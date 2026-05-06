@@ -8,6 +8,10 @@ Rules that apply to every file in this project. These do not change per-feature.
 
 Do not write one giant script. One script per system. If a script is doing two unrelated things, split it.
 
+## Config modules
+
+Any value that may need tuning later — timers, damage numbers, round counts, distances, speeds — belongs in a config or data module in `ReplicatedStorage/Modules`, not hardcoded inside a service or controller. If a designer or developer would ever want to change a number without reading through logic code, it must be in a module.
+
 ## Server / client boundary
 
 The server owns anything that affects the game outcome. The client owns presentation only.
@@ -80,3 +84,12 @@ Both sides may require shared modules (`src/shared/`).
 ## Build discipline
 
 Build one system at a time, server before client. Do not start the next system until the current one has been manually tested. See `ROADMAP.md` for the sequence.
+
+## Explaining changes
+
+Every time code is written or edited, explain:
+
+1. **Every file that changes** — name each file and what specifically changed in it.
+2. **How the new code connects** — describe how it fits into the existing system: which services call it, which remotes it uses, which modules it reads from.
+3. **Maintenance risks** — call out anything that may become hard to change or debug later (tight coupling, assumptions about load order, growing conditionals, etc.).
+4. **Test steps** — give concrete steps to verify the change works in Studio before moving on.

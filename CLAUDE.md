@@ -129,6 +129,10 @@ Do not write one giant script. Use small, modular scripts — one per system.
 - destruction
 - win conditions
 
+**Config modules — use them for any value that may change:**
+- Any number a designer might want to tune (timer, damage, speed, count, distance) goes in `ReplicatedStorage/Modules/Constants` or a relevant data module — never hardcoded inside a service or controller.
+- If the value appears in more than one place, it must be in a module. No duplicate magic numbers.
+
 **Luau specifics:**
 - `--!strict` at the top of every script.
 - No `wait()` — use `task.wait()`. No `spawn()` — use `task.spawn()`.
@@ -187,9 +191,11 @@ Before writing any code:
 - inspect the existing structure
 - reuse existing names and module patterns
 - do not rename public functions unless asked
-- explain which files will change and why
+- explain every file that will change and exactly what will change in it
+- explain how the new code connects to existing systems (which services call it, which remotes it uses, which modules it reads)
 - build one system at a time
-- provide test steps after each code change
 
 After writing any code:
+- give concrete test steps so the change can be verified in Studio before moving on
+- point out anything in the new code that may become hard to maintain later (tight coupling, load-order assumptions, growing conditionals, anything that will need revisiting)
 - add an entry to `docs/CHANGELOG.md` describing what was added or changed

@@ -7,6 +7,14 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-06] — Coding rules expanded in CLAUDE.md and PROJECT_RULES.md
+
+- Added explicit "Config modules" rule: tunable values must live in `ReplicatedStorage/Modules`, never hardcoded
+- Added "Explaining changes" rule: every task must list every changed file, explain how new code connects to existing systems, flag maintenance risks, and provide test steps
+- These rules now appear in both `CLAUDE.md` (Claude behavior section + code rules) and `docs/PROJECT_RULES.md`
+
+---
+
 ## [2026-05-06] — Stage 1 infrastructure + MatchService
 
 - Added `default.project.json` (Rojo project), `wally.toml`, `selene.toml`, `stylua.toml`
