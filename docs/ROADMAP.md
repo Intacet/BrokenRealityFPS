@@ -14,13 +14,13 @@ A 5-round attackers vs defenders match on one small suburban map. Attackers plan
 
 ### Stage 1 — Infrastructure
 
-- [ ] **Folder structure** — create all instance folders in Workspace, ReplicatedStorage, ServerScriptService, StarterGui, StarterPlayer per the layout in `CLAUDE.md`
-- [ ] **Config modules** — `Constants`, `Types`, `WeaponData`, `ZoneData` in `ReplicatedStorage/Modules`; stub entries only, fill data as systems need it
-- [ ] **Remotes** — create all RemoteEvents and RemoteFunctions listed in `PROJECT_MAP.md` inside `ReplicatedStorage/Remotes`
+- [x] **Folder structure** — create all instance folders in Workspace, ReplicatedStorage, ServerScriptService, StarterGui, StarterPlayer per the layout in `CLAUDE.md`
+- [x] **Config modules** — `Constants`, `Types`, `WeaponData`, `ZoneData` in `ReplicatedStorage/Modules`; stub entries only, fill data as systems need it
+- [x] **Remotes** — create all RemoteEvents and RemoteFunctions listed in `PROJECT_MAP.md` inside `ReplicatedStorage/Remotes`
 
 ### Stage 2 — Match loop
 
-- [ ] **MatchService** — round counter, phase machine (Lobby → Active → Results), round timer, calls `RoundStateChanged`
+- [x] **MatchService** — round counter, phase machine (Lobby → Prep → Active → Results), round timer, calls `RoundStateChanged`
 - [ ] **MatchController** — listens to `RoundStateChanged`, drives `MatchUI` (countdown, results screen)
 - [ ] **TeamService** — assigns players to Attackers or Defenders, selects spawn, fires `TeamAssigned`
 - [ ] **ObjectiveService** — tracks anchor plant progress, fires `ObjectiveUpdated` and `ObjectiveComplete`; `ObjectiveComplete` triggers `MatchService` to end round

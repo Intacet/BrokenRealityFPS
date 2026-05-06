@@ -1,0 +1,9 @@
+[package]
+name = "brokenreality/brokenrealityfps"
+version = "0.1.0"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[dependencies]
+# Add packages here as needed, e.g.:
+# Signal = "sleitnick/signal@1.5.0"

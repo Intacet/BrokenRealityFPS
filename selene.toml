@@ -1,0 +1,3 @@
+# Selene linter config — https://kampfkarren.github.io/selene/
+# "roblox" standard library knows about game, workspace, Players, etc.
+std = "roblox"

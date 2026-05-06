@@ -1,0 +1,55 @@
+{
+  "name": "BrokenRealityFPS",
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Remotes": {
+        "$className": "Folder"
+      },
+      "Modules": {
+        "$className": "Folder",
+        "$path": "src/shared"
+      }
+    },
+
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "Services": {
+        "$className": "Folder",
+        "$path": "src/server"
+      }
+    },
+
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "Controllers": {
+          "$className": "Folder",
+          "$path": "src/client"
+        }
+      }
+    },
+
+    "StarterGui": {
+      "$className": "StarterGui",
+      "$path": "src/ui"
+    },
+
+    "Workspace": {
+      "$className": "Workspace",
+      "Map":          { "$className": "Folder" },
+      "Spawns": {
+        "$className": "Folder",
+        "Attackers":  { "$className": "Folder" },
+        "Defenders":  { "$className": "Folder" }
+      },
+      "Objectives":   { "$className": "Folder" },
+      "Destructibles":{ "$className": "Folder" },
+      "MonsterSpawns":{ "$className": "Folder" },
+      "CorpseFolder": { "$className": "Folder" }
+    }
+  }
+}

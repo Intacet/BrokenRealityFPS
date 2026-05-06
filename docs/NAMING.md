@@ -57,12 +57,18 @@ All remotes live in `ReplicatedStorage/Remotes` and are listed in `docs/PROJECT_
 
 ## Files on disk (Rojo tree)
 
-Files map 1-to-1 with Roblox script instances. The filename is the instance name.
+Rojo uses file extensions to decide the Roblox instance type. The filename (minus extension) becomes the instance name.
+
+| Extension | Roblox instance | Used for |
+|-----------|----------------|---------|
+| `.server.lua` | Script | Files in `src/server/` |
+| `.client.lua` | LocalScript | Files in `src/client/` |
+| `.lua` | ModuleScript | Files in `src/shared/` and `src/ui/` |
 
 ```
-src/server/MatchService.lua        → ServerScriptService/Services/MatchService
-src/client/GunController.lua       → StarterPlayerScripts/Controllers/GunController
-src/shared/WeaponData.lua          → ReplicatedStorage/Modules/WeaponData
+src/server/MatchService.server.lua  → ServerScriptService/Services/MatchService  (Script)
+src/client/GunController.client.lua → StarterPlayerScripts/Controllers/GunController  (LocalScript)
+src/shared/WeaponData.lua           → ReplicatedStorage/Modules/WeaponData  (ModuleScript)
 ```
 
 No abbreviations in file names. `GunController`, not `GunCtrl`.
@@ -89,6 +95,7 @@ Round phases used in `MatchService` and `RoundStateChanged` payloads:
 
 ```lua
 Phase.LOBBY    -- waiting for players
+Phase.PREP     -- brief countdown before the round starts
 Phase.ACTIVE   -- round in progress
 Phase.RESULTS  -- round ended, scores shown
 ```
