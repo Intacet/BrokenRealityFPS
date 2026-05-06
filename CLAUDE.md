@@ -173,10 +173,23 @@ Each service on the server has a matching controller on the client. Build the se
 
 ## Claude behavior
 
+**Read `docs/` before making any code changes. These files are the source of truth for this project.**
+
+The files to read before starting any task:
+- `docs/PROJECT_RULES.md` — hard rules for every file
+- `docs/PROJECT_MAP.md` — how systems connect and the remote registry
+- `docs/NAMING.md` — naming conventions for every layer
+- `docs/ROADMAP.md` — what is planned and in what order
+- `docs/CHANGELOG.md` — what has already been built
+
 Before writing any code:
+- read the docs listed above
 - inspect the existing structure
 - reuse existing names and module patterns
 - do not rename public functions unless asked
 - explain which files will change and why
 - build one system at a time
 - provide test steps after each code change
+
+After writing any code:
+- add an entry to `docs/CHANGELOG.md` describing what was added or changed
