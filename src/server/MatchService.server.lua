@@ -40,6 +40,10 @@ local currentPhase    = Constants.Phase.LOBBY
 local currentRound    = 0
 local currentTimeLeft = 0
 
+-- Tracks the last phase fired to MatchEvents so PhaseChanged only fires once per
+-- transition, not once per second. Initialised to "" so the first broadcast always fires.
+local lastFiredPhase  = ""
+
 -- ============================================================
 -- Early-end hook (for ObjectiveService, built next)
 --
@@ -93,11 +97,12 @@ local function broadcast(phase: string, round: number, timeLeft: number)
         timeLeft  = timeLeft,
     })
 
-    -- Notify server-side services of the current phase and round.
-    -- NOTE: broadcast() is called every second, so this fires every second too —
-    -- not only on phase transitions. Listeners (TeamService, ObjectiveService) must
-    -- guard against being called repeatedly with the same phase.
-    MatchEvents.PhaseChanged:Fire(phase, round)
+    -- Only fire PhaseChanged when the phase actually transitions.
+    -- broadcast() runs every second, but listeners only need to react once per phase.
+    if phase ~= lastFiredPhase then
+        lastFiredPhase = phase
+        MatchEvents.PhaseChanged:Fire(phase, round)
+    end
 end
 
 -- Counts down `duration` seconds, broadcasting the state every second.
