@@ -185,6 +185,7 @@ The files to read before starting any task:
 - `docs/NAMING.md` — naming conventions for every layer
 - `docs/ROADMAP.md` — what is planned and in what order
 - `docs/CHANGELOG.md` — what has already been built
+- `docs/TECHNICAL_DEBT.md` — known risks and deferred problems
 
 Before writing any code:
 - read the docs listed above
@@ -199,3 +200,6 @@ After writing any code:
 - give concrete test steps so the change can be verified in Studio before moving on
 - point out anything in the new code that may become hard to maintain later (tight coupling, load-order assumptions, growing conditionals, anything that will need revisiting)
 - add an entry to `docs/CHANGELOG.md` describing what was added or changed
+- every time you flag a maintenance risk or known limitation in a response, add it to `docs/TECHNICAL_DEBT.md` as a new numbered entry before finishing the task
+
+At the start of every task, read `docs/TECHNICAL_DEBT.md` and check whether the requested change touches any file or system listed there. Before writing any code, explicitly state which debt entries are relevant to this task and whether the change resolves, worsens, or is unaffected by each one.
