@@ -60,7 +60,7 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ## [DEBT-009] DamageService:Apply() has no friendly-fire enforcement yet
 
-**File:** `src/server/DamageService.server.lua`
+**File:** `src/server/DamageService.lua`
 **Risk:** `Apply()` tracks the attacker and victim but does not yet check whether they are on the same team. The `playerTeam` table is populated and `GetTeam()` is exposed, but the friendly-fire guard (`if playerTeam[victim] == playerTeam[attacker] then return end`) is not written. Any weapon that calls `Apply()` will hit teammates.
 **Trigger:** GunService is now built and calls `Apply()`. Friendly fire is live.
 **Fix when:** Immediately — add the team-equality check at the top of `Apply()` before the damage calculation, along with a design decision on whether friendly fire should be blocked entirely or penalised (reflected damage, etc.).
@@ -84,12 +84,12 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-013] GunService uses a hardcoded DEFAULT_WEAPON instead of a client-supplied name
+## [DEBT-013] Weapon name is hardcoded on both client and server instead of sent in the payload
 
-**File:** `src/server/GunService.server.lua`
-**Risk:** `DEFAULT_WEAPON = "AssaultRifle"` is used for every shot until GunController is built. Once multiple weapons exist, every shot will be validated against AssaultRifle stats regardless of what the player is actually holding. A player with a slow-firing sniper rifle could fire at AssaultRifle's 0.1 s rate; a player with a fast SMG would be validated against the wrong damage value.
-**Trigger:** Adding a second weapon to WeaponData, or building GunController and giving players weapon choices.
-**Fix when:** GunController is built. Add the weapon name to the `WeaponFired` payload (`{origin, direction, tick, weaponName}`) and replace `DEFAULT_WEAPON` in GunService with the validated client-supplied name (validate that the name exists in WeaponData before using it).
+**Files:** `src/server/GunService.server.lua`, `src/client/GunController.client.lua`
+**Risk:** `DEFAULT_WEAPON = "AssaultRifle"` in GunService and `CURRENT_WEAPON = "AssaultRifle"` in GunController are two independent hardcodes that must be kept in sync. GunController is now built but the `WeaponFired` payload is `{origin, direction, tick}` with no weapon name — so the server cannot know what weapon the client is using. With a single weapon this is invisible. With multiple weapons, every shot is validated against AssaultRifle stats regardless of what the player holds.
+**Trigger:** Adding a second weapon to WeaponData, or giving players a loadout choice.
+**Fix when:** Multiple weapons exist. Add `weaponName: string` to the `WeaponFired` payload, validate it exists in WeaponData on the server (never trust the client's name blindly — verify it is a real entry), and remove both hardcodes.
 
 ---
 
@@ -99,6 +99,15 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 **Risk:** The `tick` value sent with each `WeaponFired` event is intended to let the server reject shots with timestamps too far in the past (replay attacks or lag compensation abuse). Currently `_clientTick` is discarded. Without this check, a client could theoretically queue up shots during lag and dump them all at once, bypassing the server-side rate limiter — though the rate limiter's `os.clock()` comparison already partially mitigates this.
 **Trigger:** The game is stress-tested with high-latency clients or an exploiter attempts shot-replay injection.
 **Fix when:** Combat is otherwise stable. Add a maximum acceptable age check: `if os.clock() - clientTick > MAX_SHOT_AGE then return end` where `MAX_SHOT_AGE` accounts for typical RTT plus a tolerance (e.g. 0.5 s). Add `MAX_SHOT_AGE` to Constants.
+
+---
+
+## [DEBT-015] MatchController.client.lua must be renamed MatchController.lua before GunController works
+
+**File:** `src/client/MatchController.client.lua`
+**Risk:** `GunController.client.lua` calls `require(script.Parent:WaitForChild("MatchController"))`. In Roblox, `require()` only accepts a ModuleScript. A file named `MatchController.client.lua` creates a LocalScript instance — `require()` will throw at runtime. GunController is architecturally correct; the file extension is wrong. The game will error on the client on startup until this is fixed.
+**Trigger:** This is blocking — GunController cannot run until it is resolved.
+**Fix when:** Immediately. Rename `src/client/MatchController.client.lua` → `src/client/MatchController.lua`. The `MatchController:Start()` call at the bottom of the file already handles self-initialization on first `require()`, so no runner script is needed. Update the header comment from `-- LocalScript` to `-- ModuleScript`. Logic unchanged.
 
 ---
 

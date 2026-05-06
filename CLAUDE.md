@@ -203,3 +203,5 @@ After writing any code:
 - every time you flag a maintenance risk or known limitation in a response, add it to `docs/TECHNICAL_DEBT.md` as a new numbered entry before finishing the task
 
 At the start of every task, read `docs/TECHNICAL_DEBT.md` and check whether the requested change touches any file or system listed there. Before writing any code, explicitly state which debt entries are relevant to this task and whether the change resolves, worsens, or is unaffected by each one.
+
+When a task touches a debt entry, evaluate whether the debt is fully resolved, partially resolved, or unresolved based on the actual state of the code after your changes. Do not mark an entry resolved simply because the requested fix was applied — confirm the underlying risk is genuinely gone. Update the entry status with your reasoning.
