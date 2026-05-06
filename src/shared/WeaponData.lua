@@ -2,17 +2,20 @@
 -- ModuleScript
 -- Location in Studio: ReplicatedStorage > Modules > WeaponData
 --
--- Stub: weapon entries will be added when GunService is built (Stage 4 of the roadmap).
--- Do not add weapon logic here — only data tables.
+-- All weapon definitions. Add a new entry here to add a new weapon.
+-- GunService reads damage and fireRate. GunController reads fireRate for
+-- client-side shot pacing (cosmetic only — the server re-validates).
+-- Do not put weapon logic here — only data.
 
 local WeaponData = {}
 
--- Entries will look like this when GunService is built:
--- WeaponData["AssaultRifle"] = {
---     damage    = 25,
---     fireRate  = 0.1,   -- seconds between shots
---     range     = 300,   -- max raycast distance in studs
---     spread    = 0.02,  -- bullet spread angle in radians
--- }
+-- damage   — hit points removed per shot (read by DamageService via GunService)
+-- fireRate — minimum seconds between shots; enforced server-side as a rate limit
+-- range    — maximum raycast distance in studs; shots beyond this are ignored
+WeaponData["AssaultRifle"] = {
+    damage   = 25,
+    fireRate = 0.1,
+    range    = 300,
+}
 
 return WeaponData

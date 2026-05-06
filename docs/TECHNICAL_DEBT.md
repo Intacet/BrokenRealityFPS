@@ -61,9 +61,9 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 ## [DEBT-009] DamageService:Apply() has no friendly-fire enforcement yet
 
 **File:** `src/server/DamageService.server.lua`
-**Risk:** `Apply()` tracks the attacker and victim but does not yet check whether they are on the same team. The `playerTeam` table is populated and `GetTeam()` is exposed, but the friendly-fire guard (`if playerTeam[victim] == playerTeam[attacker] then return end`) is not written. Any weapon that calls `Apply()` will hit teammates until this is added.
-**Trigger:** Building GunService (the first caller of `Apply()`). Without the guard, GunService will deal damage to teammates by default.
-**Fix when:** GunService is built. Add the team-equality check at the top of `Apply()` before the damage calculation, with a design decision on whether friendly fire should be disabled entirely or penalised.
+**Risk:** `Apply()` tracks the attacker and victim but does not yet check whether they are on the same team. The `playerTeam` table is populated and `GetTeam()` is exposed, but the friendly-fire guard (`if playerTeam[victim] == playerTeam[attacker] then return end`) is not written. Any weapon that calls `Apply()` will hit teammates.
+**Trigger:** GunService is now built and calls `Apply()`. Friendly fire is live.
+**Fix when:** Immediately — add the team-equality check at the top of `Apply()` before the damage calculation, along with a design decision on whether friendly fire should be blocked entirely or penalised (reflected damage, etc.).
 
 ---
 
@@ -73,6 +73,33 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 **Risk:** Team assignments are distributed once per PREP phase via `MatchEvents.TeamAssigned`. Any service that starts after PREP (or requires at a moment after assignments have already fired) will have an empty team table and no way to back-fill. There is currently no shared module that a service can read to find a player's current team on demand — TeamService is a `.server.lua` Script and cannot be required, and there is no `TeamData` ModuleScript.
 **Trigger:** A new service that is added later in the build order and needs to know a player's team at an arbitrary moment (e.g. a late-loading ObjectiveService that checks team on first touch rather than on assignment). It will miss the TeamAssigned events that fired at PREP and have no fallback.
 **Fix when:** Any service needs to query a player's current team outside of the TeamAssigned subscription window. Create a `src/server/TeamData.lua` ModuleScript that TeamService writes to on assignment and reset, and that other services read from via `TeamData.GetTeam(player)`.
+
+---
+
+## [DEBT-012] DamageService.server.lua must be renamed to DamageService.lua before GunService works
+
+**File:** `src/server/DamageService.server.lua`
+**Risk:** `GunService.server.lua` calls `require(script.Parent:WaitForChild("DamageService"))`. In Roblox, `require()` only accepts a ModuleScript. A file named `DamageService.server.lua` creates a Script instance, not a ModuleScript — so `require()` will throw at runtime. GunService is architecturally correct; the file extension is wrong. The game will error on startup until this is fixed.
+**Trigger:** This is blocking — GunService cannot run until it is resolved.
+**Fix when:** Immediately. Rename `src/server/DamageService.server.lua` → `src/server/DamageService.lua`. Update `default.project.json` if the mapping is explicit (if it uses a glob for `*.server.lua` the rename is sufficient). The file content does not need to change.
+
+---
+
+## [DEBT-013] GunService uses a hardcoded DEFAULT_WEAPON instead of a client-supplied name
+
+**File:** `src/server/GunService.server.lua`
+**Risk:** `DEFAULT_WEAPON = "AssaultRifle"` is used for every shot until GunController is built. Once multiple weapons exist, every shot will be validated against AssaultRifle stats regardless of what the player is actually holding. A player with a slow-firing sniper rifle could fire at AssaultRifle's 0.1 s rate; a player with a fast SMG would be validated against the wrong damage value.
+**Trigger:** Adding a second weapon to WeaponData, or building GunController and giving players weapon choices.
+**Fix when:** GunController is built. Add the weapon name to the `WeaponFired` payload (`{origin, direction, tick, weaponName}`) and replace `DEFAULT_WEAPON` in GunService with the validated client-supplied name (validate that the name exists in WeaponData before using it).
+
+---
+
+## [DEBT-014] WeaponFired clientTick is received but not validated
+
+**File:** `src/server/GunService.server.lua`
+**Risk:** The `tick` value sent with each `WeaponFired` event is intended to let the server reject shots with timestamps too far in the past (replay attacks or lag compensation abuse). Currently `_clientTick` is discarded. Without this check, a client could theoretically queue up shots during lag and dump them all at once, bypassing the server-side rate limiter — though the rate limiter's `os.clock()` comparison already partially mitigates this.
+**Trigger:** The game is stress-tested with high-latency clients or an exploiter attempts shot-replay injection.
+**Fix when:** Combat is otherwise stable. Add a maximum acceptable age check: `if os.clock() - clientTick > MAX_SHOT_AGE then return end` where `MAX_SHOT_AGE` accounts for typical RTT plus a tolerance (e.g. 0.5 s). Add `MAX_SHOT_AGE` to Constants.
 
 ---
 
