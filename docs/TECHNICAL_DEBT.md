@@ -68,9 +68,8 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-008] pcall on GetMatchConfig silently swallows server errors
+## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.client.lua`
-**Risk:** `GetMatchConfig:InvokeServer()` is wrapped in `pcall`. If `MatchService` has a bug in its `OnServerInvoke` handler — an error thrown, a nil return, a missing field — the `pcall` catches it, prints a generic fallback message, and the controller continues with stale default state (LOBBY, round 0). This makes a server-side logic error look like a timing issue and is easy to miss.
-**Trigger:** Any error thrown inside `GetMatchConfig.OnServerInvoke` in MatchService — for example, if `Constants` fails to load and `currentPhase` is nil.
-**Fix when:** The first time a hard-to-diagnose mid-join sync bug appears. Fix by logging the error message from `pcall` explicitly: `local ok, result = pcall(...)` → `if not ok then warn("[MatchController] GetMatchConfig error:", result) end`.
+**Risk:** ~~`GetMatchConfig:InvokeServer()` is wrapped in `pcall`. If `MatchService` has a bug in its `OnServerInvoke` handler — an error thrown, a nil return, a missing field — the `pcall` catches it, prints a generic fallback message, and the controller continues with stale default state (LOBBY, round 0). This makes a server-side logic error look like a timing issue and is easy to miss.~~
+**Resolution:** The `else` branch now distinguishes two cases. `not ok` (genuine error thrown server-side) calls `warn("[MatchController] GetMatchConfig error:", result)` where `result` is the error string — visible as red output. `ok` with a nil result keeps the original print, since that is a genuine timing edge case and not an error.

@@ -85,7 +85,13 @@ function MatchController:Start()
 
     if ok and result ~= nil then
         applyState(result :: Types.RoundStatePayload)
+    elseif not ok then
+        -- result contains the error string when pcall catches a thrown error.
+        -- warn() makes it red in the Output window and easier to spot than print().
+        warn("[MatchController] GetMatchConfig error:", result)
     else
+        -- ok is true but the server returned nil — genuine timing edge case where
+        -- MatchService hasn't set up its handler yet. Wait for RoundStateChanged.
         print("[MatchController] GetMatchConfig not ready yet — waiting for first RoundStateChanged")
     end
 
