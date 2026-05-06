@@ -50,12 +50,29 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-006] playerTeams table has no signal for observers
+## [DEBT-006] playerTeams table has no signal for observers — RESOLVED 2026-05-06
 
 **File:** `src/server/TeamService.server.lua`
-**Risk:** `playerTeams` is a plain `{ [Player]: string }` table. Any service that needs to know a player's team must call `TeamService:GetTeam(player)` by requiring TeamService and polling at the moment they need the value. There is no event that fires when a player is assigned. If two or more services need to react *at the moment of assignment* (rather than querying lazily), they have no clean hook.
-**Trigger:** Adding DamageService (needs team for friendly-fire), ObjectiveService (needs team to validate who can plant an anchor), or any system that must respond immediately when teams are set — rather than checking on demand.
-**Fix when:** Two or more services need to subscribe to team assignment events. Add a `MatchEvents.TeamAssigned` BindableEvent fired per-player inside `assignTeams()`, mirroring the pattern already used for `PhaseChanged`.
+**Risk:** ~~`playerTeams` is a plain `{ [Player]: string }` table. Any service that needs to know a player's team must call `TeamService:GetTeam(player)` by requiring TeamService and polling at the moment they need the value. There is no event that fires when a player is assigned.~~
+**Resolution:** Added `MatchEvents.TeamAssigned = Instance.new("BindableEvent")` to `src/server/MatchEvents.lua`. `assignTeams()` now fires `MatchEvents.TeamAssigned:Fire(player, teamName)` per player. `DamageService` subscribes to this event and maintains its own `playerTeam` table, avoiding cross-require coupling.
+
+---
+
+## [DEBT-009] DamageService:Apply() has no friendly-fire enforcement yet
+
+**File:** `src/server/DamageService.server.lua`
+**Risk:** `Apply()` tracks the attacker and victim but does not yet check whether they are on the same team. The `playerTeam` table is populated and `GetTeam()` is exposed, but the friendly-fire guard (`if playerTeam[victim] == playerTeam[attacker] then return end`) is not written. Any weapon that calls `Apply()` will hit teammates until this is added.
+**Trigger:** Building GunService (the first caller of `Apply()`). Without the guard, GunService will deal damage to teammates by default.
+**Fix when:** GunService is built. Add the team-equality check at the top of `Apply()` before the damage calculation, with a design decision on whether friendly fire should be disabled entirely or penalised.
+
+---
+
+## [DEBT-010] DamageService health reset fires for all players including mid-respawn characters
+
+**File:** `src/server/DamageService.server.lua`
+**Risk:** On PREP, `resetHealth()` calls `setHealth(player, MAX_HEALTH)` and fires `HealthChanged` to the client for every connected player. If a player is mid-respawn (character is nil or Humanoid is being created), the client receives a correct health value but the Humanoid itself may reset to its default health independently when the new character loads — causing a brief mismatch between the server table and the Humanoid's displayed value.
+**Trigger:** A player disconnects or dies in the final second of RESULTS, so their character is respawning exactly when PREP begins and `resetHealth()` fires.
+**Fix when:** CorpseService is built (it owns character lifecycle). At that point, hook health reset into `CharacterAdded` instead of relying solely on the phase-change event.
 
 ---
 

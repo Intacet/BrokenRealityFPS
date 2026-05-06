@@ -34,4 +34,9 @@ Constants.PREP_TIME    = 10  -- how long the prep countdown lasts before active 
 Constants.ACTIVE_TIME  = 180 -- how long each active round lasts (3 minutes)
 Constants.RESULTS_TIME = 10  -- how long results are shown between rounds
 
+-- ============================================================
+-- Player settings
+-- ============================================================
+Constants.MAX_HEALTH   = 100 -- maximum and starting health for every player
+
 return Constants

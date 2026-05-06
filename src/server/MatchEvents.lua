@@ -27,8 +27,14 @@ local MatchEvents = {}
 
 -- Fired by MatchService whenever the round phase changes.
 -- Payload: (phase: string, round: number)
--- Current listeners: TeamService
+-- Current listeners: TeamService, DamageService
 -- Future listeners:  ObjectiveService
 MatchEvents.PhaseChanged = Instance.new("BindableEvent")
+
+-- Fired by TeamService once per player inside assignTeams().
+-- Payload: (player: Player, teamName: string)
+-- Current listeners: DamageService
+-- Future listeners:  ObjectiveService, kill-feed
+MatchEvents.TeamAssigned = Instance.new("BindableEvent")
 
 return MatchEvents

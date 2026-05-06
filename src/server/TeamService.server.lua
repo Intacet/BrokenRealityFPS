@@ -179,6 +179,7 @@ local function assignTeams()
         teleportWhenReady(player, spawnPoints)
 
         TeamAssigned:FireClient(player, teamName)
+        MatchEvents.TeamAssigned:Fire(player, teamName)  -- notify server services (DamageService, etc.)
         print("[TeamService]", player.Name, "→", teamName)
     end
 
