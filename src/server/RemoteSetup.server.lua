@@ -11,11 +11,16 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Grab the Remotes folder that Rojo creates, or create it if running without Rojo.
-local Remotes = ReplicatedStorage:FindFirstChild("Remotes") :: Folder
-if not Remotes then
-    Remotes = Instance.new("Folder")
-    Remotes.Name = "Remotes"
-    Remotes.Parent = ReplicatedStorage
+-- FindFirstChild returns Instance? (nullable), so we check for nil before casting.
+local Remotes: Folder
+local existing = ReplicatedStorage:FindFirstChild("Remotes")
+if existing then
+    Remotes = existing :: Folder  -- nil already ruled out; cast is safe here
+else
+    local folder = Instance.new("Folder")
+    folder.Name = "Remotes"
+    folder.Parent = ReplicatedStorage
+    Remotes = folder
 end
 
 -- Helper: creates a RemoteEvent by name and parents it to the Remotes folder.

@@ -7,6 +7,13 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-06] — Two type-safety fixes
+
+- `src/server/RemoteSetup.server.lua`: fixed unsafe nil cast — `FindFirstChild` result is now left as `Instance?`, nil-checked first, then narrowed with `:: Folder` only inside the branch where nil is already ruled out
+- `src/shared/Types.lua`: added a prominent sync warning on the `Phase` union explaining that Luau cannot derive it from `Constants.Phase` at compile time, and that both files must be updated together whenever a phase is added or renamed
+
+---
+
 ## [2026-05-06] — Coding rules expanded in CLAUDE.md and PROJECT_RULES.md
 
 - Added explicit "Config modules" rule: tunable values must live in `ReplicatedStorage/Modules`, never hardcoded

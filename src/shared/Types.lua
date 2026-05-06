@@ -8,6 +8,12 @@
 --          local payload: Types.RoundStatePayload = ...
 
 -- The four possible round phases (strings, but narrowed by the type system).
+--
+-- SYNC WARNING: Luau cannot derive this union from the Constants.Phase table at compile
+-- time — there is no keyof or value-union extraction in the type system. This means the
+-- type and the table are two separate declarations of the same truth.
+-- Rule: whenever you add or rename a phase in Constants.Phase, update this union too,
+-- and vice versa. Both files must always list exactly the same set of phases.
 export type Phase = "LOBBY" | "PREP" | "ACTIVE" | "RESULTS"
 
 -- Payload sent by the RoundStateChanged RemoteEvent every second.
