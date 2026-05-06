@@ -76,12 +76,11 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-012] DamageService.server.lua must be renamed to DamageService.lua before GunService works
+## [DEBT-012] DamageService.server.lua must be renamed to DamageService.lua before GunService works — RESOLVED 2026-05-06
 
 **File:** `src/server/DamageService.server.lua`
-**Risk:** `GunService.server.lua` calls `require(script.Parent:WaitForChild("DamageService"))`. In Roblox, `require()` only accepts a ModuleScript. A file named `DamageService.server.lua` creates a Script instance, not a ModuleScript — so `require()` will throw at runtime. GunService is architecturally correct; the file extension is wrong. The game will error on startup until this is fixed.
-**Trigger:** This is blocking — GunService cannot run until it is resolved.
-**Fix when:** Immediately. Rename `src/server/DamageService.server.lua` → `src/server/DamageService.lua`. Update `default.project.json` if the mapping is explicit (if it uses a glob for `*.server.lua` the rename is sufficient). The file content does not need to change.
+**Risk:** ~~`GunService.server.lua` calls `require(script.Parent:WaitForChild("DamageService"))`. In Roblox, `require()` only accepts a ModuleScript. A file named `DamageService.server.lua` creates a Script instance, not a ModuleScript — so `require()` will throw at runtime.~~
+**Resolution:** Renamed `src/server/DamageService.server.lua` → `src/server/DamageService.lua`. Rojo maps `.lua` files in `src/server/` to ModuleScript instances, so `require()` in GunService now resolves correctly. `default.project.json` uses a folder-level `$path` mapping and required no changes. File header updated from `-- Script` to `-- ModuleScript`. Logic unchanged.
 
 ---
 

@@ -1,5 +1,5 @@
 --!strict
--- Script
+-- ModuleScript
 -- Location in Studio: ServerScriptService > Services > DamageService
 --
 -- Owns all server-side health tracking.

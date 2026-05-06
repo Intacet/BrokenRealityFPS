@@ -7,6 +7,14 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-06] — Resolve DEBT-012: rename DamageService to ModuleScript
+
+- Renamed `src/server/DamageService.server.lua` → `src/server/DamageService.lua` — Rojo maps `.server.lua` to Script and `.lua` to ModuleScript; the old name prevented `require()` from GunService at runtime; logic is identical, only the file header comment changed (`-- Script` → `-- ModuleScript`)
+- `default.project.json` unchanged — server folder is mapped by directory path, not by explicit file list
+- Updated `docs/TECHNICAL_DEBT.md`: marked DEBT-012 resolved with today's date
+
+---
+
 ## [2026-05-06] — GunService
 
 - Added `src/server/GunService.server.lua` — validates client shot requests server-side; listens to `WeaponFired` RemoteEvent; enforces ACTIVE-phase gate, Vector3 type guard, per-player rate limit (from WeaponData.fireRate), and server raycast; calls `DamageService:Apply(victim, damage, shooter)` on a confirmed hit; fires `HitConfirmed` back to the shooter client for a cosmetic hitmarker; cleans up `lastShotTime` on `PlayerRemoving`
