@@ -2,9 +2,28 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Game Concept
+---
 
-BrokenRealityFPS is a round-based multiplayer FPS on Roblox. Players compete inside "broken-reality zones" — maps where physical and visual rules are distorted (gravity shifts, mirrored geometry, time dilation, inverted color palettes). Each round cycles through: Lobby → Active (in-zone combat) → Results. Zone effects are scripted per-map and applied server-side, with client-side visual overlays synced via RemoteEvents.
+# Broken Reality FPS
+
+## Game concept
+
+This is a Roblox round-based FPS set on Earth after reality breaks open in certain zones.
+
+The main mode has:
+- attackers
+- defenders
+- AI monsters
+- multiple rounds
+- controlled destruction
+- dead bodies that remain between rounds
+- different maps later
+
+Attackers are a spec ops containment team sent to anchor unstable zones.
+Defenders change by map and may be civilians, scientists, soldiers, militia, or survivors.
+Monsters attack both human teams.
+
+The morality should feel gray. Attackers may save the world, but their orders can be brutal. Defenders may protect innocent people, but they may risk spreading the break.
 
 ## Toolchain
 
@@ -34,67 +53,130 @@ selene src/
 stylua src/
 ```
 
-## Folder Structure
+## Folder structure
+
+Roblox instance tree (what lives in-engine):
+
+```
+ReplicatedStorage
+  Remotes          -- all RemoteEvents and RemoteFunctions (single source of truth)
+  Modules          -- shared ModuleScripts (types, weapon data, zone data, constants)
+
+ServerScriptService
+  Services         -- server-only Scripts (one per system, see Build order below)
+
+StarterPlayer
+  StarterPlayerScripts
+    Controllers    -- LocalScripts (one per system, mirrors Services)
+
+StarterGui
+  HUD              -- ammo, health, kill feed, zone-effect indicator
+  MatchUI          -- lobby countdown, round results
+  ObjectiveUI      -- anchor progress, objective markers
+
+Workspace
+  Map              -- static map geometry
+  Spawns           -- attacker and defender spawn folders
+  Objectives       -- anchor/objective parts
+  Destructibles    -- parts managed by DestructionService
+  MonsterSpawns    -- spawn nodes for MonsterService
+  CorpseFolder     -- corpse models persisted between rounds
+```
+
+Rojo source tree (files on disk, synced into the instance tree above):
 
 ```
 src/
-  server/          -- Scripts running in ServerScriptService (no client access)
-    RoundManager   -- Authoritative round state machine (Lobby/Active/Results)
-    ZoneManager    -- Loads zone maps, applies per-zone physics/effect configs
-    HitDetection   -- Server-side raycast validation and damage application
-    PlayerManager  -- Spawning, respawn, team assignment
-  client/          -- LocalScripts in StarterPlayerScripts / StarterCharacterScripts
-    WeaponController  -- Input, viewmodel animation, client-side raycast (unverified)
-    ZoneOverlay       -- Visual distortion effects (blur, color correction, FOV)
-    HUD               -- Round timer, kill feed, ammo, zone-effect indicator
-    RoundUI           -- Lobby countdown, results screen
-  shared/          -- ModuleScripts required by both sides via ReplicatedStorage
-    Types            -- Luau type definitions (RoundState, ZoneConfig, WeaponConfig, etc.)
-    Remotes          -- Single source of truth for all RemoteEvent/RemoteFunction names
-    WeaponData       -- Stat tables for each weapon (damage, firerate, spread, etc.)
-    ZoneData         -- Per-zone config (gravity multiplier, fog, effect list)
-    Constants        -- Game-wide numeric constants (round duration, respawn time, etc.)
-  ui/              -- ScreenGui trees built in code or via Rojo XML instances
-Packages/          -- Wally-managed dependencies (committed, do not edit manually)
+  server/          -- maps to ServerScriptService/Services
+  client/          -- maps to StarterPlayerScripts/Controllers
+  shared/          -- maps to ReplicatedStorage/Modules
+  ui/              -- maps to StarterGui
+Packages/          -- Wally dependencies (committed, do not edit manually)
 default.project.json
 wally.toml
 selene.toml
 stylua.toml
 ```
 
-## Server / Client Rules
+## Code rules
 
-**Server is authoritative for everything that affects game outcome:**
-- Round state transitions live exclusively in `RoundManager`; clients receive state via a single `RoundStateChanged` RemoteEvent.
-- Damage is never applied by the client. `WeaponController` fires a `WeaponFired` RemoteEvent carrying `{origin, direction, tick}`. `HitDetection` re-runs the raycast server-side, validates timing and position, then calls `PlayerManager:ApplyDamage()`.
-- Zone effects that change physics (gravity, walkspeed) are set in `ZoneManager` on the server. Clients mirror cosmetic changes (fog, color grading) locally after receiving a `ZoneEffectApplied` event.
+Do not write one giant script. Use small, modular scripts — one per system.
 
-**Clients own their own visuals only:**
-- `ZoneOverlay` and `HUD` are purely cosmetic and never gate gameplay logic.
-- Viewmodel and muzzle flash are client-local; never replicate them.
+**Server controls:**
+- match state
+- teams
+- objectives
+- damage and health
+- destruction states
+- monster AI
+- corpses
+- rewards and saving
 
-**Remote conventions (defined in `shared/Remotes`):**
-- `RemoteEvent` names: `PascalCase`, verb-first (`WeaponFired`, `RoundStateChanged`, `ZoneEffectApplied`).
-- `RemoteFunction` names: `PascalCase`, question-phrased (`GetRoundConfig`).
-- Never create a Remote outside `shared/Remotes`; require that module everywhere.
+**Client controls:**
+- input
+- camera
+- recoil visuals
+- sounds
+- UI
+- hitmarkers
+- cutscenes
 
-## Code Rules
+**Do not trust the client with:**
+- damage
+- rewards
+- objectives
+- inventory
+- destruction
+- win conditions
 
-- All files use **Luau strict mode**: `--!strict` at the top of every script.
-- Types live in `shared/Types` and are imported, not redeclared locally.
-- Module return shape: always a table (never a bare function). Service modules follow `Module:Method()` style; pure utility modules use `Module.method()`.
+**Luau specifics:**
+- `--!strict` at the top of every script.
 - No `wait()` — use `task.wait()`. No `spawn()` — use `task.spawn()`.
-- Zone configs and weapon stats are **data, not code** — add new entries to `ZoneData`/`WeaponData` rather than branching logic on zone/weapon names.
+- Module return shape: always a table. Service modules use `Module:Method()`; pure utilities use `Module.method()`.
+- Types are defined in `ReplicatedStorage/Modules/Types` and imported, never redeclared locally.
+- Weapon stats and zone configs are data tables, not branching logic — add entries to the data modules rather than `if weapon == "AR"` style conditionals.
 - Server scripts never `require` anything under `src/client/`. Client scripts never `require` anything under `src/server/`.
 
-## Development Order
+**Remote conventions:**
+- All Remotes are created and referenced through `ReplicatedStorage/Remotes` only.
+- `RemoteEvent` names: `PascalCase`, verb-first (`WeaponFired`, `RoundStateChanged`, `DamageApplied`).
+- `RemoteFunction` names: `PascalCase`, question-phrased (`GetMatchConfig`).
 
-When building a new feature from scratch, follow this sequence to avoid circular dependencies and untestable states:
+## First playable goal
 
-1. **Shared types & constants** — define new types in `shared/Types`, add remotes in `shared/Remotes`, add stat tables in `WeaponData`/`ZoneData`.
-2. **Server logic** — implement in the appropriate server module; keep it testable without a live client.
-3. **RemoteEvent wiring** — server fires events; define the payload shape in `shared/Types`.
-4. **Client receiver** — handle the event in the appropriate client module; update HUD or overlay.
-5. **UI** — wire up `RoundUI`/`HUD` last, after the data flow is confirmed working.
+Build the smallest playable version first:
 
-When adding a new zone: add its config to `shared/ZoneData`, add the map model under `src/server/ZoneManager`, and add any new visual effects to `src/client/ZoneOverlay`. No other files should need to change.
+A 5-round attackers vs defenders FPS on one small suburban map where attackers plant reality anchors and defenders try to stop them.
+
+Do not build the full dream game first.
+
+## Build order
+
+1. Folder structure
+2. Config modules
+3. MatchService
+4. MatchController
+5. TeamService
+6. ObjectiveService
+7. Basic UI
+8. GunService
+9. GunController
+10. DamageService
+11. MovementController
+12. DestructionService
+13. CorpseService
+14. MonsterService
+15. HordeService
+16. CutsceneController
+
+Each service on the server has a matching controller on the client. Build the server side of a system before the client side.
+
+## Claude behavior
+
+Before writing any code:
+- inspect the existing structure
+- reuse existing names and module patterns
+- do not rename public functions unless asked
+- explain which files will change and why
+- build one system at a time
+- provide test steps after each code change
