@@ -67,6 +67,15 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
+## [DEBT-011] No on-demand team query path exists for services that miss TeamAssigned
+
+**File:** `src/server/TeamService.server.lua`, `src/server/MatchEvents.lua`
+**Risk:** Team assignments are distributed once per PREP phase via `MatchEvents.TeamAssigned`. Any service that starts after PREP (or requires at a moment after assignments have already fired) will have an empty team table and no way to back-fill. There is currently no shared module that a service can read to find a player's current team on demand — TeamService is a `.server.lua` Script and cannot be required, and there is no `TeamData` ModuleScript.
+**Trigger:** A new service that is added later in the build order and needs to know a player's team at an arbitrary moment (e.g. a late-loading ObjectiveService that checks team on first touch rather than on assignment). It will miss the TeamAssigned events that fired at PREP and have no fallback.
+**Fix when:** Any service needs to query a player's current team outside of the TeamAssigned subscription window. Create a `src/server/TeamData.lua` ModuleScript that TeamService writes to on assignment and reset, and that other services read from via `TeamData.GetTeam(player)`.
+
+---
+
 ## [DEBT-010] DamageService health reset fires for all players including mid-respawn characters
 
 **File:** `src/server/DamageService.server.lua`

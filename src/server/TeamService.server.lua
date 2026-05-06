@@ -220,17 +220,6 @@ end)
 
 print("[TeamService] Ready — waiting for PREP phase")
 
--- ============================================================
--- Public API
--- ============================================================
-
-local TeamService = {}
-
--- Returns "Attackers" or "Defenders" for the given player,
--- or nil if they have not been assigned yet (LOBBY or RESULTS).
--- Used by DamageService (friendly-fire), ObjectiveService, and others.
-function TeamService:GetTeam(player: Player): string?
-    return playerTeams[player]
-end
-
-return TeamService
+-- TeamService is a .server.lua Script and cannot be required by other server scripts.
+-- Other services access team data by subscribing to MatchEvents.TeamAssigned, not by
+-- requiring this file directly.
