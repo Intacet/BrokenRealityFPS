@@ -23,7 +23,7 @@ Constants.Phase = {
 -- Match settings
 -- ============================================================
 Constants.MAX_ROUNDS   = 5  -- number of rounds per match
-Constants.MIN_PLAYERS  = 1  -- minimum players needed before lobby countdown starts
+Constants.MIN_PLAYERS  = 2  -- minimum players needed before lobby countdown starts
 
 -- ============================================================
 -- Phase durations (in seconds)
