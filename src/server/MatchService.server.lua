@@ -26,6 +26,10 @@ local Remotes           = ReplicatedStorage:WaitForChild("Remotes")
 local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEvent
 local GetMatchConfig    = Remotes:WaitForChild("GetMatchConfig")    :: RemoteFunction
 
+-- Bridges phase changes to other server services (TeamService, ObjectiveService).
+-- MatchEvents is a sibling ModuleScript in ServerScriptService/Services.
+local MatchEvents = require(script.Parent:WaitForChild("MatchEvents"))
+
 -- ============================================================
 -- State
 -- These variables track what phase and round the server is currently in.
@@ -88,6 +92,12 @@ local function broadcast(phase: string, round: number, timeLeft: number)
         maxRounds = Constants.MAX_ROUNDS,
         timeLeft  = timeLeft,
     })
+
+    -- Notify server-side services of the current phase and round.
+    -- NOTE: broadcast() is called every second, so this fires every second too —
+    -- not only on phase transitions. Listeners (TeamService, ObjectiveService) must
+    -- guard against being called repeatedly with the same phase.
+    MatchEvents.PhaseChanged:Fire(phase, round)
 end
 
 -- Counts down `duration` seconds, broadcasting the state every second.
