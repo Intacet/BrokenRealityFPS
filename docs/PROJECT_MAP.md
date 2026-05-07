@@ -96,6 +96,7 @@ MatchUI                 -- driven by RoundStateChanged
 CrosshairUI             -- driven by RoundStateChanged; exposes ShowHitmarker()
 ViewModelController     -- driven by RoundStateChanged; exposes PlayFireAnimation(), GetBarrelTipCFrame()
 DeathScreen             -- driven by RagdollApplied (death trigger), RoundStateChanged (PREP cleanup)
+KillFeedUI              -- driven by KillFeed; top-right scrolling kill entries, max 5, fade after display time
 ```
 
 ### Client initialization pattern
@@ -114,14 +115,17 @@ ClientInit.client.lua
   2. MatchUI:init()+Start()          -- no controller deps; connects RoundStateChanged; needs PlayerGui
   3. HUD:init()+Start()              -- no controller deps; connects HealthChanged, TeamStatusUpdate, RoundStateChanged; needs PlayerGui
   4. DeathScreen:init()+Start()      -- no controller deps; connects RagdollApplied, RoundStateChanged; needs PlayerGui
-  5. CrosshairUI:init()+Start()      -- no controller deps; exposes ShowHitmarker(); needs PlayerGui
-  6. ViewModelController:Start()     -- no controller deps; exposes PlayFireAnimation(), GetBarrelTipCFrame()
-  7. GunController:Start()           -- reads MatchController:GetPhase(); calls ViewModelController + CrosshairUI
+  5. KillFeedUI:init()+Start()       -- no controller deps; connects KillFeed; needs PlayerGui
+  6. CrosshairUI:init()+Start()      -- no controller deps; exposes ShowHitmarker(); needs PlayerGui
+  7. ViewModelController:Start()     -- no controller deps; exposes PlayFireAnimation(), GetBarrelTipCFrame()
+  8. SoundController:init()+Start()  -- no controller deps; no PlayerGui; must start before GunController
+  9. GunController:Start()           -- reads MatchController:GetPhase(); calls ViewModelController, CrosshairUI, SoundController
 ```
 
-**Two initialization helpers:**
+**Three initialization helpers:**
 - `loadAndStart(name, getModule)` — for controllers with no PlayerGui dependency: `require → Start()`
 - `loadInitAndStart(name, getModule)` — for UI modules that create ScreenGui instances: `require → init(playerGui) → Start()`
+- `loadInitNoGuiAndStart(name, getModule)` — for modules with `init()` (no PlayerGui arg) followed by `Start()`
 
 **Adding a new controller:**
 - Create the file as `src/client/NewController.lua` (ModuleScript, not `.client.lua`)
@@ -162,7 +166,8 @@ Add a row here **before** implementing any new remote. Every row must have exact
 | `RoundStateChanged` | RemoteEvent | `MatchService.server.lua` | `MatchController.lua`, `MatchUI.lua`, `HUD.lua`, `CrosshairUI.lua`, `ViewModelController.lua` | Phase, round, timer, winner, and win-count updates every tick |
 | `TeamAssigned` | RemoteEvent | `TeamService.server.lua` | `MatchUI.lua` (pending) | Tells each client their team for this round |
 | `TeamStatusUpdate` | RemoteEvent | `TeamService.server.lua` | `HUD.lua` | Alive count per team broadcast after each death |
-| `RagdollApplied` | RemoteEvent | `RagdollService.lua` | `DeathScreen.lua` | Notifies all clients a player died; triggers death experience on the dying client |
+| `RagdollApplied` | RemoteEvent | `RagdollService.lua` | `DeathScreen.lua`, `SoundController.lua` | Notifies all clients a player died; triggers death experience on the dying client |
+| `KillFeed` | RemoteEvent | `DamageService.lua` | `KillFeedUI.lua` | Broadcasts killer and victim display names and team names to all clients for the kill feed |
 | `ObjectiveUpdated` | RemoteEvent | `ObjectiveService.server.lua` | pending (ObjectiveUI) | Anchor capture progress (0–1) |
 | `ObjectiveComplete` | RemoteEvent | `ObjectiveService.server.lua` | pending (ObjectiveUI) | An objective was finished |
 | `PartDestroyed` | RemoteEvent | pending | pending | Trigger destruction VFX on all clients |

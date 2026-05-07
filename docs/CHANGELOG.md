@@ -7,6 +7,49 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-07] — Add kill feed UI
+
+**Kill feed data flow:** `DamageService:killPlayer()` → `KillFeed:FireAllClients(killerName, victimName, killerTeam, victimTeam)` → `KillFeedUI:addEntry()` → top-right entry stack, fades after 4 s
+
+**Updated — `src/shared/Constants.lua`**
+- Added `KILLFEED_DISPLAY_TIME = 4` — seconds each entry is visible before fading
+- Added `KILLFEED_FADE_TIME = 0.4` — seconds for the fade-out tween
+- Added `TEAM_ATTACKERS = "Attackers"` and `TEAM_DEFENDERS = "Defenders"` — canonical team name strings (triggered by DEBT-020 fix condition: KillFeedUI is the third consumer)
+- Added `COLOR_TEAM_ATTACKERS = Color3.fromRGB(255, 80, 80)`, `COLOR_TEAM_DEFENDERS = Color3.fromRGB(80, 140, 255)`, `COLOR_TEAM_NEUTRAL = Color3.fromRGB(220, 220, 220)` — centralized Color3 values for UI team tinting (triggered by DEBT-004 fix condition: KillFeedUI needs team colours)
+
+**Updated — `src/server/RemoteSetup.server.lua`**
+- Added `makeEvent("KillFeed")` in the "Teams / death tracking" section
+
+**Updated — `src/server/DamageService.lua`**
+- Added `KillFeed` remote reference at module level
+- `killPlayer()`: after firing HealthChanged and applying ragdoll, fires `KillFeed:FireAllClients(killerDisplayName, victimDisplayName, killerTeamName, victimTeamName)`; `killerDisplayName` is `attacker.DisplayName` or `""` for environment kills; `killerTeamName` is `playerTeam[attacker]` or `""` if attacker has no recorded team (mid-round joiner or environment kill)
+- Header comment updated to note KillFeed broadcast
+
+**New file — `src/client/UI/KillFeedUI.lua`**
+- `init(playerGui)`: creates ScreenGui "KillFeedUI" (`ResetOnSpawn=false`, `IgnoreGuiInset=true`, `DisplayOrder=5`); transparent container Frame anchored top-right (AnchorPoint=(1,0), 8 px inset, 260 px wide, `AutomaticSize=Y`); UIListLayout (Vertical, LayoutOrder sort, 2 px padding)
+- `Start()`: connects `KillFeed.OnClientEvent` → calls `addEntry()`
+- `addEntry(killerName, victimName, killerTeam, victimTeam)`: enforces max 5 entries (oldest `removeEntry()`d immediately when a 6th arrives); creates a 22 px Frame with semi-transparent black background; TextLabel with `RichText=true` showing `<font color="rgb(...)">KillerName</font> → <font color="rgb(...)">VictimName</font>` — team colours from `Constants.COLOR_TEAM_*`; environment kills show `✦ → VictimName` in neutral colour; schedules `task.delay(KILLFEED_DISPLAY_TIME)` → TweenService fades `BackgroundTransparency` and `TextTransparency` to 1 over `KILLFEED_FADE_TIME` → `removeEntry()` on tween completion
+- `removeEntry(frame)`: removes frame from `entries` table by reference and calls `Destroy()`; guarded against double-destroy via `if not frame.Parent then return end` check in the delay callback
+
+**Updated — `src/client/ClientInit.client.lua`**
+- KillFeedUI inserted at position 5 (after DeathScreen, before CrosshairUI) using `loadInitAndStart`
+- CrosshairUI shifts to 6, ViewModelController to 7, SoundController to 8, GunController to 9
+- Header comment updated to 9-entry order
+
+**Updated — `docs/PROJECT_MAP.md`**
+- Added `KillFeed` row to remote registry (Fired by DamageService.lua, Listened by KillFeedUI.lua)
+- Added `KillFeedUI` to Presentation section
+- Updated `RagdollApplied` Listened-by to include `SoundController.lua` (correction from prior entry)
+- Updated ClientInit order to 9 entries; added `loadInitNoGuiAndStart` to the helpers list
+
+**Debt evaluation**
+- DEBT-004 (team colours not in Constants): **further resolved** — `COLOR_TEAM_*` Color3 constants now in Constants.lua; KillFeedUI uses them; TeamService's BrickColor values remain local (outside task scope); entry updated with reasoning
+- DEBT-007 (RoundStateChanged fan-out): **unaffected** — KillFeedUI listens to KillFeed, not RoundStateChanged; listener count stays at 6
+- DEBT-017 (ClientInit manual update): **worsened** — 9 entries now; count updated
+- DEBT-020 (team name strings duplicated): **partially resolved** — `TEAM_ATTACKERS`/`TEAM_DEFENDERS` added to Constants.lua; KillFeedUI uses them; TeamService and ObjectiveService still have local copies (outside task scope); entry updated
+
+---
+
 ## [2026-05-07] — Add server-authoritative ammo system with reload
 
 **Ammo flow:** `TeamAssigned` → `GunService.setupAmmo()` → `AmmoChanged` → `GunController` + `HUD` | `WeaponFired` → ammo check → decrement → `AmmoChanged` | `ReloadRequest` → validate → transfer → `AmmoChanged`

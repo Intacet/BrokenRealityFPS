@@ -38,8 +38,9 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 **File:** `src/server/TeamService.server.lua`
 **Risk:** ~~`ATTACKER_COLOR`, `DEFENDER_COLOR`, and `TELEPORT_Y_OFFSET` are defined as local constants inside TeamService.~~ `ATTACKER_COLOR` and `DEFENDER_COLOR` are still defined as local constants inside TeamService. If another system (kill feed, HUD team indicator, spectator camera) needs to read team colours, it will either hardcode them again or have no access to them — creating duplicate magic values.
 **Partial resolution (2026-05-07):** `TELEPORT_Y_OFFSET` was moved to `src/shared/Constants.lua` during the "No magic numbers" audit. The offset value is no longer duplicated. `ATTACKER_COLOR` and `DEFENDER_COLOR` were not moved because `BrickColor` values are not numeric literals — they fall outside the no-magic-numbers rule. The underlying colour-duplication risk remains.
-**Trigger:** Adding a kill feed, name tag, or any UI that needs to tint elements by team colour.
-**Fix when:** Any system outside TeamService needs to read team colours. Move `ATTACKER_COLOR` and `DEFENDER_COLOR` to `src/shared/Constants.lua` at that point.
+**Further resolution (2026-05-07):** `KillFeedUI` was the trigger — a second system needing team colours. `Color3` variants for UI tinting (`COLOR_TEAM_ATTACKERS`, `COLOR_TEAM_DEFENDERS`, `COLOR_TEAM_NEUTRAL`) were added to `src/shared/Constants.lua`. `KillFeedUI` reads from these constants; no new magic values were introduced. TeamService's `BrickColor` values (`ATTACKER_COLOR`, `DEFENDER_COLOR`) remain as local module constants because (a) they drive Roblox `Team.TeamColor` which requires `BrickColor`, not `Color3`, and (b) TeamService is a `.server.lua` Script that cannot be updated in this task scope.
+**Remaining risk:** TeamService's `BrickColor` values are still not in Constants. If a future system needs BrickColor team values, it must add them to Constants separately. The Color3 UI values are now canonical and safe to use from any client UI.
+**Trigger for full resolution:** Any system outside TeamService needing the `BrickColor` team colours. At that point, add `Constants.BRICKCOLOR_TEAM_ATTACKERS` and `Constants.BRICKCOLOR_TEAM_DEFENDERS` and replace the local declarations in TeamService.
 
 ---
 
@@ -144,7 +145,7 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 **File:** `src/client/ClientInit.client.lua`
 **Risk:** `ClientInit.client.lua` holds an explicit ordered list of `loadAndStart()` / `loadInitAndStart()` calls. When a new controller is built (e.g. `MovementController`, `CutsceneController`), a developer must manually add its call in the correct position. If forgotten, the controller's `Start()` is never called and it silently does nothing — no error, no warning, just a non-functional system.
-**Current count:** 8 entries (MatchController, MatchUI, HUD, DeathScreen, CrosshairUI, ViewModelController, SoundController, GunController).
+**Current count:** 9 entries (MatchController, MatchUI, HUD, DeathScreen, KillFeedUI, CrosshairUI, ViewModelController, SoundController, GunController).
 **Trigger:** Every time a new controller is built. The risk grows with each addition.
 **Fix when:** The controller count reaches double digits. At that point, consider a self-registration pattern where each ModuleScript registers itself with ClientInit via a shared table, or a folder-scan pattern that discovers and calls all controllers automatically. Until then, the explicit list is simpler and clearer.
 
@@ -168,12 +169,13 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-020] Team name strings are duplicated across TeamService and ObjectiveService
+## [DEBT-020] Team name strings are duplicated across TeamService and ObjectiveService — PARTIALLY RESOLVED 2026-05-07
 
 **Files:** `src/server/TeamService.server.lua`, `src/server/ObjectiveService.server.lua`
 **Risk:** Both services define `local TEAM_ATTACKERS = "Attackers"` and both assume `TEAM_DEFENDERS = "Defenders"` (implicit). If a team is renamed, both files must be updated together. A mismatch — e.g. TeamService assigns "Attacker" (no s) but ObjectiveService checks "Attackers" — silently breaks objective capture without any runtime error, because `playerTeams[player] ~= TEAM_ATTACKERS` is always true.
-**Trigger:** Renaming a team, or adding a third service that filters by team name.
-**Fix when:** A third consumer appears, or when the team names are likely to change. Add `Constants.TEAM_ATTACKERS = "Attackers"` and `Constants.TEAM_DEFENDERS = "Defenders"` to `src/shared/Constants.lua` and replace the local declarations in both service files.
+**Partial resolution (2026-05-07):** `KillFeedUI` was the third consumer that triggered the fix condition. `Constants.TEAM_ATTACKERS = "Attackers"` and `Constants.TEAM_DEFENDERS = "Defenders"` were added to `src/shared/Constants.lua`. `KillFeedUI` reads from Constants and introduces no new hardcoded strings. TeamService and ObjectiveService still have their own local declarations (not in the allowed-file scope for this task).
+**Remaining risk:** TeamService and ObjectiveService still have local `TEAM_ATTACKERS`/`TEAM_DEFENDERS` strings that are not wired to Constants. A team rename still requires updating three files instead of one.
+**Fix when:** The next task that touches TeamService or ObjectiveService. Replace their local `TEAM_ATTACKERS`/`TEAM_DEFENDERS` declarations with `require(Constants).TEAM_ATTACKERS` / `.TEAM_DEFENDERS`.
 
 ---
 

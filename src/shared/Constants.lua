@@ -67,4 +67,23 @@ Constants.DEATH_EQ_LOW_GAIN     = 0    -- EqualizerSoundEffect low-frequency gai
 Constants.DEATH_EQ_MID_GAIN     = -50  -- EqualizerSoundEffect mid-frequency gain on death (heavy cut)
 Constants.DEATH_EQ_HIGH_GAIN    = -60  -- EqualizerSoundEffect high-frequency gain on death (near silence)
 
+-- ============================================================
+-- Kill feed (client presentation only)
+-- ============================================================
+Constants.KILLFEED_DISPLAY_TIME = 4    -- seconds each kill entry is visible before fading out
+Constants.KILLFEED_FADE_TIME    = 0.4  -- seconds to tween an entry to transparent before destroying it
+
+-- ============================================================
+-- Team identity — canonical strings and UI colours
+-- Use these instead of raw "Attackers"/"Defenders" literals.
+-- TeamService also defines BrickColor values for Roblox Team objects; those are
+-- separate from these Color3 values used for text and UI tinting.
+-- ============================================================
+Constants.TEAM_ATTACKERS = "Attackers"
+Constants.TEAM_DEFENDERS = "Defenders"
+
+Constants.COLOR_TEAM_ATTACKERS = Color3.fromRGB(255, 80,  80)   -- red  — attacker name tint
+Constants.COLOR_TEAM_DEFENDERS = Color3.fromRGB(80,  140, 255)  -- blue — defender name tint
+Constants.COLOR_TEAM_NEUTRAL   = Color3.fromRGB(220, 220, 220)  -- grey — unknown/environment
+
 return Constants

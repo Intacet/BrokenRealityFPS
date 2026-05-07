@@ -28,6 +28,7 @@ local RagdollService  = require(script.Parent:WaitForChild("RagdollService"))
 
 local Remotes       = ReplicatedStorage:WaitForChild("Remotes")
 local HealthChanged = Remotes:WaitForChild("HealthChanged") :: RemoteEvent
+local KillFeed      = Remotes:WaitForChild("KillFeed")      :: RemoteEvent
 
 -- ============================================================
 -- State
@@ -60,6 +61,7 @@ end
 -- to RagdollService which converts Motor6Ds to physics joints and fires Humanoid.Health=0.
 -- RagdollService fires Humanoid.Died (TeamService alive tracking) and RagdollApplied
 -- (client death screen). The character is NOT destroyed — it stays as a ragdoll.
+-- Also fires KillFeed to all clients so the kill feed UI can display the kill.
 local function killPlayer(player: Player, attacker: Player?)
     playerHealth[player] = 0
     HealthChanged:FireClient(player, 0, Constants.MAX_HEALTH)
@@ -71,6 +73,14 @@ local function killPlayer(player: Player, attacker: Player?)
         Logger.warn("[DamageService] killPlayer: no character for", player.Name,
             "— ragdoll skipped; Humanoid.Died will not fire via this path")
     end
+
+    -- Broadcast kill to all clients for the kill feed.
+    -- killerTeam may be nil if attacker joined between phases and missed TeamAssigned.
+    local killerDisplayName = attacker and attacker.DisplayName or ""
+    local victimDisplayName = player.DisplayName
+    local killerTeamName    = (attacker and playerTeam[attacker]) or ""
+    local victimTeamName    = playerTeam[player] or ""
+    KillFeed:FireAllClients(killerDisplayName, victimDisplayName, killerTeamName, victimTeamName)
 
     local attackerName = attacker and attacker.DisplayName or "environment"
     Logger.debug("[DamageService]", player.Name, "killed by", attackerName)

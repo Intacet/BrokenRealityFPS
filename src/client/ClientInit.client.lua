@@ -11,14 +11,15 @@
 --   2. MatchUI              — reads RoundStateChanged; needs PlayerGui
 --   3. HUD                  — reads HealthChanged, TeamStatusUpdate, RoundStateChanged; needs PlayerGui
 --   4. DeathScreen          — reads RagdollApplied, RoundStateChanged; needs PlayerGui
---   5. CrosshairUI          — reads RoundStateChanged, exposes ShowHitmarker(); needs PlayerGui
---   6. ViewModelController  — reads RoundStateChanged, exposes PlayFireAnimation(); no PlayerGui
---   7. SoundController      — reads HitConfirmed, RagdollApplied; no PlayerGui; must start before GunController
---   8. GunController        — reads MatchController:GetPhase(); calls ViewModelController, CrosshairUI, SoundController
+--   5. KillFeedUI           — reads KillFeed; needs PlayerGui; no deps on other controllers
+--   6. CrosshairUI          — reads RoundStateChanged, exposes ShowHitmarker(); needs PlayerGui
+--   7. ViewModelController  — reads RoundStateChanged, exposes PlayFireAnimation(); no PlayerGui
+--   8. SoundController      — reads HitConfirmed, RagdollApplied; no PlayerGui; must start before GunController
+--   9. GunController        — reads MatchController:GetPhase(); calls ViewModelController, CrosshairUI, SoundController
 --
 -- GunController requires ViewModelController, CrosshairUI, and SoundController at module level,
 -- so all three must be initialized (Start()ed) before GunController:Start() runs.
--- DeathScreen has no deps on other controllers and none depend on it; position 4 is arbitrary.
+-- DeathScreen and KillFeedUI have no deps on other controllers and none depend on them.
 --
 -- To add a new controller: require it here and call its Start() (or init()+Start())
 -- inside the appropriate helper. Keep the order intentional and document any dependency.
@@ -128,25 +129,30 @@ loadInitAndStart("DeathScreen", function()
     return require(script.Parent:WaitForChild("UI"):WaitForChild("DeathScreen"))
 end)
 
--- 5. CrosshairUI — no dependency on other controllers; needs PlayerGui
+-- 5. KillFeedUI — no dependency on other controllers; needs PlayerGui
+loadInitAndStart("KillFeedUI", function()
+    return require(script.Parent:WaitForChild("UI"):WaitForChild("KillFeedUI"))
+end)
+
+-- 6. CrosshairUI — no dependency on other controllers; needs PlayerGui
 --    Must start before GunController so ShowHitmarker() is ready when HitConfirmed fires.
 loadInitAndStart("CrosshairUI", function()
     return require(script.Parent:WaitForChild("UI"):WaitForChild("CrosshairUI"))
 end)
 
--- 6. ViewModelController — no PlayerGui; must start before GunController so
+-- 7. ViewModelController — no PlayerGui; must start before GunController so
 --    PlayFireAnimation() and GetBarrelTipCFrame() are available when the first shot fires.
 loadAndStart("ViewModelController", function()
     return require(script.Parent:WaitForChild("ViewModelController"))
 end)
 
--- 7. SoundController — no PlayerGui; must start before GunController so PlayGunshot()
+-- 8. SoundController — no PlayerGui; must start before GunController so PlayGunshot()
 --    is available when the first shot fires. Uses init()+Start() (no PlayerGui arg).
 loadInitNoGuiAndStart("SoundController", function()
     return require(script.Parent:WaitForChild("SoundController"))
 end)
 
--- 8. GunController — reads MatchController:GetPhase(); calls ViewModelController,
+-- 9. GunController — reads MatchController:GetPhase(); calls ViewModelController,
 --    CrosshairUI, and SoundController at module level — all three must be Start()ed first.
 loadAndStart("GunController", function()
     return require(script.Parent:WaitForChild("GunController"))
