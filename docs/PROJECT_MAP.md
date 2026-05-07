@@ -95,6 +95,28 @@ ObjectiveUI         -- driven by ObjectiveUpdated
 MatchUI             -- driven by RoundStateChanged
 ```
 
+### Client initialization pattern
+
+All client controllers are **ModuleScripts** (`.lua`). They do not run automatically.
+`ClientInit.client.lua` is the only **LocalScript** in the Controllers folder. It:
+
+1. `require()`s each controller in dependency order
+2. Calls each controller's `:Start()` method in the same order
+3. Wraps each step in `pcall` — one failed controller does not block the others
+
+**Current initialization order:**
+```
+ClientInit.client.lua
+  1. MatchController:Start()  -- must be first; owns GetPhase() which GunController reads
+  2. GunController:Start()    -- reads MatchController:GetPhase() on every shot
+```
+
+**Adding a new controller:**
+- Create the file as `src/client/NewController.lua` (ModuleScript, not `.client.lua`)
+- Expose a `:Start()` method that connects all events and listeners
+- Add a `loadAndStart()` call in `ClientInit.client.lua` at the correct position
+- Document the dependency order in a comment above the call
+
 ---
 
 ## Workspace layout

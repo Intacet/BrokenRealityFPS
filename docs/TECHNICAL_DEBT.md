@@ -87,7 +87,7 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ## [DEBT-013] Weapon name is hardcoded on both client and server instead of sent in the payload
 
-**Files:** `src/server/GunService.server.lua`, `src/client/GunController.client.lua`
+**Files:** `src/server/GunService.server.lua`, `src/client/GunController.lua`
 **Risk:** `DEFAULT_WEAPON = "AssaultRifle"` in GunService and `CURRENT_WEAPON = "AssaultRifle"` in GunController are two independent hardcodes that must be kept in sync. GunController is now built but the `WeaponFired` payload is `{origin, direction, tick}` with no weapon name — so the server cannot know what weapon the client is using. With a single weapon this is invisible. With multiple weapons, every shot is validated against AssaultRifle stats regardless of what the player holds.
 **Trigger:** Adding a second weapon to WeaponData, or giving players a loadout choice.
 **Fix when:** Multiple weapons exist. Add `weaponName: string` to the `WeaponFired` payload, validate it exists in WeaponData on the server (never trust the client's name blindly — verify it is a real entry), and remove both hardcodes.
@@ -103,12 +103,11 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-015] MatchController.client.lua must be renamed MatchController.lua before GunController works
+## [DEBT-015] MatchController.client.lua must be renamed MatchController.lua before GunController works — RESOLVED 2026-05-07
 
-**File:** `src/client/MatchController.client.lua`
-**Risk:** `GunController.client.lua` calls `require(script.Parent:WaitForChild("MatchController"))`. In Roblox, `require()` only accepts a ModuleScript. A file named `MatchController.client.lua` creates a LocalScript instance — `require()` will throw at runtime. GunController is architecturally correct; the file extension is wrong. The game will error on the client on startup until this is fixed.
-**Trigger:** This is blocking — GunController cannot run until it is resolved.
-**Fix when:** Immediately. Rename `src/client/MatchController.client.lua` → `src/client/MatchController.lua`. The `MatchController:Start()` call at the bottom of the file already handles self-initialization on first `require()`, so no runner script is needed. Update the header comment from `-- LocalScript` to `-- ModuleScript`. Logic unchanged.
+**Files:** `src/client/MatchController.client.lua`, `src/client/GunController.client.lua`
+**Risk:** ~~`GunController.client.lua` calls `require(script.Parent:WaitForChild("MatchController"))`. A file named `MatchController.client.lua` creates a LocalScript instance — `require()` will throw at runtime. The game will error on the client on startup.~~
+**Resolution:** Both controllers renamed to `.lua` (ModuleScript). `MatchController.client.lua` → `MatchController.lua`; `GunController.client.lua` → `GunController.lua`. The self-calling `MatchController:Start()` at the bottom of MatchController was removed — leaving it in would have caused `Start()` to fire twice on `require()` (once from the module tail, once from ClientInit), registering `RoundStateChanged.OnClientEvent` twice. GunController's event connections were wrapped in `GunController:Start()` and a `return GunController` was added. `ClientInit.client.lua` is the sole LocalScript runner — it requires both controllers in dependency order (MatchController first) and calls their `Start()` methods. `require()` now resolves correctly; the startup error is eliminated.
 
 ---
 
@@ -123,7 +122,7 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ## [DEBT-007] applyState is the only mutation point in MatchController — will grow
 
-**File:** `src/client/MatchController.client.lua`
+**File:** `src/client/MatchController.lua`
 **Risk:** `applyState()` is the single function that writes to local state and currently calls `print()`. When MatchUI is built, a UI update call will be added here. If CutsceneController, HUD, and ObjectiveUI all need to react to phase changes, they will each add a call inside `applyState()`, making it a growing list of side effects in one function.
 **Trigger:** Adding MatchUI (Stage 3 of the roadmap) — the first UI that needs to read from MatchController.
 **Fix when:** A second system needs to react to phase changes. Replace the `print()` with a `BindableEvent:Fire(payload)` that any client system can connect to, rather than adding direct calls inside `applyState()`.
@@ -138,8 +137,17 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
+## [DEBT-017] ClientInit must be manually updated when a new controller is added
+
+**File:** `src/client/ClientInit.client.lua`
+**Risk:** `ClientInit.client.lua` holds an explicit ordered list of `loadAndStart()` calls. When a new controller is built (e.g. `MovementController`, `CutsceneController`), a developer must manually add its `loadAndStart()` call in the correct position. If forgotten, the controller's `Start()` is never called and it silently does nothing — no error, no warning, just a non-functional system.
+**Trigger:** Every time a new controller is built. The risk is proportional to the number of future controllers (currently 5 planned beyond the current 2).
+**Fix when:** The controller count grows large enough that manual tracking becomes error-prone. At that point, consider a self-registration pattern where each ModuleScript registers itself with ClientInit via a shared table, or a folder-scan pattern that discovers and calls all controllers automatically. Until then, the explicit list is simpler and clearer.
+
+---
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
-**File:** `src/client/MatchController.client.lua`
+**File:** `src/client/MatchController.lua`
 **Risk:** ~~`GetMatchConfig:InvokeServer()` is wrapped in `pcall`. If `MatchService` has a bug in its `OnServerInvoke` handler — an error thrown, a nil return, a missing field — the `pcall` catches it, prints a generic fallback message, and the controller continues with stale default state (LOBBY, round 0). This makes a server-side logic error look like a timing issue and is easy to miss.~~
 **Resolution:** The `else` branch now distinguishes two cases. `not ok` (genuine error thrown server-side) calls `warn("[MatchController] GetMatchConfig error:", result)` where `result` is the error string — visible as red output. `ok` with a nil result keeps the original print, since that is a genuine timing edge case and not an error.

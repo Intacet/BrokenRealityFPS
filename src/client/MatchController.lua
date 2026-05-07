@@ -1,5 +1,5 @@
 --!strict
--- LocalScript
+-- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MatchController
 --
 -- Owns the client-side view of match state: current phase, round number, and time left.
@@ -7,6 +7,8 @@
 --
 -- Does NOT build any UI — MatchUI will read from this controller once it is built.
 -- Does NOT touch server state — all authoritative data lives in MatchService.
+--
+-- Initialized by ClientInit.client.lua — do not self-call Start() inside this module.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -70,8 +72,8 @@ end
 
 local MatchController = {}
 
--- Called once when the LocalScript runs.
--- Syncs immediately, then listens for updates.
+-- Called once by ClientInit after all modules are required.
+-- Syncs immediately with the server, then stays current via RoundStateChanged.
 function MatchController:Start()
     -- Ask the server for the current state right now.
     -- This handles the case where a player joins mid-round and would otherwise
@@ -125,13 +127,5 @@ end
 function MatchController:GetMaxRounds(): number
     return currentMaxRounds
 end
-
--- ============================================================
--- Entry point
--- LocalScripts run automatically; call Start() here so the controller
--- is active as soon as the player's client loads.
--- ============================================================
-
-MatchController:Start()
 
 return MatchController
