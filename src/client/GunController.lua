@@ -28,7 +28,9 @@ local WeaponData = require(Modules:WaitForChild("WeaponData"))
 local Logger     = require(Modules:WaitForChild("Logger"))
 
 -- MatchController is a sibling ModuleScript in StarterPlayerScripts/Controllers.
-local MatchController = require(script.Parent:WaitForChild("MatchController"))
+local MatchController      = require(script.Parent:WaitForChild("MatchController"))
+local ViewModelController  = require(script.Parent:WaitForChild("ViewModelController"))
+local CrosshairUI          = require(script.Parent:WaitForChild("UI"):WaitForChild("CrosshairUI"))
 
 local Remotes       = ReplicatedStorage:WaitForChild("Remotes")
 local WeaponFired   = Remotes:WaitForChild("WeaponFired")   :: RemoteEvent
@@ -126,12 +128,36 @@ function GunController:Start()
         -- Fire the shot request. The server validates origin + direction with its
         -- own raycast and decides whether damage is applied.
         WeaponFired:FireServer(origin, direction, now)
+
+        -- ── Client-side visuals (cosmetic only, no gameplay impact) ────────────
+
+        -- Snap gun body back; RenderStepped in ViewModelController lerps it forward.
+        ViewModelController:PlayFireAnimation()
+
+        -- Brief muzzle flash: a glowing sphere at the barrel tip, removed after 0.05 s.
+        local flash         = Instance.new("Part")
+        flash.Name          = "MuzzleFlash"
+        flash.Size          = Vector3.new(0.3, 0.3, 0.3)
+        flash.BrickColor    = BrickColor.new("Bright yellow")
+        flash.Material      = Enum.Material.Neon
+        flash.CanCollide    = false
+        flash.CastShadow    = false
+        flash.Anchored      = true
+        flash.CFrame        = ViewModelController:GetBarrelTipCFrame()
+        flash.Parent        = workspace.CurrentCamera
+        local flashMesh     = Instance.new("SpecialMesh")
+        flashMesh.MeshType  = Enum.MeshType.Sphere
+        flashMesh.Parent    = flash
+        task.delay(0.05, function()
+            flash:Destroy()
+        end)
     end)
 
     -- ── Server event listeners ────────────────────────────────────────────────
 
-    -- GunService confirmed a hit on the server. Placeholder for a hitmarker sprite.
+    -- GunService confirmed a hit on the server. Show the hitmarker and log.
     HitConfirmed.OnClientEvent:Connect(function()
+        CrosshairUI:ShowHitmarker()
         Logger.debug("[GunController] HIT")
     end)
 

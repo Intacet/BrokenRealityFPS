@@ -107,10 +107,12 @@ All client controllers are **ModuleScripts** (`.lua`). They do not run automatic
 **Current initialization order:**
 ```
 ClientInit.client.lua
-  1. MatchController:Start()     -- must be first; owns GetPhase() which GunController reads
-  2. MatchUI:init()+Start()      -- no controller deps; connects RoundStateChanged
-  3. HUD:init()+Start()          -- no controller deps; connects HealthChanged, TeamStatusUpdate, RoundStateChanged
-  4. GunController:Start()       -- reads MatchController:GetPhase() on every shot
+  1. MatchController:Start()         -- must be first; owns GetPhase() which GunController reads
+  2. MatchUI:init()+Start()          -- no controller deps; connects RoundStateChanged; needs PlayerGui
+  3. HUD:init()+Start()              -- no controller deps; connects HealthChanged, TeamStatusUpdate, RoundStateChanged; needs PlayerGui
+  4. CrosshairUI:init()+Start()      -- no controller deps; exposes ShowHitmarker(); needs PlayerGui
+  5. ViewModelController:Start()     -- no controller deps; exposes PlayFireAnimation(), GetBarrelTipCFrame()
+  6. GunController:Start()           -- reads MatchController:GetPhase(); calls ViewModelController + CrosshairUI
 ```
 
 **Two initialization helpers:**
@@ -151,7 +153,7 @@ Add a row here **before** implementing any new remote. Every row must have exact
 | `WeaponFired` | RemoteEvent | `GunController.lua` | `GunService.server.lua` | Client requests hit validation |
 | `HitConfirmed` | RemoteEvent | `GunService.server.lua` | `GunController.lua` | Server confirms hit for cosmetic hitmarker |
 | `HealthChanged` | RemoteEvent | `DamageService.lua` | `GunController.lua`, `HUD.lua` | Server sends updated health to affected client |
-| `RoundStateChanged` | RemoteEvent | `MatchService.server.lua` | `MatchController.lua`, `MatchUI.lua`, `HUD.lua` | Phase, round, timer, winner, and win-count updates every tick |
+| `RoundStateChanged` | RemoteEvent | `MatchService.server.lua` | `MatchController.lua`, `MatchUI.lua`, `HUD.lua`, `CrosshairUI.lua`, `ViewModelController.lua` | Phase, round, timer, winner, and win-count updates every tick |
 | `TeamAssigned` | RemoteEvent | `TeamService.server.lua` | `MatchUI.lua` (pending) | Tells each client their team for this round |
 | `TeamStatusUpdate` | RemoteEvent | `TeamService.server.lua` | `HUD.lua` | Alive count per team broadcast after each death |
 | `ObjectiveUpdated` | RemoteEvent | `ObjectiveService.server.lua` | pending (ObjectiveUI) | Anchor capture progress (0–1) |

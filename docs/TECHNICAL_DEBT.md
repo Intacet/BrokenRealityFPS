@@ -123,11 +123,11 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ## [DEBT-007] Multiple clients connect to RoundStateChanged independently
 
-**Files:** `src/client/MatchController.lua`, `src/client/UI/MatchUI.lua`, `src/client/UI/HUD.lua`
-**Risk:** MatchController, MatchUI, and HUD each connect their own `RoundStateChanged.OnClientEvent` listener. Every server broadcast triggers three separate handlers. Adding CutsceneController, ObjectiveUI, or any future client system will add a fourth, fifth, etc. This is functionally correct but creates a fan-out of identical event subscriptions. If the payload format ever changes, all listeners must be updated together.
-**Original risk (2026-05-06):** `applyState()` growing as the single side-effect point. Resolution path was to add a BindableEvent in MatchController so UI systems subscribe to it instead of directly to the remote.
-**Trigger:** Adding a fourth system that needs phase data (e.g. CutsceneController), or changing the RoundStatePayload shape.
-**Fix when:** A fourth RoundStateChanged listener is needed. Introduce a `MatchController.StateChanged` BindableEvent, fire it from `applyState()`, and migrate MatchUI and HUD to subscribe to the BindableEvent instead of the RemoteEvent directly. This decouples all UI from the remote format and keeps MatchController as the single parsing layer.
+**Files:** `src/client/MatchController.lua`, `src/client/UI/MatchUI.lua`, `src/client/UI/HUD.lua`, `src/client/UI/CrosshairUI.lua`, `src/client/ViewModelController.lua`
+**Risk:** Five separate systems now each connect their own `RoundStateChanged.OnClientEvent` listener (MatchController, MatchUI, HUD, CrosshairUI, ViewModelController). Every server broadcast triggers five separate handlers. If the payload format ever changes, all five must be updated together.
+**History:** Originally 1 listener (MatchController). Each new system that needs phase data adds another — now at 5. The fix of introducing a `MatchController.StateChanged` BindableEvent is increasingly urgent.
+**Trigger:** Adding any further system that reads phase data (CutsceneController, ObjectiveUI, etc.).
+**Fix when:** A sixth listener is needed. Introduce `MatchController.StateChanged` BindableEvent, fire it from `applyState()`, migrate all UI/controllers to subscribe to it instead of the RemoteEvent directly.
 
 ---
 
@@ -172,6 +172,16 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 **Risk:** Both services define `local TEAM_ATTACKERS = "Attackers"` and both assume `TEAM_DEFENDERS = "Defenders"` (implicit). If a team is renamed, both files must be updated together. A mismatch — e.g. TeamService assigns "Attacker" (no s) but ObjectiveService checks "Attackers" — silently breaks objective capture without any runtime error, because `playerTeams[player] ~= TEAM_ATTACKERS` is always true.
 **Trigger:** Renaming a team, or adding a third service that filters by team name.
 **Fix when:** A third consumer appears, or when the team names are likely to change. Add `Constants.TEAM_ATTACKERS = "Attackers"` and `Constants.TEAM_DEFENDERS = "Defenders"` to `src/shared/Constants.lua` and replace the local declarations in both service files.
+
+---
+
+## [DEBT-021] ViewModelController parts have no cleanup path if Start() is called twice
+
+**File:** `src/client/ViewModelController.lua`
+**Risk:** `gunBody`, `barrel`, and `grip` are module-level variables created inside `Start()`. If `Start()` were called a second time (e.g., a future re-initialization path), a new set of Parts would be parented to `workspace.CurrentCamera` without the old ones being destroyed — leaving orphaned, invisible Parts consuming memory and rendering time.
+**Current exposure:** ClientInit calls `Start()` exactly once per session; there is no re-initialization path today. Risk is not triggered.
+**Trigger:** Any future change that calls `Start()` more than once, or a pattern where the controller is torn down and rebuilt (e.g., a map reload system).
+**Fix when:** A re-initialization path is needed. Add a `cleanup()` helper at the top of `Start()` that destroys existing Parts if they are non-nil before creating new ones.
 
 ---
 

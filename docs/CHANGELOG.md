@@ -7,6 +7,42 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-07] — Add viewmodel, crosshair, hitmarker, muzzle flash
+
+**Part 1 — ViewModelController (`src/client/ViewModelController.lua`, new)**
+- Creates three Parts (GunBody 0.8×0.2×0.5, Barrel 0.08×0.6×0.08 with Cylinder SpecialMesh, Grip 0.15×0.25×0.15) parented to `workspace.CurrentCamera` in `Start()`
+- All parts: `Anchored=false`, `CanCollide=false`, `CastShadow=false`, `BrickColor="Dark grey"`
+- `RunService.RenderStepped` updates GunBody CFrame to `camera.CFrame * CFrame.new(0.6, -0.4, -1.2) * CFrame.new(0, 0, recoilOffset)` every frame; Barrel and Grip follow with fixed offsets
+- Visibility toggled by `RoundStateChanged` — shown only during `ACTIVE`, hidden in all other phases
+- `PlayFireAnimation()`: sets `recoilOffset = 0.05`; RenderStepped decays it back to 0 at 1 stud/sec (returns in 0.05 s)
+- `GetBarrelTipCFrame()`: returns `gunBody.CFrame * CFrame.new(0, 0.04, -0.85)` — the muzzle world CFrame used by GunController for flash placement
+
+**Part 2 — CrosshairUI (`src/client/UI/CrosshairUI.lua`, new)**
+- Creates a ScreenGui "CrosshairUI" (`ResetOnSpawn=false`, `IgnoreGuiInset=true`) in `init(playerGui)`
+- Crosshair: four white Frames (2×10 px top/bottom, 10×2 px left/right) with 4 px gap and `AnchorPoint=(0.5, 0.5)`; container hidden until `Start()` receives a phase
+- Hitmarker: four white 2×10 px Frames placed diagonally (NE, NW, SE, SW — ±8 px from center, rotated ±45°) forming an X; hidden by default
+- `Start()` connects `RoundStateChanged` — crosshair shown during `PREP` and `ACTIVE` only
+- `ShowHitmarker()`: sets hitmarker container visible, hides it after 0.1 s via `task.delay`
+
+**Part 3 — GunController (`src/client/GunController.lua`, updated)**
+- Added module-level requires: `ViewModelController` (sibling) and `CrosshairUI` (`UI/CrosshairUI`)
+- After `WeaponFired:FireServer()`: calls `ViewModelController:PlayFireAnimation()`, then creates a 0.3-stud Neon bright-yellow Sphere Part (SpecialMesh) at `ViewModelController:GetBarrelTipCFrame()` parented to `workspace.CurrentCamera`, destroyed after 0.05 s via `task.delay`
+- `HitConfirmed` listener: now calls `CrosshairUI:ShowHitmarker()` before the existing `Logger.debug("HIT")` call
+- No changes to raycast, rate-limiting, phase gate, or server fire logic
+
+**Part 4 — ClientInit (`src/client/ClientInit.client.lua`, updated)**
+- New initialization order: MatchController → MatchUI → HUD → CrosshairUI → ViewModelController → GunController
+- CrosshairUI uses `loadInitAndStart()` (needs PlayerGui); ViewModelController uses `loadAndStart()` (no PlayerGui)
+- Dependency comment updated: ViewModelController and CrosshairUI must start before GunController
+
+**Debt evaluation**
+- DEBT-007 (RoundStateChanged fan-out): **worsened** — now 5 listeners (MatchController, MatchUI, HUD, CrosshairUI, ViewModelController); entry updated with new count and escalated urgency
+- DEBT-017 (ClientInit manual update): **worsened** — 2 more entries added (CrosshairUI, ViewModelController)
+- All other open entries: unaffected
+- Added DEBT-021: ViewModelController parts created once in `Start()` with no cleanup — second call would orphan the first set of parts
+
+---
+
 ## [2026-05-07] — Batch 1: Constants, Types, RemoteSetup, Logger baseline audit
 
 Confirmed and completed the shared-module baseline required before building further systems. Most values were already present from the previous session; the audit identified and filled one gap.

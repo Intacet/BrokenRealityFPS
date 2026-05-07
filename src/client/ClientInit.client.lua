@@ -7,10 +7,15 @@
 -- ModuleScripts so they can be required by each other without running automatically.
 --
 -- Initialization order is explicit and load-order-safe:
---   1. MatchController — must be first; owns GetPhase() which GunController reads
---   2. MatchUI         — reads RoundStateChanged; needs PlayerGui
---   3. HUD             — reads HealthChanged, TeamStatusUpdate, RoundStateChanged; needs PlayerGui
---   4. GunController   — reads MatchController:GetPhase() on every shot attempt
+--   1. MatchController      — must be first; owns GetPhase() which GunController reads
+--   2. MatchUI              — reads RoundStateChanged; needs PlayerGui
+--   3. HUD                  — reads HealthChanged, TeamStatusUpdate, RoundStateChanged; needs PlayerGui
+--   4. CrosshairUI          — reads RoundStateChanged, exposes ShowHitmarker(); needs PlayerGui
+--   5. ViewModelController  — reads RoundStateChanged, exposes PlayFireAnimation(); no PlayerGui
+--   6. GunController        — reads MatchController:GetPhase(); calls ViewModelController and CrosshairUI
+--
+-- GunController requires ViewModelController and CrosshairUI at module level, so both
+-- must be initialized (Start()ed) before GunController:Start() runs — hence the order above.
 --
 -- To add a new controller: require it here and call its Start() (or init()+Start())
 -- inside the appropriate helper. Keep the order intentional and document any dependency.
@@ -90,7 +95,19 @@ loadInitAndStart("HUD", function()
     return require(script.Parent:WaitForChild("UI"):WaitForChild("HUD"))
 end)
 
--- 4. GunController — reads MatchController:GetPhase() on every shot attempt
+-- 4. CrosshairUI — no dependency on other controllers; needs PlayerGui
+--    Must start before GunController so ShowHitmarker() is ready when HitConfirmed fires.
+loadInitAndStart("CrosshairUI", function()
+    return require(script.Parent:WaitForChild("UI"):WaitForChild("CrosshairUI"))
+end)
+
+-- 5. ViewModelController — no PlayerGui; must start before GunController so
+--    PlayFireAnimation() and GetBarrelTipCFrame() are available when the first shot fires.
+loadAndStart("ViewModelController", function()
+    return require(script.Parent:WaitForChild("ViewModelController"))
+end)
+
+-- 6. GunController — reads MatchController:GetPhase(), calls ViewModelController and CrosshairUI
 loadAndStart("GunController", function()
     return require(script.Parent:WaitForChild("GunController"))
 end)
