@@ -7,6 +7,39 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-07] — Replace block viewmodel with SCAR model using PivotTo
+
+**Model attachment:** `ViewModelController:init()` clones `ReplicatedStorage/ViewModels/SCAR` and parents it to `workspace.CurrentCamera`. `RenderStepped` calls `model:PivotTo(camera.CFrame * CFrame.new(0.6, -0.4, -1.2) * CFrame.new(0, 0, recoilOffset))` every frame, keeping the model locked to the camera. No PrimaryPart is required — `PivotTo` repositions by the model's geometric pivot.
+
+**Updated — `src/client/ViewModelController.lua`**
+- Replaced the three hand-built Parts (`gunBody`, `barrel`, `grip`) and `makePart()` helper with a single cloned Model stored as `self.model` (table field, typed `Model?`)
+- Added `ViewModelController:init()`: destroys any existing `self.model` (re-init safe), calls `ReplicatedStorage:WaitForChild("ViewModels"):WaitForChild("SCAR")`, clones the model, parents clone to `workspace.CurrentCamera`, hides all `BasePart` descendants via `GetDescendants()` / `IsA("BasePart")` / `Transparency = 1`
+- `Start()` calls `self:init()` first, then narrows `self.model` to non-nil `Model`, registers `RoundStateChanged` phase listener and `RenderStepped` loop
+- `RenderStepped`: replaced three individual `Part.CFrame` assignments with `model:PivotTo(cam.CFrame * BASE_OFFSET * CFrame.new(0, 0, recoilOffset))`; skipped entirely when `visible == false`
+- `setVisibility(show)`: iterates `model:GetDescendants()` / `IsA("BasePart")` to set `Transparency`; called only on phase changes (not per-frame)
+- Visibility rule unchanged: shown only during `ACTIVE`, hidden during all other phases
+- `PlayFireAnimation()`: sets `recoilOffset = RECOIL_DIST`, then immediately applies `model:PivotTo(model:GetPivot() * CFrame.new(0, 0, recoilOffset))` for a same-frame snap; `RenderStepped` decays `recoilOffset` back to 0 over 0.05 s
+- `GetBarrelTipCFrame()`: uses `model:FindFirstChild("MuzzleAttachment", true)` → `CFrame.new(attachment.WorldPosition)`; falls back to `CFrame.new(cam.CFrame.Position + cam.CFrame.LookVector * 1.5)` with `Logger.warn` if attachment is missing
+- Removed: `VM_COLOR`, `BARREL_CENTER_OFFSET`, `BARREL_TIP_OFFSET`, `GRIP_OFFSET`, `makePart()`, `local gunBody/barrel/grip`
+
+**Updated — `src/shared/WeaponData.lua`**
+- Added `WeaponData["SCAR"] = { damage=30, fireRate=0.1, range=400, magazineSize=20, reserveAmmo=100 }`
+- Retained `WeaponData["AssaultRifle"]` as a fallback definition (not the active weapon)
+
+**Updated — `src/server/GunService.server.lua`**
+- `DEFAULT_WEAPON` changed from `"AssaultRifle"` to `"SCAR"`
+
+**Updated — `src/client/GunController.lua`**
+- `CURRENT_WEAPON` changed from `"AssaultRifle"` to `"SCAR"`
+
+**Debt evaluation**
+- DEBT-013 (weapon name hardcoded): **worsened** — WeaponData now has two named entries; mismatch between the two hardcoded strings would silently apply wrong stats (damage 25→30, range 300→400, mag 30→20); entry updated
+- DEBT-021 (ViewModelController no cleanup on double-Start): **resolved** — `init()` destroys previous `self.model` before cloning; three-Part orphaning risk eliminated; entry marked resolved
+- DEBT-007 (RoundStateChanged fan-out): **unaffected** — still one listener in ViewModelController; count stays at 6
+- Added DEBT-027: `WaitForChild("ViewModels")` / `WaitForChild("SCAR")` blocks forever if model is missing from ReplicatedStorage
+
+---
+
 ## [2026-05-07] — Fix reload to discard magazine instead of topping off
 
 **Updated — `src/server/GunService.server.lua`**

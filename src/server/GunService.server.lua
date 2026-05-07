@@ -38,8 +38,8 @@ local ReloadRequest  = Remotes:WaitForChild("ReloadRequest")  :: RemoteEvent
 
 -- GunController will include the weapon name in the WeaponFired payload once it is
 -- built. Until then, every shot is attributed to this default weapon.
--- See DEBT-013.
-local DEFAULT_WEAPON = "AssaultRifle"
+-- Must stay in sync with GunController's CURRENT_WEAPON — see DEBT-013.
+local DEFAULT_WEAPON = "SCAR"
 
 -- ============================================================
 -- State

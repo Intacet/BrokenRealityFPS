@@ -90,10 +90,11 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 ## [DEBT-013] Weapon name is hardcoded on both client and server instead of sent in the payload
 
 **Files:** `src/server/GunService.server.lua`, `src/client/GunController.lua`
-**Risk:** `DEFAULT_WEAPON = "AssaultRifle"` in GunService and `CURRENT_WEAPON = "AssaultRifle"` in GunController are independent hardcodes that must be kept in sync. GunController's `WeaponFired` payload is `{origin, direction, tick}` with no weapon name — so the server cannot know what weapon the client is using. With a single weapon this is invisible; with multiple weapons, every shot is validated against AssaultRifle stats regardless of what the player holds.
-**Worsened (2026-05-07):** The ammo system added in GunService (`setupAmmo`, `ReloadRequest` handler) also looks up `WeaponData[DEFAULT_WEAPON]` for `magazineSize` and `reserveAmmo`. A player holding a different weapon would be assigned AssaultRifle ammo and have their reload calculated against AssaultRifle's magazine size. There are now three hardcoded lookup points instead of two.
-**Trigger:** Adding a second weapon to WeaponData, or giving players a loadout choice.
-**Fix when:** Multiple weapons exist. Add `weaponName: string` to the `WeaponFired` payload (and to `ReloadRequest`), validate it exists in WeaponData on the server, and remove all three hardcoded DEFAULT_WEAPON / CURRENT_WEAPON references.
+**Risk:** `DEFAULT_WEAPON = "SCAR"` in GunService and `CURRENT_WEAPON = "SCAR"` in GunController are independent hardcodes that must be kept in sync. GunController's `WeaponFired` payload is `{origin, direction, tick}` with no weapon name — so the server cannot know what weapon the client is using. With a single weapon this is invisible; with multiple weapons, every shot is validated against SCAR stats regardless of what the player holds.
+**Worsened (2026-05-07):** The ammo system added in GunService (`setupAmmo`, `ReloadRequest` handler) also looks up `WeaponData[DEFAULT_WEAPON]` for `magazineSize` and `reserveAmmo`. A player holding a different weapon would be assigned SCAR ammo and have their reload calculated against SCAR's magazine size. There are now three hardcoded lookup points instead of two.
+**Worsened (2026-05-07 — SCAR task):** `WeaponData` now has two entries (`SCAR` and `AssaultRifle`). The risk is more concrete: both sides must use `"SCAR"` or the wrong weapon's stats (damage 25 vs 30, range 300 vs 400, mag 30 vs 20) are silently applied to every shot without a runtime error.
+**Trigger:** Adding a loadout choice, or mismatching the two hardcoded strings during a future weapon rename.
+**Fix when:** Multiple weapons exist as a player choice. Add `weaponName: string` to the `WeaponFired` payload (and to `ReloadRequest`), validate it exists in WeaponData on the server, and remove all three hardcoded DEFAULT_WEAPON / CURRENT_WEAPON references.
 
 ---
 
@@ -225,13 +226,20 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-021] ViewModelController parts have no cleanup path if Start() is called twice
+## [DEBT-021] ViewModelController parts have no cleanup path if Start() is called twice — RESOLVED 2026-05-07
 
 **File:** `src/client/ViewModelController.lua`
-**Risk:** `gunBody`, `barrel`, and `grip` are module-level variables created inside `Start()`. If `Start()` were called a second time (e.g., a future re-initialization path), a new set of Parts would be parented to `workspace.CurrentCamera` without the old ones being destroyed — leaving orphaned, invisible Parts consuming memory and rendering time.
-**Current exposure:** ClientInit calls `Start()` exactly once per session; there is no re-initialization path today. Risk is not triggered.
-**Trigger:** Any future change that calls `Start()` more than once, or a pattern where the controller is torn down and rebuilt (e.g., a map reload system).
-**Fix when:** A re-initialization path is needed. Add a `cleanup()` helper at the top of `Start()` that destroys existing Parts if they are non-nil before creating new ones.
+**Risk:** ~~`gunBody`, `barrel`, and `grip` are module-level variables created inside `Start()`. If `Start()` were called a second time, a new set of Parts would be parented to `workspace.CurrentCamera` without the old ones being destroyed.~~
+**Resolution:** The three individual Part variables were replaced by a single `self.model` (a cloned Model). `init()` — which `Start()` calls first — destroys any existing `self.model` before cloning a new one: `if self.model then self.model:Destroy() end`. Re-calling `Start()` is now safe with respect to model instances. Note: duplicate RenderStepped and RoundStateChanged connections would still accumulate on double-Start; this is a general concern for all controllers and is prevented by ClientInit calling `Start()` exactly once.
+
+---
+
+## [DEBT-027] ViewModelController depends on ReplicatedStorage/ViewModels/SCAR existing at startup
+
+**File:** `src/client/ViewModelController.lua`
+**Risk:** `init()` calls `ReplicatedStorage:WaitForChild("ViewModels")` and then `WaitForChild("SCAR")`. If either instance is missing at startup — because Rojo was not synced, the model was accidentally deleted from the place, or a future model rename was applied to only one side — `WaitForChild` will yield indefinitely with no timeout. The controller's `Start()` call will block forever, silently preventing GunController from initializing (ClientInit calls them sequentially). No error is printed; the viewmodel simply never appears and shots produce no muzzle flash.
+**Trigger:** Running the game without syncing the SCAR viewmodel via Rojo, or renaming/removing the model in Studio without updating the WaitForChild call.
+**Fix when:** The project reaches a stability pass before wider playtesting. At that point, add a timeout to the WaitForChild calls (e.g. `WaitForChild("SCAR", 10)` returns nil after 10 s) and log a warning + return early if nil, so the failure is loud rather than a silent hang.
 
 ---
 

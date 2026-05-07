@@ -14,6 +14,15 @@ local WeaponData = {}
 -- range         — maximum raycast distance in studs; shots beyond this are ignored
 -- magazineSize  — rounds per magazine; server rejects WeaponFired when magazine is empty
 -- reserveAmmo   — total spare rounds the player starts each round with
+WeaponData["SCAR"] = {
+    damage       = 30,
+    fireRate     = 0.1,
+    range        = 400,
+    magazineSize = 20,
+    reserveAmmo  = 100,
+}
+
+-- AssaultRifle kept as a fallback definition; not the active weapon (see DEBT-013).
 WeaponData["AssaultRifle"] = {
     damage       = 25,
     fireRate     = 0.1,
