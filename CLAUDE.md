@@ -229,3 +229,5 @@ After writing any code:
 At the start of every task, read `docs/TECHNICAL_DEBT.md` and check whether the requested change touches any file or system listed there. Before writing any code, explicitly state which debt entries are relevant to this task and whether the change resolves, worsens, or is unaffected by each one.
 
 When a task touches a debt entry, evaluate whether the debt is fully resolved, partially resolved, or unresolved based on the actual state of the code after your changes. Do not mark an entry resolved simply because the requested fix was applied — confirm the underlying risk is genuinely gone. Update the entry status with your reasoning.
+
+After every task, run `git add -A`, `git commit -m "[description]"`, and `git push` before ending the session. Never leave completed work uncommitted or unpushed. A task is not finished until it is on GitHub.
