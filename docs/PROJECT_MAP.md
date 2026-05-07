@@ -88,11 +88,13 @@ HordeService (server)
 ### Presentation (client only, no server impact)
 
 ```
-MovementController  -- camera, character feel, footsteps
-CutsceneController  -- intro/outro sequences, triggered by RoundStateChanged
-HUD                 -- driven by HealthChanged, AmmoChanged, RoundStateChanged
-ObjectiveUI         -- driven by ObjectiveUpdated
-MatchUI             -- driven by RoundStateChanged
+MovementController      -- camera, character feel, footsteps
+CutsceneController      -- intro/outro sequences, triggered by RoundStateChanged
+HUD                     -- driven by HealthChanged, TeamStatusUpdate, RoundStateChanged
+ObjectiveUI             -- driven by ObjectiveUpdated, ObjectiveComplete
+MatchUI                 -- driven by RoundStateChanged
+CrosshairUI             -- driven by RoundStateChanged; exposes ShowHitmarker()
+ViewModelController     -- driven by RoundStateChanged; exposes PlayFireAnimation(), GetBarrelTipCFrame()
 ```
 
 ### Client initialization pattern

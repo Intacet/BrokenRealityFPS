@@ -20,24 +20,27 @@ A 5-round attackers vs defenders match on one small suburban map. Attackers plan
 
 ### Stage 2 — Match loop
 
-- [x] **MatchService** — round counter, phase machine (Lobby → Prep → Active → Results), round timer, calls `RoundStateChanged`
-- [ ] **MatchController** — listens to `RoundStateChanged`, drives `MatchUI` (countdown, results screen)
-- [ ] **TeamService** — assigns players to Attackers or Defenders, selects spawn, fires `TeamAssigned`
-- [ ] **ObjectiveService** — tracks anchor plant progress, fires `ObjectiveUpdated` and `ObjectiveComplete`; `ObjectiveComplete` triggers `MatchService` to end round
+- [x] **MatchService** — round counter, phase machine (Lobby → Prep → Active → Results → MatchEnd), round timer, win-condition tallying, calls `RoundStateChanged`
+- [x] **MatchController** — listens to `RoundStateChanged`, mirrors phase/round/winner/win-count state; exposes `GetPhase()`, `GetWinner()`, `GetAttackerWins()`, `GetDefenderWins()`
+- [x] **TeamService** — assigns players to Attackers or Defenders, teleports to spawn, fires `TeamAssigned`; tracks alive counts, fires `TeamStatusUpdate` on death, fires `RoundEndedEarly` on team elimination
+- [x] **ObjectiveService** — tracks per-player touch counts on anchor parts, fires `ObjectiveUpdated` (progress 0–1) and `ObjectiveComplete`; fires `RoundEndedEarly("Attackers")` when all objectives planted
 
 Test gate: two players can join, get teamed, a round starts and ends, teams reset.
 
 ### Stage 3 — UI basics
 
-- [ ] **Basic UI** — `HUD` frame (health, ammo placeholders), `MatchUI` (round number, timer, phase label), `ObjectiveUI` (anchor progress bar)
+- [x] **HUD** — health number + colour-coded bar (green/orange/red), team-alive-count label; driven by `HealthChanged`, `TeamStatusUpdate`, `RoundStateChanged`
+- [x] **MatchUI** — top bar with round/phase label and timer; RESULTS overlay (winner, round scores); MATCHEND overlay (match winner, final scores); driven by `RoundStateChanged`
+- [ ] **ObjectiveUI** — anchor capture progress bar and objective markers; driven by `ObjectiveUpdated`, `ObjectiveComplete`
 
 Test gate: all UI updates correctly from remote events with no gameplay yet.
 
 ### Stage 4 — Combat
 
-- [ ] **GunService** — receives `WeaponFired`, validates raycast and timing, calls `DamageService`
-- [ ] **GunController** — input handling, client-side raycast, viewmodel placeholder, fires `WeaponFired`, listens for `HitConfirmed` to show hitmarker
-- [ ] **DamageService** — applies health changes, fires `HealthChanged`, kills player if health reaches 0
+- [x] **GunService** — receives `WeaponFired`, validates raycast and timing, calls `DamageService`, fires `HitConfirmed`
+- [x] **GunController** — left-click input, phase gate, client-side rate limit, camera raycast, fires `WeaponFired`, shows hitmarker on `HitConfirmed`
+- [x] **DamageService** — applies health changes, fires `HealthChanged`, kills player if health reaches 0; resets health on PREP
+- [x] **ViewModelController** — 3-part gun model (GunBody, Barrel, Grip) parented to `workspace.CurrentCamera`; RenderStepped camera-follow with recoil animation; exposes `PlayFireAnimation()` and `GetBarrelTipCFrame()`; CrosshairUI (4-bar crosshair + X hitmarker) initialized alongside
 - [ ] **MovementController** — character feel, camera, footstep sounds; no server component
 
 Test gate: players can shoot and kill each other; health updates on the HUD; kills are server-authoritative.

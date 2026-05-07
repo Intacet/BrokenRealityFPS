@@ -7,6 +7,20 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-07] — Sync all documentation to current codebase state
+
+**`docs/ROADMAP.md`**
+- Stage 2: checked off MatchController, TeamService, ObjectiveService; updated descriptions to reflect actual implementation (win-condition tallying, alive-count tracking, per-player touch counting)
+- Stage 3: split "Basic UI" into three separate entries — HUD (checked), MatchUI (checked), ObjectiveUI (unchecked, not yet built)
+- Stage 4: checked off GunService, GunController, DamageService; added ViewModelController+CrosshairUI as a checked entry; MovementController remains unchecked
+
+**`docs/PROJECT_MAP.md`**
+- Presentation section: added `CrosshairUI` (driven by RoundStateChanged, exposes ShowHitmarker()) and `ViewModelController` (driven by RoundStateChanged, exposes PlayFireAnimation()/GetBarrelTipCFrame()); corrected HUD driven-by list from AmmoChanged to TeamStatusUpdate; added ObjectiveComplete to ObjectiveUI driven-by list
+
+No code changes in this entry. Remote registry, ClientInit order, and debt entries were already up to date from prior sessions.
+
+---
+
 ## [2026-05-07] — Add viewmodel, crosshair, hitmarker, muzzle flash
 
 **Part 1 — ViewModelController (`src/client/ViewModelController.lua`, new)**
