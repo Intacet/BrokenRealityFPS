@@ -7,6 +7,18 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-07] — Fix reload to discard magazine instead of topping off
+
+**Updated — `src/server/GunService.server.lua`**
+- `ReloadRequest` handler: replaced top-off logic (`needed = magazineSize - mag; pulled = min(needed, reserve); mag += pulled`) with full-discard logic (`pulled = min(magazineSize, reserve); mag = pulled; reserve -= pulled`)
+- Concrete example added as a comment: 15 rounds in magazine, 70 in reserve → 30 in magazine, 40 in reserve; the 15 remaining rounds are permanently discarded
+- The full-magazine guard (`mag >= magazineSize → early return`) is unchanged and correct: reloading a full magazine with the new logic would consume reserve rounds for zero gain
+
+**Debt evaluation**
+- All open entries: unaffected
+
+---
+
 ## [2026-05-07] — Add kill feed UI
 
 **Kill feed data flow:** `DamageService:killPlayer()` → `KillFeed:FireAllClients(killerName, victimName, killerTeam, victimTeam)` → `KillFeedUI:addEntry()` → top-right entry stack, fades after 4 s

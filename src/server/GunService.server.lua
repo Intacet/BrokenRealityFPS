@@ -236,9 +236,11 @@ ReloadRequest.OnServerEvent:Connect(function(player: Player)
         return
     end
 
-    local needed = weaponDef.magazineSize - mag
-    local pulled = math.min(needed, reserve)
-    playerMag[player]     = mag + pulled
+    -- Discard the current magazine entirely and pull a full new one from reserve.
+    -- Example: 15 rounds in magazine, 70 in reserve → 30 in magazine, 40 in reserve.
+    -- The 15 remaining rounds are permanently discarded.
+    local pulled = math.min(weaponDef.magazineSize, reserve)
+    playerMag[player]     = pulled
     playerReserve[player] = reserve - pulled
     AmmoChanged:FireClient(player, playerMag[player], playerReserve[player])
 
