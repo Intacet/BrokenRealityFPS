@@ -123,11 +123,11 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ## [DEBT-007] Multiple clients connect to RoundStateChanged independently
 
-**Files:** `src/client/MatchController.lua`, `src/client/UI/MatchUI.lua`, `src/client/UI/HUD.lua`, `src/client/UI/CrosshairUI.lua`, `src/client/ViewModelController.lua`
-**Risk:** Five separate systems now each connect their own `RoundStateChanged.OnClientEvent` listener (MatchController, MatchUI, HUD, CrosshairUI, ViewModelController). Every server broadcast triggers five separate handlers. If the payload format ever changes, all five must be updated together.
-**History:** Originally 1 listener (MatchController). Each new system that needs phase data adds another — now at 5. The fix of introducing a `MatchController.StateChanged` BindableEvent is increasingly urgent.
+**Files:** `src/client/MatchController.lua`, `src/client/UI/MatchUI.lua`, `src/client/UI/HUD.lua`, `src/client/UI/CrosshairUI.lua`, `src/client/ViewModelController.lua`, `src/client/UI/DeathScreen.lua`
+**Risk:** Six separate systems now each connect their own `RoundStateChanged.OnClientEvent` listener. Every server broadcast triggers six separate handlers. If the payload format ever changes, all six must be updated together.
+**History:** Originally 1 listener (MatchController). Each new system that needs phase data adds another — now at 6. The fix of introducing a `MatchController.StateChanged` BindableEvent is overdue.
 **Trigger:** Adding any further system that reads phase data (CutsceneController, ObjectiveUI, etc.).
-**Fix when:** A sixth listener is needed. Introduce `MatchController.StateChanged` BindableEvent, fire it from `applyState()`, migrate all UI/controllers to subscribe to it instead of the RemoteEvent directly.
+**Fix when:** A seventh listener is needed, or when a payload format change is required. Introduce `MatchController.StateChanged` BindableEvent, fire it from `applyState()`, migrate all UI/controllers to subscribe to it instead of the RemoteEvent directly.
 
 ---
 
@@ -142,9 +142,10 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 ## [DEBT-017] ClientInit must be manually updated when a new controller is added
 
 **File:** `src/client/ClientInit.client.lua`
-**Risk:** `ClientInit.client.lua` holds an explicit ordered list of `loadAndStart()` calls. When a new controller is built (e.g. `MovementController`, `CutsceneController`), a developer must manually add its `loadAndStart()` call in the correct position. If forgotten, the controller's `Start()` is never called and it silently does nothing — no error, no warning, just a non-functional system.
-**Trigger:** Every time a new controller is built. The risk is proportional to the number of future controllers (currently 5 planned beyond the current 2).
-**Fix when:** The controller count grows large enough that manual tracking becomes error-prone. At that point, consider a self-registration pattern where each ModuleScript registers itself with ClientInit via a shared table, or a folder-scan pattern that discovers and calls all controllers automatically. Until then, the explicit list is simpler and clearer.
+**Risk:** `ClientInit.client.lua` holds an explicit ordered list of `loadAndStart()` / `loadInitAndStart()` calls. When a new controller is built (e.g. `MovementController`, `CutsceneController`), a developer must manually add its call in the correct position. If forgotten, the controller's `Start()` is never called and it silently does nothing — no error, no warning, just a non-functional system.
+**Current count:** 7 entries (MatchController, MatchUI, HUD, DeathScreen, CrosshairUI, ViewModelController, GunController).
+**Trigger:** Every time a new controller is built. The risk grows with each addition.
+**Fix when:** The controller count reaches double digits. At that point, consider a self-registration pattern where each ModuleScript registers itself with ClientInit via a shared table, or a folder-scan pattern that discovers and calls all controllers automatically. Until then, the explicit list is simpler and clearer.
 
 ---
 
@@ -172,6 +173,25 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 **Risk:** Both services define `local TEAM_ATTACKERS = "Attackers"` and both assume `TEAM_DEFENDERS = "Defenders"` (implicit). If a team is renamed, both files must be updated together. A mismatch — e.g. TeamService assigns "Attacker" (no s) but ObjectiveService checks "Attackers" — silently breaks objective capture without any runtime error, because `playerTeams[player] ~= TEAM_ATTACKERS` is always true.
 **Trigger:** Renaming a team, or adding a third service that filters by team name.
 **Fix when:** A third consumer appears, or when the team names are likely to change. Add `Constants.TEAM_ATTACKERS = "Attackers"` and `Constants.TEAM_DEFENDERS = "Defenders"` to `src/shared/Constants.lua` and replace the local declarations in both service files.
+
+---
+
+## [DEBT-022] Ragdolled characters have no cleanup owner until CorpseService is built
+
+**File:** `src/server/RagdollService.lua`
+**Risk:** `RagdollService:Apply()` deliberately does not destroy the character — the ragdoll stays in Workspace so other players can see it. However, there is currently no system that removes these ragdoll models. Motor6Ds disabled + BallSocketConstraints attached means the character is a persistent physics object. Across multiple rounds, ragdolled characters from earlier rounds accumulate in Workspace. They have no cleanup on PREP or RESULTS.
+**Current exposure:** Characters are still respawned at the start of PREP via `player:LoadCharacter()` in TeamService — this replaces the character reference on the Player object, but the old ragdolled Model is orphaned in Workspace (it loses its `Players.Player.Character` association but is not destroyed).
+**Trigger:** After the first kill in any round. Corpses accumulate every round. On a long session, this causes memory pressure and visual clutter.
+**Fix when:** CorpseService is built (Stage 5 on the roadmap). CorpseService should take ownership of ragdolled models, track them across rounds, and call `:Destroy()` on all of them at MATCHEND.
+
+---
+
+## [DEBT-023] BallSocketConstraint ragdoll assumes a standard Roblox R15 or R6 character rig
+
+**File:** `src/server/RagdollService.lua`
+**Risk:** `RagdollService:Apply()` iterates `character:GetDescendants()` and converts every `Motor6D` it finds. This works correctly for standard Roblox R15 and R6 characters, which have a known, predictable Motor6D hierarchy. If a custom character rig is introduced (e.g. a non-humanoid defender faction, a monster that uses the Humanoid class, or a weapon held by a player model with its own Motor6Ds), `Apply()` may convert joints that should not be ragdolled — breaking the custom rig or producing unexpected physics behavior.
+**Trigger:** Adding any non-standard character rig to the game.
+**Fix when:** A custom rig is introduced. Add a tag or attribute (e.g. `Instance:SetAttribute("RagdollEnabled", true)`) to each Motor6D that should participate in ragdolling, and filter by that attribute in `convertJoint()`.
 
 ---
 

@@ -42,4 +42,11 @@ MatchEvents.TeamAssigned = Instance.new("BindableEvent")
 -- Fires at most once per round; MatchService disconnects the listener after ACTIVE ends.
 MatchEvents.RoundEndedEarly = Instance.new("BindableEvent")
 
+-- Fired by RagdollService after a player's character is ragdolled.
+-- TeamService's existing Humanoid.Died listener still handles death tracking;
+-- this event exists for services that need to hook into deaths without relying on
+-- Humanoid.Died (e.g., future RewardService, CorpseService).
+-- Payload: (player: Player, killerName: string) — killerName is "" for environment kills.
+MatchEvents.PlayerDied = Instance.new("BindableEvent")
+
 return MatchEvents

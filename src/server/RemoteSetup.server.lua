@@ -60,6 +60,7 @@ makeEvent("ObjectiveComplete")  -- server → all clients | an objective was fin
 
 -- Teams / death tracking
 makeEvent("TeamStatusUpdate")   -- server → all clients | alive count per team after a death
+makeEvent("RagdollApplied")     -- server → all clients | triggers death visual on the dying client
 
 -- World
 makeEvent("PartDestroyed")      -- server → all clients | trigger destruction VFX

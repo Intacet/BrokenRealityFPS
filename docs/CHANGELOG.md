@@ -7,6 +7,57 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-07] — Add ragdoll system and death screen with blur and audio muffling
+
+**Death pipeline overview:** `DamageService:killPlayer()` → `RagdollService:Apply()` → `humanoid.Health = 0` → `Humanoid.Died` (TeamService alive tracking, unchanged) + `RagdollApplied:FireAllClients()` (DeathScreen client trigger)
+
+**New file — `src/server/RagdollService.lua`**
+- `RagdollService:Apply(character, victim, attacker)` called by DamageService when health reaches 0
+- Iterates `character:GetDescendants()` for all `Motor6D` instances; for each: creates two `Attachment` instances in `Part0` (CFrame = `C0`) and `Part1` (CFrame = `C1`), creates a `BallSocketConstraint` linking them (`LimitsEnabled = true`, `UpperAngle = 45`), then sets `Motor6D.Enabled = false`
+- Sets `humanoid.PlatformStand = true` (stops Humanoid from counteracting physics) then `humanoid.Health = 0` (fires `Humanoid.Died` → TeamService still handles alive tracking with no changes)
+- Fires `MatchEvents.PlayerDied:Fire(victim, killerName)` for future consumers (RewardService, CorpseService)
+- Fires `RagdollApplied:FireAllClients(victim.UserId, killerName)` — `killerName` is `attacker.DisplayName` or `""` for environment kills
+- Warns if no Motor6Ds found (non-standard rig) or if Part0/Part1 is nil on any joint
+
+**Updated — `src/server/DamageService.lua`**
+- Added `require(RagdollService)` at module level
+- `killPlayer()` now calls `RagdollService:Apply(character, player, attacker)` instead of directly setting `humanoid.Health = 0`; logs a warning and skips ragdoll if `player.Character` is nil at kill time
+- Header comment updated to reflect that character is no longer destroyed
+
+**Updated — `src/server/MatchEvents.lua`**
+- Added `MatchEvents.PlayerDied = Instance.new("BindableEvent")` — payload: `(player: Player, killerName: string)` — for future server-side listeners that want a named death signal without relying on `Humanoid.Died`
+
+**Updated — `src/server/RemoteSetup.server.lua`**
+- Added `makeEvent("RagdollApplied")` in the "Teams / death tracking" section
+
+**New file — `src/client/UI/DeathScreen.lua`**
+- `init(playerGui)`: creates ScreenGui "DeathScreen" (`ResetOnSpawn=false`, `IgnoreGuiInset=true`, `DisplayOrder=10`); full-screen black overlay Frame (starts `BackgroundTransparency=1`); centered text container (hidden by default) with "YOU DIED" (GothamBold, large, white), "Eliminated by [Name]" (Gotham, red, hidden if no killer), "Waiting for next round..." (Gotham, grey)
+- `Start()`: connects `RagdollApplied.OnClientEvent` — if `userId == LocalPlayer.UserId`, calls `showDeathUI(killerName)`: creates `BlurEffect` in `game.Lighting` (Size 0 → 24 via TweenService), creates `EqualizerSoundEffect` in `SoundService` (`LowGain=Constants.DEATH_EQ_LOW_GAIN`, `MidGain=Constants.DEATH_EQ_MID_GAIN`, `HighGain=Constants.DEATH_EQ_HIGH_GAIN`), tweens overlay `BackgroundTransparency` from 1 to `1-DEATH_OVERLAY_OPACITY` (0.4), shows text container after `DEATH_FADE_TIME` seconds via `task.delay`
+- Connects `RoundStateChanged.OnClientEvent` — on PREP: calls `hideDeathUI()` which hides text, tweens overlay back to transparent, tweens blur Size back to 0 then destroys `BlurEffect`, destroys `EqualizerSoundEffect` after cleanup tween
+- Active tween is cancelled before any new tween starts to prevent overlap on rapid phase changes
+
+**Updated — `src/shared/Constants.lua`**
+- Added 7 death screen constants: `DEATH_FADE_TIME = 0.8`, `DEATH_OVERLAY_OPACITY = 0.6`, `DEATH_BLUR_SIZE = 24`, `DEATH_CLEANUP_TIME = 0.5`, `DEATH_EQ_LOW_GAIN = 0`, `DEATH_EQ_MID_GAIN = -50`, `DEATH_EQ_HIGH_GAIN = -60`
+
+**Updated — `src/client/ClientInit.client.lua`**
+- DeathScreen inserted at position 4 (after HUD, before CrosshairUI); uses `loadInitAndStart()`
+- Header comment updated: 7-entry order documented
+
+**Updated — `docs/PROJECT_MAP.md`**
+- Added `RagdollApplied` row to remote registry (Fired by RagdollService, Listened by DeathScreen)
+- Added `DeathScreen` to Presentation section
+- Updated ClientInit order to 7 entries
+
+**Debt evaluation**
+- DEBT-007 (RoundStateChanged fan-out): **worsened** — now 6 listeners; entry updated with new count
+- DEBT-009 (no friendly-fire guard): **unaffected**
+- DEBT-010 (health reset vs mid-respawn): **partially mitigated** — characters stay ragdolled rather than being respawned, reducing the timing window; structural risk remains
+- DEBT-017 (ClientInit manual update): **worsened** — 7 entries now; entry updated with current count
+- Added DEBT-022: ragdolled characters have no cleanup owner until CorpseService is built; corpses accumulate across rounds
+- Added DEBT-023: Motor6D ragdoll conversion assumes standard R15/R6 rig; custom rigs untested
+
+---
+
 ## [2026-05-07] — Sync all documentation to current codebase state
 
 **`docs/ROADMAP.md`**

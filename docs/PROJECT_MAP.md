@@ -95,6 +95,7 @@ ObjectiveUI             -- driven by ObjectiveUpdated, ObjectiveComplete
 MatchUI                 -- driven by RoundStateChanged
 CrosshairUI             -- driven by RoundStateChanged; exposes ShowHitmarker()
 ViewModelController     -- driven by RoundStateChanged; exposes PlayFireAnimation(), GetBarrelTipCFrame()
+DeathScreen             -- driven by RagdollApplied (death trigger), RoundStateChanged (PREP cleanup)
 ```
 
 ### Client initialization pattern
@@ -112,9 +113,10 @@ ClientInit.client.lua
   1. MatchController:Start()         -- must be first; owns GetPhase() which GunController reads
   2. MatchUI:init()+Start()          -- no controller deps; connects RoundStateChanged; needs PlayerGui
   3. HUD:init()+Start()              -- no controller deps; connects HealthChanged, TeamStatusUpdate, RoundStateChanged; needs PlayerGui
-  4. CrosshairUI:init()+Start()      -- no controller deps; exposes ShowHitmarker(); needs PlayerGui
-  5. ViewModelController:Start()     -- no controller deps; exposes PlayFireAnimation(), GetBarrelTipCFrame()
-  6. GunController:Start()           -- reads MatchController:GetPhase(); calls ViewModelController + CrosshairUI
+  4. DeathScreen:init()+Start()      -- no controller deps; connects RagdollApplied, RoundStateChanged; needs PlayerGui
+  5. CrosshairUI:init()+Start()      -- no controller deps; exposes ShowHitmarker(); needs PlayerGui
+  6. ViewModelController:Start()     -- no controller deps; exposes PlayFireAnimation(), GetBarrelTipCFrame()
+  7. GunController:Start()           -- reads MatchController:GetPhase(); calls ViewModelController + CrosshairUI
 ```
 
 **Two initialization helpers:**
@@ -158,6 +160,7 @@ Add a row here **before** implementing any new remote. Every row must have exact
 | `RoundStateChanged` | RemoteEvent | `MatchService.server.lua` | `MatchController.lua`, `MatchUI.lua`, `HUD.lua`, `CrosshairUI.lua`, `ViewModelController.lua` | Phase, round, timer, winner, and win-count updates every tick |
 | `TeamAssigned` | RemoteEvent | `TeamService.server.lua` | `MatchUI.lua` (pending) | Tells each client their team for this round |
 | `TeamStatusUpdate` | RemoteEvent | `TeamService.server.lua` | `HUD.lua` | Alive count per team broadcast after each death |
+| `RagdollApplied` | RemoteEvent | `RagdollService.lua` | `DeathScreen.lua` | Notifies all clients a player died; triggers death experience on the dying client |
 | `ObjectiveUpdated` | RemoteEvent | `ObjectiveService.server.lua` | pending (ObjectiveUI) | Anchor capture progress (0–1) |
 | `ObjectiveComplete` | RemoteEvent | `ObjectiveService.server.lua` | pending (ObjectiveUI) | An objective was finished |
 | `PartDestroyed` | RemoteEvent | pending | pending | Trigger destruction VFX on all clients |

@@ -7,8 +7,9 @@
 -- and applies the change, then fires HealthChanged back to the affected client.
 --
 -- What this script does NOT do:
+--   - Convert the character to a ragdoll  →  RagdollService (called from killPlayer)
+--   - Remove ragdoll corpses  →  CorpseService (future)
 --   - Award kills, streaks, or XP  →  RewardService (future)
---   - Remove corpses or spawn fresh characters  →  CorpseService (future)
 --   - Validate line-of-sight or range  →  will move here from GunService when built
 
 local Players           = game:GetService("Players")
@@ -22,7 +23,8 @@ local Modules    = ReplicatedStorage:WaitForChild("Modules")
 local Constants  = require(Modules:WaitForChild("Constants"))
 local Logger     = require(Modules:WaitForChild("Logger"))
 
-local MatchEvents = require(script.Parent:WaitForChild("MatchEvents"))
+local MatchEvents     = require(script.Parent:WaitForChild("MatchEvents"))
+local RagdollService  = require(script.Parent:WaitForChild("RagdollService"))
 
 local Remotes       = ReplicatedStorage:WaitForChild("Remotes")
 local HealthChanged = Remotes:WaitForChild("HealthChanged") :: RemoteEvent
@@ -54,20 +56,23 @@ local function resetHealth(player: Player)
     Logger.debug("[DamageService] Reset health for", player.Name)
 end
 
--- Kills the player by zeroing their Humanoid health.
--- HealthChanged with 0 is fired first so the client UI reacts immediately,
--- before the character is replaced by Roblox's respawn system.
+-- Kills the player: fires HealthChanged(0) to the client, then hands the character
+-- to RagdollService which converts Motor6Ds to physics joints and fires Humanoid.Health=0.
+-- RagdollService fires Humanoid.Died (TeamService alive tracking) and RagdollApplied
+-- (client death screen). The character is NOT destroyed — it stays as a ragdoll.
 local function killPlayer(player: Player, attacker: Player?)
     playerHealth[player] = 0
     HealthChanged:FireClient(player, 0, Constants.MAX_HEALTH)
 
     local character = player.Character
-    local humanoid  = character and character:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        humanoid.Health = 0
+    if character then
+        RagdollService:Apply(character, player, attacker)
+    else
+        Logger.warn("[DamageService] killPlayer: no character for", player.Name,
+            "— ragdoll skipped; Humanoid.Died will not fire via this path")
     end
 
-    local attackerName = attacker and attacker.Name or "environment"
+    local attackerName = attacker and attacker.DisplayName or "environment"
     Logger.debug("[DamageService]", player.Name, "killed by", attackerName)
 end
 

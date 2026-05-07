@@ -56,4 +56,15 @@ Constants.COUNTDOWN_TICK     = 1  -- seconds between each broadcast inside a pha
 Constants.LOBBY_POLL_INTERVAL = 2  -- seconds between player-count checks while waiting for MIN_PLAYERS
 Constants.MATCH_END_PAUSE    = 3   -- seconds between the end of one match and the start of the next
 
+-- ============================================================
+-- Death screen (client presentation only)
+-- ============================================================
+Constants.DEATH_FADE_TIME      = 0.8  -- seconds to tween the black overlay and blur in on death
+Constants.DEATH_OVERLAY_OPACITY = 0.6  -- target opacity of the black screen overlay (0–1)
+Constants.DEATH_BLUR_SIZE       = 24   -- target blur size applied to Lighting on death
+Constants.DEATH_CLEANUP_TIME    = 0.5  -- seconds to tween the overlay and blur back out on PREP
+Constants.DEATH_EQ_LOW_GAIN     = 0    -- EqualizerSoundEffect low-frequency gain on death (unchanged)
+Constants.DEATH_EQ_MID_GAIN     = -50  -- EqualizerSoundEffect mid-frequency gain on death (heavy cut)
+Constants.DEATH_EQ_HIGH_GAIN    = -60  -- EqualizerSoundEffect high-frequency gain on death (near silence)
+
 return Constants
