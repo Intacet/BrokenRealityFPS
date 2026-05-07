@@ -6,11 +6,12 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-001] Phase type union manually duplicated from Constants.Phase
+## [DEBT-001] Phase type union manually duplicated from Constants.Phase — PARTIALLY RESOLVED 2026-05-07
 
 **File:** `src/shared/Types.lua` and `src/shared/Constants.lua`
-**Risk:** `export type Phase` in `Types.lua` is a manually written string union `"LOBBY" | "PREP" | "ACTIVE" | "RESULTS"`. Luau has no `keyof` or value-union derivation, so this cannot be derived from the `Constants.Phase` table. Both declarations must be updated together whenever a phase is added or renamed. If only one is changed, the type system will silently allow invalid phase strings through any code that reads from the table but type-checks against the union.
-**Trigger:** Adding a new phase (e.g. `"OVERTIME"`) to `Constants.Phase` without adding it to the `Types.Phase` union, or vice versa.
+**Risk:** `export type Phase` in `Types.lua` is a manually written string union. Luau has no `keyof` or value-union derivation, so this cannot be derived from the `Constants.Phase` table. Both declarations must be updated together whenever a phase is added or renamed. If only one is changed, the type system will silently allow invalid phase strings through any code that reads from the table but type-checks against the union.
+**Partial resolution (2026-05-07):** The `"MATCHEND"` phase was added to both `Constants.Phase` and the `Types.Phase` union at the same time (Batch 1 task). Both files currently list exactly the same five phases: LOBBY, PREP, ACTIVE, RESULTS, MATCHEND. The structural risk — no compiler enforcement of the sync — remains because Luau still has no `keyof` equivalent.
+**Trigger:** Adding any new phase to `Constants.Phase` without adding it to the `Types.Phase` union, or vice versa.
 **Fix when:** Luau adds a mechanism to derive a union type from a table's value set, or when a phase is added and both files must be touched anyway — at that point, annotate each `Constants.Phase` value as `:: Types.Phase` so the compiler enforces the relationship.
 
 ---

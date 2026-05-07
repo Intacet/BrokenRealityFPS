@@ -7,6 +7,32 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-07] — Batch 1: Constants, Types, RemoteSetup, Logger baseline audit
+
+Confirmed and completed the shared-module baseline required before building further systems. Most values were already present from the previous session; the audit identified and filled one gap.
+
+**`src/shared/Constants.lua`**
+- Already present: `Phase.MATCHEND`, `MAX_HEALTH`, `ANCHOR_PLANT_TIME`, `COUNTDOWN_TICK`, `TELEPORT_Y_OFFSET`, `LOBBY_POLL_INTERVAL`, `MATCH_END_PAUSE`
+- Added: `RESPAWN_DELAY = 5` — seconds before a player re-enters play at round start; reserved for the future reinforcement system, not yet consumed by any service
+
+**`src/shared/Types.lua`**
+- Already correct: `Phase` union includes all five values (`"LOBBY" | "PREP" | "ACTIVE" | "RESULTS" | "MATCHEND"`); `RoundStatePayload` already carries `winner`, `attackerWins`, `defenderWins`
+- No changes made
+
+**`src/server/RemoteSetup.server.lua`**
+- Already present: `makeEvent("TeamStatusUpdate")`
+- No changes made
+
+**`src/shared/Logger.lua`**
+- Already exists with `RunService:IsStudio()` DEBUG_MODE guard, `Logger.debug()`, `Logger.warn()`
+- No changes made
+
+**Debt evaluation**
+- DEBT-001 (Phase type sync): updated to "partially resolved" — both files list the same five phases after MATCHEND was added; structural risk (no compiler enforcement) remains
+- DEBT-016 (Logger DEBUG_MODE): confirmed fully resolved from prior session; no action needed
+
+---
+
 ## [2026-05-07] — Four systems for first playtest: death tracking, win conditions, objectives, HUD + MatchUI
 
 **System 1 — Death tracking (TeamService)**

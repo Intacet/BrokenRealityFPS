@@ -47,6 +47,7 @@ Constants.ANCHOR_PLANT_TIME = 5  -- seconds an attacker must stand on an objecti
 -- ============================================================
 Constants.MAX_HEALTH        = 100 -- maximum and starting health for every player
 Constants.TELEPORT_Y_OFFSET = 3   -- studs above a spawn part's centre so characters land on top
+Constants.RESPAWN_DELAY     = 5   -- seconds before a player re-enters play at round start (reserved for reinforcement system)
 
 -- ============================================================
 -- Timing constants
