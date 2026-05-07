@@ -208,12 +208,11 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-025] DryFire sound has no asset ID assigned — ACTIVELY TRIGGERED
+## [DEBT-025] DryFire sound has no asset ID assigned — RESOLVED 2026-05-07
 
 **File:** `src/client/SoundController.lua`
-**Risk:** `ID_DRYFIRE = ""` — `SoundController:PlayDryFire()` logs a warning and returns immediately without playing anything. GunController now calls `PlayDryFire()` when the magazine is empty (ammo system added 2026-05-07), so the warning `[SoundController] PlayDryFire: no SoundId assigned (DEBT-025)` will appear in Output on every empty-mag click during playtesting.
-**Trigger:** Player fires with an empty magazine. Now active in every ACTIVE phase after the magazine is exhausted.
-**Fix when:** Immediately — find a free Roblox audio asset for a dry-fire click (e.g. a Mauser empty-chamber click), assign its `rbxassetid://` to `ID_DRYFIRE` in `SoundController.lua`, and remove the early-return guard in `PlayDryFire()`.
+**Risk:** ~~`ID_DRYFIRE = ""` — `SoundController:PlayDryFire()` logs a warning and returns immediately without playing anything. GunController now calls `PlayDryFire()` when the magazine is empty (ammo system added 2026-05-07), so the warning `[SoundController] PlayDryFire: no SoundId assigned (DEBT-025)` will appear in Output on every empty-mag click during playtesting.~~
+**Resolution:** `ID_DRYFIRE` assigned `"rbxassetid://9120386446"` (short metallic click). The empty-string guard and `Logger.warn` in `PlayDryFire()` were removed — the method now calls `dryFireSound:Play()` directly. The stale comment on the `makeSound` call in `init()` was also removed.
 
 ---
 

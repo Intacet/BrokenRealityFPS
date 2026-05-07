@@ -47,8 +47,7 @@ local ID_GUNSHOT  = "rbxassetid://4792534948"
 local ID_HIT      = "rbxassetid://4612378292"
 local ID_RELOAD   = "rbxassetid://3900723713"
 local ID_DEATH    = "rbxassetid://3900724014"
--- DryFire: no asset assigned — no ammo system exists yet (see DEBT-025).
-local ID_DRYFIRE  = ""
+local ID_DRYFIRE  = "rbxassetid://9120386446"  -- short metallic click for empty-chamber
 
 -- ============================================================
 -- Sound references (assigned in init(), read in Start() and public methods)
@@ -91,7 +90,6 @@ function SoundController:init()
     reloadSound   = makeSound(folder, "Reload",     ID_RELOAD,   RELOAD_VOLUME)
     deathSound    = makeSound(folder, "Death",       ID_DEATH,    DEATH_VOLUME)
     dryFireSound  = makeSound(folder, "DryFire",    ID_DRYFIRE,  DRYFIRE_VOLUME)
-    -- DryFire SoundId is empty until an ammo system exists; playing it does nothing.
 
     Logger.debug("[SoundController] Sound instances created")
 end
@@ -136,12 +134,7 @@ function SoundController:PlayHit()
 end
 
 -- Plays an empty-chamber click when the player tries to fire with no ammo.
--- No asset is assigned yet — calls are silently no-ops until DEBT-025 is resolved.
 function SoundController:PlayDryFire()
-    if ID_DRYFIRE == "" then
-        Logger.warn("[SoundController] PlayDryFire: no SoundId assigned (DEBT-025)")
-        return
-    end
     dryFireSound:Play()
 end
 
