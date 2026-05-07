@@ -21,5 +21,11 @@ WeaponData["AssaultRifle"] = {
     magazineSize = 30,
     reserveAmmo  = 90,
 }
-
+WeaponData["SCAR"] = {
+    damage      = 30,
+    fireRate    = 0.1,
+    range       = 400,
+    magazineSize = 20,
+    reserveAmmo  = 100,
+}
 return WeaponData
