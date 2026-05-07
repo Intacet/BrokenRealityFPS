@@ -53,6 +53,8 @@ makeEvent("TeamAssigned")       -- server → individual client | your team for 
 makeEvent("HealthChanged")      -- server → affected client | current health value
 makeEvent("WeaponFired")        -- client → server | request hit validation
 makeEvent("HitConfirmed")       -- server → firing client | cosmetic hitmarker only
+makeEvent("AmmoChanged")        -- server → firing client | magazine and reserve after each shot or reload
+makeEvent("ReloadRequest")      -- client → server | player requests a magazine reload
 
 -- Objectives
 makeEvent("ObjectiveUpdated")   -- server → all clients | anchor capture progress (0–1)

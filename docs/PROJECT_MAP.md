@@ -90,7 +90,7 @@ HordeService (server)
 ```
 MovementController      -- camera, character feel, footsteps
 CutsceneController      -- intro/outro sequences, triggered by RoundStateChanged
-HUD                     -- driven by HealthChanged, TeamStatusUpdate, RoundStateChanged
+HUD                     -- driven by HealthChanged, TeamStatusUpdate, AmmoChanged, RoundStateChanged
 ObjectiveUI             -- driven by ObjectiveUpdated, ObjectiveComplete
 MatchUI                 -- driven by RoundStateChanged
 CrosshairUI             -- driven by RoundStateChanged; exposes ShowHitmarker()
@@ -155,8 +155,10 @@ Add a row here **before** implementing any new remote. Every row must have exact
 | Name | Type | Fired by | Listened by | Purpose |
 |------|------|----------|-------------|---------|
 | `WeaponFired` | RemoteEvent | `GunController.lua` | `GunService.server.lua` | Client requests hit validation |
-| `HitConfirmed` | RemoteEvent | `GunService.server.lua` | `GunController.lua` | Server confirms hit for cosmetic hitmarker |
+| `HitConfirmed` | RemoteEvent | `GunService.server.lua` | `GunController.lua`, `SoundController.lua` | Server confirms hit for cosmetic hitmarker and hit sound |
 | `HealthChanged` | RemoteEvent | `DamageService.lua` | `GunController.lua`, `HUD.lua` | Server sends updated health to affected client |
+| `AmmoChanged` | RemoteEvent | `GunService.server.lua` | `GunController.lua`, `HUD.lua` | Server sends updated magazine and reserve ammo after each shot or reload |
+| `ReloadRequest` | RemoteEvent | `GunController.lua` | `GunService.server.lua` | Client requests a magazine reload |
 | `RoundStateChanged` | RemoteEvent | `MatchService.server.lua` | `MatchController.lua`, `MatchUI.lua`, `HUD.lua`, `CrosshairUI.lua`, `ViewModelController.lua` | Phase, round, timer, winner, and win-count updates every tick |
 | `TeamAssigned` | RemoteEvent | `TeamService.server.lua` | `MatchUI.lua` (pending) | Tells each client their team for this round |
 | `TeamStatusUpdate` | RemoteEvent | `TeamService.server.lua` | `HUD.lua` | Alive count per team broadcast after each death |

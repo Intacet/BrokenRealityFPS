@@ -2,9 +2,10 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > UI > HUD
 --
--- Builds and drives the heads-up display: health bar and team alive counts.
+-- Builds and drives the heads-up display: health bar, team alive counts, and ammo.
 -- Health is driven by HealthChanged (server → this client only).
 -- Alive counts are driven by TeamStatusUpdate (server → all clients).
+-- Ammo is driven by AmmoChanged (server → this client only).
 -- Visibility is driven by RoundStateChanged — HUD hides during LOBBY and MATCHEND.
 --
 -- Initialized by ClientInit via loadInitAndStart():
@@ -21,10 +22,11 @@ local Logger    = require(Modules:WaitForChild("Logger"))
 -- Silence unused-variable warning: Types is imported for its exported types only.
 local _ = Types
 
-local Remotes          = ReplicatedStorage:WaitForChild("Remotes")
-local HealthChanged    = Remotes:WaitForChild("HealthChanged")    :: RemoteEvent
-local TeamStatusUpdate = Remotes:WaitForChild("TeamStatusUpdate") :: RemoteEvent
+local Remotes           = ReplicatedStorage:WaitForChild("Remotes")
+local HealthChanged     = Remotes:WaitForChild("HealthChanged")     :: RemoteEvent
+local TeamStatusUpdate  = Remotes:WaitForChild("TeamStatusUpdate")  :: RemoteEvent
 local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEvent
+local AmmoChanged       = Remotes:WaitForChild("AmmoChanged")       :: RemoteEvent
 
 -- ============================================================
 -- Configuration
@@ -45,6 +47,9 @@ local HEALTH_DANGER_THRESHOLD = 0.25  -- below this ratio the bar turns red
 local HEALTH_BAR_WIDTH  = 200
 local HEALTH_BAR_HEIGHT = 14
 
+local AMMO_FRAME_WIDTH  = 130
+local AMMO_FRAME_HEIGHT = 44
+
 -- ============================================================
 -- GUI references (set inside init())
 -- ============================================================
@@ -55,6 +60,8 @@ local healthNumber : TextLabel
 local healthBarBg  : Frame
 local healthBarFill: Frame
 local teamStatus   : TextLabel
+local ammoFrame    : Frame
+local ammoLabel    : TextLabel
 
 -- ============================================================
 -- Private helpers
@@ -81,6 +88,10 @@ local function makeLabel(
     label.TextXAlignment         = Enum.TextXAlignment.Left
     label.Parent                 = parent
     return label
+end
+
+local function setAmmo(mag: number, reserve: number)
+    ammoLabel.Text = string.format("%d / %d", mag, reserve)
 end
 
 local function setHealth(health: number)
@@ -156,6 +167,31 @@ function HUD:init(playerGui: PlayerGui)
     )
     teamStatus.Text = "ATK: — · DEF: —"
 
+    -- Ammo display — bottom-right corner, separate from the health frame.
+    ammoFrame = Instance.new("Frame")
+    ammoFrame.Name                   = "AmmoFrame"
+    ammoFrame.Size                   = UDim2.new(0, AMMO_FRAME_WIDTH, 0, AMMO_FRAME_HEIGHT)
+    ammoFrame.Position               = UDim2.new(1, -(AMMO_FRAME_WIDTH + 12), 1, -(AMMO_FRAME_HEIGHT + 16))
+    ammoFrame.BackgroundColor3       = BLACK
+    ammoFrame.BackgroundTransparency = 0.6
+    ammoFrame.BorderSizePixel        = 0
+    ammoFrame.Visible                = false
+    ammoFrame.Parent                 = hudScreen
+
+    ammoLabel = Instance.new("TextLabel")
+    ammoLabel.Name                   = "AmmoLabel"
+    ammoLabel.Size                   = UDim2.new(1, -8, 1, 0)
+    ammoLabel.Position               = UDim2.fromOffset(4, 0)
+    ammoLabel.BackgroundTransparency = 1
+    ammoLabel.TextColor3             = WHITE
+    ammoLabel.TextStrokeTransparency = 0.5
+    ammoLabel.TextStrokeColor3       = BLACK
+    ammoLabel.Font                   = FONT_BOLD
+    ammoLabel.TextSize               = 22
+    ammoLabel.TextXAlignment         = Enum.TextXAlignment.Right
+    ammoLabel.Text                   = "— / —"
+    ammoLabel.Parent                 = ammoFrame
+
     Logger.debug("[HUD] GUI created")
 end
 
@@ -173,12 +209,17 @@ function HUD:Start()
         teamStatus.Text = string.format("ATK: %d · DEF: %d", attAlive, defAlive)
     end)
 
-    -- Show HUD only during active gameplay phases; hide otherwise.
+    AmmoChanged.OnClientEvent:Connect(function(mag: number, reserve: number)
+        setAmmo(mag, reserve)
+    end)
+
+    -- Show HUD elements only during active gameplay phases; hide otherwise.
     RoundStateChanged.OnClientEvent:Connect(function(raw: any)
         local payload = raw :: Types.RoundStatePayload
         local phase   = payload.phase
         local visible = (phase ~= Constants.Phase.LOBBY and phase ~= Constants.Phase.MATCHEND)
-        hudFrame.Visible = visible
+        hudFrame.Visible  = visible
+        ammoFrame.Visible = visible
     end)
 
     Logger.debug("[HUD] Started")

@@ -89,9 +89,10 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 ## [DEBT-013] Weapon name is hardcoded on both client and server instead of sent in the payload
 
 **Files:** `src/server/GunService.server.lua`, `src/client/GunController.lua`
-**Risk:** `DEFAULT_WEAPON = "AssaultRifle"` in GunService and `CURRENT_WEAPON = "AssaultRifle"` in GunController are two independent hardcodes that must be kept in sync. GunController is now built but the `WeaponFired` payload is `{origin, direction, tick}` with no weapon name — so the server cannot know what weapon the client is using. With a single weapon this is invisible. With multiple weapons, every shot is validated against AssaultRifle stats regardless of what the player holds.
+**Risk:** `DEFAULT_WEAPON = "AssaultRifle"` in GunService and `CURRENT_WEAPON = "AssaultRifle"` in GunController are independent hardcodes that must be kept in sync. GunController's `WeaponFired` payload is `{origin, direction, tick}` with no weapon name — so the server cannot know what weapon the client is using. With a single weapon this is invisible; with multiple weapons, every shot is validated against AssaultRifle stats regardless of what the player holds.
+**Worsened (2026-05-07):** The ammo system added in GunService (`setupAmmo`, `ReloadRequest` handler) also looks up `WeaponData[DEFAULT_WEAPON]` for `magazineSize` and `reserveAmmo`. A player holding a different weapon would be assigned AssaultRifle ammo and have their reload calculated against AssaultRifle's magazine size. There are now three hardcoded lookup points instead of two.
 **Trigger:** Adding a second weapon to WeaponData, or giving players a loadout choice.
-**Fix when:** Multiple weapons exist. Add `weaponName: string` to the `WeaponFired` payload, validate it exists in WeaponData on the server (never trust the client's name blindly — verify it is a real entry), and remove both hardcodes.
+**Fix when:** Multiple weapons exist. Add `weaponName: string` to the `WeaponFired` payload (and to `ReloadRequest`), validate it exists in WeaponData on the server, and remove all three hardcoded DEFAULT_WEAPON / CURRENT_WEAPON references.
 
 ---
 
@@ -205,12 +206,21 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-025] DryFire sound has no asset ID assigned
+## [DEBT-025] DryFire sound has no asset ID assigned — ACTIVELY TRIGGERED
 
 **File:** `src/client/SoundController.lua`
-**Risk:** `ID_DRYFIRE = ""` — `SoundController:PlayDryFire()` logs a warning and returns immediately without playing anything. The method is correct scaffolding, but there is no audible feedback for an empty-chamber click. No caller currently invokes `PlayDryFire()` anyway (there is no ammo system), but once the ammo system is built, the method will be wired up and the missing asset will become audible.
-**Trigger:** The ammo system is built and `PlayDryFire()` is called.
-**Fix when:** The ammo system (or GunController ammo tracking) is added. At that point, select a free Roblox audio asset for an empty-chamber click sound, assign its `rbxassetid://` to `ID_DRYFIRE` in `SoundController.lua`, and remove the guard in `PlayDryFire()`.
+**Risk:** `ID_DRYFIRE = ""` — `SoundController:PlayDryFire()` logs a warning and returns immediately without playing anything. GunController now calls `PlayDryFire()` when the magazine is empty (ammo system added 2026-05-07), so the warning `[SoundController] PlayDryFire: no SoundId assigned (DEBT-025)` will appear in Output on every empty-mag click during playtesting.
+**Trigger:** Player fires with an empty magazine. Now active in every ACTIVE phase after the magazine is exhausted.
+**Fix when:** Immediately — find a free Roblox audio asset for a dry-fire click (e.g. a Mauser empty-chamber click), assign its `rbxassetid://` to `ID_DRYFIRE` in `SoundController.lua`, and remove the early-return guard in `PlayDryFire()`.
+
+---
+
+## [DEBT-026] Ammo is not initialized for players who join after the PREP TeamAssigned window
+
+**File:** `src/server/GunService.server.lua`
+**Risk:** GunService populates `playerMag` and `playerReserve` when `MatchEvents.TeamAssigned` fires (during PREP). TeamService fires TeamAssigned for all connected players at the start of every PREP phase. A player who joins while a round is already ACTIVE will not receive TeamAssigned until the next PREP; their `playerMag` and `playerReserve` will be `nil`. The WeaponFired handler already guards against this — it returns silently if `playerMag[shooter] == nil` — so no crash occurs. However, that player cannot fire at all until the next round, even though TeamService also does not spawn mid-ACTIVE joiners, so the nil ammo case is moot in practice.
+**Trigger:** A player joins during ACTIVE phase and, by some path, has a character and attempts to fire (e.g. a future game mode that allows mid-round joining).
+**Fix when:** A mid-round join or reinforcement system is built. At that point, hook into `Players.PlayerAdded` and `player.CharacterAdded` during ACTIVE to assign ammo on spawn rather than relying solely on TeamAssigned.
 
 ---
 

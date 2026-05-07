@@ -7,6 +7,51 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-07] — Add server-authoritative ammo system with reload
+
+**Ammo flow:** `TeamAssigned` → `GunService.setupAmmo()` → `AmmoChanged` → `GunController` + `HUD` | `WeaponFired` → ammo check → decrement → `AmmoChanged` | `ReloadRequest` → validate → transfer → `AmmoChanged`
+
+**Updated — `src/shared/WeaponData.lua`**
+- Added `magazineSize = 30` and `reserveAmmo = 90` to the AssaultRifle entry; updated field comment
+
+**Updated — `src/server/GunService.server.lua`**
+- Added `AmmoChanged` and `ReloadRequest` remote references
+- Added `playerMag: { [Player]: number }` and `playerReserve: { [Player]: number }` state tables
+- Added `setupAmmo(player)` helper: reads `DEFAULT_WEAPON.magazineSize` and `.reserveAmmo`, populates both tables, fires `AmmoChanged` to the player
+- Added `MatchEvents.TeamAssigned.Event` listener → calls `setupAmmo(player)` at PREP start for every player
+- `WeaponFired` handler: after rate limit, checks `playerMag[shooter]` — nil (mid-round joiner) silently returns; 0 fires `AmmoChanged(0, reserve)` to re-sync client and returns; positive decrements by 1 and fires `AmmoChanged` before the raycast
+- Added `ReloadRequest.OnServerEvent` handler: validates ACTIVE phase and non-nil ammo tables; rejects if reserve ≤ 0 or mag already full (fires AmmoChanged to sync); otherwise transfers `min(magazineSize - mag, reserve)` rounds from reserve to magazine and fires AmmoChanged
+- `PlayerRemoving`: now also clears `playerMag[player]` and `playerReserve[player]`
+
+**Updated — `src/server/RemoteSetup.server.lua`**
+- Added `makeEvent("AmmoChanged")` and `makeEvent("ReloadRequest")` in the "Health & combat" section
+
+**Updated — `src/client/GunController.lua`**
+- Added `AmmoChanged` and `ReloadRequest` remote references at module level
+- Added `currentMag` and `currentReserve` state variables (start at 0/0; updated exclusively by AmmoChanged)
+- Dry fire check added in `InputBegan` before rate limit: `if currentMag <= 0 then SoundController:PlayDryFire() return end`
+- Added second `InputBegan` connection for `Enum.KeyCode.R` in ACTIVE phase: fires `ReloadRequest:FireServer()` then calls `SoundController:PlayReload()` (optimistic sound; server validates)
+- Added `AmmoChanged.OnClientEvent` listener: caches `currentMag` and `currentReserve`; logs the new values
+- Added `GunController:GetAmmo(): (number, number)` getter returning cached magazine and reserve
+
+**Updated — `src/client/UI/HUD.lua`**
+- Added `AmmoChanged` remote reference
+- Added `ammoFrame` (130×44 px, bottom-right corner, same semi-transparent black style as health frame) and `ammoLabel` (right-aligned, 22 pt GothamBold, white) created in `init()`; initial text `"— / —"` until first AmmoChanged
+- Added `setAmmo(mag, reserve)` helper: formats label as `"30 / 90"` etc.
+- Added `AmmoChanged.OnClientEvent` listener in `Start()` → calls `setAmmo()`
+- `RoundStateChanged` visibility handler updated: now also toggles `ammoFrame.Visible` alongside `hudFrame.Visible`
+
+**Updated — `docs/PROJECT_MAP.md`**
+- Added `AmmoChanged` and `ReloadRequest` rows to remote registry; updated `HitConfirmed` Listened-by to include `SoundController.lua`; updated HUD Presentation entry to include AmmoChanged
+
+**Debt evaluation**
+- DEBT-013 (hardcoded weapon name): **worsened** — ammo system adds a third hardcoded lookup point (`setupAmmo` and reload handler both use `DEFAULT_WEAPON`); entry updated
+- DEBT-025 (DryFire no asset): **actively triggered** — GunController now calls `PlayDryFire()` on empty magazine; warning fires every playtest; entry updated with urgency
+- DEBT-026 (new): ammo not initialized for mid-ACTIVE joiners; nil guard in WeaponFired silently blocks their shots; no crash, no functional impact today but will matter if reinforcement system is added
+- All other entries: unaffected
+
+---
+
 ## [2026-05-07] — Add sound system with gunshot, hit, reload, death sounds
 
 **New file — `src/client/SoundController.lua`**

@@ -9,8 +9,8 @@
 --
 -- What this controller does NOT do:
 --   - Decide if a shot hit or apply damage  →  GunService + DamageService (server)
---   - Render a viewmodel or muzzle flash    →  future ViewmodelController
---   - Show ammo count UI                    →  future HUD
+--   - Render a viewmodel or muzzle flash    →  ViewModelController
+--   - Show ammo count UI                    →  HUD (driven by AmmoChanged remote)
 --
 -- Initialized by ClientInit.client.lua after MatchController:Start() has run.
 
@@ -33,10 +33,12 @@ local ViewModelController  = require(script.Parent:WaitForChild("ViewModelContro
 local CrosshairUI          = require(script.Parent:WaitForChild("UI"):WaitForChild("CrosshairUI"))
 local SoundController      = require(script.Parent:WaitForChild("SoundController"))
 
-local Remotes       = ReplicatedStorage:WaitForChild("Remotes")
-local WeaponFired   = Remotes:WaitForChild("WeaponFired")   :: RemoteEvent
-local HitConfirmed  = Remotes:WaitForChild("HitConfirmed")  :: RemoteEvent
-local HealthChanged = Remotes:WaitForChild("HealthChanged") :: RemoteEvent
+local Remotes         = ReplicatedStorage:WaitForChild("Remotes")
+local WeaponFired     = Remotes:WaitForChild("WeaponFired")     :: RemoteEvent
+local HitConfirmed    = Remotes:WaitForChild("HitConfirmed")    :: RemoteEvent
+local HealthChanged   = Remotes:WaitForChild("HealthChanged")   :: RemoteEvent
+local AmmoChanged     = Remotes:WaitForChild("AmmoChanged")     :: RemoteEvent
+local ReloadRequest   = Remotes:WaitForChild("ReloadRequest")   :: RemoteEvent
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -56,6 +58,12 @@ local CURRENT_WEAPON = "AssaultRifle"
 -- Prevents the client from sending WeaponFired events faster than the weapon
 -- allows — events that would be silently rejected by GunService anyway.
 local lastShotTime: number = 0
+
+-- Local mirror of the server-authoritative ammo state.
+-- Updated exclusively by AmmoChanged — never mutated by this controller.
+-- Starts at 0/0 until the first AmmoChanged fires (on TeamAssigned/PREP).
+local currentMag:     number = 0
+local currentReserve: number = 0
 
 -- ============================================================
 -- Controller
@@ -90,6 +98,14 @@ function GunController:Start()
         local weaponDef = WeaponData[CURRENT_WEAPON]
         if not weaponDef then
             Logger.warn("[GunController] No WeaponData entry for:", CURRENT_WEAPON)
+            return
+        end
+
+        -- Dry fire: magazine empty — play click and stop here.
+        -- This check runs before the rate limit so an empty-mag click always
+        -- gives immediate audio feedback without waiting for the cooldown window.
+        if currentMag <= 0 then
+            SoundController:PlayDryFire()
             return
         end
 
@@ -156,6 +172,26 @@ function GunController:Start()
         end)
     end)
 
+    -- ── Reload input handler ──────────────────────────────────────────────────
+
+    UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+        if gameProcessed then
+            return
+        end
+        if input.KeyCode ~= Enum.KeyCode.R then
+            return
+        end
+        if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then
+            return
+        end
+        -- Fire the request first so the server acts immediately, then play the
+        -- sound optimistically. The server will no-op if the reload is invalid
+        -- (full mag, empty reserve) and fire AmmoChanged to keep the client in sync.
+        ReloadRequest:FireServer()
+        SoundController:PlayReload()
+        Logger.debug("[GunController] Reload requested")
+    end)
+
     -- ── Server event listeners ────────────────────────────────────────────────
 
     -- GunService confirmed a hit on the server. Show the hitmarker and log.
@@ -164,13 +200,26 @@ function GunController:Start()
         Logger.debug("[GunController] HIT")
     end)
 
-    -- DamageService updated this player's health. Placeholder for the HUD health bar.
-    -- Receives current HP and maximum HP so the bar can scale correctly once built.
+    -- GunService updated this player's ammo. Cache for dry-fire check and GetAmmo().
+    -- HUD listens to AmmoChanged independently for its display.
+    AmmoChanged.OnClientEvent:Connect(function(mag: number, reserve: number)
+        currentMag     = mag
+        currentReserve = reserve
+        Logger.debug(string.format("[GunController] Ammo: %d / %d", mag, reserve))
+    end)
+
+    -- DamageService updated this player's health.
     HealthChanged.OnClientEvent:Connect(function(current: number, maximum: number)
         Logger.debug(string.format("[GunController] Health: %d / %d", current, maximum))
     end)
 
     Logger.debug("[GunController] Ready")
+end
+
+-- Returns the locally cached magazine and reserve ammo counts.
+-- These mirror the server-authoritative values from the last AmmoChanged event.
+function GunController:GetAmmo(): (number, number)
+    return currentMag, currentReserve
 end
 
 return GunController
