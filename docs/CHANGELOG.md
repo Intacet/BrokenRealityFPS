@@ -7,6 +7,18 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-07] — Fix DEBT-027: add WaitForChild timeout for SCAR model
+
+**Updated — `src/client/ViewModelController.lua`**
+- `init()`: replaced bare `WaitForChild("ViewModels")` with `WaitForChild("ViewModels", 10)` + nil check + `Logger.warn` + early return
+- `init()`: replaced bare `WaitForChild("SCAR")` with `WaitForChild("SCAR", 10)` + nil check + `Logger.warn` + early return
+- A missing folder or model now prints an actionable warning in Output and returns cleanly instead of blocking ClientInit forever
+
+**Debt evaluation**
+- DEBT-027 (WaitForChild blocks forever): **resolved** — both calls now time out after 10 s with loud warnings; entry marked resolved
+
+---
+
 ## [2026-05-07] — Replace block viewmodel with SCAR model using PivotTo
 
 **Model attachment:** `ViewModelController:init()` clones `ReplicatedStorage/ViewModels/SCAR` and parents it to `workspace.CurrentCamera`. `RenderStepped` calls `model:PivotTo(camera.CFrame * CFrame.new(0.6, -0.4, -1.2) * CFrame.new(0, 0, recoilOffset))` every frame, keeping the model locked to the camera. No PrimaryPart is required — `PivotTo` repositions by the model's geometric pivot.

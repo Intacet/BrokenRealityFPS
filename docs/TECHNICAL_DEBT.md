@@ -234,12 +234,11 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-027] ViewModelController depends on ReplicatedStorage/ViewModels/SCAR existing at startup
+## [DEBT-027] ViewModelController depends on ReplicatedStorage/ViewModels/SCAR existing at startup — RESOLVED 2026-05-07
 
 **File:** `src/client/ViewModelController.lua`
-**Risk:** `init()` calls `ReplicatedStorage:WaitForChild("ViewModels")` and then `WaitForChild("SCAR")`. If either instance is missing at startup — because Rojo was not synced, the model was accidentally deleted from the place, or a future model rename was applied to only one side — `WaitForChild` will yield indefinitely with no timeout. The controller's `Start()` call will block forever, silently preventing GunController from initializing (ClientInit calls them sequentially). No error is printed; the viewmodel simply never appears and shots produce no muzzle flash.
-**Trigger:** Running the game without syncing the SCAR viewmodel via Rojo, or renaming/removing the model in Studio without updating the WaitForChild call.
-**Fix when:** The project reaches a stability pass before wider playtesting. At that point, add a timeout to the WaitForChild calls (e.g. `WaitForChild("SCAR", 10)` returns nil after 10 s) and log a warning + return early if nil, so the failure is loud rather than a silent hang.
+**Risk:** ~~`init()` calls `ReplicatedStorage:WaitForChild("ViewModels")` and then `WaitForChild("SCAR")`. If either instance is missing at startup, `WaitForChild` would yield indefinitely, silently blocking ClientInit and preventing GunController from initializing.~~
+**Resolution:** Both `WaitForChild` calls now pass a 10-second timeout. If either returns nil, `Logger.warn` fires with an actionable message (`"check Rojo sync"` / `"check ReplicatedStorage/ViewModels/SCAR exists"`) and `init()` returns early. The failure is now loud (visible warning in Output) rather than a silent hang.
 
 ---
 

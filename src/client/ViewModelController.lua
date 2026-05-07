@@ -64,9 +64,17 @@ function ViewModelController:init()
         self.model = nil
     end
 
-    local viewModels = ReplicatedStorage:WaitForChild("ViewModels")
-    local template   = viewModels:WaitForChild("SCAR") :: Model
-    local clone      = template:Clone()
+    local viewModels = ReplicatedStorage:WaitForChild("ViewModels", 10)
+    if not viewModels then
+        Logger.warn("[ViewModelController] ViewModels folder not found in ReplicatedStorage after 10s — check Rojo sync")
+        return
+    end
+    local scarModel = viewModels:WaitForChild("SCAR", 10)
+    if not scarModel then
+        Logger.warn("[ViewModelController] SCAR model not found after 10s — check ReplicatedStorage/ViewModels/SCAR exists")
+        return
+    end
+    local clone = (scarModel :: Model):Clone()
     clone.Parent     = workspace.CurrentCamera
     self.model       = clone
 
