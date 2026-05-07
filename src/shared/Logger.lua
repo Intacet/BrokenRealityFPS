@@ -8,9 +8,12 @@
 -- Set DEBUG_MODE to false before shipping to silence all debug output without
 -- touching any other file. Logger.warn() is always active regardless of the flag.
 
+local RunService = game:GetService("RunService")
+
 local Logger = {}
 
-local DEBUG_MODE = true
+-- True in Studio, false in published builds — no manual step required before shipping.
+local DEBUG_MODE = RunService:IsStudio()
 
 -- Prints to Output only when DEBUG_MODE is true.
 -- Use for development tracing: phase transitions, health resets, team assignments.

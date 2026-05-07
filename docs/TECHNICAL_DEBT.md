@@ -130,12 +130,11 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-016] Logger.DEBUG_MODE requires a source-level code edit to disable for production
+## [DEBT-016] Logger.DEBUG_MODE requires a source-level code edit to disable for production — RESOLVED 2026-05-07
 
 **File:** `src/shared/Logger.lua`
-**Risk:** `DEBUG_MODE = true` is a Lua local variable inside `Logger.lua`. Silencing all `Logger.debug()` output before shipping requires opening the file and changing the value to `false`. There is no build-time flag, no environment variable, no CLI argument, and no Roblox `game:GetService("RunService"):IsStudio()` guard — so a developer who forgets to flip the flag ships with debug output visible to every player in the Output window (and to exploiters who monitor it via third-party tools).
-**Trigger:** The first time a build is shipped to production without flipping the flag.
-**Fix when:** The project approaches a public release. Add a `RunService:IsStudio()` guard so `DEBUG_MODE` is automatically true in Studio and false in production: `local DEBUG_MODE = game:GetService("RunService"):IsStudio()`. This removes the manual step and cannot be forgotten. Until then, add a pre-ship checklist item.
+**Risk:** ~~`DEBUG_MODE = true` is a Lua local variable inside `Logger.lua`. Silencing all `Logger.debug()` output before shipping requires opening the file and changing the value to `false`. A developer who forgets to flip the flag ships with debug output visible to every player in the Output window.~~
+**Resolution:** Replaced `local DEBUG_MODE = true` with `local DEBUG_MODE = game:GetService("RunService"):IsStudio()`. `RunService:IsStudio()` returns `true` only inside Roblox Studio and `false` in any live published build or Roblox test server. No manual step exists to forget — the runtime environment determines the flag automatically. The underlying risk is fully eliminated.
 
 ---
 
