@@ -2,10 +2,15 @@
 -- Script
 -- Location in Studio: ServerScriptService > Services > MatchService
 --
--- Owns the full match lifecycle: Lobby → (Prep → Active → Results) × MAX_ROUNDS.
+-- Owns the full match lifecycle: Lobby → (Prep → Active → Results) × MAX_ROUNDS → MatchEnd.
 -- Fires RoundStateChanged every second so clients can update timers and phase labels.
+-- Fires MatchEvents.PhaseChanged on every phase transition so server services can react.
+-- Tracks round wins and announces the overall match winner during MATCHEND.
 --
--- What this script does NOT do (handled by future services):
+-- Early round ends: TeamService or ObjectiveService fires MatchEvents.RoundEndedEarly
+-- with a winner string. countdown() captures this and runActive() passes it to runResults().
+--
+-- What this script does NOT do (handled by other services):
 --   - Spawn or assign players to teams  →  TeamService
 --   - Track objective capture progress  →  ObjectiveService
 --   - Apply damage or health changes    →  DamageService
@@ -17,8 +22,6 @@ local Players           = game:GetService("Players")
 -- Dependencies
 -- ============================================================
 
--- WaitForChild is used here because Roblox does not guarantee that
--- ReplicatedStorage children exist the instant this script runs.
 local Modules    = ReplicatedStorage:WaitForChild("Modules")
 local Constants  = require(Modules:WaitForChild("Constants"))
 local Logger     = require(Modules:WaitForChild("Logger"))
@@ -27,55 +30,39 @@ local Remotes           = ReplicatedStorage:WaitForChild("Remotes")
 local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEvent
 local GetMatchConfig    = Remotes:WaitForChild("GetMatchConfig")    :: RemoteFunction
 
--- Bridges phase changes to other server services (TeamService, ObjectiveService).
--- MatchEvents is a sibling ModuleScript in ServerScriptService/Services.
+-- Bridges phase changes and early-end signals to/from other server services.
 local MatchEvents = require(script.Parent:WaitForChild("MatchEvents"))
 
 -- ============================================================
 -- State
--- These variables track what phase and round the server is currently in.
--- Read by GetMatchConfig so late-joining clients can sync immediately.
 -- ============================================================
 
-local currentPhase    = Constants.Phase.LOBBY
-local currentRound    = 0
-local currentTimeLeft = 0
+local currentPhase    : string = Constants.Phase.LOBBY
+local currentRound    : number = 0
+local currentTimeLeft : number = 0
+local currentWinner   : string = ""
 
--- Tracks the last phase fired to MatchEvents so PhaseChanged only fires once per
--- transition, not once per second. Initialised to "" so the first broadcast always fires.
-local lastFiredPhase  = ""
+local attackerRoundWins : number = 0
+local defenderRoundWins : number = 0
 
--- ============================================================
--- Early-end hook (for ObjectiveService, built next)
---
--- When an objective is completed, ObjectiveService will fire this
--- BindableEvent to cut the Active phase short without needing to
--- wait for the full ACTIVE_TIME to expire.
--- ============================================================
-
-local RoundEndedEarly = Instance.new("BindableEvent")
-
--- Public accessor so ObjectiveService can reach this event.
--- Usage from ObjectiveService: MatchService.RoundEndedEarly:Fire()
--- (ObjectiveService will require this script once it is built.)
--- For now this is wired up but never fired.
-local MatchService = {}
-MatchService.RoundEndedEarly = RoundEndedEarly
+-- Tracks the last phase fired so PhaseChanged fires exactly once per transition.
+local lastFiredPhase : string = ""
 
 -- ============================================================
 -- GetMatchConfig handler
 --
--- A client calls this when they first join to get the current state.
--- Without this, a player who joins mid-round would see stale UI.
+-- A client calls this on join to get the current state immediately.
 -- ============================================================
 
 GetMatchConfig.OnServerInvoke = function(_player)
-    -- Return the current snapshot so the client can sync its UI immediately.
     return {
-        phase     = currentPhase,
-        round     = currentRound,
-        maxRounds = Constants.MAX_ROUNDS,
-        timeLeft  = currentTimeLeft,
+        phase        = currentPhase,
+        round        = currentRound,
+        maxRounds    = Constants.MAX_ROUNDS,
+        timeLeft     = currentTimeLeft,
+        winner       = currentWinner,
+        attackerWins = attackerRoundWins,
+        defenderWins = defenderRoundWins,
     }
 end
 
@@ -83,40 +70,49 @@ end
 -- Private helpers
 -- ============================================================
 
--- Sends the current match state to every connected client.
--- Called once per COUNTDOWN_TICK during any timed phase.
+-- Sends the current match state to every client and fires PhaseChanged once per transition.
 local function broadcast(phase: string, round: number, timeLeft: number)
-    -- Keep module-level state in sync so GetMatchConfig always returns fresh data.
     currentPhase    = phase
     currentRound    = round
     currentTimeLeft = timeLeft
 
     RoundStateChanged:FireAllClients({
-        phase     = phase,
-        round     = round,
-        maxRounds = Constants.MAX_ROUNDS,
-        timeLeft  = timeLeft,
+        phase        = phase,
+        round        = round,
+        maxRounds    = Constants.MAX_ROUNDS,
+        timeLeft     = timeLeft,
+        winner       = currentWinner,
+        attackerWins = attackerRoundWins,
+        defenderWins = defenderRoundWins,
     })
 
-    -- Only fire PhaseChanged when the phase actually transitions.
-    -- broadcast() runs every second, but listeners only need to react once per phase.
     if phase ~= lastFiredPhase then
         lastFiredPhase = phase
         MatchEvents.PhaseChanged:Fire(phase, round)
     end
 end
 
--- Counts down `duration` seconds, broadcasting the state every COUNTDOWN_TICK.
--- Returns true if the full duration elapsed normally.
--- Returns false if RoundEndedEarly fired (objective completed early).
-local function countdown(phase: string, round: number, duration: number): boolean
-    local endTime    = os.clock() + duration
-    local endedEarly = false
+-- Counts down `duration` seconds, broadcasting every COUNTDOWN_TICK.
+-- Pass listenForEarlyEnd = true during ACTIVE to capture RoundEndedEarly signals.
+-- Returns (completedNormally: boolean, earlyWinner: string).
+-- earlyWinner is "" when completedNormally is true.
+local function countdown(
+    phase: string,
+    round: number,
+    duration: number,
+    listenForEarlyEnd: boolean?
+): (boolean, string)
+    local endTime     = os.clock() + duration
+    local endedEarly  = false
+    local earlyWinner = ""
 
-    -- Listen for ObjectiveService signalling an early round end.
-    local earlyConnection = RoundEndedEarly.Event:Connect(function()
-        endedEarly = true
-    end)
+    local earlyConn: RBXScriptConnection?
+    if listenForEarlyEnd then
+        earlyConn = MatchEvents.RoundEndedEarly.Event:Connect(function(winner: string)
+            earlyWinner = winner
+            endedEarly  = true
+        end)
+    end
 
     while os.clock() < endTime and not endedEarly do
         local timeLeft = math.ceil(endTime - os.clock())
@@ -124,12 +120,13 @@ local function countdown(phase: string, round: number, duration: number): boolea
         task.wait(Constants.COUNTDOWN_TICK)
     end
 
-    earlyConnection:Disconnect() -- always clean up connections to avoid memory leaks
-    return not endedEarly
+    if earlyConn then
+        earlyConn:Disconnect()
+    end
+    return not endedEarly, earlyWinner
 end
 
 -- Blocks until the server has at least MIN_PLAYERS connected.
--- Broadcasts a LOBBY state with timeLeft = 0 while waiting.
 local function waitForPlayers()
     while #Players:GetPlayers() < Constants.MIN_PLAYERS do
         broadcast(Constants.Phase.LOBBY, 0, 0)
@@ -139,46 +136,45 @@ end
 
 -- ============================================================
 -- Phase runners
--- Each function runs one phase of the match and then returns.
 -- ============================================================
 
 local function runLobby()
     Logger.debug("[MatchService] LOBBY — waiting for", Constants.MIN_PLAYERS, "players")
-
-    -- Keep broadcasting LOBBY until enough players are present.
     waitForPlayers()
-
     Logger.debug("[MatchService] LOBBY — players ready, starting countdown")
-    -- Count down the lobby timer. Players should see this on their MatchUI.
     countdown(Constants.Phase.LOBBY, 0, Constants.LOBBY_TIME)
 end
 
 local function runPrep(round: number)
     Logger.debug("[MatchService] PREP — round", round, "of", Constants.MAX_ROUNDS)
-
-    -- Broadcast once immediately so clients flip their UI to PREP without waiting 1 second.
+    -- Broadcast once immediately so clients flip to PREP without a one-second delay.
     broadcast(Constants.Phase.PREP, round, Constants.PREP_TIME)
     countdown(Constants.Phase.PREP, round, Constants.PREP_TIME)
 end
 
-local function runActive(round: number)
+-- Returns the round winner: "Time Expired" on normal end, team name on early end.
+-- "Time Expired" is treated as a Defenders round win everywhere that reads it.
+local function runActive(round: number): string
     Logger.debug("[MatchService] ACTIVE — round", round)
-
     broadcast(Constants.Phase.ACTIVE, round, Constants.ACTIVE_TIME)
-    local completedNormally = countdown(Constants.Phase.ACTIVE, round, Constants.ACTIVE_TIME)
+    local completedNormally, earlyWinner =
+        countdown(Constants.Phase.ACTIVE, round, Constants.ACTIVE_TIME, true)
 
-    if not completedNormally then
-        -- An objective was completed. ObjectiveService already fired ObjectiveComplete
-        -- to clients, so we just move on to the results phase immediately.
-        Logger.debug("[MatchService] ACTIVE ended early — objective completed")
+    if completedNormally then
+        Logger.debug("[MatchService] ACTIVE — time expired, Defenders win")
+        return "Time Expired"
+    else
+        Logger.debug("[MatchService] ACTIVE — ended early, winner:", earlyWinner)
+        return earlyWinner
     end
 end
 
-local function runResults(round: number)
-    Logger.debug("[MatchService] RESULTS — round", round)
-
-    broadcast(Constants.Phase.RESULTS, round, Constants.RESULTS_TIME)
-    countdown(Constants.Phase.RESULTS, round, Constants.RESULTS_TIME)
+-- Sets currentWinner so it is included in every broadcast during RESULTS.
+local function runResults(round: number, winner: string)
+    Logger.debug("[MatchService] RESULTS — round", round, "| winner:", winner)
+    currentWinner = winner
+    broadcast(Constants.Phase.RESULTS, round, Constants.RESULTS_DURATION)
+    countdown(Constants.Phase.RESULTS, round, Constants.RESULTS_DURATION)
 end
 
 -- ============================================================
@@ -187,27 +183,48 @@ end
 
 local function runMatch()
     Logger.debug("[MatchService] ========== NEW MATCH ==========")
+    attackerRoundWins = 0
+    defenderRoundWins = 0
+    currentWinner     = ""
 
     runLobby()
 
     for round = 1, Constants.MAX_ROUNDS do
         runPrep(round)
-        runActive(round)
-        runResults(round)
+        local winner = runActive(round)
+
+        -- "Time Expired" is a Defenders win; all other winner strings are team names.
+        if winner == "Attackers" then
+            attackerRoundWins += 1
+        else
+            defenderRoundWins += 1
+        end
+
+        runResults(round, winner)
     end
 
-    -- Match is over. Broadcast a final state with timeLeft = 0 so clients know
-    -- the full match has ended (not just a single round).
-    Logger.debug("[MatchService] Match complete — all", Constants.MAX_ROUNDS, "rounds finished")
-    broadcast(Constants.Phase.RESULTS, Constants.MAX_ROUNDS, 0)
-    task.wait(Constants.RESULTS_TIME)
+    -- Determine the overall match winner and broadcast MATCHEND.
+    local matchWinner: string
+    if attackerRoundWins > defenderRoundWins then
+        matchWinner = "Attackers"
+    elseif defenderRoundWins > attackerRoundWins then
+        matchWinner = "Defenders"
+    else
+        matchWinner = "Draw"
+    end
+
+    Logger.debug(string.format(
+        "[MatchService] Match complete — ATK %d DEF %d — overall winner: %s",
+        attackerRoundWins, defenderRoundWins, matchWinner
+    ))
+
+    currentWinner = matchWinner
+    broadcast(Constants.Phase.MATCHEND, Constants.MAX_ROUNDS, Constants.MATCHEND_DURATION)
+    task.wait(Constants.MATCHEND_DURATION)
 end
 
 -- ============================================================
--- Entry point
---
--- Run matches back-to-back indefinitely so the server never idles.
--- A MATCH_END_PAUSE gap between matches gives players time to read final scores.
+-- Entry point — run matches back-to-back indefinitely.
 -- ============================================================
 
 while true do

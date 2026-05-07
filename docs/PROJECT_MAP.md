@@ -107,14 +107,21 @@ All client controllers are **ModuleScripts** (`.lua`). They do not run automatic
 **Current initialization order:**
 ```
 ClientInit.client.lua
-  1. MatchController:Start()  -- must be first; owns GetPhase() which GunController reads
-  2. GunController:Start()    -- reads MatchController:GetPhase() on every shot
+  1. MatchController:Start()     -- must be first; owns GetPhase() which GunController reads
+  2. MatchUI:init()+Start()      -- no controller deps; connects RoundStateChanged
+  3. HUD:init()+Start()          -- no controller deps; connects HealthChanged, TeamStatusUpdate, RoundStateChanged
+  4. GunController:Start()       -- reads MatchController:GetPhase() on every shot
 ```
+
+**Two initialization helpers:**
+- `loadAndStart(name, getModule)` — for controllers with no PlayerGui dependency: `require → Start()`
+- `loadInitAndStart(name, getModule)` — for UI modules that create ScreenGui instances: `require → init(playerGui) → Start()`
 
 **Adding a new controller:**
 - Create the file as `src/client/NewController.lua` (ModuleScript, not `.client.lua`)
 - Expose a `:Start()` method that connects all events and listeners
-- Add a `loadAndStart()` call in `ClientInit.client.lua` at the correct position
+- Use `loadAndStart()` if no PlayerGui is needed; use `loadInitAndStart()` if the module creates ScreenGui elements
+- Add the call in `ClientInit.client.lua` at the correct position
 - Document the dependency order in a comment above the call
 
 ---
@@ -141,13 +148,14 @@ Add a row here **before** implementing any new remote. Every row must have exact
 
 | Name | Type | Fired by | Listened by | Purpose |
 |------|------|----------|-------------|---------|
-| `WeaponFired` | RemoteEvent | `GunController.client.lua` | `GunService.server.lua` | Client requests hit validation |
-| `HitConfirmed` | RemoteEvent | `GunService.server.lua` | `GunController.client.lua` | Server confirms hit for cosmetic hitmarker |
-| `HealthChanged` | RemoteEvent | `DamageService.lua` | `GunController.client.lua` | Server sends updated health to affected client |
-| `RoundStateChanged` | RemoteEvent | `MatchService.server.lua` | `MatchController.client.lua` | Phase, round, and timer updates every tick |
-| `TeamAssigned` | RemoteEvent | `TeamService.server.lua` | pending | Tells each client their team for this round |
-| `ObjectiveUpdated` | RemoteEvent | pending | pending | Anchor capture progress (0–1) |
-| `ObjectiveComplete` | RemoteEvent | pending | pending | An objective was finished; triggers round end |
+| `WeaponFired` | RemoteEvent | `GunController.lua` | `GunService.server.lua` | Client requests hit validation |
+| `HitConfirmed` | RemoteEvent | `GunService.server.lua` | `GunController.lua` | Server confirms hit for cosmetic hitmarker |
+| `HealthChanged` | RemoteEvent | `DamageService.lua` | `GunController.lua`, `HUD.lua` | Server sends updated health to affected client |
+| `RoundStateChanged` | RemoteEvent | `MatchService.server.lua` | `MatchController.lua`, `MatchUI.lua`, `HUD.lua` | Phase, round, timer, winner, and win-count updates every tick |
+| `TeamAssigned` | RemoteEvent | `TeamService.server.lua` | `MatchUI.lua` (pending) | Tells each client their team for this round |
+| `TeamStatusUpdate` | RemoteEvent | `TeamService.server.lua` | `HUD.lua` | Alive count per team broadcast after each death |
+| `ObjectiveUpdated` | RemoteEvent | `ObjectiveService.server.lua` | pending (ObjectiveUI) | Anchor capture progress (0–1) |
+| `ObjectiveComplete` | RemoteEvent | `ObjectiveService.server.lua` | pending (ObjectiveUI) | An objective was finished |
 | `PartDestroyed` | RemoteEvent | pending | pending | Trigger destruction VFX on all clients |
 | `ZoneEffectApplied` | RemoteEvent | pending | pending | Trigger visual overlay on all clients |
-| `GetMatchConfig` | RemoteFunction | `MatchController.client.lua` | `MatchService.server.lua` | Client fetches current match state on join |
+| `GetMatchConfig` | RemoteFunction | `MatchController.lua` | `MatchService.server.lua` | Client fetches current match state on join |

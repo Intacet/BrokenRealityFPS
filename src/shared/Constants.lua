@@ -13,10 +13,11 @@ local Constants = {}
 -- Example: if currentPhase == Constants.Phase.ACTIVE then ...
 -- ============================================================
 Constants.Phase = {
-    LOBBY   = "LOBBY",   -- server is waiting for enough players
-    PREP    = "PREP",    -- brief countdown before the round starts (players read objectives)
-    ACTIVE  = "ACTIVE",  -- round is live, players can fight and plant anchors
-    RESULTS = "RESULTS", -- round ended, scores are shown before the next round
+    LOBBY    = "LOBBY",    -- server is waiting for enough players
+    PREP     = "PREP",     -- brief countdown before the round starts (players read objectives)
+    ACTIVE   = "ACTIVE",   -- round is live, players can fight and plant anchors
+    RESULTS  = "RESULTS",  -- round ended, scores are shown before the next round
+    MATCHEND = "MATCHEND", -- all rounds complete, overall match winner is displayed
 }
 
 -- ============================================================
@@ -29,10 +30,17 @@ Constants.MIN_PLAYERS  = 1  -- minimum players needed before lobby countdown sta
 -- Phase durations (in seconds)
 -- Adjust these to change how long each phase lasts.
 -- ============================================================
-Constants.LOBBY_TIME   = 30  -- how long to wait in lobby after MIN_PLAYERS is reached
-Constants.PREP_TIME    = 10  -- how long the prep countdown lasts before active play
-Constants.ACTIVE_TIME  = 180 -- how long each active round lasts (3 minutes)
-Constants.RESULTS_TIME = 10  -- how long results are shown between rounds
+Constants.LOBBY_TIME        = 30  -- how long to wait in lobby after MIN_PLAYERS is reached
+Constants.PREP_TIME         = 10  -- how long the prep countdown lasts before active play
+Constants.ACTIVE_TIME       = 180 -- how long each active round lasts (3 minutes)
+Constants.RESULTS_TIME      = 10  -- how long results are shown between rounds
+Constants.RESULTS_DURATION  = 10  -- alias used by MatchService for the per-round end screen
+Constants.MATCHEND_DURATION = 15  -- how long the match-end screen is shown before the next lobby
+
+-- ============================================================
+-- Objective settings
+-- ============================================================
+Constants.ANCHOR_PLANT_TIME = 5  -- seconds an attacker must stand on an objective to plant it
 
 -- ============================================================
 -- Player settings

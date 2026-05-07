@@ -58,6 +58,9 @@ makeEvent("HitConfirmed")       -- server → firing client | cosmetic hitmarker
 makeEvent("ObjectiveUpdated")   -- server → all clients | anchor capture progress (0–1)
 makeEvent("ObjectiveComplete")  -- server → all clients | an objective was finished
 
+-- Teams / death tracking
+makeEvent("TeamStatusUpdate")   -- server → all clients | alive count per team after a death
+
 -- World
 makeEvent("PartDestroyed")      -- server → all clients | trigger destruction VFX
 makeEvent("ZoneEffectApplied")  -- server → all clients | trigger visual overlay

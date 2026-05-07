@@ -41,6 +41,9 @@ local currentPhase: Types.Phase = Constants.Phase.LOBBY
 local currentRound: number      = 0
 local currentTimeLeft: number   = 0
 local currentMaxRounds: number  = Constants.MAX_ROUNDS
+local currentWinner: string     = ""
+local currentAttackerWins: number = 0
+local currentDefenderWins: number = 0
 
 -- ============================================================
 -- Private helpers
@@ -50,19 +53,23 @@ local currentMaxRounds: number  = Constants.MAX_ROUNDS
 -- This is the single place where local state is mutated.
 -- MatchUI will hook into this function (or replace the debug call) when it is built.
 local function applyState(payload: Types.RoundStatePayload)
-    currentPhase     = payload.phase
-    currentRound     = payload.round
-    currentTimeLeft  = payload.timeLeft
-    currentMaxRounds = payload.maxRounds
+    currentPhase        = payload.phase
+    currentRound        = payload.round
+    currentTimeLeft     = payload.timeLeft
+    currentMaxRounds    = payload.maxRounds
+    currentWinner       = payload.winner
+    currentAttackerWins = payload.attackerWins
+    currentDefenderWins = payload.defenderWins
 
-    -- Temporary debug output so we can confirm the controller is receiving correctly.
-    -- Replace this with a UI update when MatchUI is built.
     Logger.debug(string.format(
-        "[MatchController] %s | Round %d / %d | %ds left",
+        "[MatchController] %s | Round %d/%d | %ds | winner: %q | ATK %d DEF %d",
         currentPhase,
         currentRound,
         currentMaxRounds,
-        currentTimeLeft
+        currentTimeLeft,
+        currentWinner,
+        currentAttackerWins,
+        currentDefenderWins
     ))
 end
 
@@ -126,6 +133,18 @@ end
 
 function MatchController:GetMaxRounds(): number
     return currentMaxRounds
+end
+
+function MatchController:GetWinner(): string
+    return currentWinner
+end
+
+function MatchController:GetAttackerWins(): number
+    return currentAttackerWins
+end
+
+function MatchController:GetDefenderWins(): number
+    return currentDefenderWins
 end
 
 return MatchController

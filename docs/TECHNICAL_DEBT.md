@@ -120,12 +120,13 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-007] applyState is the only mutation point in MatchController — will grow
+## [DEBT-007] Multiple clients connect to RoundStateChanged independently
 
-**File:** `src/client/MatchController.lua`
-**Risk:** `applyState()` is the single function that writes to local state and currently calls `print()`. When MatchUI is built, a UI update call will be added here. If CutsceneController, HUD, and ObjectiveUI all need to react to phase changes, they will each add a call inside `applyState()`, making it a growing list of side effects in one function.
-**Trigger:** Adding MatchUI (Stage 3 of the roadmap) — the first UI that needs to read from MatchController.
-**Fix when:** A second system needs to react to phase changes. Replace the `print()` with a `BindableEvent:Fire(payload)` that any client system can connect to, rather than adding direct calls inside `applyState()`.
+**Files:** `src/client/MatchController.lua`, `src/client/UI/MatchUI.lua`, `src/client/UI/HUD.lua`
+**Risk:** MatchController, MatchUI, and HUD each connect their own `RoundStateChanged.OnClientEvent` listener. Every server broadcast triggers three separate handlers. Adding CutsceneController, ObjectiveUI, or any future client system will add a fourth, fifth, etc. This is functionally correct but creates a fan-out of identical event subscriptions. If the payload format ever changes, all listeners must be updated together.
+**Original risk (2026-05-06):** `applyState()` growing as the single side-effect point. Resolution path was to add a BindableEvent in MatchController so UI systems subscribe to it instead of directly to the remote.
+**Trigger:** Adding a fourth system that needs phase data (e.g. CutsceneController), or changing the RoundStatePayload shape.
+**Fix when:** A fourth RoundStateChanged listener is needed. Introduce a `MatchController.StateChanged` BindableEvent, fire it from `applyState()`, and migrate MatchUI and HUD to subscribe to the BindableEvent instead of the RemoteEvent directly. This decouples all UI from the remote format and keeps MatchController as the single parsing layer.
 
 ---
 
@@ -143,6 +144,33 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 **Risk:** `ClientInit.client.lua` holds an explicit ordered list of `loadAndStart()` calls. When a new controller is built (e.g. `MovementController`, `CutsceneController`), a developer must manually add its `loadAndStart()` call in the correct position. If forgotten, the controller's `Start()` is never called and it silently does nothing — no error, no warning, just a non-functional system.
 **Trigger:** Every time a new controller is built. The risk is proportional to the number of future controllers (currently 5 planned beyond the current 2).
 **Fix when:** The controller count grows large enough that manual tracking becomes error-prone. At that point, consider a self-registration pattern where each ModuleScript registers itself with ClientInit via a shared table, or a folder-scan pattern that discovers and calls all controllers automatically. Until then, the explicit list is simpler and clearer.
+
+---
+
+## [DEBT-018] getPlayerFromPart is duplicated in DamageService and ObjectiveService
+
+**Files:** `src/server/DamageService.lua`, `src/server/ObjectiveService.server.lua`
+**Risk:** Both services implement an identical `getPlayerFromPart(hit: BasePart): Player?` helper that walks up the ancestor chain to find the owning Player. If the Roblox character hierarchy ever changes (e.g. a model-in-model arrangement for ragdolls or vehicles), both copies must be updated in sync. A fix in one without the other will cause inconsistent hit detection across services.
+**Trigger:** Adding a third service that needs to map a BasePart back to a Player (e.g. MonsterService targeting a player, or a Zone service checking who is inside a region).
+**Fix when:** A third consumer appears. Create `src/server/CharacterUtil.lua` (ModuleScript) with `CharacterUtil.getPlayerFromPart(hit)` and `CharacterUtil.getHumanoid(player)`. Replace the inline copies in DamageService and ObjectiveService with `require(CharacterUtil)` calls.
+
+---
+
+## [DEBT-019] Players.CharacterAutoLoads = false is set globally in TeamService with no fallback
+
+**File:** `src/server/TeamService.server.lua`
+**Risk:** `Players.CharacterAutoLoads = false` is set at the top of TeamService. If TeamService fails to load (a require error, a script disabled in Studio), Roblox will never auto-spawn characters, and players will see a blank screen with no error. There is no watchdog that re-enables auto-loading if TeamService fails, and no fallback spawn path.
+**Trigger:** Any unhandled error in TeamService's module-level code (e.g. a missing dependency) that prevents the script from running fully.
+**Fix when:** The server-side error handling pass. Add a `pcall` around the PREP phase handler in TeamService, and consider a separate failsafe script that re-enables CharacterAutoLoads if TeamService has not reported readiness within N seconds.
+
+---
+
+## [DEBT-020] Team name strings are duplicated across TeamService and ObjectiveService
+
+**Files:** `src/server/TeamService.server.lua`, `src/server/ObjectiveService.server.lua`
+**Risk:** Both services define `local TEAM_ATTACKERS = "Attackers"` and both assume `TEAM_DEFENDERS = "Defenders"` (implicit). If a team is renamed, both files must be updated together. A mismatch — e.g. TeamService assigns "Attacker" (no s) but ObjectiveService checks "Attackers" — silently breaks objective capture without any runtime error, because `playerTeams[player] ~= TEAM_ATTACKERS` is always true.
+**Trigger:** Renaming a team, or adding a third service that filters by team name.
+**Fix when:** A third consumer appears, or when the team names are likely to change. Add `Constants.TEAM_ATTACKERS = "Attackers"` and `Constants.TEAM_DEFENDERS = "Defenders"` to `src/shared/Constants.lua` and replace the local declarations in both service files.
 
 ---
 

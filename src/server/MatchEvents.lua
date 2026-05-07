@@ -33,8 +33,13 @@ MatchEvents.PhaseChanged = Instance.new("BindableEvent")
 
 -- Fired by TeamService once per player inside assignTeams().
 -- Payload: (player: Player, teamName: string)
--- Current listeners: DamageService
--- Future listeners:  ObjectiveService, kill-feed
+-- Current listeners: DamageService, ObjectiveService
 MatchEvents.TeamAssigned = Instance.new("BindableEvent")
+
+-- Fired by TeamService (elimination) or ObjectiveService (all anchors planted) to cut
+-- the ACTIVE phase short. MatchService's countdown() listens and captures the winner.
+-- Payload: (winner: string) — "Attackers" | "Defenders"
+-- Fires at most once per round; MatchService disconnects the listener after ACTIVE ends.
+MatchEvents.RoundEndedEarly = Instance.new("BindableEvent")
 
 return MatchEvents

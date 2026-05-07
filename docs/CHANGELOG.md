@@ -7,6 +7,61 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-07] — Four systems for first playtest: death tracking, win conditions, objectives, HUD + MatchUI
+
+**System 1 — Death tracking (TeamService)**
+- `Players.CharacterAutoLoads = false` set at the top of TeamService; Roblox never auto-spawns characters
+- `player:LoadCharacter()` called for all players at the start of each PREP phase (concurrent)
+- New state: `aliveAttackers`, `aliveDefenders`, `diedConnections: { [Player]: RBXScriptConnection }`, `currentPhase`
+- `handlePlayerDied(player)`: removes the player from the alive table for their team, fires `TeamStatusUpdate:FireAllClients(attAlive, defAlive)`, and fires `MatchEvents.RoundEndedEarly` if one team is fully eliminated (simultaneous elimination → Defenders win as tiebreak)
+- `setupDeathTracking()`: connects `Humanoid.Died` for every player at ACTIVE start; broadcasts initial alive counts; stores connections by player for clean disconnection
+- `cleanupDeathTracking()`: disconnects all `Humanoid.Died` connections; called at RESULTS
+- `PlayerRemoving`: disconnects the player's death connection; treats a mid-ACTIVE disconnect as a death via `handlePlayerDied()` before clearing tables
+- `resetTeams()` updated to call `cleanupDeathTracking()` and use `table.clear()` for alive tables
+- Added `TeamStatusUpdate` RemoteEvent to `RemoteSetup.server.lua`
+- Added `MatchEvents.RoundEndedEarly = Instance.new("BindableEvent")` to `src/server/MatchEvents.lua`
+
+**System 2 — Win conditions (MatchService)**
+- Removed the old local `RoundEndedEarly` BindableEvent and `MatchService` table; early-end signals now flow through `MatchEvents.RoundEndedEarly` so TeamService and ObjectiveService can fire it
+- New state: `currentWinner: string`, `attackerRoundWins: number`, `defenderRoundWins: number`
+- `broadcast()` now includes `winner`, `attackerWins`, `defenderWins` in every `RoundStateChanged` payload
+- `GetMatchConfig` returns the full payload including winner and win counts
+- `countdown()` signature changed to `(phase, round, duration, listenForEarlyEnd?): (boolean, string)` — returns the winner string captured from `MatchEvents.RoundEndedEarly` when ended early
+- `runActive()` returns `"Time Expired"` on normal completion or the winner team name on early end
+- `runResults(round, winner)` sets `currentWinner` before broadcasting so RESULTS payloads carry the winner
+- `runMatch()` resets win counts at match start, tallies wins per round ("Time Expired" counts as Defenders), determines the overall match winner (or "Draw"), broadcasts MATCHEND with `MATCHEND_DURATION`, then waits
+- Added `Constants.MATCHEND` phase to `Constants.Phase`; "MATCHEND" added to `Types.Phase` union
+- Added `Constants.RESULTS_DURATION = 10` and `Constants.MATCHEND_DURATION = 15` to `Constants.lua`
+
+**System 3 — Objective capture (ObjectiveService)**
+- New file `src/server/ObjectiveService.server.lua`
+- Subscribes to `MatchEvents.TeamAssigned` to build a local `playerTeams` table; does not require TeamService directly (avoids cross-require and DEBT-011 timing risk)
+- On ACTIVE: scans `Workspace/Objectives` for BaseParts and calls `registerObjective()` on each
+- `registerObjective(part)`: creates an `ObjectiveState` record and connects `Touched`/`TouchEnded` with per-player touch counting (prevents body-part spam from causing false entry/exit)
+- `startCapture(state, planter)`: spawns a task that ticks progress every `COUNTDOWN_TICK`; fires `ObjectiveUpdated:FireAllClients(part, progress)` each tick; exits cleanly if `state.planter` changes before `ANCHOR_PLANT_TIME` elapses
+- `cancelCapture(state)`: clears planter and fires `ObjectiveUpdated` with progress 0
+- `completeObjective(state)`: marks planted, fires `ObjectiveComplete:FireAllClients(part)`, checks if all objectives are planted, fires `MatchEvents.RoundEndedEarly("Attackers")` when they are
+- `resetObjectives()`: disconnects all `Touched`/`TouchEnded` connections and clears the objectives table; called on PREP and RESULTS
+- `PlayerRemoving`: clears `playerTeams` entry and cancels any in-progress capture by that player
+
+**System 4 — MatchUI and HUD**
+- `src/client/UI/MatchUI.lua` (new ModuleScript): creates a ScreenGui with a top bar (round/phase label + timer), a RESULTS overlay (winner + round scores), and a MATCHEND overlay (match winner + final scores); hidden during LOBBY; connects `RoundStateChanged.OnClientEvent` in `Start()`
+- `src/client/UI/HUD.lua` (new ModuleScript): creates a ScreenGui with a bottom-left frame containing a health number, a colour-coded health bar (green → orange → red by ratio), and a team-alive-count label; connects `HealthChanged`, `TeamStatusUpdate`, and `RoundStateChanged` in `Start()`; hidden during LOBBY and MATCHEND
+- `src/client/MatchController.lua`: added `currentWinner`, `currentAttackerWins`, `currentDefenderWins` state; `applyState()` reads these from the payload; added `GetWinner()`, `GetAttackerWins()`, `GetDefenderWins()` public getters
+- `src/client/ClientInit.client.lua`: added `loadInitAndStart()` helper for UI modules that require `init(playerGui)` before `Start()`; added `Players.LocalPlayer:WaitForChild("PlayerGui")` reference; updated initialization order to: MatchController → MatchUI → HUD → GunController
+
+**Debt evaluation**
+- DEBT-003 (lastFiredPhase phase-only): unaffected — MatchService changes do not worsen or resolve it
+- DEBT-007 (applyState growth): partially triggered — MatchUI and HUD connect directly to RoundStateChanged; updated entry to reflect the fan-out pattern and the planned BindableEvent fix
+- DEBT-009 (no friendly-fire guard): unaffected
+- DEBT-011 (no on-demand team query): ObjectiveService uses TeamAssigned subscription correctly; risk not triggered since all services start before the first PREP phase
+- DEBT-017 (ClientInit manual update): worsened by two new UI entries; still acceptable at this controller count
+- Added DEBT-018: `getPlayerFromPart` duplicated in DamageService and ObjectiveService
+- Added DEBT-019: `Players.CharacterAutoLoads = false` set globally in TeamService with no fallback
+- Added DEBT-020: `TEAM_ATTACKERS` / `TEAM_DEFENDERS` string literals duplicated across TeamService and ObjectiveService
+
+---
+
 ## [2026-05-07] — Resolve DEBT-015: ClientInit pattern + controller ModuleScript conversion
 
 **Part 1 — MatchController renamed**
