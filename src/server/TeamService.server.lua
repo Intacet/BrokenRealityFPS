@@ -20,6 +20,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Modules    = ReplicatedStorage:WaitForChild("Modules")
 local Constants  = require(Modules:WaitForChild("Constants"))
+local Logger     = require(Modules:WaitForChild("Logger"))
 
 -- MatchEvents is a sibling ModuleScript in ServerScriptService/Services.
 -- script.Parent is that Services folder at runtime.
@@ -33,13 +34,13 @@ local TeamAssigned = Remotes:WaitForChild("TeamAssigned") :: RemoteEvent
 -- Team name strings must exactly match the identifiers in docs/NAMING.md.
 -- Colors are defined here for now; move them to Constants if other systems
 -- ever need to read team colours (e.g. a kill-feed that tints names).
+-- Teleport offset lives in Constants.TELEPORT_Y_OFFSET.
 -- ============================================================
 
-local TEAM_ATTACKERS    = "Attackers"
-local TEAM_DEFENDERS    = "Defenders"
-local ATTACKER_COLOR    = BrickColor.new("Bright red")
-local DEFENDER_COLOR    = BrickColor.new("Bright blue")
-local TELEPORT_Y_OFFSET = 3  -- studs above spawn part centre, so characters land on top
+local TEAM_ATTACKERS = "Attackers"
+local TEAM_DEFENDERS = "Defenders"
+local ATTACKER_COLOR = BrickColor.new("Bright red")
+local DEFENDER_COLOR = BrickColor.new("Bright blue")
 
 -- ============================================================
 -- State
@@ -60,11 +61,11 @@ local function getOrCreateTeam(name: string, color: BrickColor): Team
     if existing and existing:IsA("Team") then
         return existing :: Team
     end
-    local team         = Instance.new("Team")
-    team.Name          = name
-    team.TeamColor     = color
+    local team          = Instance.new("Team")
+    team.Name           = name
+    team.TeamColor      = color
     team.AutoAssignable = false
-    team.Parent        = Teams
+    team.Parent         = Teams
     return team
 end
 
@@ -74,12 +75,12 @@ end
 local function getSpawnPoints(folderName: string): { BasePart }
     local spawnsRoot = workspace:FindFirstChild("Spawns")
     if not spawnsRoot then
-        warn("[TeamService] Workspace/Spawns is missing — cannot find spawn points")
+        Logger.warn("[TeamService] Workspace/Spawns is missing — cannot find spawn points")
         return {}
     end
     local teamFolder = spawnsRoot:FindFirstChild(folderName)
     if not teamFolder then
-        warn("[TeamService] Workspace/Spawns/" .. folderName .. " is missing")
+        Logger.warn("[TeamService] Workspace/Spawns/" .. folderName .. " is missing")
         return {}
     end
     local points: { BasePart } = {}
@@ -89,7 +90,7 @@ local function getSpawnPoints(folderName: string): { BasePart }
         end
     end
     if #points == 0 then
-        warn("[TeamService] Workspace/Spawns/" .. folderName .. " has no BasePart children")
+        Logger.warn("[TeamService] Workspace/Spawns/" .. folderName .. " has no BasePart children")
     end
     return points
 end
@@ -98,20 +99,24 @@ end
 -- Does nothing if the character or root part is not present.
 local function teleportToSpawn(player: Player, spawnPoints: { BasePart })
     if #spawnPoints == 0 then
-        warn("[TeamService] No spawn points for", player.Name, "— skipping teleport")
+        Logger.warn("[TeamService] No spawn points for " .. player.Name .. " — skipping teleport")
         return
     end
     local character = player.Character
     if not character then
+        -- teleportWhenReady should guarantee the character exists before calling this.
+        -- A nil character here means a race condition (player disconnected mid-respawn).
+        Logger.warn("[TeamService] teleportToSpawn: character is nil for " .. player.Name .. " — skipping")
         return
     end
     local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
     if not root then
+        Logger.warn("[TeamService] teleportToSpawn: HumanoidRootPart missing for " .. player.Name .. " — skipping")
         return
     end
     local point = spawnPoints[math.random(1, #spawnPoints)]
     -- Place the character above the spawn part so it lands on the surface cleanly.
-    root.CFrame = point.CFrame + Vector3.new(0, TELEPORT_Y_OFFSET, 0)
+    root.CFrame = point.CFrame + Vector3.new(0, Constants.TELEPORT_Y_OFFSET, 0)
 end
 
 -- Teleports immediately if the character is loaded, or defers until CharacterAdded
@@ -133,7 +138,7 @@ end
 -- Randomises the player list so team composition is different every round.
 local function shuffle(list: { Player })
     for i = #list, 2, -1 do
-        local j   = math.random(1, i)
+        local j    = math.random(1, i)
         list[i], list[j] = list[j], list[i]
     end
 end
@@ -173,17 +178,17 @@ local function assignTeams()
             spawnPoints = defenderSpawns
         end
 
-        player.Team        = team      -- sets the Roblox scoreboard team
-        playerTeams[player] = teamName  -- records it for other services to query
+        player.Team         = team     -- sets the Roblox scoreboard team
+        playerTeams[player] = teamName -- records it for other services to query
 
         teleportWhenReady(player, spawnPoints)
 
         TeamAssigned:FireClient(player, teamName)
         MatchEvents.TeamAssigned:Fire(player, teamName)  -- notify server services (DamageService, etc.)
-        print("[TeamService]", player.Name, "→", teamName)
+        Logger.debug("[TeamService]", player.Name, "→", teamName)
     end
 
-    print("[TeamService] Assigned", #players, "players")
+    Logger.debug("[TeamService] Assigned", #players, "players")
 end
 
 -- Removes players from their Roblox teams and clears the tracking table.
@@ -193,7 +198,7 @@ local function resetTeams()
         player.Team = nil  -- sets the player to "Neutral" on the scoreboard
     end
     playerTeams = {}
-    print("[TeamService] Teams reset")
+    Logger.debug("[TeamService] Teams reset")
 end
 
 -- ============================================================
@@ -218,7 +223,7 @@ MatchEvents.PhaseChanged.Event:Connect(function(phase: string, _round: number)
     end
 end)
 
-print("[TeamService] Ready — waiting for PREP phase")
+Logger.debug("[TeamService] Ready — waiting for PREP phase")
 
 -- TeamService is a .server.lua Script and cannot be required by other server scripts.
 -- Other services access team data by subscribing to MatchEvents.TeamAssigned, not by

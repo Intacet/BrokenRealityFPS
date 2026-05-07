@@ -133,6 +133,11 @@ Do not write one giant script. Use small, modular scripts — one per system.
 - Any number a designer might want to tune (timer, damage, speed, count, distance) goes in `ReplicatedStorage/Modules/Constants` or a relevant data module — never hardcoded inside a service or controller.
 - If the value appears in more than one place, it must be in a module. No duplicate magic numbers.
 
+**No magic numbers:**
+- No numeric literal may appear in a service or controller unless it is a loop counter or a table index.
+- Every tunable value — wait times, distances, thresholds, damage values, counts — must have a named constant in `Constants.lua` or the relevant data module.
+- If a value has no obvious home, add it to `Constants.lua` with a comment explaining what it controls.
+
 **Luau specifics:**
 - `--!strict` at the top of every script.
 - No `wait()` — use `task.wait()`. No `spawn()` — use `task.spawn()`.
@@ -141,10 +146,29 @@ Do not write one giant script. Use small, modular scripts — one per system.
 - Weapon stats and zone configs are data tables, not branching logic — add entries to the data modules rather than `if weapon == "AR"` style conditionals.
 - Server scripts never `require` anything under `src/client/`. Client scripts never `require` anything under `src/server/`.
 
+**No circular requires:**
+- Never require a module that directly or indirectly requires the calling module back.
+- If two services need to communicate bidirectionally, use a BindableEvent in `MatchEvents.lua` instead of direct requires.
+- Before requiring a new module, confirm the dependency only flows in one direction.
+
+**Logger — never call print() or warn() directly:**
+- Never call `print()` or `warn()` directly in a service or controller.
+- Always `require` `src/shared/Logger.lua` and use `Logger.debug()` for development output and `Logger.warn()` for unexpected states.
+- `Logger.debug()` calls are automatically suppressed when `DEBUG_MODE` is set to `false` before shipping.
+- Require Logger from shared modules with: `local Logger = require(Modules:WaitForChild("Logger"))` where `Modules` is already resolved via `WaitForChild`.
+
+**No silent failures:**
+- Never use `pcall` without logging the error message in the failure branch using `Logger.warn()`.
+- Never return `nil` from a function that is expected to return a value without first calling `Logger.warn()` with the function name and the reason.
+- Silent failures must not exist anywhere in the codebase.
+
 **Remote conventions:**
 - All Remotes are created and referenced through `ReplicatedStorage/Remotes` only.
 - `RemoteEvent` names: `PascalCase`, verb-first (`WeaponFired`, `RoundStateChanged`, `DamageApplied`).
 - `RemoteFunction` names: `PascalCase`, question-phrased (`GetMatchConfig`).
+- Before adding a new `RemoteEvent` or `RemoteFunction`, add it to the remote registry table in `docs/PROJECT_MAP.md` first with its **Fired by** and **Listened by** columns filled in.
+- Never fire or listen to a remote that is not listed in that table.
+- Never assign a second script to fire or listen to an existing remote without updating the table and explaining why.
 
 ## First playable goal
 

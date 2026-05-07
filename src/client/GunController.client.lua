@@ -16,9 +16,9 @@
 --    (making it a ModuleScript) before the require() below succeeds at runtime.
 --    See DEBT-015 in docs/TECHNICAL_DEBT.md.
 
-local Players          = game:GetService("Players")
+local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
+local UserInputService  = game:GetService("UserInputService")
 
 -- ============================================================
 -- Dependencies
@@ -27,6 +27,7 @@ local UserInputService = game:GetService("UserInputService")
 local Modules    = ReplicatedStorage:WaitForChild("Modules")
 local Constants  = require(Modules:WaitForChild("Constants"))
 local WeaponData = require(Modules:WaitForChild("WeaponData"))
+local Logger     = require(Modules:WaitForChild("Logger"))
 
 -- MatchController is a sibling in StarterPlayerScripts/Controllers.
 -- It must be a ModuleScript (.lua) for require() to work — see DEBT-015.
@@ -79,7 +80,7 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 
     local weaponDef = WeaponData[CURRENT_WEAPON]
     if not weaponDef then
-        warn("[GunController] No WeaponData entry for:", CURRENT_WEAPON)
+        Logger.warn("[GunController] No WeaponData entry for:", CURRENT_WEAPON)
         return
     end
 
@@ -127,13 +128,13 @@ end)
 
 -- GunService confirmed a hit on the server. Placeholder for a hitmarker sprite.
 HitConfirmed.OnClientEvent:Connect(function()
-    print("[GunController] HIT")
+    Logger.debug("[GunController] HIT")
 end)
 
 -- DamageService updated this player's health. Placeholder for the HUD health bar.
 -- Receives current HP and maximum HP so the bar can scale correctly once built.
 HealthChanged.OnClientEvent:Connect(function(current: number, maximum: number)
-    print(string.format("[GunController] Health: %d / %d", current, maximum))
+    Logger.debug(string.format("[GunController] Health: %d / %d", current, maximum))
 end)
 
-print("[GunController] Ready")
+Logger.debug("[GunController] Ready")

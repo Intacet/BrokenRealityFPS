@@ -17,6 +17,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules    = ReplicatedStorage:WaitForChild("Modules")
 local Constants  = require(Modules:WaitForChild("Constants"))
 local Types      = require(Modules:WaitForChild("Types"))
+local Logger     = require(Modules:WaitForChild("Logger"))
 
 -- Silence the unused-variable warning: Types is imported for its exported types only.
 -- The require is still necessary so the type system resolves Types.Phase and
@@ -43,18 +44,18 @@ local currentMaxRounds: number  = Constants.MAX_ROUNDS
 -- Private helpers
 -- ============================================================
 
--- Writes a received payload into local state and prints it for verification.
+-- Writes a received payload into local state and logs it for verification.
 -- This is the single place where local state is mutated.
--- MatchUI will hook into this function (or replace the print) when it is built.
+-- MatchUI will hook into this function (or replace the debug call) when it is built.
 local function applyState(payload: Types.RoundStatePayload)
     currentPhase     = payload.phase
     currentRound     = payload.round
     currentTimeLeft  = payload.timeLeft
     currentMaxRounds = payload.maxRounds
 
-    -- Temporary output so we can confirm the controller is receiving correctly.
-    -- Replace this print with a UI update when MatchUI is built.
-    print(string.format(
+    -- Temporary debug output so we can confirm the controller is receiving correctly.
+    -- Replace this with a UI update when MatchUI is built.
+    Logger.debug(string.format(
         "[MatchController] %s | Round %d / %d | %ds left",
         currentPhase,
         currentRound,
@@ -87,12 +88,12 @@ function MatchController:Start()
         applyState(result :: Types.RoundStatePayload)
     elseif not ok then
         -- result contains the error string when pcall catches a thrown error.
-        -- warn() makes it red in the Output window and easier to spot than print().
-        warn("[MatchController] GetMatchConfig error:", result)
+        -- Logger.warn makes it red in the Output window and easier to spot.
+        Logger.warn("[MatchController] GetMatchConfig error:", result)
     else
         -- ok is true but the server returned nil — genuine timing edge case where
         -- MatchService hasn't set up its handler yet. Wait for RoundStateChanged.
-        print("[MatchController] GetMatchConfig not ready yet — waiting for first RoundStateChanged")
+        Logger.debug("[MatchController] GetMatchConfig not ready yet — waiting for first RoundStateChanged")
     end
 
     -- Listen for every subsequent state update from MatchService.

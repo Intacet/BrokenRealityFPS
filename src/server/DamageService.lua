@@ -20,11 +20,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Modules    = ReplicatedStorage:WaitForChild("Modules")
 local Constants  = require(Modules:WaitForChild("Constants"))
+local Logger     = require(Modules:WaitForChild("Logger"))
 
 local MatchEvents = require(script.Parent:WaitForChild("MatchEvents"))
 
-local Remotes        = ReplicatedStorage:WaitForChild("Remotes")
-local HealthChanged  = Remotes:WaitForChild("HealthChanged") :: RemoteEvent
+local Remotes       = ReplicatedStorage:WaitForChild("Remotes")
+local HealthChanged = Remotes:WaitForChild("HealthChanged") :: RemoteEvent
 
 -- ============================================================
 -- State
@@ -50,7 +51,7 @@ end
 
 local function resetHealth(player: Player)
     setHealth(player, Constants.MAX_HEALTH)
-    print("[DamageService] Reset health for", player.Name)
+    Logger.debug("[DamageService] Reset health for", player.Name)
 end
 
 -- Kills the player by zeroing their Humanoid health.
@@ -60,14 +61,14 @@ local function killPlayer(player: Player, attacker: Player?)
     playerHealth[player] = 0
     HealthChanged:FireClient(player, 0, Constants.MAX_HEALTH)
 
-    local character  = player.Character
-    local humanoid   = character and character:FindFirstChildOfClass("Humanoid")
+    local character = player.Character
+    local humanoid  = character and character:FindFirstChildOfClass("Humanoid")
     if humanoid then
         humanoid.Health = 0
     end
 
     local attackerName = attacker and attacker.Name or "environment"
-    print("[DamageService]", player.Name, "killed by", attackerName)
+    Logger.debug("[DamageService]", player.Name, "killed by", attackerName)
 end
 
 -- ============================================================
@@ -78,7 +79,7 @@ local DamageService = {}
 
 -- Apply `amount` points of damage to `victim`.
 -- `attacker` is the Player responsible (nil for hazards, fall damage, etc.).
--- Always called from the server (GunService will call this once built).
+-- Always called from the server (GunService calls this once a shot is validated).
 -- Never called directly from a client.
 function DamageService:Apply(victim: Player, amount: number, attacker: Player?)
     if amount <= 0 then
@@ -117,10 +118,9 @@ end
 -- ============================================================
 
 -- Track team assignments so DamageService can enforce friendly-fire rules later.
--- Resolves DEBT-006: server services no longer need to poll TeamService:GetTeam().
 MatchEvents.TeamAssigned.Event:Connect(function(player: Player, teamName: string)
     playerTeam[player] = teamName
-    print("[DamageService] Tracking team for", player.Name, "→", teamName)
+    Logger.debug("[DamageService] Tracking team for", player.Name, "→", teamName)
 end)
 
 -- Reset every player's health to MAX_HEALTH at the start of each PREP phase
@@ -130,7 +130,7 @@ MatchEvents.PhaseChanged.Event:Connect(function(phase: string, _round: number)
         for _, player in ipairs(Players:GetPlayers()) do
             resetHealth(player)
         end
-        print("[DamageService] Health reset for all players")
+        Logger.debug("[DamageService] Health reset for all players")
     end
 end)
 
@@ -140,6 +140,6 @@ Players.PlayerRemoving:Connect(function(player: Player)
     playerTeam[player]   = nil
 end)
 
-print("[DamageService] Ready")
+Logger.debug("[DamageService] Ready")
 
 return DamageService

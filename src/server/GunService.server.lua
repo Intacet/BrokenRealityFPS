@@ -2,22 +2,17 @@
 -- Script
 -- Location in Studio: ServerScriptService > Services > GunService
 --
--- Validates weapon shots sent by clients and applies authoritative damage.
+-- Validates weapon shots fired by clients.
+-- Clients fire WeaponFired with origin+direction+tick; GunService re-runs the
+-- raycast on the server and calls DamageService:Apply() only if the shot is valid.
 --
--- Flow:
---   GunController fires WeaponFired {origin, direction, tick}
---   → GunService re-runs the raycast on the server
---   → if the ray hits a player, GunService calls DamageService:Apply()
---   → GunService fires HitConfirmed back to the shooter for a hitmarker
---
--- What this script does NOT do (handled elsewhere):
---   - Apply damage values           →  DamageService
---   - Track health or fire HealthChanged →  DamageService
---   - Handle client input or viewmodel   →  GunController (client)
+-- What this script does NOT do:
+--   - Apply damage or track health   →  DamageService
+--   - Handle client input            →  GunController (client)
 --
 -- ⚠  PREREQUISITE: DamageService.server.lua must be renamed DamageService.lua
 --    (making it a ModuleScript) before require() on line 35 will succeed.
---    See DEBT-012 in docs/TECHNICAL_DEBT.md.
+--    See DEBT-012 in docs/TECHNICAL_DEBT.md. (Already resolved as of 2026-05-06.)
 
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -29,9 +24,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules    = ReplicatedStorage:WaitForChild("Modules")
 local Constants  = require(Modules:WaitForChild("Constants"))
 local WeaponData = require(Modules:WaitForChild("WeaponData"))
+local Logger     = require(Modules:WaitForChild("Logger"))
 
 -- DamageService and MatchEvents are sibling ModuleScripts in Services.
--- DamageService must be a .lua ModuleScript for require() to work (see DEBT-012).
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local MatchEvents   = require(script.Parent:WaitForChild("MatchEvents"))
 
@@ -99,15 +94,17 @@ WeaponFired.OnServerEvent:Connect(function(
 
     -- ── Type guard ───────────────────────────────────────────────────────────
     -- Reject payloads where an exploiter has replaced Vector3 values with
-    -- non-Vector3 types. typeof() is safe under --!strict.
+    -- non-Vector3 types. Log as warn because malformed payloads are unexpected
+    -- and may indicate an exploiter probing the remote.
     if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" then
+        Logger.warn("[GunService] WeaponFired: invalid payload types from", shooter.Name)
         return
     end
 
     -- ── Weapon lookup ────────────────────────────────────────────────────────
     local weaponDef = WeaponData[DEFAULT_WEAPON]
     if not weaponDef then
-        warn("[GunService] No WeaponData entry for:", DEFAULT_WEAPON)
+        Logger.warn("[GunService] No WeaponData entry for:", DEFAULT_WEAPON)
         return
     end
 
@@ -159,7 +156,7 @@ WeaponFired.OnServerEvent:Connect(function(
     -- the client cannot infer health values or kill state from this event.
     HitConfirmed:FireClient(shooter)
 
-    print(string.format(
+    Logger.debug(string.format(
         "[GunService] %s hit %s for %d dmg",
         shooter.Name, victim.Name, weaponDef.damage
     ))
@@ -171,4 +168,4 @@ Players.PlayerRemoving:Connect(function(player: Player)
     lastShotTime[player] = nil
 end)
 
-print("[GunService] Ready")
+Logger.debug("[GunService] Ready")

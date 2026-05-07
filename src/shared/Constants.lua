@@ -37,6 +37,14 @@ Constants.RESULTS_TIME = 10  -- how long results are shown between rounds
 -- ============================================================
 -- Player settings
 -- ============================================================
-Constants.MAX_HEALTH   = 100 -- maximum and starting health for every player
+Constants.MAX_HEALTH        = 100 -- maximum and starting health for every player
+Constants.TELEPORT_Y_OFFSET = 3   -- studs above a spawn part's centre so characters land on top
+
+-- ============================================================
+-- Timing constants
+-- ============================================================
+Constants.COUNTDOWN_TICK     = 1  -- seconds between each broadcast inside a phase countdown
+Constants.LOBBY_POLL_INTERVAL = 2  -- seconds between player-count checks while waiting for MIN_PLAYERS
+Constants.MATCH_END_PAUSE    = 3   -- seconds between the end of one match and the start of the next
 
 return Constants

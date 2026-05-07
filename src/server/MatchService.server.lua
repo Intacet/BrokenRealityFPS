@@ -21,6 +21,7 @@ local Players           = game:GetService("Players")
 -- ReplicatedStorage children exist the instant this script runs.
 local Modules    = ReplicatedStorage:WaitForChild("Modules")
 local Constants  = require(Modules:WaitForChild("Constants"))
+local Logger     = require(Modules:WaitForChild("Logger"))
 
 local Remotes           = ReplicatedStorage:WaitForChild("Remotes")
 local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEvent
@@ -83,7 +84,7 @@ end
 -- ============================================================
 
 -- Sends the current match state to every connected client.
--- Called once per second during any timed phase.
+-- Called once per COUNTDOWN_TICK during any timed phase.
 local function broadcast(phase: string, round: number, timeLeft: number)
     -- Keep module-level state in sync so GetMatchConfig always returns fresh data.
     currentPhase    = phase
@@ -105,7 +106,7 @@ local function broadcast(phase: string, round: number, timeLeft: number)
     end
 end
 
--- Counts down `duration` seconds, broadcasting the state every second.
+-- Counts down `duration` seconds, broadcasting the state every COUNTDOWN_TICK.
 -- Returns true if the full duration elapsed normally.
 -- Returns false if RoundEndedEarly fired (objective completed early).
 local function countdown(phase: string, round: number, duration: number): boolean
@@ -120,7 +121,7 @@ local function countdown(phase: string, round: number, duration: number): boolea
     while os.clock() < endTime and not endedEarly do
         local timeLeft = math.ceil(endTime - os.clock())
         broadcast(phase, round, timeLeft)
-        task.wait(1) -- task.wait() is the modern, accurate replacement for wait()
+        task.wait(Constants.COUNTDOWN_TICK)
     end
 
     earlyConnection:Disconnect() -- always clean up connections to avoid memory leaks
@@ -132,7 +133,7 @@ end
 local function waitForPlayers()
     while #Players:GetPlayers() < Constants.MIN_PLAYERS do
         broadcast(Constants.Phase.LOBBY, 0, 0)
-        task.wait(2)
+        task.wait(Constants.LOBBY_POLL_INTERVAL)
     end
 end
 
@@ -142,18 +143,18 @@ end
 -- ============================================================
 
 local function runLobby()
-    print("[MatchService] LOBBY — waiting for", Constants.MIN_PLAYERS, "players")
+    Logger.debug("[MatchService] LOBBY — waiting for", Constants.MIN_PLAYERS, "players")
 
     -- Keep broadcasting LOBBY until enough players are present.
     waitForPlayers()
 
-    print("[MatchService] LOBBY — players ready, starting countdown")
+    Logger.debug("[MatchService] LOBBY — players ready, starting countdown")
     -- Count down the lobby timer. Players should see this on their MatchUI.
     countdown(Constants.Phase.LOBBY, 0, Constants.LOBBY_TIME)
 end
 
 local function runPrep(round: number)
-    print("[MatchService] PREP — round", round, "of", Constants.MAX_ROUNDS)
+    Logger.debug("[MatchService] PREP — round", round, "of", Constants.MAX_ROUNDS)
 
     -- Broadcast once immediately so clients flip their UI to PREP without waiting 1 second.
     broadcast(Constants.Phase.PREP, round, Constants.PREP_TIME)
@@ -161,7 +162,7 @@ local function runPrep(round: number)
 end
 
 local function runActive(round: number)
-    print("[MatchService] ACTIVE — round", round)
+    Logger.debug("[MatchService] ACTIVE — round", round)
 
     broadcast(Constants.Phase.ACTIVE, round, Constants.ACTIVE_TIME)
     local completedNormally = countdown(Constants.Phase.ACTIVE, round, Constants.ACTIVE_TIME)
@@ -169,12 +170,12 @@ local function runActive(round: number)
     if not completedNormally then
         -- An objective was completed. ObjectiveService already fired ObjectiveComplete
         -- to clients, so we just move on to the results phase immediately.
-        print("[MatchService] ACTIVE ended early — objective completed")
+        Logger.debug("[MatchService] ACTIVE ended early — objective completed")
     end
 end
 
 local function runResults(round: number)
-    print("[MatchService] RESULTS — round", round)
+    Logger.debug("[MatchService] RESULTS — round", round)
 
     broadcast(Constants.Phase.RESULTS, round, Constants.RESULTS_TIME)
     countdown(Constants.Phase.RESULTS, round, Constants.RESULTS_TIME)
@@ -185,7 +186,7 @@ end
 -- ============================================================
 
 local function runMatch()
-    print("[MatchService] ========== NEW MATCH ==========")
+    Logger.debug("[MatchService] ========== NEW MATCH ==========")
 
     runLobby()
 
@@ -197,7 +198,7 @@ local function runMatch()
 
     -- Match is over. Broadcast a final state with timeLeft = 0 so clients know
     -- the full match has ended (not just a single round).
-    print("[MatchService] Match complete — all", Constants.MAX_ROUNDS, "rounds finished")
+    Logger.debug("[MatchService] Match complete — all", Constants.MAX_ROUNDS, "rounds finished")
     broadcast(Constants.Phase.RESULTS, Constants.MAX_ROUNDS, 0)
     task.wait(Constants.RESULTS_TIME)
 end
@@ -206,10 +207,10 @@ end
 -- Entry point
 --
 -- Run matches back-to-back indefinitely so the server never idles.
--- A 3-second gap between matches gives players time to read final scores.
+-- A MATCH_END_PAUSE gap between matches gives players time to read final scores.
 -- ============================================================
 
 while true do
     runMatch()
-    task.wait(3)
+    task.wait(Constants.MATCH_END_PAUSE)
 end

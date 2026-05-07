@@ -113,19 +113,19 @@ Workspace
 
 ---
 
-## Remote registry (planned)
+## Remote registry
 
-| Name | Type | Fired by | Purpose |
-|------|------|----------|---------|
-| `WeaponFired` | RemoteEvent | Client | Request hit validation |
-| `HitConfirmed` | RemoteEvent | Server | Cosmetic hitmarker confirm |
-| `HealthChanged` | RemoteEvent | Server | Update client health display |
-| `RoundStateChanged` | RemoteEvent | Server | Drive all UI and phase transitions |
-| `TeamAssigned` | RemoteEvent | Server | Tell client their team |
-| `ObjectiveUpdated` | RemoteEvent | Server | Update capture progress UI |
-| `ObjectiveComplete` | RemoteEvent | Server | Signal round end |
-| `PartDestroyed` | RemoteEvent | Server | Trigger destruction VFX on client |
-| `ZoneEffectApplied` | RemoteEvent | Server | Trigger visual overlay on client |
-| `GetMatchConfig` | RemoteFunction | Client | Fetch config on join |
+Add a row here **before** implementing any new remote. Every row must have exactly one entry in Fired by and Listened by. If the system is not yet built, write `pending`.
 
-Add new remotes to this table before implementing them.
+| Name | Type | Fired by | Listened by | Purpose |
+|------|------|----------|-------------|---------|
+| `WeaponFired` | RemoteEvent | `GunController.client.lua` | `GunService.server.lua` | Client requests hit validation |
+| `HitConfirmed` | RemoteEvent | `GunService.server.lua` | `GunController.client.lua` | Server confirms hit for cosmetic hitmarker |
+| `HealthChanged` | RemoteEvent | `DamageService.lua` | `GunController.client.lua` | Server sends updated health to affected client |
+| `RoundStateChanged` | RemoteEvent | `MatchService.server.lua` | `MatchController.client.lua` | Phase, round, and timer updates every tick |
+| `TeamAssigned` | RemoteEvent | `TeamService.server.lua` | pending | Tells each client their team for this round |
+| `ObjectiveUpdated` | RemoteEvent | pending | pending | Anchor capture progress (0–1) |
+| `ObjectiveComplete` | RemoteEvent | pending | pending | An objective was finished; triggers round end |
+| `PartDestroyed` | RemoteEvent | pending | pending | Trigger destruction VFX on all clients |
+| `ZoneEffectApplied` | RemoteEvent | pending | pending | Trigger visual overlay on all clients |
+| `GetMatchConfig` | RemoteFunction | `MatchController.client.lua` | `MatchService.server.lua` | Client fetches current match state on join |

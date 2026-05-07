@@ -32,12 +32,13 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-004] Team colours and teleport offset are local to TeamService, not in Constants
+## [DEBT-004] Team colours are local to TeamService, not in Constants — PARTIALLY RESOLVED 2026-05-07
 
 **File:** `src/server/TeamService.server.lua`
-**Risk:** `ATTACKER_COLOR`, `DEFENDER_COLOR`, and `TELEPORT_Y_OFFSET` are defined as local constants inside TeamService. If another system (kill feed, HUD team indicator, spectator camera) needs to read team colours, it will either hardcode them again or have no access to them — creating duplicate magic values.
-**Trigger:** Adding a kill feed, name tag, or any UI that needs to tint elements by team colour. Adding a second teleportation site that needs the same Y offset.
-**Fix when:** Any system outside TeamService needs to read team colours or the teleport offset. Move them to `src/shared/Constants.lua` at that point.
+**Risk:** ~~`ATTACKER_COLOR`, `DEFENDER_COLOR`, and `TELEPORT_Y_OFFSET` are defined as local constants inside TeamService.~~ `ATTACKER_COLOR` and `DEFENDER_COLOR` are still defined as local constants inside TeamService. If another system (kill feed, HUD team indicator, spectator camera) needs to read team colours, it will either hardcode them again or have no access to them — creating duplicate magic values.
+**Partial resolution (2026-05-07):** `TELEPORT_Y_OFFSET` was moved to `src/shared/Constants.lua` during the "No magic numbers" audit. The offset value is no longer duplicated. `ATTACKER_COLOR` and `DEFENDER_COLOR` were not moved because `BrickColor` values are not numeric literals — they fall outside the no-magic-numbers rule. The underlying colour-duplication risk remains.
+**Trigger:** Adding a kill feed, name tag, or any UI that needs to tint elements by team colour.
+**Fix when:** Any system outside TeamService needs to read team colours. Move `ATTACKER_COLOR` and `DEFENDER_COLOR` to `src/shared/Constants.lua` at that point.
 
 ---
 
@@ -113,7 +114,7 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ## [DEBT-010] DamageService health reset fires for all players including mid-respawn characters
 
-**File:** `src/server/DamageService.server.lua`
+**File:** `src/server/DamageService.lua`
 **Risk:** On PREP, `resetHealth()` calls `setHealth(player, MAX_HEALTH)` and fires `HealthChanged` to the client for every connected player. If a player is mid-respawn (character is nil or Humanoid is being created), the client receives a correct health value but the Humanoid itself may reset to its default health independently when the new character loads — causing a brief mismatch between the server table and the Humanoid's displayed value.
 **Trigger:** A player disconnects or dies in the final second of RESULTS, so their character is respawning exactly when PREP begins and `resetHealth()` fires.
 **Fix when:** CorpseService is built (it owns character lifecycle). At that point, hook health reset into `CharacterAdded` instead of relying solely on the phase-change event.
@@ -126,6 +127,15 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 **Risk:** `applyState()` is the single function that writes to local state and currently calls `print()`. When MatchUI is built, a UI update call will be added here. If CutsceneController, HUD, and ObjectiveUI all need to react to phase changes, they will each add a call inside `applyState()`, making it a growing list of side effects in one function.
 **Trigger:** Adding MatchUI (Stage 3 of the roadmap) — the first UI that needs to read from MatchController.
 **Fix when:** A second system needs to react to phase changes. Replace the `print()` with a `BindableEvent:Fire(payload)` that any client system can connect to, rather than adding direct calls inside `applyState()`.
+
+---
+
+## [DEBT-016] Logger.DEBUG_MODE requires a source-level code edit to disable for production
+
+**File:** `src/shared/Logger.lua`
+**Risk:** `DEBUG_MODE = true` is a Lua local variable inside `Logger.lua`. Silencing all `Logger.debug()` output before shipping requires opening the file and changing the value to `false`. There is no build-time flag, no environment variable, no CLI argument, and no Roblox `game:GetService("RunService"):IsStudio()` guard — so a developer who forgets to flip the flag ships with debug output visible to every player in the Output window (and to exploiters who monitor it via third-party tools).
+**Trigger:** The first time a build is shipped to production without flipping the flag.
+**Fix when:** The project approaches a public release. Add a `RunService:IsStudio()` guard so `DEBUG_MODE` is automatically true in Studio and false in production: `local DEBUG_MODE = game:GetService("RunService"):IsStudio()`. This removes the manual step and cannot be forgotten. Until then, add a pre-ship checklist item.
 
 ---
 
