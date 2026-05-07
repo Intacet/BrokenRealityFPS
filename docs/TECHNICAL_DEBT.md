@@ -143,7 +143,7 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 **File:** `src/client/ClientInit.client.lua`
 **Risk:** `ClientInit.client.lua` holds an explicit ordered list of `loadAndStart()` / `loadInitAndStart()` calls. When a new controller is built (e.g. `MovementController`, `CutsceneController`), a developer must manually add its call in the correct position. If forgotten, the controller's `Start()` is never called and it silently does nothing — no error, no warning, just a non-functional system.
-**Current count:** 7 entries (MatchController, MatchUI, HUD, DeathScreen, CrosshairUI, ViewModelController, GunController).
+**Current count:** 8 entries (MatchController, MatchUI, HUD, DeathScreen, CrosshairUI, ViewModelController, SoundController, GunController).
 **Trigger:** Every time a new controller is built. The risk grows with each addition.
 **Fix when:** The controller count reaches double digits. At that point, consider a self-registration pattern where each ModuleScript registers itself with ClientInit via a shared table, or a folder-scan pattern that discovers and calls all controllers automatically. Until then, the explicit list is simpler and clearer.
 
@@ -192,6 +192,25 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 **Risk:** `RagdollService:Apply()` iterates `character:GetDescendants()` and converts every `Motor6D` it finds. This works correctly for standard Roblox R15 and R6 characters, which have a known, predictable Motor6D hierarchy. If a custom character rig is introduced (e.g. a non-humanoid defender faction, a monster that uses the Humanoid class, or a weapon held by a player model with its own Motor6Ds), `Apply()` may convert joints that should not be ragdolled — breaking the custom rig or producing unexpected physics behavior.
 **Trigger:** Adding any non-standard character rig to the game.
 **Fix when:** A custom rig is introduced. Add a tag or attribute (e.g. `Instance:SetAttribute("RagdollEnabled", true)`) to each Motor6D that should participate in ragdolling, and filter by that attribute in `convertJoint()`.
+
+---
+
+## [DEBT-024] SoundController uses single Sound instances with no pooling
+
+**File:** `src/client/SoundController.lua`
+**Risk:** Each sound type (gunshot, hit, reload, death, dry-fire) is backed by exactly one `Sound` instance. Calling `Sound:Play()` when the instance is already playing restarts it from the beginning rather than spawning a concurrent playback. For `PlayGunshot()` called at `AssaultRifle.fireRate = 0.1 s` intervals, if the gunshot sound asset is longer than 0.1 s, each new shot cuts the previous one audibly. This produces a choppy, interrupted audio experience at the maximum fire rate.
+**Current exposure:** The gunshot asset (`rbxassetid://4792534948`) is a short percussive shot; restart-on-play produces an acceptable rapid-fire stutter at this fire rate. Risk grows if a slower, longer-sounding weapon is added.
+**Trigger:** Adding a weapon with a fire rate longer than the corresponding sound asset's duration, or adding a shotgun/burst weapon that plays multiple sounds at once.
+**Fix when:** A second weapon type with a noticeably longer sound is added. Implement a small sound pool per type (3–5 clones, round-robin `Play()`). Alternatively, use `SoundGroup` with `PolyphonyMode = SoundGroup.Polyphony` if that API is available.
+
+---
+
+## [DEBT-025] DryFire sound has no asset ID assigned
+
+**File:** `src/client/SoundController.lua`
+**Risk:** `ID_DRYFIRE = ""` — `SoundController:PlayDryFire()` logs a warning and returns immediately without playing anything. The method is correct scaffolding, but there is no audible feedback for an empty-chamber click. No caller currently invokes `PlayDryFire()` anyway (there is no ammo system), but once the ammo system is built, the method will be wired up and the missing asset will become audible.
+**Trigger:** The ammo system is built and `PlayDryFire()` is called.
+**Fix when:** The ammo system (or GunController ammo tracking) is added. At that point, select a free Roblox audio asset for an empty-chamber click sound, assign its `rbxassetid://` to `ID_DRYFIRE` in `SoundController.lua`, and remove the guard in `PlayDryFire()`.
 
 ---
 

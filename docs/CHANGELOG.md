@@ -7,6 +7,31 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-07] — Add sound system with gunshot, hit, reload, death sounds
+
+**New file — `src/client/SoundController.lua`**
+- `init()`: creates `SoundService/GameSounds/` folder; creates five `Sound` instances inside it: Gunshot (`rbxassetid://4792534948`, vol 0.6), HitConfirm (`rbxassetid://4612378292`, vol 0.8), Reload (`rbxassetid://3900723713`, vol 0.7), Death (`rbxassetid://3900724014`, vol 0.8), DryFire (no asset assigned yet, vol 0.5). All sounds have `RollOffMaxDistance = 0` (flat/non-positional — correct for local-player feedback)
+- `Start()`: connects `HitConfirmed.OnClientEvent` → `PlayHit()`; connects `RagdollApplied.OnClientEvent` → `PlayDeath()` when `userId == LocalPlayer.UserId`. The death sound plays through DeathScreen's EQ muffle (DeathScreen connects first; EQ is active before PlayDeath fires)
+- Public API: `PlayGunshot()`, `PlayHit()`, `PlayDryFire()` (logs warning, no-ops until DEBT-025 resolved), `PlayReload()`, `PlayDeath()`
+- Volume and asset ID values are named local constants at module level (cannot go in Constants.lua per task scope restriction; move there when a second caller needs them)
+
+**Updated — `src/client/GunController.lua`**
+- Added module-level `require(SoundController)` alongside existing ViewModelController and CrosshairUI requires
+- Added `SoundController:PlayGunshot()` call immediately after `WeaponFired:FireServer()` in the input handler (cosmetic, no server impact)
+
+**Updated — `src/client/ClientInit.client.lua`**
+- Added `loadInitNoGuiAndStart()` helper — for modules that have `init()` (no playerGui argument) followed by `Start()`; fills the gap between `loadAndStart` (no init) and `loadInitAndStart` (init with playerGui)
+- SoundController inserted at position 7 using `loadInitNoGuiAndStart`; GunController shifts to position 8
+- Header comment updated to 8-entry order; dependency note updated (GunController now requires ViewModelController, CrosshairUI, AND SoundController)
+
+**Debt evaluation**
+- DEBT-007 (RoundStateChanged fan-out): **unaffected** — SoundController connects to HitConfirmed and RagdollApplied, not RoundStateChanged
+- DEBT-017 (ClientInit manual update): **worsened** — 8 entries now; count updated
+- Added DEBT-024: single Sound instances have no audio pooling; rapid PlayGunshot() calls restart instead of overlap
+- Added DEBT-025: DryFire has no asset ID; PlayDryFire() is a no-op until the ammo system is built
+
+---
+
 ## [2026-05-07] — Add ragdoll system and death screen with blur and audio muffling
 
 **Death pipeline overview:** `DamageService:killPlayer()` → `RagdollService:Apply()` → `humanoid.Health = 0` → `Humanoid.Died` (TeamService alive tracking, unchanged) + `RagdollApplied:FireAllClients()` (DeathScreen client trigger)

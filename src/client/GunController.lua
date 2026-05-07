@@ -31,6 +31,7 @@ local Logger     = require(Modules:WaitForChild("Logger"))
 local MatchController      = require(script.Parent:WaitForChild("MatchController"))
 local ViewModelController  = require(script.Parent:WaitForChild("ViewModelController"))
 local CrosshairUI          = require(script.Parent:WaitForChild("UI"):WaitForChild("CrosshairUI"))
+local SoundController      = require(script.Parent:WaitForChild("SoundController"))
 
 local Remotes       = ReplicatedStorage:WaitForChild("Remotes")
 local WeaponFired   = Remotes:WaitForChild("WeaponFired")   :: RemoteEvent
@@ -129,7 +130,9 @@ function GunController:Start()
         -- own raycast and decides whether damage is applied.
         WeaponFired:FireServer(origin, direction, now)
 
-        -- ── Client-side visuals (cosmetic only, no gameplay impact) ────────────
+        -- ── Client-side audio and visuals (cosmetic only, no gameplay impact) ───
+
+        SoundController:PlayGunshot()
 
         -- Snap gun body back; RenderStepped in ViewModelController lerps it forward.
         ViewModelController:PlayFireAnimation()

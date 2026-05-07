@@ -13,10 +13,11 @@
 --   4. DeathScreen          — reads RagdollApplied, RoundStateChanged; needs PlayerGui
 --   5. CrosshairUI          — reads RoundStateChanged, exposes ShowHitmarker(); needs PlayerGui
 --   6. ViewModelController  — reads RoundStateChanged, exposes PlayFireAnimation(); no PlayerGui
---   7. GunController        — reads MatchController:GetPhase(); calls ViewModelController and CrosshairUI
+--   7. SoundController      — reads HitConfirmed, RagdollApplied; no PlayerGui; must start before GunController
+--   8. GunController        — reads MatchController:GetPhase(); calls ViewModelController, CrosshairUI, SoundController
 --
--- GunController requires ViewModelController and CrosshairUI at module level, so both
--- must be initialized (Start()ed) before GunController:Start() runs — hence the order above.
+-- GunController requires ViewModelController, CrosshairUI, and SoundController at module level,
+-- so all three must be initialized (Start()ed) before GunController:Start() runs.
 -- DeathScreen has no deps on other controllers and none depend on it; position 4 is arbitrary.
 --
 -- To add a new controller: require it here and call its Start() (or init()+Start())
@@ -41,6 +42,31 @@ local function loadAndStart(name: string, getModule: () -> any)
     local loadOk, controller = pcall(getModule)
     if not loadOk then
         Logger.warn("[ClientInit] Failed to require " .. name .. ": " .. tostring(controller))
+        return
+    end
+    local startOk, startErr = pcall(function()
+        controller:Start()
+    end)
+    if startOk then
+        Logger.debug("[ClientInit] " .. name .. " initialized")
+    else
+        Logger.warn("[ClientInit] " .. name .. " Start() error: " .. tostring(startErr))
+    end
+end
+
+-- Requires a non-UI module that has both init() and Start() with no PlayerGui argument.
+-- Used for controllers that set up internal state in init() before connecting events in Start().
+local function loadInitNoGuiAndStart(name: string, getModule: () -> any)
+    local loadOk, controller = pcall(getModule)
+    if not loadOk then
+        Logger.warn("[ClientInit] Failed to require " .. name .. ": " .. tostring(controller))
+        return
+    end
+    local initOk, initErr = pcall(function()
+        controller:init()
+    end)
+    if not initOk then
+        Logger.warn("[ClientInit] " .. name .. " init() error: " .. tostring(initErr))
         return
     end
     local startOk, startErr = pcall(function()
@@ -114,7 +140,14 @@ loadAndStart("ViewModelController", function()
     return require(script.Parent:WaitForChild("ViewModelController"))
 end)
 
--- 7. GunController — reads MatchController:GetPhase(), calls ViewModelController and CrosshairUI
+-- 7. SoundController — no PlayerGui; must start before GunController so PlayGunshot()
+--    is available when the first shot fires. Uses init()+Start() (no PlayerGui arg).
+loadInitNoGuiAndStart("SoundController", function()
+    return require(script.Parent:WaitForChild("SoundController"))
+end)
+
+-- 8. GunController — reads MatchController:GetPhase(); calls ViewModelController,
+--    CrosshairUI, and SoundController at module level — all three must be Start()ed first.
 loadAndStart("GunController", function()
     return require(script.Parent:WaitForChild("GunController"))
 end)
