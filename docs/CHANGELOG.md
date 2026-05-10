@@ -7,6 +7,24 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-10] — Fix camera mode, viewmodel cleanup on respawn, gun position offset
+
+**Updated — `src/client/ViewModelController.lua`**
+- `Start()`: applies `Enum.CameraMode.LockFirstPerson` to `Players.LocalPlayer` immediately on init, preventing the camera from reverting to third-person
+- `Start()`: connects `localPlayer.CharacterAdded` — on each respawn, calls `self:init()` (destroys old model, clones fresh SCAR from ReplicatedStorage) then re-applies `LockFirstPerson`; this handles `player:LoadCharacter()` calls from TeamService at the start of every PREP
+- `setVisibility` and `RenderStepped` closures now read `local m = self.model` per-call instead of capturing `local model` at `Start()` time, so the fresh clone after each respawn is automatically picked up
+- `BASE_OFFSET` changed from `CFrame.new(0.6, -0.4, -1.2)` to `CFrame.new(3.2, 0.9, -1.2)` to compensate for the Troy Defense AR model's internal geometry layout (~2.6 studs right and ~1.3 studs down relative to the model pivot)
+- Added `local Players = game:GetService("Players")` import (required for LocalPlayer and CharacterAdded)
+
+**Debt evaluation**
+- DEBT-007 (multiple RoundStateChanged listeners): unaffected — count unchanged
+- DEBT-013 (weapon name hardcoded): unaffected
+- DEBT-021 (model cleanup on re-init): unaffected — already resolved; `init()` guard still present
+- DEBT-027 (WaitForChild timeout): unaffected — already resolved; timeout still in place
+- DEBT-028 (BASE_OFFSET hardcoded per-model): **introduced** — see DEBT-028 entry
+
+---
+
 ## [2026-05-07] — Update ViewModelController for Troy Defense AR model structure
 
 **Updated — `src/client/ViewModelController.lua`**

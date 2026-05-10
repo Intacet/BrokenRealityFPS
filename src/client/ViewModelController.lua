@@ -5,6 +5,8 @@
 -- Owns the client-side viewmodel: clones the SCAR model from
 -- ReplicatedStorage/ViewModels and parents it to workspace.CurrentCamera so it
 -- follows the camera every frame via PivotTo.
+-- Locks the local player to first-person and re-applies the lock on every respawn
+-- so TeamService's LoadCharacter() call cannot revert the camera to third person.
 -- Shows only during ACTIVE; hidden during LOBBY, PREP, RESULTS, and MATCHEND.
 -- Exposes PlayFireAnimation() for GunController to call on each shot.
 -- Exposes GetBarrelTipCFrame() so GunController can position the muzzle flash.
@@ -12,6 +14,7 @@
 -- Initialized by ClientInit via loadAndStart() — no PlayerGui needed.
 -- init() is called internally from Start() before event listeners are registered.
 
+local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -27,7 +30,9 @@ local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEve
 -- ============================================================
 
 -- Pivot offset of the model relative to the camera (right, down, forward).
-local BASE_OFFSET = CFrame.new(0.6, -0.4, -1.2)
+-- Compensates for the Troy Defense AR internal layout (~2.6 studs left, ~1.3 below pivot).
+-- May need visual fine-tuning once the model pivot is confirmed in Studio. See DEBT-028.
+local BASE_OFFSET = CFrame.new(3.2, 0.9, -1.2)
 
 -- Recoil snap distance and decay rate.
 -- recoilOffset starts at RECOIL_DIST on fire and decays to 0 at RECOIL_RATE studs/s,
@@ -96,15 +101,29 @@ function ViewModelController:Start()
     if not self.model then
         return
     end
-    local model = self.model :: Model
+
+    local localPlayer = Players.LocalPlayer
+    localPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+
+    -- Re-clone the viewmodel and re-apply the camera lock after each respawn.
+    -- TeamService calls player:LoadCharacter() at the start of every PREP which
+    -- would otherwise revert CameraMode to the default (Classic / third-person).
+    localPlayer.CharacterAdded:Connect(function(_character: Model)
+        self:init()
+        localPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+        Logger.debug("[ViewModelController] Model re-cloned on character respawn")
+    end)
 
     -- Sets Transparency on every BasePart descendant of the model.
     -- Hiding: ALL BaseParts → Transparency 1.
     -- Showing: all BaseParts → Transparency 0, EXCEPT HumanoidRootPart (physics
     -- anchor) and FakeCamera (camera reference part) which must always stay
     -- invisible regardless of phase — they are structural, not visual.
+    -- Reads self.model per-call so re-clones after CharacterAdded are always used.
     local function setVisibility(show: boolean)
-        for _, desc in ipairs(model:GetDescendants()) do
+        local m = self.model
+        if not m then return end
+        for _, desc in ipairs(m:GetDescendants()) do
             if desc:IsA("BasePart") then
                 local part = desc :: BasePart
                 local alwaysHidden = part.Name == "HumanoidRootPart" or part.Name == "FakeCamera"
@@ -125,10 +144,13 @@ function ViewModelController:Start()
 
     -- RenderStepped: reposition the model pivot every frame to follow the camera.
     -- Skipped entirely when not visible to avoid unnecessary PivotTo calls.
+    -- Reads self.model per-call so re-clones after CharacterAdded are always used.
     RunService.RenderStepped:Connect(function(dt: number)
         if not visible then
             return
         end
+        local m = self.model
+        if not m then return end
 
         -- Decay recoil offset back to zero at RECOIL_RATE studs/second.
         if recoilOffset > 0 then
@@ -136,7 +158,7 @@ function ViewModelController:Start()
         end
 
         local cam = workspace.CurrentCamera
-        model:PivotTo(cam.CFrame * BASE_OFFSET * CFrame.new(0, 0, recoilOffset))
+        m:PivotTo(cam.CFrame * BASE_OFFSET * CFrame.new(0, 0, recoilOffset))
     end)
 
     Logger.debug("[ViewModelController] Ready")

@@ -242,6 +242,15 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
+## [DEBT-028] BASE_OFFSET in ViewModelController is hardcoded for the Troy Defense AR model pivot
+
+**File:** `src/client/ViewModelController.lua`
+**Risk:** `BASE_OFFSET = CFrame.new(3.2, 0.9, -1.2)` was set specifically to compensate for the Troy Defense AR's internal geometry — the model's pivot does not sit at the grip, so a large X/Y offset is needed to place it in the right screen position. If a second viewmodel weapon is added with a different internal pivot, it will need a different offset. There is currently no per-weapon offset in `WeaponData`, so either a second constant would be added here (causing a chain of if-elses on weapon name) or both weapons would share the wrong offset.
+**Trigger:** Adding any second viewmodel weapon (e.g. a pistol, sniper, or shotgun with a different model pivot).
+**Fix when:** A second viewmodel weapon is introduced. Move `BASE_OFFSET` into `WeaponData` as a per-entry `viewOffset: CFrame` field; `ViewModelController` reads `WeaponData[currentWeapon].viewOffset` in the `RenderStepped` loop. This also requires `CURRENT_WEAPON` to be accessible to ViewModelController (currently only in GunController — see DEBT-013).
+
+---
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.lua`
