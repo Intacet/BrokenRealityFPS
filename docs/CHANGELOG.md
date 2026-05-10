@@ -7,6 +7,27 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-10] — Revert viewmodel to programmatic placeholder while proper model is sourced
+
+**Updated — `src/client/ViewModelController.lua`**
+- `init()` rebuilt from scratch: no longer clones from `ReplicatedStorage/ViewModels/SCAR`; all geometry is now created programmatically in code
+- Creates a `Model` named `ViewModelPlaceholder` parented to `workspace.CurrentCamera`
+- Parts built inside the model: `GunBody` (0.3 × 0.2 × 1.4, dark grey), `Barrel` (0.08 × 0.08 × 0.6, dark grey, 0.7 studs forward from body centre), `LeftArm` (0.4 × 0.4 × 1.2, Light orange, offset left/below), `RightArm` (same, offset right/below)
+- All parts: `CanCollide false`, `CanQuery false`, `CastShadow false`, `Anchored false`, `Transparency 1` on creation
+- `MuzzleAttachment` added at barrel front tip `(0, 0, −0.3)` in barrel local space
+- `BASE_OFFSET` changed to `CFrame.new(0.6, -0.4, -1.5)` (placeholder-appropriate, no model-specific compensation needed)
+- `setVisibility` simplified: no longer special-cases `HumanoidRootPart` / `FakeCamera` (placeholder has no such parts)
+- Removed all `WaitForChild("ViewModels")` and `WaitForChild("SCAR")` calls — no external asset dependency
+- `ReplicatedStorage` import retained (still needed for Modules and Remotes)
+- All show/hide, `PivotTo`, camera-lock, `CharacterAdded`, `PlayFireAnimation`, and `GetBarrelTipCFrame` logic unchanged
+
+**Debt evaluation**
+- DEBT-021 (model cleanup on re-init): unaffected — `init()` destroy-before-create guard still present; entry remains resolved
+- DEBT-027 (WaitForChild blocks forever): **deleted** — WaitForChild no longer used in `init()`; the entry is now moot
+- DEBT-028 (BASE_OFFSET hardcoded per model): **deleted** — programmatic placeholder uses a geometry-neutral offset; per-weapon offset concern does not apply until a production model with a non-standard pivot is introduced
+
+---
+
 ## [2026-05-10] — Fix camera mode, viewmodel cleanup on respawn, gun position offset
 
 **Updated — `src/client/ViewModelController.lua`**

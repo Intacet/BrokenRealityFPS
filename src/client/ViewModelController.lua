@@ -2,14 +2,17 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > ViewModelController
 --
--- Owns the client-side viewmodel: clones the SCAR model from
--- ReplicatedStorage/ViewModels and parents it to workspace.CurrentCamera so it
--- follows the camera every frame via PivotTo.
+-- Owns the client-side viewmodel: builds a simple programmatic placeholder Model
+-- (GunBody, Barrel, LeftArm, RightArm, MuzzleAttachment) and parents it to
+-- workspace.CurrentCamera so it follows the camera every frame via PivotTo.
 -- Locks the local player to first-person and re-applies the lock on every respawn
 -- so TeamService's LoadCharacter() call cannot revert the camera to third person.
 -- Shows only during ACTIVE; hidden during LOBBY, PREP, RESULTS, and MATCHEND.
 -- Exposes PlayFireAnimation() for GunController to call on each shot.
 -- Exposes GetBarrelTipCFrame() so GunController can position the muzzle flash.
+--
+-- The placeholder is built entirely in code — no ReplicatedStorage asset is
+-- required. Replace init() with a model clone once a production-ready asset exists.
 --
 -- Initialized by ClientInit via loadAndStart() — no PlayerGui needed.
 -- init() is called internally from Start() before event listeners are registered.
@@ -30,9 +33,7 @@ local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEve
 -- ============================================================
 
 -- Pivot offset of the model relative to the camera (right, down, forward).
--- Compensates for the Troy Defense AR internal layout (~2.6 studs left, ~1.3 below pivot).
--- May need visual fine-tuning once the model pivot is confirmed in Studio. See DEBT-028.
-local BASE_OFFSET = CFrame.new(3.2, 0.9, -1.2)
+local BASE_OFFSET = CFrame.new(0.6, -0.4, -1.5)
 
 -- Recoil snap distance and decay rate.
 -- recoilOffset starts at RECOIL_DIST on fire and decays to 0 at RECOIL_RATE studs/s,
@@ -58,46 +59,67 @@ local recoilOffset : number  = 0
 local ViewModelController = {}
 ViewModelController.model = nil :: Model?
 
--- Clones the SCAR model from ReplicatedStorage/ViewModels and parents it to the
--- camera. All BasePart descendants are hidden (Transparency = 1) on creation.
--- If called again (e.g. re-init), the previous model is destroyed first.
+-- Builds the placeholder viewmodel from code and parents it to the camera.
+-- All parts start hidden (Transparency = 1).
+-- If called again (e.g. re-init on respawn), the previous model is destroyed first.
 -- Called internally by Start() before any event listeners are registered.
 function ViewModelController:init()
-    -- Clean up any previous model so re-initialization does not orphan instances.
     if self.model then
         self.model:Destroy()
         self.model = nil
     end
 
-    local viewModels = ReplicatedStorage:WaitForChild("ViewModels", 10)
-    if not viewModels then
-        Logger.warn("[ViewModelController] ViewModels folder not found in ReplicatedStorage after 10s — check Rojo sync")
-        return
-    end
-    local scarModel = viewModels:WaitForChild("SCAR", 10)
-    if not scarModel then
-        Logger.warn("[ViewModelController] SCAR model not found after 10s — check ReplicatedStorage/ViewModels/SCAR exists")
-        return
-    end
-    local clone = (scarModel :: Model):Clone()
-    clone.Parent     = workspace.CurrentCamera
-    self.model       = clone
+    local cam = workspace.CurrentCamera
 
-    -- Start fully hidden; the phase listener in Start() will show during ACTIVE.
-    for _, desc in ipairs(clone:GetDescendants()) do
-        if desc:IsA("BasePart") then
-            (desc :: BasePart).Transparency = 1
-        end
+    local container = Instance.new("Model")
+    container.Name = "ViewModelPlaceholder"
+    container.Parent = cam
+
+    local function makePart(name: string, size: Vector3, color: BrickColor, position: Vector3): Part
+        local p = Instance.new("Part")
+        p.Name        = name
+        p.Size        = size
+        p.BrickColor  = color
+        p.CFrame      = CFrame.new(position)
+        p.CanCollide  = false
+        p.CanQuery    = false
+        p.CastShadow  = false
+        p.Anchored    = false
+        p.Transparency = 1
+        p.Parent      = container
+        return p
     end
 
-    Logger.debug("[ViewModelController] SCAR model cloned and hidden")
+    local darkGrey  = BrickColor.new("Dark grey")
+    local skinTone  = BrickColor.new("Light orange")
+
+    -- Gun body: centred at origin; other parts are offset relative to it.
+    makePart("GunBody", Vector3.new(0.3, 0.2, 1.4), darkGrey, Vector3.new(0, 0, 0))
+
+    -- Barrel: 0.7 studs forward (-Z) from gun body centre.
+    local barrel = makePart("Barrel", Vector3.new(0.08, 0.08, 0.6), darkGrey, Vector3.new(0, 0, -0.7))
+
+    -- Arms: slightly left/right and below the gun body.
+    makePart("LeftArm",  Vector3.new(0.4, 0.4, 1.2), skinTone, Vector3.new(-0.25, -0.2, 0))
+    makePart("RightArm", Vector3.new(0.4, 0.4, 1.2), skinTone, Vector3.new( 0.25, -0.2, 0))
+
+    -- MuzzleAttachment at the front tip of the barrel.
+    -- Barrel is 0.6 long, centred at Z = -0.7, so front tip is at Z = -1.0 world.
+    -- In barrel local space the front face is at (0, 0, -0.3).
+    local muzzle = Instance.new("Attachment")
+    muzzle.Name     = "MuzzleAttachment"
+    muzzle.Position = Vector3.new(0, 0, -0.3)
+    muzzle.Parent   = barrel
+
+    self.model = container
+    Logger.debug("[ViewModelController] Programmatic placeholder built")
 end
 
 function ViewModelController:Start()
     self:init()
 
-    -- If init() returned early because the model assets were missing, the
-    -- controller is inert. Return cleanly so other controllers still initialize.
+    -- init() always succeeds (no external assets); self.model is guaranteed here.
+    -- Guard kept defensively in case init() is extended later with a failure path.
     if not self.model then
         return
     end
@@ -105,29 +127,25 @@ function ViewModelController:Start()
     local localPlayer = Players.LocalPlayer
     localPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
 
-    -- Re-clone the viewmodel and re-apply the camera lock after each respawn.
+    -- Re-build the viewmodel and re-apply the camera lock after each respawn.
     -- TeamService calls player:LoadCharacter() at the start of every PREP which
     -- would otherwise revert CameraMode to the default (Classic / third-person).
     localPlayer.CharacterAdded:Connect(function(_character: Model)
         self:init()
         localPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
-        Logger.debug("[ViewModelController] Model re-cloned on character respawn")
+        Logger.debug("[ViewModelController] Model rebuilt on character respawn")
     end)
 
     -- Sets Transparency on every BasePart descendant of the model.
     -- Hiding: ALL BaseParts → Transparency 1.
-    -- Showing: all BaseParts → Transparency 0, EXCEPT HumanoidRootPart (physics
-    -- anchor) and FakeCamera (camera reference part) which must always stay
-    -- invisible regardless of phase — they are structural, not visual.
-    -- Reads self.model per-call so re-clones after CharacterAdded are always used.
+    -- Showing: all BaseParts → Transparency 0.
+    -- Reads self.model per-call so re-builds after CharacterAdded are always used.
     local function setVisibility(show: boolean)
         local m = self.model
         if not m then return end
         for _, desc in ipairs(m:GetDescendants()) do
             if desc:IsA("BasePart") then
-                local part = desc :: BasePart
-                local alwaysHidden = part.Name == "HumanoidRootPart" or part.Name == "FakeCamera"
-                part.Transparency = (show and not alwaysHidden) and 0 or 1
+                (desc :: BasePart).Transparency = show and 0 or 1
             end
         end
     end
@@ -144,7 +162,7 @@ function ViewModelController:Start()
 
     -- RenderStepped: reposition the model pivot every frame to follow the camera.
     -- Skipped entirely when not visible to avoid unnecessary PivotTo calls.
-    -- Reads self.model per-call so re-clones after CharacterAdded are always used.
+    -- Reads self.model per-call so re-builds after CharacterAdded are always used.
     RunService.RenderStepped:Connect(function(dt: number)
         if not visible then
             return
