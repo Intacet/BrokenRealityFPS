@@ -23,7 +23,7 @@ WeaponData["SCAR"] = {
 }
 
 -- AssaultRifle kept as a fallback definition; not the active weapon (see DEBT-013).
-WeaponData["AssaultRifle"] = {
+WeaponData["AR15"] = {
     damage       = 25,
     fireRate     = 0.1,
     range        = 300,
