@@ -91,16 +91,24 @@ end
 function ViewModelController:Start()
     self:init()
 
-    -- Narrow self.model to Model (non-nil) for use inside closures.
-    -- init() always assigns self.model or errors via WaitForChild.
+    -- If init() returned early because the model assets were missing, the
+    -- controller is inert. Return cleanly so other controllers still initialize.
+    if not self.model then
+        return
+    end
     local model = self.model :: Model
 
     -- Sets Transparency on every BasePart descendant of the model.
+    -- Hiding: ALL BaseParts → Transparency 1.
+    -- Showing: all BaseParts → Transparency 0, EXCEPT HumanoidRootPart (physics
+    -- anchor) and FakeCamera (camera reference part) which must always stay
+    -- invisible regardless of phase — they are structural, not visual.
     local function setVisibility(show: boolean)
-        local t = show and 0 or 1
         for _, desc in ipairs(model:GetDescendants()) do
             if desc:IsA("BasePart") then
-                (desc :: BasePart).Transparency = t
+                local part = desc :: BasePart
+                local alwaysHidden = part.Name == "HumanoidRootPart" or part.Name == "FakeCamera"
+                part.Transparency = (show and not alwaysHidden) and 0 or 1
             end
         end
     end

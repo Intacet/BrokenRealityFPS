@@ -7,6 +7,17 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-07] — Update ViewModelController for Troy Defense AR model structure
+
+**Updated — `src/client/ViewModelController.lua`**
+- `setVisibility(show)` in `Start()`: when hiding (show=false), all BaseParts set to Transparency=1 as before; when showing (show=true), all BaseParts set to Transparency=0 **except** parts named `HumanoidRootPart` or `FakeCamera`, which always remain at Transparency=1 — these are the physics anchor and camera reference part, not visual geometry
+- `Start()`: added nil guard after `self:init()` — if the model failed to load (DEBT-027 early-return path), `Start()` now returns cleanly instead of casting a nil `self.model` to `Model` and crashing; other controllers continue initializing normally
+
+**Debt evaluation**
+- All open entries: unaffected
+
+---
+
 ## [2026-05-07] — Fix DEBT-027: add WaitForChild timeout for SCAR model
 
 **Updated — `src/client/ViewModelController.lua`**
