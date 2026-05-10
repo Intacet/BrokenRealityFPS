@@ -7,6 +7,22 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-10] — Fix placeholder viewmodel part positions to align arms with gun
+
+**Updated — `src/client/ViewModelController.lua`**
+- `GunBody`: size changed to `0.25 × 0.18 × 1.2`, CFrame offset `(0, 0, -0.3)` — centred in view, slightly forward of model pivot
+- `Barrel`: size changed to `0.07 × 0.07 × 0.5`, CFrame offset `(0, 0.04, -0.9)` — thin barrel extending forward and raised slightly above gun body
+- `RightArm`: size changed to `0.35 × 0.35 × 0.9`, BrickColor changed to `Pastel brown`, CFrame offset `(0.12, -0.22, 0.15)` — right hand at the grip, behind and below gun body
+- `LeftArm`: size changed to `0.35 × 0.35 × 0.7`, BrickColor changed to `Pastel brown`, CFrame offset `(-0.05, -0.18, -0.45)` — left hand at the handguard, forward and below gun body
+- `MuzzleAttachment` local position updated to `(0, 0, -0.25)` to match shorter barrel (0.5 length → tip at −0.25 local Z)
+- `BASE_OFFSET` adjusted from `CFrame.new(0.6, -0.4, -1.5)` to `CFrame.new(0.6, -0.5, -1.5)` — shifts the whole viewmodel 0.1 studs lower on screen to match the new part layout
+- `makePart` helper signature changed from `position: Vector3` to `cf: CFrame` so rotation can be added per-part in future without changing the helper
+
+**Debt evaluation**
+- All open entries: unaffected
+
+---
+
 ## [2026-05-10] — Revert viewmodel to programmatic placeholder while proper model is sourced
 
 **Updated — `src/client/ViewModelController.lua`**

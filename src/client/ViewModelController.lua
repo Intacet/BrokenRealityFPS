@@ -33,7 +33,7 @@ local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEve
 -- ============================================================
 
 -- Pivot offset of the model relative to the camera (right, down, forward).
-local BASE_OFFSET = CFrame.new(0.6, -0.4, -1.5)
+local BASE_OFFSET = CFrame.new(0.6, -0.5, -1.5)
 
 -- Recoil snap distance and decay rate.
 -- recoilOffset starts at RECOIL_DIST on fire and decays to 0 at RECOIL_RATE studs/s,
@@ -75,12 +75,12 @@ function ViewModelController:init()
     container.Name = "ViewModelPlaceholder"
     container.Parent = cam
 
-    local function makePart(name: string, size: Vector3, color: BrickColor, position: Vector3): Part
+    local function makePart(name: string, size: Vector3, color: BrickColor, cf: CFrame): Part
         local p = Instance.new("Part")
         p.Name        = name
         p.Size        = size
         p.BrickColor  = color
-        p.CFrame      = CFrame.new(position)
+        p.CFrame      = cf
         p.CanCollide  = false
         p.CanQuery    = false
         p.CastShadow  = false
@@ -90,25 +90,29 @@ function ViewModelController:init()
         return p
     end
 
-    local darkGrey  = BrickColor.new("Dark grey")
-    local skinTone  = BrickColor.new("Light orange")
+    local darkGrey   = BrickColor.new("Dark grey")
+    local pastelBrown = BrickColor.new("Pastel brown")
 
-    -- Gun body: centred at origin; other parts are offset relative to it.
-    makePart("GunBody", Vector3.new(0.3, 0.2, 1.4), darkGrey, Vector3.new(0, 0, 0))
+    -- All offsets are relative to the model pivot (world origin at creation time).
+    -- PivotTo repositions the whole model so relative layout is preserved.
 
-    -- Barrel: 0.7 studs forward (-Z) from gun body centre.
-    local barrel = makePart("Barrel", Vector3.new(0.08, 0.08, 0.6), darkGrey, Vector3.new(0, 0, -0.7))
+    -- Main gun body centred in view, slightly forward of pivot.
+    makePart("GunBody", Vector3.new(0.25, 0.18, 1.2), darkGrey, CFrame.new(0, 0, -0.3))
 
-    -- Arms: slightly left/right and below the gun body.
-    makePart("LeftArm",  Vector3.new(0.4, 0.4, 1.2), skinTone, Vector3.new(-0.25, -0.2, 0))
-    makePart("RightArm", Vector3.new(0.4, 0.4, 1.2), skinTone, Vector3.new( 0.25, -0.2, 0))
+    -- Thin barrel extending forward from the gun body, raised slightly.
+    local barrel = makePart("Barrel", Vector3.new(0.07, 0.07, 0.5), darkGrey, CFrame.new(0, 0.04, -0.9))
+
+    -- Right hand at the grip, behind and below the gun body.
+    makePart("RightArm", Vector3.new(0.35, 0.35, 0.9), pastelBrown, CFrame.new(0.12, -0.22, 0.15))
+
+    -- Left hand at the handguard, forward and below the gun body.
+    makePart("LeftArm",  Vector3.new(0.35, 0.35, 0.7), pastelBrown, CFrame.new(-0.05, -0.18, -0.45))
 
     -- MuzzleAttachment at the front tip of the barrel.
-    -- Barrel is 0.6 long, centred at Z = -0.7, so front tip is at Z = -1.0 world.
-    -- In barrel local space the front face is at (0, 0, -0.3).
+    -- Barrel length is 0.5, so local tip is at Z = -0.25.
     local muzzle = Instance.new("Attachment")
     muzzle.Name     = "MuzzleAttachment"
-    muzzle.Position = Vector3.new(0, 0, -0.3)
+    muzzle.Position = Vector3.new(0, 0, -0.25)
     muzzle.Parent   = barrel
 
     self.model = container
