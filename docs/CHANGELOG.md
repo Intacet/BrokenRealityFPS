@@ -7,6 +7,18 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-10] — Fix ViewModelController visibility state bug on model rebuild
+
+**Updated — `src/client/ViewModelController.lua`**
+- `init()`: added `visible = false` after `self.model = container` — resets the module-level visibility flag to match the newly built model's actual state (all parts at Transparency 1); without this, if `visible` was `true` when `init()` ran (e.g. respawn during ACTIVE), the new model would stay invisible forever
+- `setVisibility`: added `local count = 0` counter that increments per BasePart; added `Logger.debug(string.format(...))` call after the loop reporting the show value and part count — confirms the function is being called and how many parts it touched
+- `RoundStateChanged` listener: removed the `if show ~= visible then` guard; now always calls `setVisibility(show)` unconditionally — eliminates the entire class of state-mismatch bugs where stale `visible` prevents the new model from being shown; minor extra transparency pass per phase change is negligible
+
+**Debt evaluation**
+- All open entries: unaffected
+
+---
+
 ## [2026-05-10] — Fix placeholder viewmodel part positions to align arms with gun
 
 **Updated — `src/client/ViewModelController.lua`**

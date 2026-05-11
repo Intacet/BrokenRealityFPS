@@ -116,6 +116,7 @@ function ViewModelController:init()
     muzzle.Parent   = barrel
 
     self.model = container
+    visible = false
     Logger.debug("[ViewModelController] Programmatic placeholder built")
 end
 
@@ -147,21 +148,22 @@ function ViewModelController:Start()
     local function setVisibility(show: boolean)
         local m = self.model
         if not m then return end
+        local count = 0
         for _, desc in ipairs(m:GetDescendants()) do
             if desc:IsA("BasePart") then
                 (desc :: BasePart).Transparency = show and 0 or 1
+                count += 1
             end
         end
+        Logger.debug(string.format("[ViewModelController] setVisibility(%s) — %d parts", tostring(show), count))
     end
 
     -- Phase listener: show only during ACTIVE; hide during all other phases.
     RoundStateChanged.OnClientEvent:Connect(function(raw: any)
         local payload = raw :: { phase: string }
         local show    = (payload.phase == Constants.Phase.ACTIVE)
-        if show ~= visible then
-            visible = show
-            setVisibility(visible)
-        end
+        visible = show
+        setVisibility(show)
     end)
 
     -- RenderStepped: reposition the model pivot every frame to follow the camera.
