@@ -7,6 +7,15 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-12] — Add object pooling, connection cleanup, and API validation rules to CLAUDE.md
+
+**Updated — `CLAUDE.md`**
+- Added **Object pooling** rule: frequently created/destroyed instances (muzzle flash, impact effects, debris, floating text) must use an object pool instead of `Instance.new()` per event; when a second pooled type is needed, create `src/shared/ObjectPool.lua` as the shared pool module
+- Added **Connection cleanup** rule: all `RBXScriptConnection`s created inside a service or controller must be stored in a local array; on system reset (phase change, round end) or player leave, every connection must be `Disconnect()`ed and the array cleared; no active connections may point to removed players, destroyed instances, or finished rounds
+- Added **Public API validation** rule: every public function accepting required parameters must call `assert()` with a descriptive message before any other logic, to prevent silent failures from bad callers and make errors immediately traceable
+
+---
+
 ## [2026-05-10] — Fix ViewModelController visibility state bug on model rebuild
 
 **Updated — `src/client/ViewModelController.lua`**

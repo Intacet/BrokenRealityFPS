@@ -82,8 +82,13 @@ Constants.KILLFEED_FADE_TIME    = 0.4  -- seconds to tween an entry to transpare
 Constants.TEAM_ATTACKERS = "Attackers"
 Constants.TEAM_DEFENDERS = "Defenders"
 
-Constants.COLOR_TEAM_ATTACKERS = Color3.fromRGB(255, 80,  80)   -- red  — attacker name tint
-Constants.COLOR_TEAM_DEFENDERS = Color3.fromRGB(80,  140, 255)  -- blue — defender name tint
-Constants.COLOR_TEAM_NEUTRAL   = Color3.fromRGB(220, 220, 220)  -- grey — unknown/environment
+Constants.COLOR_TEAM_ATTACKERS = Color3.fromRGB(200,  60,  60)  -- desaturated red  — attacker accent
+Constants.COLOR_TEAM_DEFENDERS = Color3.fromRGB( 60, 120, 200)  -- desaturated blue — defender accent
+Constants.COLOR_TEAM_NEUTRAL   = Color3.fromRGB(160, 160, 160)  -- medium grey — unknown/environment
+
+-- ============================================================
+-- Ammo HUD thresholds (client presentation only)
+-- ============================================================
+Constants.AMMO_LOW_THRESHOLD = 5  -- magazine count at or below which the number turns amber
 
 return Constants

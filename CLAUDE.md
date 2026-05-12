@@ -231,3 +231,12 @@ At the start of every task, read `docs/TECHNICAL_DEBT.md` and check whether the 
 When a task touches a debt entry, evaluate whether the debt is fully resolved, partially resolved, or unresolved based on the actual state of the code after your changes. Do not mark an entry resolved simply because the requested fix was applied — confirm the underlying risk is genuinely gone. Update the entry status with your reasoning.
 
 After every task, run `git add -A`, `git commit -m "[description]"`, and `git push` before ending the session. Never leave completed work uncommitted or unpushed. A task is not finished until it is on GitHub.
+
+**Object pooling:**
+For any object that is created and destroyed frequently during gameplay (muzzle flash parts, bullet impact effects, debris, floating text), use an object pool rather than calling `Instance.new()` on every event. When a second pooled object type is needed, create `src/shared/ObjectPool.lua` as a reusable pool module.
+
+**Connection cleanup:**
+Store all `RBXScriptConnection`s in a local array when created inside a service or controller. When a system resets (phase change, round end) or a player leaves, iterate the array and `Disconnect()` every connection, then clear the array. Never leave active connections pointing to removed players, destroyed instances, or finished rounds.
+
+**Public API validation:**
+Every public API function that accepts required parameters must validate them with `assert()` before any other logic. Example: `assert(typeof(victim) == 'Instance' and victim:IsA('Player'), '[ServiceName] method requires a valid Player')`. This prevents silent failures from bad callers and makes errors immediately traceable.
