@@ -22,7 +22,7 @@ WeaponData["SCAR"] = {
     reserveAmmo  = 100,
 }
 
--- AssaultRifle kept as a fallback definition; not the active weapon (see DEBT-013).
+-- AR15 kept as a secondary definition; not the active weapon (see DEBT-013).
 WeaponData["AR15"] = {
     damage       = 25,
     fireRate     = 0.1,
@@ -30,11 +30,5 @@ WeaponData["AR15"] = {
     magazineSize = 30,
     reserveAmmo  = 90,
 }
-WeaponData["SCAR"] = {
-    damage      = 30,
-    fireRate    = 0.1,
-    range       = 400,
-    magazineSize = 20,
-    reserveAmmo  = 100,
-}
+
 return WeaponData

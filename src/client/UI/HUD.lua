@@ -2,25 +2,25 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > UI > HUD
 --
--- Builds and drives the heads-up display: health bar, team alive counts, and ammo.
--- Health is driven by HealthChanged (server → this client only).
--- Alive counts are driven by TeamStatusUpdate (server → all clients).
--- Ammo is driven by AmmoChanged (server → this client only).
--- Visibility is driven by RoundStateChanged — HUD hides during LOBBY and MATCHEND.
+-- Minimal tactical HUD.
+-- Bottom-left cluster: HEALTH label, bar (220×6 px), health number, ATK/DEF alive counts.
+-- Bottom-right ammo block: magazine number (large), divider, reserve (small), weapon name.
+-- Health bar transitions: white → amber below 50% → red below 25%.
+-- Magazine number transitions: amber at ≤5, red at 0.
+-- Magazine number pulses (scale 1.0 → 1.15 → 1.0 over 0.1s) on every AmmoChanged.
+-- All color transitions use TweenService.
+-- Visibility: hidden during LOBBY and MATCHEND.
 --
 -- Initialized by ClientInit via loadInitAndStart():
 --   1. init(playerGui) — creates all ScreenGui instances
---   2. Start()         — connects HealthChanged, TeamStatusUpdate, RoundStateChanged
+--   2. Start()         — connects all remote listeners
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService      = game:GetService("TweenService")
 
 local Modules   = ReplicatedStorage:WaitForChild("Modules")
 local Constants = require(Modules:WaitForChild("Constants"))
-local Types     = require(Modules:WaitForChild("Types"))
 local Logger    = require(Modules:WaitForChild("Logger"))
-
--- Silence unused-variable warning: Types is imported for its exported types only.
-local _ = Types
 
 local Remotes           = ReplicatedStorage:WaitForChild("Remotes")
 local HealthChanged     = Remotes:WaitForChild("HealthChanged")     :: RemoteEvent
@@ -29,83 +29,115 @@ local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEve
 local AmmoChanged       = Remotes:WaitForChild("AmmoChanged")       :: RemoteEvent
 
 -- ============================================================
--- Configuration
+-- Design tokens
 -- ============================================================
 
-local FONT_BOLD   = Enum.Font.GothamBold
-local FONT_NORMAL = Enum.Font.Gotham
-local WHITE       = Color3.new(1, 1, 1)
-local BLACK       = Color3.new(0, 0, 0)
+local PANEL_COLOR       = Color3.fromRGB(10, 10, 10)
+local PANEL_ALPHA       = 0.6
+local WHITE             = Color3.new(1, 1, 1)
+local GREY              = Color3.fromRGB(160, 160, 160)
+local COLOR_ATK         = Color3.fromRGB(200, 60, 60)
+local COLOR_DEF         = Color3.fromRGB(60, 120, 200)
+local COLOR_WARN        = Color3.fromRGB(220, 160, 40)
 
-local COLOR_HEALTH_HIGH   = Color3.fromRGB(50,  200,  50)  -- green
-local COLOR_HEALTH_MED    = Color3.fromRGB(220, 160,  20)  -- yellow-orange
-local COLOR_HEALTH_LOW    = Color3.fromRGB(200,  40,  40)  -- red
+local BAR_FULL  = WHITE
+local BAR_MED   = COLOR_WARN
+local BAR_LOW   = COLOR_ATK  -- same red as attacker accent
 
-local HEALTH_WARN_THRESHOLD   = 0.5   -- below this ratio the bar turns yellow-orange
-local HEALTH_DANGER_THRESHOLD = 0.25  -- below this ratio the bar turns red
-
-local HEALTH_BAR_WIDTH  = 200
-local HEALTH_BAR_HEIGHT = 14
-
-local AMMO_FRAME_WIDTH  = 130
-local AMMO_FRAME_HEIGHT = 44
-
--- ============================================================
--- GUI references (set inside init())
--- ============================================================
-
-local hudScreen    : ScreenGui
-local hudFrame     : Frame
-local healthNumber : TextLabel
-local healthBarBg  : Frame
-local healthBarFill: Frame
-local teamStatus   : TextLabel
-local ammoFrame    : Frame
-local ammoLabel    : TextLabel
+local HEALTH_BAR_W  = 220
+local HEALTH_BAR_H  = 6
+local HUD_PAD       = 12
+local HUD_BOTTOM    = 16
 
 -- ============================================================
--- Private helpers
+-- GUI references (set in init())
 -- ============================================================
 
-local function makeLabel(
-    parent: Instance,
-    name: string,
-    size: UDim2,
-    pos: UDim2,
-    textSize: number,
-    font: Enum.Font
+local hudScreen     : ScreenGui
+local hudFrame      : Frame      -- bottom-left health cluster
+local ammoFrame     : Frame      -- bottom-right ammo block
+local healthBarFill : Frame
+local healthNumber  : TextLabel
+local aliveLabel    : TextLabel
+local magLabel      : TextLabel
+local magScale      : UIScale
+local reserveLabel  : TextLabel
+
+-- ============================================================
+-- Helpers
+-- ============================================================
+
+local function label(
+    parent   : Instance,
+    text     : string,
+    size     : UDim2,
+    pos      : UDim2,
+    fontSize : number,
+    bold     : boolean,
+    color    : Color3
 ): TextLabel
-    local label = Instance.new("TextLabel")
-    label.Name                   = name
-    label.Size                   = size
-    label.Position               = pos
-    label.BackgroundTransparency = 1
-    label.TextColor3             = WHITE
-    label.TextStrokeTransparency = 0.5
-    label.TextStrokeColor3       = BLACK
-    label.Font                   = font
-    label.TextSize               = textSize
-    label.TextXAlignment         = Enum.TextXAlignment.Left
-    label.Parent                 = parent
-    return label
+    local lbl = Instance.new("TextLabel")
+    lbl.Size                   = size
+    lbl.Position               = pos
+    lbl.BackgroundTransparency = 1
+    lbl.Text                   = text
+    lbl.TextColor3             = color
+    lbl.Font                   = bold and Enum.Font.GothamBold or Enum.Font.Gotham
+    lbl.TextSize               = fontSize
+    lbl.TextXAlignment         = Enum.TextXAlignment.Left
+    lbl.TextYAlignment         = Enum.TextYAlignment.Center
+    lbl.Parent                 = parent
+    return lbl
+end
+
+local function setHealthColor(ratio: number)
+    local target: Color3
+    if ratio > 0.5 then
+        target = BAR_FULL
+    elseif ratio > 0.25 then
+        target = BAR_MED
+    else
+        target = BAR_LOW
+    end
+    TweenService:Create(
+        healthBarFill,
+        TweenInfo.new(0.15, Enum.EasingStyle.Linear),
+        { BackgroundColor3 = target }
+    ):Play()
+end
+
+local function setHealth(hp: number)
+    local ratio = math.clamp(hp / Constants.MAX_HEALTH, 0, 1)
+    healthNumber.Text = tostring(math.ceil(hp))
+    TweenService:Create(
+        healthBarFill,
+        TweenInfo.new(0.1, Enum.EasingStyle.Linear),
+        { Size = UDim2.new(ratio, 0, 1, 0) }
+    ):Play()
+    setHealthColor(ratio)
 end
 
 local function setAmmo(mag: number, reserve: number)
-    ammoLabel.Text = string.format("%d / %d", mag, reserve)
-end
+    magLabel.Text     = tostring(mag)
+    reserveLabel.Text = tostring(reserve)
 
-local function setHealth(health: number)
-    local ratio = math.clamp(health / Constants.MAX_HEALTH, 0, 1)
-    healthNumber.Text = tostring(math.ceil(health))
-    healthBarFill.Size = UDim2.new(ratio, 0, 1, 0)
-
-    if ratio > HEALTH_WARN_THRESHOLD then
-        healthBarFill.BackgroundColor3 = COLOR_HEALTH_HIGH
-    elseif ratio > HEALTH_DANGER_THRESHOLD then
-        healthBarFill.BackgroundColor3 = COLOR_HEALTH_MED
+    -- Color magazine number based on ammo level
+    local magColor: Color3
+    if mag == 0 then
+        magColor = BAR_LOW
+    elseif mag <= 5 then
+        magColor = COLOR_WARN
     else
-        healthBarFill.BackgroundColor3 = COLOR_HEALTH_LOW
+        magColor = WHITE
     end
+    magLabel.TextColor3 = magColor
+
+    -- Pulse scale: 1.0 → 1.15 → 1.0 over 0.1s
+    magScale.Scale = 1.0
+    TweenService:Create(magScale, TweenInfo.new(0.05, Enum.EasingStyle.Linear), { Scale = 1.15 }):Play()
+    task.delay(0.05, function()
+        TweenService:Create(magScale, TweenInfo.new(0.05, Enum.EasingStyle.Linear), { Scale = 1.0 }):Play()
+    end)
 end
 
 -- ============================================================
@@ -114,112 +146,162 @@ end
 
 local HUD = {}
 
--- Creates all ScreenGui elements. Must be called before Start().
 function HUD:init(playerGui: PlayerGui)
-    hudScreen = Instance.new("ScreenGui")
-    hudScreen.Name           = "HUD"
-    hudScreen.ResetOnSpawn   = false
+    hudScreen               = Instance.new("ScreenGui")
+    hudScreen.Name          = "HUD"
+    hudScreen.ResetOnSpawn  = false
     hudScreen.IgnoreGuiInset = true
-    hudScreen.Parent         = playerGui
+    hudScreen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    hudScreen.Parent        = playerGui
 
-    -- Bottom-left frame anchored to the lower-left corner.
-    hudFrame = Instance.new("Frame")
-    hudFrame.Name                  = "HUDFrame"
-    hudFrame.Size                  = UDim2.new(0, HEALTH_BAR_WIDTH + 10, 0, 64)
-    hudFrame.Position              = UDim2.new(0, 12, 1, -76)
-    hudFrame.BackgroundColor3      = BLACK
-    hudFrame.BackgroundTransparency = 0.6
-    hudFrame.Visible               = false
-    hudFrame.Parent                = hudScreen
+    -- ── Bottom-left health cluster ────────────────────────────────────────────
+    -- Layout (top to bottom, all within hudFrame):
+    --   "HEALTH"  (grey, 11)
+    --   [====bar====] [number]
+    --   ATK: N  |  DEF: N  (grey, 11)
 
-    -- Health number label (e.g. "75").
-    healthNumber = makeLabel(
-        hudFrame, "HealthNumber",
-        UDim2.new(0, HEALTH_BAR_WIDTH, 0, 22),
-        UDim2.new(0, 6, 0, 4),
-        18, FONT_BOLD
-    )
-    healthNumber.Text = tostring(Constants.MAX_HEALTH)
+    local clusterH = 11 + 4 + HEALTH_BAR_H + 4 + 11  -- labels + bar + gaps
+    hudFrame                     = Instance.new("Frame")
+    hudFrame.Name                = "HealthCluster"
+    hudFrame.Size                = UDim2.fromOffset(HEALTH_BAR_W + 40, clusterH + 8)
+    hudFrame.Position            = UDim2.new(0, HUD_PAD, 1, -(clusterH + 8 + HUD_BOTTOM))
+    hudFrame.BackgroundColor3    = PANEL_COLOR
+    hudFrame.BackgroundTransparency = PANEL_ALPHA
+    hudFrame.BorderSizePixel     = 0
+    hudFrame.Visible             = false
+    hudFrame.Parent              = hudScreen
 
-    -- Health bar background (dark).
-    healthBarBg = Instance.new("Frame")
-    healthBarBg.Name                  = "HealthBarBg"
-    healthBarBg.Size                  = UDim2.new(0, HEALTH_BAR_WIDTH, 0, HEALTH_BAR_HEIGHT)
-    healthBarBg.Position              = UDim2.new(0, 6, 0, 28)
-    healthBarBg.BackgroundColor3      = Color3.fromRGB(40, 40, 40)
-    healthBarBg.BorderSizePixel       = 0
-    healthBarBg.Parent                = hudFrame
+    -- "HEALTH" label
+    label(hudFrame, "HEALTH",
+        UDim2.fromOffset(HEALTH_BAR_W, 11),
+        UDim2.fromOffset(6, 4),
+        11, false, GREY)
 
-    -- Health bar fill (coloured, scales with health ratio).
-    healthBarFill = Instance.new("Frame")
-    healthBarFill.Name             = "HealthBarFill"
-    healthBarFill.Size             = UDim2.fromScale(1, 1)
-    healthBarFill.BackgroundColor3 = COLOR_HEALTH_HIGH
+    -- Bar row: bar background + fill + health number side-by-side
+    local barY = 4 + 11 + 4
+    local barBg              = Instance.new("Frame")
+    barBg.Name               = "BarBg"
+    barBg.Size               = UDim2.fromOffset(HEALTH_BAR_W, HEALTH_BAR_H)
+    barBg.Position           = UDim2.fromOffset(6, barY)
+    barBg.BackgroundColor3   = Color3.fromRGB(30, 30, 30)
+    barBg.BorderSizePixel    = 0
+    barBg.Parent             = hudFrame
+
+    healthBarFill            = Instance.new("Frame")
+    healthBarFill.Name       = "BarFill"
+    healthBarFill.Size       = UDim2.fromScale(1, 1)
+    healthBarFill.BackgroundColor3 = BAR_FULL
     healthBarFill.BorderSizePixel  = 0
-    healthBarFill.Parent           = healthBarBg
+    healthBarFill.Parent     = barBg
 
-    -- Team status label — bottom of the HUD frame.
-    teamStatus = makeLabel(
-        hudFrame, "TeamStatus",
-        UDim2.new(0, HEALTH_BAR_WIDTH, 0, 18),
-        UDim2.new(0, 6, 0, 44),
-        13, FONT_NORMAL
-    )
-    teamStatus.Text = "ATK: — · DEF: —"
+    healthNumber = label(hudFrame, tostring(Constants.MAX_HEALTH),
+        UDim2.fromOffset(36, HEALTH_BAR_H + 4),
+        UDim2.fromOffset(HEALTH_BAR_W + 8, barY - 2),
+        14, true, WHITE)
+    healthNumber.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- Ammo display — bottom-right corner, separate from the health frame.
-    ammoFrame = Instance.new("Frame")
-    ammoFrame.Name                   = "AmmoFrame"
-    ammoFrame.Size                   = UDim2.new(0, AMMO_FRAME_WIDTH, 0, AMMO_FRAME_HEIGHT)
-    ammoFrame.Position               = UDim2.new(1, -(AMMO_FRAME_WIDTH + 12), 1, -(AMMO_FRAME_HEIGHT + 16))
-    ammoFrame.BackgroundColor3       = BLACK
-    ammoFrame.BackgroundTransparency = 0.6
-    ammoFrame.BorderSizePixel        = 0
-    ammoFrame.Visible                = false
-    ammoFrame.Parent                 = hudScreen
+    -- Alive counts label
+    local aliveY = barY + HEALTH_BAR_H + 4
+    aliveLabel = label(hudFrame, "ATK: —  |  DEF: —",
+        UDim2.fromOffset(HEALTH_BAR_W + 34, 11),
+        UDim2.fromOffset(6, aliveY),
+        11, false, GREY)
 
-    ammoLabel = Instance.new("TextLabel")
-    ammoLabel.Name                   = "AmmoLabel"
-    ammoLabel.Size                   = UDim2.new(1, -8, 1, 0)
-    ammoLabel.Position               = UDim2.fromOffset(4, 0)
-    ammoLabel.BackgroundTransparency = 1
-    ammoLabel.TextColor3             = WHITE
-    ammoLabel.TextStrokeTransparency = 0.5
-    ammoLabel.TextStrokeColor3       = BLACK
-    ammoLabel.Font                   = FONT_BOLD
-    ammoLabel.TextSize               = 22
-    ammoLabel.TextXAlignment         = Enum.TextXAlignment.Right
-    ammoLabel.Text                   = "— / —"
-    ammoLabel.Parent                 = ammoFrame
+    -- ── Bottom-right ammo block ───────────────────────────────────────────────
+    -- Layout (top to bottom):
+    --   [magazine number large]
+    --   ────────────────  (thin line)
+    --   [reserve small grey]
+    --   [SCAR small grey]
+
+    local ammoW = 90
+    local ammoH = 70
+    ammoFrame                     = Instance.new("Frame")
+    ammoFrame.Name                = "AmmoBlock"
+    ammoFrame.Size                = UDim2.fromOffset(ammoW, ammoH)
+    ammoFrame.Position            = UDim2.new(1, -(ammoW + HUD_PAD), 1, -(ammoH + HUD_BOTTOM))
+    ammoFrame.BackgroundColor3    = PANEL_COLOR
+    ammoFrame.BackgroundTransparency = PANEL_ALPHA
+    ammoFrame.BorderSizePixel     = 0
+    ammoFrame.Visible             = false
+    ammoFrame.Parent              = hudScreen
+
+    -- Magazine number — large, centred, with a UIScale for the pulse
+    local magWrapper              = Instance.new("Frame")
+    magWrapper.Name               = "MagWrapper"
+    magWrapper.Size               = UDim2.fromOffset(ammoW, 34)
+    magWrapper.Position           = UDim2.fromOffset(0, 4)
+    magWrapper.BackgroundTransparency = 1
+    magWrapper.Parent             = ammoFrame
+
+    magScale                = Instance.new("UIScale")
+    magScale.Scale          = 1
+    magScale.Parent         = magWrapper
+
+    magLabel = Instance.new("TextLabel")
+    magLabel.Name                   = "MagLabel"
+    magLabel.Size                   = UDim2.fromScale(1, 1)
+    magLabel.BackgroundTransparency = 1
+    magLabel.Text                   = "—"
+    magLabel.TextColor3             = WHITE
+    magLabel.Font                   = Enum.Font.GothamBold
+    magLabel.TextSize               = 28
+    magLabel.TextXAlignment         = Enum.TextXAlignment.Center
+    magLabel.TextYAlignment         = Enum.TextYAlignment.Center
+    magLabel.Parent                 = magWrapper
+
+    -- Thin divider line
+    local divider              = Instance.new("Frame")
+    divider.Name               = "Divider"
+    divider.Size               = UDim2.new(1, -12, 0, 1)
+    divider.Position           = UDim2.fromOffset(6, 40)
+    divider.BackgroundColor3   = GREY
+    divider.BackgroundTransparency = 0.4
+    divider.BorderSizePixel    = 0
+    divider.Parent             = ammoFrame
+
+    -- Reserve count
+    reserveLabel = label(ammoFrame, "—",
+        UDim2.fromOffset(ammoW, 14),
+        UDim2.fromOffset(0, 43),
+        14, false, GREY)
+    reserveLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+    -- Weapon name
+    label(ammoFrame, "SCAR",
+        UDim2.fromOffset(ammoW, 12),
+        UDim2.fromOffset(0, 57),
+        10, false, GREY).TextXAlignment = Enum.TextXAlignment.Center
 
     Logger.debug("[HUD] GUI created")
 end
 
--- Connects HealthChanged, TeamStatusUpdate, and RoundStateChanged.
--- Must be called after init().
 function HUD:Start()
-    -- Show full health on first connect so the bar is not empty before the first update.
     setHealth(Constants.MAX_HEALTH)
 
-    HealthChanged.OnClientEvent:Connect(function(health: number)
-        setHealth(health)
+    HealthChanged.OnClientEvent:Connect(function(hp: number)
+        setHealth(hp)
     end)
 
     TeamStatusUpdate.OnClientEvent:Connect(function(attAlive: number, defAlive: number)
-        teamStatus.Text = string.format("ATK: %d · DEF: %d", attAlive, defAlive)
+        local atkStr = string.format('<font color="rgb(%d,%d,%d)">ATK: %d</font>', 200, 60, 60, attAlive)
+        local defStr = string.format('<font color="rgb(%d,%d,%d)">DEF: %d</font>', 60, 120, 200, defAlive)
+        aliveLabel.RichText = true
+        aliveLabel.Text     = atkStr .. "  |  " .. defStr
+        -- suppress unused warnings
+        local _ = COLOR_ATK
+        local __ = COLOR_DEF
     end)
 
     AmmoChanged.OnClientEvent:Connect(function(mag: number, reserve: number)
         setAmmo(mag, reserve)
     end)
 
-    -- Show HUD elements only during active gameplay phases; hide otherwise.
     RoundStateChanged.OnClientEvent:Connect(function(raw: any)
-        local payload = raw :: Types.RoundStatePayload
-        local phase   = payload.phase
-        local visible = (phase ~= Constants.Phase.LOBBY and phase ~= Constants.Phase.MATCHEND)
-        hudFrame.Visible  = visible
-        ammoFrame.Visible = visible
+        local payload = raw :: { phase: string }
+        local show = (payload.phase ~= Constants.Phase.LOBBY and payload.phase ~= Constants.Phase.MATCHEND)
+        hudFrame.Visible  = show
+        ammoFrame.Visible = show
     end)
 
     Logger.debug("[HUD] Started")

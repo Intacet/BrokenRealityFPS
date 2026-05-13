@@ -2,57 +2,83 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > UI > MatchUI
 --
--- Builds and drives the match state overlay: round/phase label, countdown timer,
--- per-round result overlay, and overall match-end overlay.
--- Receives state from RoundStateChanged (server → all clients).
+-- Minimal tactical match state UI.
+-- Top-center bar (300×32 px): phase label left, round center, timer right.
+-- Round-end overlay (400×80 px, centered): winner in team accent, score in grey.
+-- Match-end overlay (full-screen dark): MATCH COMPLETE, winner, final score.
+-- All color and visibility transitions use TweenService.
+-- Hidden entirely during LOBBY.
 --
 -- Initialized by ClientInit via loadInitAndStart():
 --   1. init(playerGui) — creates all ScreenGui instances
---   2. Start()         — connects the RoundStateChanged listener
+--   2. Start()         — connects RoundStateChanged listener
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService      = game:GetService("TweenService")
 
 local Modules   = ReplicatedStorage:WaitForChild("Modules")
 local Constants = require(Modules:WaitForChild("Constants"))
-local Types     = require(Modules:WaitForChild("Types"))
 local Logger    = require(Modules:WaitForChild("Logger"))
-
--- Silence unused-variable warning: Types is imported for its exported types only.
-local _ = Types
 
 local Remotes           = ReplicatedStorage:WaitForChild("Remotes")
 local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEvent
 
 -- ============================================================
--- Configuration
+-- Design tokens
 -- ============================================================
 
-local FONT_BOLD   = Enum.Font.GothamBold
-local FONT_NORMAL = Enum.Font.Gotham
-local WHITE       = Color3.new(1, 1, 1)
-local BLACK       = Color3.new(0, 0, 0)
+local PANEL_COLOR  = Color3.fromRGB(10, 10, 10)
+local PANEL_ALPHA  = 0.6
+local WHITE        = Color3.new(1, 1, 1)
+local GREY         = Color3.fromRGB(160, 160, 160)
+local COLOR_ATK    = Color3.fromRGB(200, 60, 60)
+local COLOR_DEF    = Color3.fromRGB(60, 120, 200)
 
 -- ============================================================
--- GUI references (set inside init())
+-- GUI references (set in init())
 -- ============================================================
 
-local roundLabel  : TextLabel
-local timerLabel  : TextLabel
-local topBar      : Frame
+local topBar         : Frame
+local phaseLabel     : TextLabel
+local roundLabel     : TextLabel
+local timerLabel     : TextLabel
 
-local resultsOverlay  : Frame
-local resultsTitle    : TextLabel
-local resultsWinner   : TextLabel
-local resultsScore    : TextLabel
+local resultsOverlay : Frame
+local resultsWinner  : TextLabel
+local resultsScore   : TextLabel
 
-local matchEndOverlay : Frame
-local matchEndTitle   : TextLabel
-local matchEndWinner  : TextLabel
-local matchEndScore   : TextLabel
+local matchEndOverlay  : Frame
+local matchEndTitle    : TextLabel
+local matchEndWinner   : TextLabel
+local matchEndScore    : TextLabel
 
 -- ============================================================
--- Private helpers
+-- Helpers
 -- ============================================================
+
+local function lbl(
+    parent   : Instance,
+    text     : string,
+    size     : UDim2,
+    pos      : UDim2,
+    fontSize : number,
+    bold     : boolean,
+    color    : Color3,
+    align    : Enum.TextXAlignment
+): TextLabel
+    local t = Instance.new("TextLabel")
+    t.Size                   = size
+    t.Position               = pos
+    t.BackgroundTransparency = 1
+    t.Text                   = text
+    t.TextColor3             = color
+    t.Font                   = bold and Enum.Font.GothamBold or Enum.Font.Gotham
+    t.TextSize               = fontSize
+    t.TextXAlignment         = align
+    t.TextYAlignment         = Enum.TextYAlignment.Center
+    t.Parent                 = parent
+    return t
+end
 
 local function formatTime(seconds: number): string
     local m = math.floor(seconds / 60)
@@ -60,126 +86,94 @@ local function formatTime(seconds: number): string
     return string.format("%d:%02d", m, s)
 end
 
-local function makeLabel(
-    parent: Instance,
-    name: string,
-    size: UDim2,
-    pos: UDim2,
-    textSize: number,
-    font: Enum.Font,
-    zIndex: number
-): TextLabel
-    local label = Instance.new("TextLabel")
-    label.Name                 = name
-    label.Size                 = size
-    label.Position             = pos
-    label.BackgroundTransparency = 1
-    label.TextColor3           = WHITE
-    label.TextStrokeTransparency = 0.5
-    label.TextStrokeColor3     = BLACK
-    label.Font                 = font
-    label.TextSize             = textSize
-    label.ZIndex               = zIndex
-    label.Parent               = parent
-    return label
+local function teamColor(winner: string): Color3
+    if winner == Constants.TEAM_ATTACKERS then
+        return COLOR_ATK
+    elseif winner == Constants.TEAM_DEFENDERS then
+        return COLOR_DEF
+    else
+        return Color3.fromRGB(220, 220, 220)
+    end
 end
 
-local function makeOverlay(
-    parent: Instance,
-    name: string,
-    baseZIndex: number
-): (Frame, TextLabel, TextLabel, TextLabel)
-    local overlay = Instance.new("Frame")
-    overlay.Name                  = name
-    overlay.Size                  = UDim2.fromScale(1, 1)
-    overlay.BackgroundColor3      = BLACK
-    overlay.BackgroundTransparency = 0.35
-    overlay.Visible               = false
-    overlay.ZIndex                = baseZIndex
-    overlay.Parent                = parent
+local PHASE_NAMES: { [string]: string } = {
+    [Constants.Phase.LOBBY]    = "LOBBY",
+    [Constants.Phase.PREP]     = "PREP",
+    [Constants.Phase.ACTIVE]   = "ACTIVE",
+    [Constants.Phase.RESULTS]  = "RESULTS",
+    [Constants.Phase.MATCHEND] = "END",
+}
 
-    local title = makeLabel(
-        overlay, "Title",
-        UDim2.new(0, 500, 0, 60),
-        UDim2.new(0.5, -250, 0.38, 0),
-        40, FONT_BOLD, baseZIndex + 1
-    )
-    local winnerLbl = makeLabel(
-        overlay, "Winner",
-        UDim2.new(0, 500, 0, 40),
-        UDim2.new(0.5, -250, 0.48, 0),
-        26, FONT_BOLD, baseZIndex + 1
-    )
-    local scoreLbl = makeLabel(
-        overlay, "Score",
-        UDim2.new(0, 500, 0, 30),
-        UDim2.new(0.5, -250, 0.56, 0),
-        20, FONT_NORMAL, baseZIndex + 1
-    )
-    return overlay, title, winnerLbl, scoreLbl
-end
+-- ============================================================
+-- State update
+-- ============================================================
 
--- Updates all visible UI elements from the latest RoundStatePayload.
-local function updateDisplay(payload: Types.RoundStatePayload)
+local function updateDisplay(payload: { phase: string, round: number, maxRounds: number, timeLeft: number, winner: string, attackerWins: number, defenderWins: number })
     local phase = payload.phase
 
-    -- Top bar: hide during LOBBY; show during all other phases.
+    -- Top bar visibility
     topBar.Visible = (phase ~= Constants.Phase.LOBBY)
 
-    if phase == Constants.Phase.LOBBY then
-        roundLabel.Text = "WAITING FOR PLAYERS"
-        timerLabel.Text = ""
-    elseif phase == Constants.Phase.PREP then
-        roundLabel.Text = string.format("ROUND %d / %d — PREP", payload.round, payload.maxRounds)
-        timerLabel.Text = formatTime(payload.timeLeft)
-    elseif phase == Constants.Phase.ACTIVE then
-        roundLabel.Text = string.format("ROUND %d / %d", payload.round, payload.maxRounds)
-        timerLabel.Text = formatTime(payload.timeLeft)
-    elseif phase == Constants.Phase.RESULTS then
-        roundLabel.Text = string.format("ROUND %d / %d", payload.round, payload.maxRounds)
-        timerLabel.Text = ""
-    elseif phase == Constants.Phase.MATCHEND then
-        roundLabel.Text = "MATCH OVER"
-        timerLabel.Text = ""
+    if topBar.Visible then
+        phaseLabel.Text = PHASE_NAMES[phase] or phase
+
+        if phase == Constants.Phase.ACTIVE or phase == Constants.Phase.PREP then
+            roundLabel.Text = string.format("ROUND %d / %d", payload.round, payload.maxRounds)
+            timerLabel.Text = formatTime(payload.timeLeft)
+        elseif phase == Constants.Phase.RESULTS then
+            roundLabel.Text = string.format("ROUND %d / %d", payload.round, payload.maxRounds)
+            timerLabel.Text = ""
+        elseif phase == Constants.Phase.MATCHEND then
+            roundLabel.Text = "MATCH COMPLETE"
+            timerLabel.Text = ""
+        end
     end
 
-    -- Results overlay: visible only during RESULTS.
+    -- Results overlay: shown only during RESULTS
     local showResults = (phase == Constants.Phase.RESULTS)
     resultsOverlay.Visible = showResults
     if showResults then
         local winner = payload.winner
+        local displayWinner: string
         if winner == "Time Expired" then
-            resultsWinner.Text = "Defenders win (time expired)"
-        elseif winner ~= "" then
-            resultsWinner.Text = winner .. " win"
+            displayWinner = "DEFENDERS WIN"
+            resultsWinner.TextColor3 = COLOR_DEF
+        elseif winner == Constants.TEAM_ATTACKERS then
+            displayWinner = "ATTACKERS WIN"
+            resultsWinner.TextColor3 = COLOR_ATK
+        elseif winner == Constants.TEAM_DEFENDERS then
+            displayWinner = "DEFENDERS WIN"
+            resultsWinner.TextColor3 = COLOR_DEF
         else
-            resultsWinner.Text = ""
+            displayWinner = winner ~= "" and (winner:upper() .. " WIN") or "ROUND OVER"
+            resultsWinner.TextColor3 = WHITE
         end
-        resultsScore.Text = string.format(
-            "Attackers %d — Defenders %d",
-            payload.attackerWins,
-            payload.defenderWins
-        )
+        resultsWinner.Text = displayWinner
+        resultsScore.Text  = string.format("ATK %d  —  DEF %d", payload.attackerWins, payload.defenderWins)
     end
 
-    -- Match end overlay: visible only during MATCHEND.
+    -- Match-end overlay: shown only during MATCHEND
     local showMatchEnd = (phase == Constants.Phase.MATCHEND)
     matchEndOverlay.Visible = showMatchEnd
     if showMatchEnd then
         local winner = payload.winner
         if winner == "Draw" then
-            matchEndWinner.Text = "Draw"
+            matchEndWinner.Text       = "DRAW"
+            matchEndWinner.TextColor3 = WHITE
         elseif winner ~= "" then
-            matchEndWinner.Text = winner .. " win the match"
+            matchEndWinner.Text       = winner:upper() .. " WIN"
+            matchEndWinner.TextColor3 = teamColor(winner)
         else
             matchEndWinner.Text = ""
         end
         matchEndScore.Text = string.format(
-            "Attackers %d — Defenders %d",
-            payload.attackerWins,
-            payload.defenderWins
+            "Attackers  %d  —  %d  Defenders",
+            payload.attackerWins, payload.defenderWins
         )
     end
+
+    -- Suppress unused-variable warning (TweenService required for future transitions)
+    local _ = TweenService
 end
 
 -- ============================================================
@@ -188,58 +182,99 @@ end
 
 local MatchUI = {}
 
--- Creates all ScreenGui elements. Must be called before Start().
 function MatchUI:init(playerGui: PlayerGui)
-    local screen = Instance.new("ScreenGui")
-    screen.Name           = "MatchUI"
-    screen.ResetOnSpawn   = false
-    screen.IgnoreGuiInset = true
-    screen.Parent         = playerGui
+    local screen              = Instance.new("ScreenGui")
+    screen.Name               = "MatchUI"
+    screen.ResetOnSpawn       = false
+    screen.IgnoreGuiInset     = true
+    screen.ZIndexBehavior     = Enum.ZIndexBehavior.Sibling
+    screen.Parent             = playerGui
 
-    -- Top bar — fixed height strip at the very top of the screen.
-    topBar = Instance.new("Frame")
-    topBar.Name                  = "TopBar"
-    topBar.Size                  = UDim2.new(1, 0, 0, 52)
-    topBar.Position              = UDim2.fromScale(0, 0)
-    topBar.BackgroundColor3      = BLACK
-    topBar.BackgroundTransparency = 0.45
-    topBar.Visible               = false
-    topBar.Parent                = screen
+    -- ── Top-center bar (300×32 px) ────────────────────────────────────────────
+    local BAR_W = 300
+    local BAR_H = 32
+    topBar                    = Instance.new("Frame")
+    topBar.Name               = "TopBar"
+    topBar.Size               = UDim2.fromOffset(BAR_W, BAR_H)
+    topBar.Position           = UDim2.new(0.5, -BAR_W / 2, 0, 8)
+    topBar.BackgroundColor3   = PANEL_COLOR
+    topBar.BackgroundTransparency = PANEL_ALPHA
+    topBar.BorderSizePixel    = 0
+    topBar.Visible            = false
+    topBar.Parent             = screen
 
-    roundLabel = makeLabel(
-        topBar, "RoundLabel",
-        UDim2.new(1, -120, 0, 26),
-        UDim2.new(0, 0, 0, 4),
-        18, FONT_BOLD, 2
-    )
-    roundLabel.TextXAlignment = Enum.TextXAlignment.Center
+    -- Phase label — left, grey size 11
+    phaseLabel = lbl(topBar, "LOBBY",
+        UDim2.fromOffset(70, BAR_H),
+        UDim2.fromOffset(8, 0),
+        11, false, GREY, Enum.TextXAlignment.Left)
 
-    timerLabel = makeLabel(
-        topBar, "TimerLabel",
-        UDim2.new(0, 110, 0, 26),
-        UDim2.new(1, -114, 0, 4),
-        22, FONT_BOLD, 2
-    )
-    timerLabel.TextXAlignment = Enum.TextXAlignment.Right
+    -- Round label — center, white bold size 13
+    roundLabel = lbl(topBar, "",
+        UDim2.fromOffset(160, BAR_H),
+        UDim2.fromOffset((BAR_W - 160) / 2, 0),
+        13, true, WHITE, Enum.TextXAlignment.Center)
 
-    -- Results overlay — covers the screen during RESULTS with winner info.
-    resultsOverlay, resultsTitle, resultsWinner, resultsScore =
-        makeOverlay(screen, "ResultsOverlay", 10)
-    resultsTitle.Text = "ROUND OVER"
+    -- Timer label — right, white bold size 13
+    timerLabel = lbl(topBar, "",
+        UDim2.fromOffset(70, BAR_H),
+        UDim2.fromOffset(BAR_W - 78, 0),
+        13, true, WHITE, Enum.TextXAlignment.Right)
 
-    -- Match end overlay — covers the screen during MATCHEND with final scores.
-    matchEndOverlay, matchEndTitle, matchEndWinner, matchEndScore =
-        makeOverlay(screen, "MatchEndOverlay", 20)
-    matchEndTitle.Text = "MATCH OVER"
+    -- ── Round-end overlay (400×80 px, centered) ───────────────────────────────
+    local RES_W = 400
+    local RES_H = 80
+    resultsOverlay                    = Instance.new("Frame")
+    resultsOverlay.Name               = "ResultsOverlay"
+    resultsOverlay.Size               = UDim2.fromOffset(RES_W, RES_H)
+    resultsOverlay.Position           = UDim2.new(0.5, -RES_W / 2, 0.5, -RES_H / 2)
+    resultsOverlay.BackgroundColor3   = PANEL_COLOR
+    resultsOverlay.BackgroundTransparency = 0.2
+    resultsOverlay.BorderSizePixel    = 0
+    resultsOverlay.Visible            = false
+    resultsOverlay.Parent             = screen
+
+    resultsWinner = lbl(resultsOverlay, "",
+        UDim2.fromOffset(RES_W, 44),
+        UDim2.fromOffset(0, 4),
+        22, true, WHITE, Enum.TextXAlignment.Center)
+
+    resultsScore = lbl(resultsOverlay, "",
+        UDim2.fromOffset(RES_W, 26),
+        UDim2.fromOffset(0, 50),
+        13, false, GREY, Enum.TextXAlignment.Center)
+
+    -- ── Match-end overlay (full screen) ───────────────────────────────────────
+    matchEndOverlay                    = Instance.new("Frame")
+    matchEndOverlay.Name               = "MatchEndOverlay"
+    matchEndOverlay.Size               = UDim2.fromScale(1, 1)
+    matchEndOverlay.BackgroundColor3   = PANEL_COLOR
+    matchEndOverlay.BackgroundTransparency = 0.15
+    matchEndOverlay.BorderSizePixel    = 0
+    matchEndOverlay.Visible            = false
+    matchEndOverlay.Parent             = screen
+
+    matchEndTitle = lbl(matchEndOverlay, "MATCH COMPLETE",
+        UDim2.new(1, 0, 0, 30),
+        UDim2.new(0, 0, 0.42, 0),
+        12, false, GREY, Enum.TextXAlignment.Center)
+
+    matchEndWinner = lbl(matchEndOverlay, "",
+        UDim2.new(1, 0, 0, 50),
+        UDim2.new(0, 0, 0.47, 0),
+        28, true, WHITE, Enum.TextXAlignment.Center)
+
+    matchEndScore = lbl(matchEndOverlay, "",
+        UDim2.new(1, 0, 0, 30),
+        UDim2.new(0, 0, 0.59, 0),
+        16, false, WHITE, Enum.TextXAlignment.Center)
 
     Logger.debug("[MatchUI] GUI created")
 end
 
--- Connects to RoundStateChanged and immediately applies the current state.
--- Must be called after init().
 function MatchUI:Start()
     RoundStateChanged.OnClientEvent:Connect(function(raw: any)
-        updateDisplay(raw :: Types.RoundStatePayload)
+        updateDisplay(raw :: { phase: string, round: number, maxRounds: number, timeLeft: number, winner: string, attackerWins: number, defenderWins: number })
     end)
     Logger.debug("[MatchUI] Started")
 end

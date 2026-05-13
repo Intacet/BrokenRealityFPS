@@ -234,6 +234,16 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
+## [DEBT-029] ViewModelController setVisibility called every RoundStateChanged tick, not only on phase transitions
+
+**File:** `src/client/ViewModelController.lua`
+**Risk:** The `if show ~= visible then` guard was removed to fix the re-init visibility bug (2026-05-12). Without the guard, `setVisibility` is called every second during ACTIVE (and every tick during any other phase), iterating all model descendants and setting Transparency on each call. This is harmless today with the programmatic placeholder (4 parts), but will scale poorly once a production viewmodel with many parts is introduced.
+**Trigger:** Adding a high-polygon viewmodel model with 50+ parts, or introducing a phase that toggles rapidly.
+**Fix when:** Frame-time profiling reveals the GetDescendants iteration inside setVisibility contributes meaningfully to client frame budget. At that point, restore a state guard (`if show ~= visible then ... end`) — `visible` is already reset to `false` at the end of `init()` so the guard fires correctly after CharacterAdded re-runs `init()`.
+
+---
+
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.lua`

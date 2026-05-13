@@ -116,6 +116,8 @@ function ViewModelController:init()
     muzzle.Parent   = barrel
 
     self.model = container
+    -- Reset visible so the next RoundStateChanged always calls setVisibility,
+    -- even if the phase hasn't changed since the previous character load.
     visible = false
     Logger.debug("[ViewModelController] Programmatic placeholder built")
 end
@@ -146,6 +148,7 @@ function ViewModelController:Start()
     -- Showing: all BaseParts → Transparency 0.
     -- Reads self.model per-call so re-builds after CharacterAdded are always used.
     local function setVisibility(show: boolean)
+        Logger.debug(string.format("[ViewModelController] setVisibility(%s)", tostring(show)))
         local m = self.model
         if not m then return end
         local count = 0
@@ -159,6 +162,9 @@ function ViewModelController:Start()
     end
 
     -- Phase listener: show only during ACTIVE; hide during all other phases.
+    -- Guard removed intentionally: after CharacterAdded re-runs init(), visible is
+    -- reset to false, so the next RoundStateChanged must always call setVisibility
+    -- even when the phase hasn't changed (e.g. ACTIVE fires again after respawn).
     RoundStateChanged.OnClientEvent:Connect(function(raw: any)
         local payload = raw :: { phase: string }
         local show    = (payload.phase == Constants.Phase.ACTIVE)

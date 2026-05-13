@@ -48,6 +48,8 @@ Constants.ANCHOR_PLANT_TIME = 5  -- seconds an attacker must stand on an objecti
 Constants.MAX_HEALTH        = 100 -- maximum and starting health for every player
 Constants.TELEPORT_Y_OFFSET = 3   -- studs above a spawn part's centre so characters land on top
 Constants.RESPAWN_DELAY     = 5   -- seconds before a player re-enters play at round start (reserved for reinforcement system)
+Constants.WALK_SPEED        = 16  -- default WalkSpeed for all players (studs/s)
+Constants.SPRINT_SPEED      = 24  -- WalkSpeed while sprinting (reserved for MovementController)
 
 -- ============================================================
 -- Timing constants
@@ -60,7 +62,7 @@ Constants.MATCH_END_PAUSE    = 3   -- seconds between the end of one match and t
 -- Death screen (client presentation only)
 -- ============================================================
 Constants.DEATH_FADE_TIME      = 0.8  -- seconds to tween the black overlay and blur in on death
-Constants.DEATH_OVERLAY_OPACITY = 0.6  -- target opacity of the black screen overlay (0–1)
+Constants.DEATH_OVERLAY_OPACITY = 0.75 -- target opacity of the black screen overlay (0–1)
 Constants.DEATH_BLUR_SIZE       = 24   -- target blur size applied to Lighting on death
 Constants.DEATH_CLEANUP_TIME    = 0.5  -- seconds to tween the overlay and blur back out on PREP
 Constants.DEATH_EQ_LOW_GAIN     = 0    -- EqualizerSoundEffect low-frequency gain on death (unchanged)
@@ -71,7 +73,7 @@ Constants.DEATH_EQ_HIGH_GAIN    = -60  -- EqualizerSoundEffect high-frequency ga
 -- Kill feed (client presentation only)
 -- ============================================================
 Constants.KILLFEED_DISPLAY_TIME = 4    -- seconds each kill entry is visible before fading out
-Constants.KILLFEED_FADE_TIME    = 0.4  -- seconds to tween an entry to transparent before destroying it
+Constants.KILLFEED_FADE_TIME    = 0.3  -- seconds to tween an entry to transparent before destroying it
 
 -- ============================================================
 -- Team identity — canonical strings and UI colours

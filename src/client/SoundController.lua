@@ -43,11 +43,11 @@ local DRYFIRE_VOLUME  = 0.5
 -- ============================================================
 -- Sound asset IDs
 -- ============================================================
-local ID_GUNSHOT  = "rbxassetid://4792534948"
-local ID_HIT      = "rbxassetid://4612378292"
-local ID_RELOAD   = "rbxassetid://3900723713"
-local ID_DEATH    = "rbxassetid://3900724014"
-local ID_DRYFIRE  = "rbxassetid://9120386446"  -- short metallic click for empty-chamber
+local ID_GUNSHOT  = "rbxassetid://9118294910"
+local ID_HIT      = "rbxassetid://9118294928"
+local ID_RELOAD   = "rbxassetid://9118294935"
+local ID_DEATH    = "rbxassetid://9118294942"
+local ID_DRYFIRE  = "rbxassetid://9118294950"
 
 -- ============================================================
 -- Sound references (assigned in init(), read in Start() and public methods)

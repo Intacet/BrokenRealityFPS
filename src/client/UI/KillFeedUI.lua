@@ -2,11 +2,13 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > UI > KillFeedUI
 --
--- Displays a scrolling kill feed in the top-right corner of the screen.
--- Driven by KillFeed RemoteEvent (server → all clients).
--- Each entry shows "[Killer] → [Victim]" with team-coloured names.
--- Entries stack downward from the top-right, fade after KILLFEED_DISPLAY_TIME seconds,
--- and the oldest entry is removed immediately when a sixth arrives.
+-- Minimal tactical kill feed, top-right corner.
+-- Format: [KillerName]  ›  [VictimName]
+-- Killer name in team accent color, › in grey, victim in team accent color.
+-- Each entry: dark panel 260×24 px with thin UIStroke border, Font Gotham size 12.
+-- Slide-in from right over 0.15s (QuadOut), fade-out over KILLFEED_FADE_TIME (0.3s).
+-- Max 5 entries; oldest removed immediately when a sixth arrives.
+-- Entries stack top-to-bottom with 4 px gap.
 --
 -- Initialized by ClientInit via loadInitAndStart():
 --   1. init(playerGui) — creates all ScreenGui instances
@@ -27,29 +29,29 @@ local KillFeed = Remotes:WaitForChild("KillFeed") :: RemoteEvent
 -- ============================================================
 
 local MAX_ENTRIES     = 5
-local CONTAINER_WIDTH = 260
-local ENTRY_HEIGHT    = 22
-local ENTRY_PADDING   = 2
+local ENTRY_W         = 260
+local ENTRY_H         = 24
+local ENTRY_GAP       = 4
+local CONTAINER_INSET = 8
 
 -- ============================================================
--- GUI references (set inside init())
+-- GUI references (set in init())
 -- ============================================================
 
-local feedScreen    : ScreenGui
 local feedContainer : Frame
 
 -- ============================================================
 -- State
 -- ============================================================
 
+-- Each element is the outer wrapper Frame (managed by UIListLayout).
 local entries      : { Frame } = {}
 local entryCounter : number    = 0
 
 -- ============================================================
--- Private helpers
+-- Helpers
 -- ============================================================
 
--- Returns the Color3 for a given team name using centralized Constants.
 local function teamColor(teamName: string): Color3
     if teamName == Constants.TEAM_ATTACKERS then
         return Constants.COLOR_TEAM_ATTACKERS
@@ -60,104 +62,110 @@ local function teamColor(teamName: string): Color3
     end
 end
 
--- Converts a Color3 to the "rgb(r,g,b)" format required by Roblox RichText.
 local function colorTag(c: Color3): string
-    return string.format(
-        "rgb(%d,%d,%d)",
+    return string.format("rgb(%d,%d,%d)",
         math.floor(c.R * 255 + 0.5),
         math.floor(c.G * 255 + 0.5),
-        math.floor(c.B * 255 + 0.5)
-    )
+        math.floor(c.B * 255 + 0.5))
 end
 
--- Removes a frame from the entries table and destroys it.
--- Safe to call even if the frame was already destroyed (Destroy is idempotent).
-local function removeEntry(frame: Frame)
+local function removeEntry(wrapper: Frame)
     for i, e in ipairs(entries) do
-        if e == frame then
+        if e == wrapper then
             table.remove(entries, i)
             break
         end
     end
-    frame:Destroy()
+    if wrapper.Parent then
+        wrapper:Destroy()
+    end
 end
 
--- Creates one kill-feed entry, appends it to the container, and schedules its removal.
-local function addEntry(
-    killerName: string,
-    victimName: string,
-    killerTeam: string,
-    victimTeam: string
-)
-    -- Enforce the cap: remove the oldest entry before adding a new one.
+local function addEntry(killerName: string, victimName: string, killerTeam: string, victimTeam: string)
+    -- Enforce cap: remove oldest before adding a new one
     if #entries >= MAX_ENTRIES then
         removeEntry(entries[1])
     end
 
     entryCounter += 1
 
-    local frame = Instance.new("Frame")
-    frame.Name                   = "KillEntry"
-    frame.Size                   = UDim2.new(1, 0, 0, ENTRY_HEIGHT)
-    frame.BackgroundColor3       = Color3.new(0, 0, 0)
-    frame.BackgroundTransparency = 0.4
-    frame.BorderSizePixel        = 0
-    frame.LayoutOrder            = entryCounter
-    frame.Parent                 = feedContainer
+    -- ── Outer wrapper (positioned by UIListLayout) ─────────────────────────────
+    local wrapper                    = Instance.new("Frame")
+    wrapper.Name                     = "KillEntry"
+    wrapper.Size                     = UDim2.fromOffset(ENTRY_W, ENTRY_H)
+    wrapper.BackgroundTransparency   = 1  -- transparent container
+    wrapper.BorderSizePixel          = 0
+    wrapper.ClipDescendants          = true
+    wrapper.LayoutOrder              = entryCounter
+    wrapper.Parent                   = feedContainer
 
-    local label = Instance.new("TextLabel")
-    label.Name                   = "KillText"
-    label.Size                   = UDim2.new(1, -8, 1, 0)
-    label.Position               = UDim2.fromOffset(4, 0)
-    label.BackgroundTransparency = 1
-    label.TextColor3             = Color3.new(1, 1, 1)
-    label.Font                   = Enum.Font.GothamBold
-    label.TextSize               = 13
-    label.TextXAlignment         = Enum.TextXAlignment.Left
-    label.TextYAlignment         = Enum.TextYAlignment.Center
-    label.RichText               = true
-    label.Parent                 = frame
+    -- ── Inner panel (slides in from right) ────────────────────────────────────
+    local panel                      = Instance.new("Frame")
+    panel.Name                       = "Panel"
+    panel.Size                       = UDim2.fromOffset(ENTRY_W, ENTRY_H)
+    panel.Position                   = UDim2.fromOffset(ENTRY_W, 0)  -- starts off-screen right
+    panel.BackgroundColor3           = Color3.fromRGB(10, 10, 10)
+    panel.BackgroundTransparency     = 0.4
+    panel.BorderSizePixel            = 0
+    panel.Parent                     = wrapper
 
+    -- Thin border via UIStroke
+    local stroke              = Instance.new("UIStroke")
+    stroke.Color              = Color3.fromRGB(60, 60, 60)
+    stroke.Thickness          = 1
+    stroke.Transparency       = 0
+    stroke.ApplyStrokeMode    = Enum.ApplyStrokeMode.Border
+    stroke.Parent             = panel
+
+    -- Kill text label
+    local textLabel                    = Instance.new("TextLabel")
+    textLabel.Name                     = "KillText"
+    textLabel.Size                     = UDim2.new(1, -8, 1, 0)
+    textLabel.Position                 = UDim2.fromOffset(4, 0)
+    textLabel.BackgroundTransparency   = 1
+    textLabel.TextColor3               = Constants.COLOR_TEAM_NEUTRAL
+    textLabel.Font                     = Enum.Font.Gotham
+    textLabel.TextSize                 = 12
+    textLabel.TextXAlignment           = Enum.TextXAlignment.Left
+    textLabel.TextYAlignment           = Enum.TextYAlignment.Center
+    textLabel.RichText                 = true
+    textLabel.Parent                   = panel
+
+    -- Build rich text: Killer › Victim
     local killerTag = colorTag(teamColor(killerTeam))
     local victimTag = colorTag(teamColor(victimTeam))
+    local greyTag   = colorTag(Constants.COLOR_TEAM_NEUTRAL)
 
     if killerName == "" then
-        -- Environment kill: show a neutral symbol in place of a killer name.
-        label.Text = string.format(
-            '<font color="%s">✦</font> → <font color="%s">%s</font>',
-            colorTag(Constants.COLOR_TEAM_NEUTRAL),
-            victimTag,
-            victimName
-        )
+        textLabel.Text = string.format(
+            '<font color="%s">✦</font> <font color="%s"> › </font> <font color="%s">%s</font>',
+            greyTag, greyTag, victimTag, victimName)
     else
-        label.Text = string.format(
-            '<font color="%s">%s</font> → <font color="%s">%s</font>',
-            killerTag,
-            killerName,
-            victimTag,
-            victimName
-        )
+        textLabel.Text = string.format(
+            '<font color="%s">%s</font> <font color="%s"> › </font> <font color="%s">%s</font>',
+            killerTag, killerName, greyTag, victimTag, victimName)
     end
 
-    entries[#entries + 1] = frame
+    entries[#entries + 1] = wrapper
 
-    -- Schedule fade-out. If the frame was already removed by the max-cap path,
-    -- frame.Parent will be nil and we exit early to avoid tweening a destroyed instance.
+    -- ── Slide in from right ────────────────────────────────────────────────────
+    TweenService:Create(
+        panel,
+        TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        { Position = UDim2.fromOffset(0, 0) }
+    ):Play()
+
+    -- ── Schedule fade-out ─────────────────────────────────────────────────────
     task.delay(Constants.KILLFEED_DISPLAY_TIME, function()
-        if not frame.Parent then
+        if not wrapper.Parent then
             return
         end
-
-        local fadeInfo   = TweenInfo.new(Constants.KILLFEED_FADE_TIME, Enum.EasingStyle.Linear)
-        local frameTween = TweenService:Create(frame, fadeInfo, { BackgroundTransparency = 1 })
-        local labelTween = TweenService:Create(label, fadeInfo, { TextTransparency = 1 })
-
-        frameTween:Play()
-        labelTween:Play()
-
-        -- Remove from entries table and destroy after the fade completes.
-        frameTween.Completed:Connect(function()
-            removeEntry(frame)
+        local fadeInfo = TweenInfo.new(Constants.KILLFEED_FADE_TIME, Enum.EasingStyle.Linear)
+        TweenService:Create(panel,      fadeInfo, { BackgroundTransparency = 1 }):Play()
+        local labelFade = TweenService:Create(textLabel, fadeInfo, { TextTransparency = 1 })
+        labelFade:Play()
+        labelFade.Completed:Connect(function()
+            removeEntry(wrapper)
         end)
     end)
 end
@@ -168,38 +176,36 @@ end
 
 local KillFeedUI = {}
 
--- Creates all ScreenGui elements. Must be called before Start().
 function KillFeedUI:init(playerGui: PlayerGui)
-    feedScreen = Instance.new("ScreenGui")
-    feedScreen.Name           = "KillFeedUI"
-    feedScreen.ResetOnSpawn   = false
-    feedScreen.IgnoreGuiInset = true
-    feedScreen.DisplayOrder   = 5
-    feedScreen.Parent         = playerGui
+    local screen              = Instance.new("ScreenGui")
+    screen.Name               = "KillFeedUI"
+    screen.ResetOnSpawn       = false
+    screen.IgnoreGuiInset     = true
+    screen.DisplayOrder       = 5
+    screen.ZIndexBehavior     = Enum.ZIndexBehavior.Sibling
+    screen.Parent             = playerGui
 
-    -- Transparent container anchored to the top-right corner.
-    -- AutomaticSize = Y lets it grow as entries are added without a fixed height.
-    feedContainer = Instance.new("Frame")
-    feedContainer.Name                   = "KillFeedContainer"
-    feedContainer.AnchorPoint            = Vector2.new(1, 0)
-    feedContainer.Position               = UDim2.new(1, -8, 0, 8)
-    feedContainer.Size                   = UDim2.new(0, CONTAINER_WIDTH, 0, 0)
-    feedContainer.AutomaticSize          = Enum.AutomaticSize.Y
+    -- Container anchored to top-right; entries stack downward via UIListLayout.
+    feedContainer                      = Instance.new("Frame")
+    feedContainer.Name                 = "KillFeedContainer"
+    feedContainer.AnchorPoint          = Vector2.new(1, 0)
+    feedContainer.Position             = UDim2.new(1, -CONTAINER_INSET, 0, CONTAINER_INSET)
+    feedContainer.Size                 = UDim2.fromOffset(ENTRY_W, 0)
+    feedContainer.AutomaticSize        = Enum.AutomaticSize.Y
     feedContainer.BackgroundTransparency = 1
-    feedContainer.BorderSizePixel        = 0
-    feedContainer.Parent                 = feedScreen
+    feedContainer.BorderSizePixel      = 0
+    feedContainer.Parent               = screen
 
-    local layout = Instance.new("UIListLayout")
-    layout.SortOrder         = Enum.SortOrder.LayoutOrder
-    layout.FillDirection     = Enum.FillDirection.Vertical
-    layout.VerticalAlignment = Enum.VerticalAlignment.Top
-    layout.Padding           = UDim.new(0, ENTRY_PADDING)
-    layout.Parent            = feedContainer
+    local layout              = Instance.new("UIListLayout")
+    layout.SortOrder          = Enum.SortOrder.LayoutOrder
+    layout.FillDirection      = Enum.FillDirection.Vertical
+    layout.VerticalAlignment  = Enum.VerticalAlignment.Top
+    layout.Padding            = UDim.new(0, ENTRY_GAP)
+    layout.Parent             = feedContainer
 
     Logger.debug("[KillFeedUI] GUI created")
 end
 
--- Connects KillFeed remote event. Must be called after init().
 function KillFeedUI:Start()
     KillFeed.OnClientEvent:Connect(function(
         killerName: string,
@@ -209,7 +215,7 @@ function KillFeedUI:Start()
     )
         addEntry(killerName, victimName, killerTeam, victimTeam)
         Logger.debug(string.format(
-            "[KillFeedUI] %s → %s (%s vs %s)",
+            "[KillFeedUI] %s › %s (%s vs %s)",
             killerName == "" and "✦" or killerName,
             victimName,
             killerTeam,

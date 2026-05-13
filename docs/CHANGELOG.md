@@ -7,6 +7,109 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-12] — Fix viewmodel visibility bug, sync codebase, UI redesign, fix sound IDs
+
+### Task 1 — Fix ViewModelController visibility bug
+
+**Updated — `src/client/ViewModelController.lua`**
+- `init()`: added `visible = false` after `self.model = container` — resets module-level state on every re-init so the next RoundStateChanged always calls setVisibility, even if the phase hasn't changed since the previous character load; note: the remote branch independently implemented this same fix and the guard removal before our commit was rebased
+- `setVisibility()`: added `Logger.debug(string.format("[ViewModelController] setVisibility(%s)", tostring(show)))` at the top so every show/hide call is traceable in Output
+- `RoundStateChanged` listener: removed `if show ~= visible then` guard — setVisibility now fires unconditionally on every phase update; eliminates the entire class of state-mismatch bugs where stale `visible` prevents the new model from being shown
+- `BASE_OFFSET`: `CFrame.new(0.6, -0.5, -1.5)` (placeholder-appropriate; no model-specific compensation needed for programmatic geometry)
+
+**Debt evaluation**
+- DEBT-027 (WaitForChild blocks forever): **deleted** — WaitForChild no longer used; programmatic placeholder needs no external assets
+- DEBT-028 (BASE_OFFSET hardcoded per model): **deleted** — programmatic placeholder uses geometry-neutral offset; per-weapon offset concern deferred until production model
+- Added DEBT-029: setVisibility now called every tick instead of only on transitions; see entry for resolution path
+
+### Task 2 — Codebase sync
+
+**Updated — `src/shared/Constants.lua`**
+- Added `WALK_SPEED = 16` and `SPRINT_SPEED = 24` (reserved for MovementController)
+- Updated `DEATH_OVERLAY_OPACITY` from `0.6` to `0.75` (matches redesigned DeathScreen spec)
+- Updated `KILLFEED_FADE_TIME` from `0.4` to `0.3` (matches redesigned KillFeedUI spec)
+- Updated team Color3 values to desaturated palette: `COLOR_TEAM_ATTACKERS = Color3.fromRGB(200, 60, 60)`, `COLOR_TEAM_DEFENDERS = Color3.fromRGB(60, 120, 200)`, `COLOR_TEAM_NEUTRAL = Color3.fromRGB(160, 160, 160)`
+- Added `AMMO_LOW_THRESHOLD = 5` — magazine count at or below which the ammo number turns amber in HUD
+
+**Updated — `src/shared/WeaponData.lua`**
+- Removed duplicate `WeaponData["SCAR"]` entry (a second identical definition was appended by a prior edit; only one SCAR entry now exists)
+- Second entry retained as `WeaponData["AR15"]` (formerly `"AssaultRifle"` comment; not the active weapon)
+
+All priority server files (MatchService, GunService, TeamService) were read and confirmed complete against the CHANGELOG. No code changes required.
+
+### Task 3 — UI redesign (all five UI files rewritten)
+
+**Design system used across all files:**
+- Panel background: `Color3.fromRGB(10, 10, 10)` at 0.6 transparency
+- Primary text: white, `GothamBold`
+- Secondary text: `Color3.fromRGB(160, 160, 160)`, `Gotham`
+- Attacker accent: `Color3.fromRGB(200, 60, 60)`
+- Defender accent: `Color3.fromRGB(60, 120, 200)`
+- Warning/amber: `Color3.fromRGB(220, 160, 40)`
+- No rounded corners, no drop shadows; sharp rectangles only
+- All transitions via TweenService
+
+**Rewritten — `src/client/UI/HUD.lua`**
+- Bottom-left health cluster: `HEALTH` grey label (size 11) above bar; 220×6 px white fill bar with amber below 50% and red below 25% (tweened); health number white bold size 14 right of bar; `ATK: N | DEF: N` grey size 11 below bar with team accent colours via RichText
+- Bottom-right ammo block: magazine number white bold size 28 centered; thin grey divider; reserve size 14 grey centered; `SCAR` size 10 grey below
+- Magazine colour: amber at ≤5 rounds (`AMMO_LOW_THRESHOLD`), red at 0
+- Magazine pulse: `UIScale` 1.0 → 1.15 → 1.0 over 0.1s (two sequential 0.05s tweens) on every `AmmoChanged` event
+
+**Rewritten — `src/client/UI/MatchUI.lua`**
+- Top-center bar 300×32 px: phase label grey size 11 (left), round label white bold size 13 (center), timer white bold size 13 (right)
+- Round-end overlay 400×80 px centered: winner text size 22 in team accent colour; score grey size 13
+- Match-end overlay full-screen: `MATCH COMPLETE` grey size 12; winner size 28 in team accent; final score white size 16
+- Winner colour determined by team name from payload
+
+**Rewritten — `src/client/UI/CrosshairUI.lua`**
+- Four bars: 2×12 px, pure white, 6 px gap from center, ZIndex 10; no center dot
+- Hitmarker: four diagonal bars 2×10 px, `Color3.fromRGB(220, 60, 60)`, rotated ±45°; appears instantly at full opacity, fades to transparent over 0.08s via TweenService after 0.12s hold; bars are individual frames tweened separately (not a container visibility toggle)
+
+**Rewritten — `src/client/UI/KillFeedUI.lua`**
+- Entry: outer wrapper Frame (UIListLayout child, 260×24 px) with `ClipDescendants = true`; inner panel frame slides in from right over 0.15s (QuadOut tween)
+- `UIStroke` border on each panel: 1px, `Color3.fromRGB(60, 60, 60)`
+- Format: `[KillerName] › [VictimName]` in RichText; killer in team accent, `›` in grey, victim in team accent; Font Gotham size 12
+- Environment kills: `✦ › [VictimName]`
+- Fade-out: 0.3s linear after `KILLFEED_DISPLAY_TIME`, then destroy wrapper
+
+**Rewritten — `src/client/UI/DeathScreen.lua`**
+- Black overlay tweened to 0.75 opacity over 0.8s
+- After 0.4s: `E L I M I N A T E D` white GothamBold size 24; `ELIMINATED BY [Name]` grey size 13; `STANDBY FOR NEXT ROUND` grey size 11 with infinite TweenService pulse (RepeatCount -1, Reverses true, 0.75s) cycling opacity 1.0 → 0.4 → 1.0
+- Clears on PREP with 0.5s fade out; pulse tween cancelled on hide
+- Text appears at 0.4s (not `DEATH_FADE_TIME`) to allow the overlay to partially settle first
+
+### Task 4 — Sound asset IDs
+
+**Updated — `src/client/SoundController.lua`**
+- `ID_GUNSHOT`:  `rbxassetid://9118294910`
+- `ID_HIT`:      `rbxassetid://9118294928`
+- `ID_RELOAD`:   `rbxassetid://9118294935`
+- `ID_DEATH`:    `rbxassetid://9118294942`
+- `ID_DRYFIRE`:  `rbxassetid://9118294950`
+
+**Debt evaluation (all open entries)**
+- DEBT-001 (Phase sync): unaffected
+- DEBT-003 (lastFiredPhase): unaffected
+- DEBT-004 (team BrickColors): unaffected — Color3 values now updated to desaturated palette in Constants
+- DEBT-005 (odd player split): unaffected
+- DEBT-007 (RoundStateChanged fan-out): unaffected — listener count remains 6
+- DEBT-009 (friendly-fire): unaffected
+- DEBT-010 (health reset timing): unaffected
+- DEBT-011 (on-demand team query): unaffected
+- DEBT-013 (weapon name hardcoded): unaffected
+- DEBT-014 (clientTick not validated): unaffected
+- DEBT-017 (ClientInit count): unaffected — still 9 entries
+- DEBT-018 (getPlayerFromPart duplicated): unaffected
+- DEBT-019 (CharacterAutoLoads): unaffected
+- DEBT-020 (team name strings): unaffected
+- DEBT-022 (ragdoll cleanup): unaffected
+- DEBT-023 (non-standard rig): unaffected
+- DEBT-024 (sound pooling): unaffected — IDs updated but pooling not yet added
+- DEBT-026 (ammo mid-round joiners): unaffected
+- Added DEBT-029: setVisibility no longer guarded (see entry)
+
+---
+
 ## [2026-05-12] — Add object pooling, connection cleanup, and API validation rules to CLAUDE.md
 
 **Updated — `CLAUDE.md`**
