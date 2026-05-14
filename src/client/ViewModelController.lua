@@ -212,12 +212,13 @@ function ViewModelController:Start()
     end)
 
     -- RenderStepped: reposition the model pivot every frame to follow the camera.
-    -- Skipped entirely when not visible to avoid unnecessary PivotTo calls.
+    -- PivotTo is called unconditionally — never skipped based on visibility.
+    -- The model must track the camera at all times (even during PREP/RESULTS) because
+    -- all parts are Anchored=false. Without PivotTo, gravity pulls the assembly
+    -- below FallenPartsDestroyHeight and Roblox destroys the parts. Visibility is
+    -- controlled by Transparency=1 (set in setVisibility), not by skipping PivotTo.
     -- Reads self.model per-call so re-builds after CharacterAdded are always used.
     RunService.RenderStepped:Connect(function(dt: number)
-        if not visible then
-            return
-        end
         local m = self.model
         if not m then return end
 
