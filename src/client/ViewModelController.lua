@@ -2,17 +2,15 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > ViewModelController
 --
--- Owns the client-side viewmodel: builds a simple programmatic placeholder Model
--- (GunBody, Barrel, LeftArm, RightArm, MuzzleAttachment) and parents it to
--- workspace.CurrentCamera so it follows the camera every frame via PivotTo.
+-- Owns the client-side viewmodel: clones ReplicatedStorage/ViewModels/AR15 (a Model
+-- containing the gun mesh parts, arm MeshParts, WeldConstraints, and a Root PrimaryPart)
+-- and parents it to workspace.CurrentCamera so it follows the camera every frame via PivotTo.
+-- Falls back to a programmatic placeholder if the AR15 asset is missing from ReplicatedStorage.
 -- Locks the local player to first-person and re-applies the lock on every respawn
 -- so TeamService's LoadCharacter() call cannot revert the camera to third person.
 -- Shows only during ACTIVE; hidden during LOBBY, PREP, RESULTS, and MATCHEND.
 -- Exposes PlayFireAnimation() for GunController to call on each shot.
 -- Exposes GetBarrelTipCFrame() so GunController can position the muzzle flash.
---
--- The placeholder is built entirely in code — no ReplicatedStorage asset is
--- required. Replace init() with a model clone once a production-ready asset exists.
 --
 -- Initialized by ClientInit via loadAndStart() — no PlayerGui needed.
 -- init() is called internally from Start() before event listeners are registered.
@@ -32,8 +30,18 @@ local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEve
 -- Configuration
 -- ============================================================
 
--- Pivot offset of the model relative to the camera (right, down, forward).
-local BASE_OFFSET = CFrame.new(0.6, -0.5, -1.5)
+-- BASE_OFFSET: pivot (PrimaryPart) position of the model relative to the camera.
+-- Real AR15 model — Root is the camera-local origin; all geometry is baked into the
+-- part positions relative to Root.  No additional offset needed.
+local REAL_MODEL_OFFSET : CFrame = CFrame.new(0, 0, 0)
+
+-- Programmatic placeholder — the model pivot sits at the visual gun-body centre,
+-- so we shift it right/down/forward to appear in the corner of the screen.
+local PLACEHOLDER_OFFSET : CFrame = CFrame.new(0.6, -0.5, -1.5)
+
+-- Set by init() based on which model loaded.  Starts at the placeholder value
+-- so any code that runs before init() gets a safe default.
+local BASE_OFFSET : CFrame = PLACEHOLDER_OFFSET
 
 -- Recoil snap distance and decay rate.
 -- recoilOffset starts at RECOIL_DIST on fire and decays to 0 at RECOIL_RATE studs/s,
@@ -59,9 +67,11 @@ local recoilOffset : number  = 0
 local ViewModelController = {}
 ViewModelController.model = nil :: Model?
 
--- Builds the placeholder viewmodel from code and parents it to the camera.
--- All parts start hidden (Transparency = 1).
--- If called again (e.g. re-init on respawn), the previous model is destroyed first.
+-- Attempts to clone ReplicatedStorage/ViewModels/AR15 and parent it to the camera.
+-- Falls back to building a programmatic placeholder if the asset is absent.
+-- All parts start hidden (Transparency = 1) via setVisibility called on the
+-- next RoundStateChanged event.
+-- Destroys any previously built model before creating a new one so re-init is safe.
 -- Called internally by Start() before any event listeners are registered.
 function ViewModelController:init()
     if self.model then
@@ -70,6 +80,34 @@ function ViewModelController:init()
     end
 
     local cam = workspace.CurrentCamera
+
+    -- ── Attempt 1: clone AR15 production asset ────────────────────────────────
+    local viewModels = ReplicatedStorage:FindFirstChild("ViewModels")
+    local ar15Asset  = viewModels and viewModels:FindFirstChild("AR15")
+    if ar15Asset then
+        local clone = ar15Asset:Clone()
+        -- Hide all parts BEFORE parenting so there is no single-frame flash at the
+        -- stored world positions (which are the build-time positions, not camera-local).
+        -- setVisibility(true) will be called by the RoundStateChanged listener when
+        -- the ACTIVE phase begins.
+        for _, desc in ipairs(clone:GetDescendants()) do
+            if desc:IsA("BasePart") then
+                (desc :: BasePart).Transparency = 1
+            end
+        end
+        clone.Parent = cam
+        self.model  = clone
+        BASE_OFFSET = REAL_MODEL_OFFSET
+        -- Reset visible so the next RoundStateChanged always fires setVisibility,
+        -- even if the phase has not changed since the previous character load.
+        visible = false
+        Logger.debug("[ViewModelController] AR15 model cloned from ReplicatedStorage")
+        return
+    end
+
+    -- ── Attempt 2: programmatic placeholder ───────────────────────────────────
+    Logger.warn("[ViewModelController] init: ReplicatedStorage/ViewModels/AR15 not found — using placeholder")
+    BASE_OFFSET = PLACEHOLDER_OFFSET
 
     local container = Instance.new("Model")
     container.Name = "ViewModelPlaceholder"
@@ -90,7 +128,7 @@ function ViewModelController:init()
         return p
     end
 
-    local darkGrey   = BrickColor.new("Dark grey")
+    local darkGrey    = BrickColor.new("Dark grey")
     local pastelBrown = BrickColor.new("Pastel brown")
 
     -- All offsets are relative to the model pivot (world origin at creation time).
@@ -125,8 +163,9 @@ end
 function ViewModelController:Start()
     self:init()
 
-    -- init() always succeeds (no external assets); self.model is guaranteed here.
-    -- Guard kept defensively in case init() is extended later with a failure path.
+    -- init() always sets self.model (either the AR15 clone or the placeholder).
+    -- Guard kept defensively: if init() is extended with a hard-failure path in
+    -- future, this prevents a nil-model crash from propagating to event listeners.
     if not self.model then
         return
     end

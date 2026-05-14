@@ -7,6 +7,59 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-14] — Add AR15 first-person viewmodel from Workspace assets
+
+**Asset flow:** `Workspace["TROY DEFENSE AR"]` + `Workspace.Viewmodel` → `ReplicatedStorage/ViewModels/AR15` (built via MCP Lua) → `ViewModelController:init()` clones and parents to `CurrentCamera` → `RenderStepped` drives `PivotTo` every frame → `setVisibility` shows/hides on phase change.
+
+### Changes
+
+**Built in Studio via MCP — `ReplicatedStorage/ViewModels/AR15` (new Model)**
+- `Root` Part (0.1×0.1×0.1, Transparency=1, CanCollide/CanQuery/CanTouch=false, Massless=true, Anchored=false) set as PrimaryPart — this is the camera-anchor that PivotTo targets
+- 27 BaseParts cloned from `Workspace["TROY DEFENSE AR"]`: physics flags reset (CanCollide/CanQuery/CanTouch=false, Massless=true, Anchored=false); positions shifted from Workspace world space to camera-local space (gun centre at (0.35, -0.35, -1.0) from Root); rotations preserved
+- `LeftArm` and `RightArm` MeshParts cloned from `Workspace.Viewmodel`: positioned at camera-local offsets derived from Motor6D C0 analysis (LeftArm: −1.54, −1.22, −2.95; RightArm: +1.65, −1.22, −2.95); oriented to face the -Z camera direction
+- `MuzzleAttachment` (Attachment) added to the most-forward barrel tip part at local Position (0, 0, −halfZ); used by `GetBarrelTipCFrame()` for muzzle flash placement
+- 29 WeldConstraints created (Root→each BasePart) so `PivotTo` on Root moves the entire assembly
+- Total descendants: 86 (30 BaseParts + 29 WeldConstraints + 1 Attachment + other children)
+
+**Updated — `src/client/ViewModelController.lua`**
+- Header comment updated: describes AR15 clone path and fallback
+- `REAL_MODEL_OFFSET = CFrame.new(0, 0, 0)` added — Root is the camera-local origin; gun geometry offset is baked into part positions
+- `PLACEHOLDER_OFFSET = CFrame.new(0.6, -0.5, -1.5)` added (renamed from the old `BASE_OFFSET` constant)
+- `BASE_OFFSET` is now a mutable local variable set by `init()` based on which path loaded
+- `init()` updated: first attempts `ReplicatedStorage:FindFirstChild("ViewModels").AR15:Clone()`; if found, hides all BaseParts (Transparency=1) before parenting to prevent a one-frame position flash, sets `BASE_OFFSET = REAL_MODEL_OFFSET`, returns early; if missing, logs `Logger.warn` and falls through to the existing programmatic placeholder path with `BASE_OFFSET = PLACEHOLDER_OFFSET`
+- `Start()` guard comment updated to reflect that init() now has an external-asset path
+
+**Updated — `src/shared/WeaponData.lua`**
+- `WeaponData["AR15"]` updated: `damage=28` (was 25), `fireRate=0.09` (was 0.1), `range=450` (was 300), `magazineSize=30` (unchanged), `reserveAmmo=120` (was 90), `reloadTime=2.2` added (not yet read by GunService — see DEBT-030)
+- Comment updated to identify AR15 as the active viewmodel weapon
+- `WeaponData["SCAR"]` retained as a secondary definition
+
+**Updated — `src/client/GunController.lua`**
+- `CURRENT_WEAPON` changed from `"SCAR"` to `"AR15"`
+
+**Updated — `src/server/GunService.server.lua`**
+- `DEFAULT_WEAPON` changed from `"SCAR"` to `"AR15"`
+
+### Debt evaluation
+
+- **DEBT-013** (weapon name hardcoded): **updated** — both hardcodes changed from `"SCAR"` to `"AR15"` to match the active viewmodel; names are now in sync; structural problem (no weapon name in payload) remains unresolved; entry updated with history
+- **DEBT-029** (setVisibility every tick): **worsened slightly** — real model has 30 BaseParts vs placeholder's 4; still well below the 50-part trigger threshold; entry updated with new part count
+- **DEBT-030** (new): `WeaponData.reloadTime` stored but not read by GunService; see entry
+
+### Test steps
+
+1. Press Play in Studio. In Output, confirm `[ViewModelController] AR15 model cloned from ReplicatedStorage` (not the placeholder warning).
+2. Start a round so phase reaches ACTIVE. Confirm the AR15 gun mesh appears in the lower-right corner of the first-person view, arms visible on both sides.
+3. Fire (left-click). Confirm gun snaps back briefly (recoil) and muzzle flash sphere appears at the barrel tip.
+4. Check ammo HUD — magazine starts at 30, decrements per shot.
+5. Press R to reload — magazine refills from 120 reserve.
+6. Kill another player — hitmarker appears and kill appears in kill feed.
+7. Round ends (RESULTS phase) — viewmodel hides (all parts Transparency=1).
+8. New round begins (ACTIVE) — viewmodel reappears.
+9. Die and respawn — viewmodel rebuilds cleanly on CharacterAdded; no orphan models in CurrentCamera.
+
+---
+
 ## [2026-05-12] — Fix viewmodel visibility bug, sync codebase, UI redesign, fix sound IDs
 
 ### Task 1 — Fix ViewModelController visibility bug

@@ -22,13 +22,15 @@ WeaponData["SCAR"] = {
     reserveAmmo  = 100,
 }
 
--- AR15 kept as a secondary definition; not the active weapon (see DEBT-013).
+-- AR15 — the active first-person viewmodel weapon (viewmodel asset in ReplicatedStorage/ViewModels/AR15).
+-- reloadTime is stored here for future use; GunService does not yet read it (see DEBT-013 / DEBT-030).
 WeaponData["AR15"] = {
-    damage       = 25,
-    fireRate     = 0.1,
-    range        = 300,
+    damage       = 28,
+    fireRate     = 0.09,
+    range        = 450,
     magazineSize = 30,
-    reserveAmmo  = 90,
+    reserveAmmo  = 120,
+    reloadTime   = 2.2,
 }
 
 return WeaponData

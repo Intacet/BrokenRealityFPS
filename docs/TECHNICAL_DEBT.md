@@ -90,9 +90,9 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 ## [DEBT-013] Weapon name is hardcoded on both client and server instead of sent in the payload
 
 **Files:** `src/server/GunService.server.lua`, `src/client/GunController.lua`
-**Risk:** `DEFAULT_WEAPON = "SCAR"` in GunService and `CURRENT_WEAPON = "SCAR"` in GunController are independent hardcodes that must be kept in sync. GunController's `WeaponFired` payload is `{origin, direction, tick}` with no weapon name — so the server cannot know what weapon the client is using. With a single weapon this is invisible; with multiple weapons, every shot is validated against SCAR stats regardless of what the player holds.
-**Worsened (2026-05-07):** The ammo system added in GunService (`setupAmmo`, `ReloadRequest` handler) also looks up `WeaponData[DEFAULT_WEAPON]` for `magazineSize` and `reserveAmmo`. A player holding a different weapon would be assigned SCAR ammo and have their reload calculated against SCAR's magazine size. There are now three hardcoded lookup points instead of two.
-**Worsened (2026-05-07 — SCAR task):** `WeaponData` now has two entries (`SCAR` and `AssaultRifle`). The risk is more concrete: both sides must use `"SCAR"` or the wrong weapon's stats (damage 25 vs 30, range 300 vs 400, mag 30 vs 20) are silently applied to every shot without a runtime error.
+**Risk:** `DEFAULT_WEAPON = "AR15"` in GunService and `CURRENT_WEAPON = "AR15"` in GunController are independent hardcodes that must be kept in sync. GunController's `WeaponFired` payload is `{origin, direction, tick}` with no weapon name — so the server cannot know what weapon the client is using. With a single weapon this is invisible; with multiple weapons, every shot is validated against AR15 stats regardless of what the player holds.
+**Worsened (2026-05-07):** The ammo system added in GunService (`setupAmmo`, `ReloadRequest` handler) also looks up `WeaponData[DEFAULT_WEAPON]` for `magazineSize` and `reserveAmmo`. A player holding a different weapon would be assigned AR15 ammo and have their reload calculated against AR15's magazine size. There are now three hardcoded lookup points instead of two.
+**Updated (2026-05-14 — AR15 viewmodel task):** Both hardcodes changed from `"SCAR"` to `"AR15"` (the active viewmodel weapon). `WeaponData` still has two entries (`SCAR` and `AR15`). Both sides are now in sync, but the structural risk — any future weapon rename or loadout choice requiring only one side — remains. SCAR entry is retained in WeaponData as a secondary definition.
 **Trigger:** Adding a loadout choice, or mismatching the two hardcoded strings during a future weapon rename.
 **Fix when:** Multiple weapons exist as a player choice. Add `weaponName: string` to the `WeaponFired` payload (and to `ReloadRequest`), validate it exists in WeaponData on the server, and remove all three hardcoded DEFAULT_WEAPON / CURRENT_WEAPON references.
 
@@ -237,9 +237,18 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 ## [DEBT-029] ViewModelController setVisibility called every RoundStateChanged tick, not only on phase transitions
 
 **File:** `src/client/ViewModelController.lua`
-**Risk:** The `if show ~= visible then` guard was removed to fix the re-init visibility bug (2026-05-12). Without the guard, `setVisibility` is called every second during ACTIVE (and every tick during any other phase), iterating all model descendants and setting Transparency on each call. This is harmless today with the programmatic placeholder (4 parts), but will scale poorly once a production viewmodel with many parts is introduced.
-**Trigger:** Adding a high-polygon viewmodel model with 50+ parts, or introducing a phase that toggles rapidly.
+**Risk:** The `if show ~= visible then` guard was removed to fix the re-init visibility bug (2026-05-12). Without the guard, `setVisibility` is called every second during ACTIVE (and every tick during any other phase), iterating all model descendants and setting Transparency on each call. The AR15 viewmodel has 30 BaseParts (30× the placeholder's 4) — the iterator work is now meaningfully larger but still well within budget at 60fps.
+**Trigger:** Adding a high-polygon viewmodel with 50+ BaseParts, or introducing a phase that toggles rapidly. The AR15 model (30 parts) is below the threshold.
 **Fix when:** Frame-time profiling reveals the GetDescendants iteration inside setVisibility contributes meaningfully to client frame budget. At that point, restore a state guard (`if show ~= visible then ... end`) — `visible` is already reset to `false` at the end of `init()` so the guard fires correctly after CharacterAdded re-runs `init()`.
+
+---
+
+## [DEBT-030] WeaponData.reloadTime is stored but not read by GunService
+
+**File:** `src/shared/WeaponData.lua`, `src/server/GunService.server.lua`
+**Risk:** `WeaponData["AR15"].reloadTime = 2.2` was added in the AR15 viewmodel task for future use. GunService's `ReloadRequest` handler currently executes an instant reload — ammo transfers from reserve to magazine with no delay. A future system that adds a reload animation or enforces a server-side delay will need to read `reloadTime` and either impose a server-side wait or validate that sufficient time has passed since the reload was requested.
+**Trigger:** Adding a server-enforced reload time or a reload animation in GunController (e.g. a `reloadTime`-second cooldown window during which `WeaponFired` is rejected even in ACTIVE).
+**Fix when:** Reload animations are built. Add a `reloadEndTime[player]: number` table to GunService; on `ReloadRequest`, set it to `os.clock() + weaponDef.reloadTime` and reject `WeaponFired` events that arrive before that time elapses.
 
 ---
 

@@ -48,7 +48,7 @@ local LocalPlayer = Players.LocalPlayer
 
 -- Must stay in sync with GunService's DEFAULT_WEAPON until DEBT-013 is resolved
 -- and both sides are updated to pass the weapon name in the WeaponFired payload.
-local CURRENT_WEAPON = "SCAR"
+local CURRENT_WEAPON = "AR15"
 
 -- ============================================================
 -- State
