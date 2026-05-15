@@ -120,3 +120,53 @@ Apply this checklist every time a Marketplace, Toolbox, `.rbxm`, or `.rbxmx` ass
 
 **Verification:**
 - If the import affects the camera, viewmodel, combat, or character controls, mark it as requiring Studio verification and do not claim it verified until tested in play mode.
+
+---
+
+## Persistent zone design rules (added 2026-05-15)
+
+These rules apply to all new systems built for the persistent zone architecture. They do not override existing code quality rules.
+
+**Loot and economy:**
+- Do not instantly bank loot or cash from inside the zone. Securing value requires physically reaching a base terminal, deposit point, or extraction exit.
+- Carried cash is always at risk. Secured funds are never lost on death. The system must maintain this distinction at all times — a server bug that accidentally secures undeposited cash violates the core loop.
+- Death should hurt but never make the player quit. Always provide a weak free respawn option (free pistol or equivalent) so a player can re-enter immediately after dying with nothing.
+- Keep re-entry fast. A player who dies should be able to return to the zone within a few seconds of choosing to respawn.
+
+**Scope discipline:**
+- Build persistent zone systems in small, testable stages. Do not build full inventory, base upgrade trees, shops, monsters, and extraction in one prompt.
+- One new server-side system per task unless the systems are trivially coupled.
+- Deferred systems (StashService, ProgressionService, InventoryService) must not be started until the core loop (zone → extract → deposit → armory → zone) is working in Studio.
+
+**Legacy systems:**
+- The round-based MatchService, TeamService, and ObjectiveService are legacy. Do not expand them or add round-specific features unless explicitly requested.
+- If a legacy service conflicts with a new system, prefer building the new system alongside the legacy one and swapping later — do not delete legacy code without an explicit instruction.
+
+---
+
+## Server authority — persistent zone systems
+
+The same server-owns-authoritative-state rule applies to all new systems. The client may display and request actions only.
+
+**Server owns:**
+- Carried cash balance per player
+- Secured funds balance per player
+- Inventory contents (equipped weapon, consumables held)
+- Death drop bag creation, position, and contents
+- Extraction success and secured-funds credit
+- Shop and armory purchase validation and fulfillment
+- Base upgrade state
+- Loot object spawn positions and remaining contents
+- Zone entry and exit gate state
+
+**Client may:**
+- Display balances sent by the server
+- Fire RemoteEvents to request deposit, purchase, extraction, loot pickup, or respawn
+- Show local-only prediction for visual feedback (e.g. wallet UI update on AmmoChanged), but treat server confirmation as authoritative
+
+**Never trust the client with:**
+- Cash amounts
+- Inventory state
+- Extraction success (a player cannot declare their own extraction valid)
+- Death drop spawning or contents
+- Shop prices or purchase results

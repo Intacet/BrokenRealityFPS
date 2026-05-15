@@ -22,19 +22,18 @@ The client never mutates authoritative state directly. Every gameplay action is 
 
 ## System map
 
-### Match lifecycle
+### Match lifecycle (legacy/transitional)
+
+> These services implement the original five-round attackers-vs-defenders loop. They are now **legacy/transitional**. Do not add new round-specific features to them. They will be replaced or retired when the persistent zone systems are built.
 
 ```
-MatchService
-  │  owns: round number, match phase (Lobby / Active / Results), timers
+MatchService    [LEGACY] round number, match phase (Lobby / Active / Results), timers
   │  fires: RoundStateChanged → all clients
   │
-  ├─ TeamService
-  │    owns: team assignments, spawn selection
+  ├─ TeamService    [LEGACY] team assignments (Attackers/Defenders), spawn selection
   │    fires: TeamAssigned → individual client
   │
-  └─ ObjectiveService
-       owns: anchor plant state, capture progress
+  └─ ObjectiveService    [LEGACY] anchor plant state, capture progress
        fires: ObjectiveUpdated → all clients
             ObjectiveComplete → all clients (triggers round end via MatchService)
 ```
@@ -95,14 +94,14 @@ ZoneService (server)
   └─ fires: ZoneEffectApplied → all clients (visual overlay trigger)
 ```
 
-### AI
+### AI (planned — not yet built)
 
 ```
 MonsterService (server)
   │  owns: individual monster agents, pathfinding, attack logic
-  │  targets: both attacker and defender teams
+  │  targets: all players (no team distinction in persistent zone mode)
   │
-HordeService (server)
+HordeService (server)   [LEGACY PLAN — replaces with zone ambient spawn budget]
   │  owns: wave timing, spawn budget, escalation across rounds
   └─ calls: MonsterService:SpawnMonster()
 ```
@@ -214,6 +213,55 @@ Workspace
   MonsterSpawns/    spawn nodes referenced by HordeService
   CorpseFolder/     populated and cleared by CorpseService
 ```
+
+---
+
+## New Target Architecture (persistent zone — planned 2026-05-15)
+
+The project is pivoting to a persistent PvPvE zone shooter. The systems below are the planned target architecture. None are built yet unless explicitly noted. Build one at a time.
+
+### Planned future services
+
+| Service | Purpose | Status |
+|---|---|---|
+| `ZoneService` | Manages the persistent zone: player entry/exit, zone state, no round timer | Not started |
+| `BaseService` | Owns the safe base area: spawn points, armory access, deposit terminal | Not started |
+| `EconomyService` | Owns carried cash and secured funds per player; validates deposits | Not started |
+| `LootService` | Spawns and tracks loot objects in the zone; respawns on pickup | Not started |
+| `DeathDropService` | Creates a droppable bag at death position with player's weapon and carried cash | Not started |
+| `ExtractionService` | Handles extraction exit triggers; credits secured funds on successful extract | Not started |
+| `ShopService` | Validates and fulfills zone shop and base armory purchases | Not started |
+| `InventoryService` | Tracks equipped weapon and held consumables per player | Not started (deferred) |
+| `StashService` | Persistent stash across sessions (server-side storage) | Not started (deferred) |
+| `ProgressionService` | Reputation, unlocks, faction standing | Not started (deferred) |
+| `MonsterService` | Zone AI enemies; carried forward from legacy plan | Not started |
+
+### Legacy services and their fate
+
+| Service | Legacy role | Target fate |
+|---|---|---|
+| `MatchService` | Round loop, phase management | Replace with ZoneService over time; do not expand |
+| `TeamService` | Attackers/Defenders assignment | Refactor into faction/spawn management or retire |
+| `ObjectiveService` | Anchor planting objectives | Replace with zone events or contracts |
+
+### Reusable systems (carry forward as-is)
+
+These systems are architecture-agnostic and remain valid in the persistent zone design:
+
+| System | Notes |
+|---|---|
+| `GunService` | Server-authoritative shot validation; reuse directly |
+| `DamageService` | Health mutation, friendly-fire guard, kill feed; reuse directly |
+| `RagdollService` | Ragdoll on death; reuse directly |
+| `RemoteSetup` | Remote creation; extend with new remote names as needed |
+| `GunController` | Client input, cosmetic raycast; reuse directly |
+| `ViewModelController` | Viewmodel render; reuse directly |
+| `SoundController` | Audio; reuse directly |
+| `HUD` (ammo, health) | Reuse ammo and health panels; add cash display panels |
+| `KillFeedUI` | Reuse as-is |
+| `WeaponData` | Weapon stats data module; extend with new weapons |
+| `Logger` | Reuse as-is |
+| `Constants` | Extend with new economy/zone constants |
 
 ---
 

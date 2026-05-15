@@ -18,6 +18,33 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
+## [DEBT-036] Round-based architecture no longer matches target persistent-zone design — ADDED 2026-05-15
+
+**Files:** `src/server/MatchService.server.lua`, `src/server/TeamService.server.lua`, `src/server/ObjectiveService.server.lua`, `src/client/UI/MatchUI.lua`, `src/client/UI/DeathScreen.lua`, `src/client/MatchController.lua`
+**Severity:** High
+**Studio verification required:** Yes
+**Risk:** The current running codebase implements a five-round attackers-vs-defenders FPS loop. The target product direction (updated 2026-05-15) is a persistent PvPvE zone shooter with carried loot, secured funds, extraction exits, shops, and base progression. The existing round-based services (`MatchService`, `TeamService`, `ObjectiveService`) and their client counterparts (`MatchController`, `MatchUI`, `DeathScreen`) encode round-start, round-end, PREP/ACTIVE/RESULTS phase transitions, team assignment, and objective completion as core concepts. None of these map directly to the persistent zone loop.
+
+**Affected legacy systems:**
+- `MatchService` — round loop, phase management; must be replaced or dormant when ZoneService is built
+- `TeamService` — Attackers/Defenders split; spawn logic will need to become faction/base-spawn management
+- `ObjectiveService` — anchor planting; will need to become zone events or contracts
+- `MatchUI` — displays round countdown, results screen; irrelevant in a persistent zone
+- `DeathScreen` — triggers on `RagdollApplied` + cleaned up on PREP; PREP cleanup path breaks without rounds
+- Round scoring, win conditions, and `RoundStateChanged` payload format — all round-specific
+
+**What carries forward as-is:** `GunService`, `DamageService`, `RagdollService`, `GunController`, `ViewModelController`, `SoundController`, `HUD` (ammo/health panels), `KillFeedUI`, `WeaponData`, `Logger`, `Constants`.
+
+**Migration approach:**
+- Build new persistent zone services (`ZoneService`, `EconomyService`, `BaseService`, etc.) alongside the legacy services, not replacing them immediately.
+- Do not expand legacy services with new round-specific features.
+- Retire legacy services one at a time when their replacement is tested.
+- `RoundStateChanged` and associated phase constants may be repurposed or replaced with a `ZoneStateChanged` remote when ZoneService is built.
+
+**Resolve when:** The core persistent zone loop (zone entry → loot → extract → deposit → armory → zone) is working in Studio and the legacy round-based systems are no longer needed for active play.
+
+---
+
 ## [DEBT-001] Phase type union manually duplicated from Constants.Phase — PARTIALLY RESOLVED 2026-05-07
 
 **File:** `src/shared/Types.lua` and `src/shared/Constants.lua`
@@ -40,10 +67,10 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-003] lastFiredPhase compares phase string only, not (phase, round) pair
+## [DEBT-003] lastFiredPhase compares phase string only, not (phase, round) pair — LEGACY/TRANSITIONAL
 
 **File:** `src/server/MatchService.server.lua`
-**Severity:** Low-Medium
+**Severity:** Low-Medium (legacy — MatchService is transitional; see DEBT-036)
 **Studio verification required:** Yes
 **Risk:** `lastFiredPhase` is a plain string. `MatchEvents.PhaseChanged` fires on phase transitions (e.g. RESULTS → PREP), which is correct for current listeners. However, the guard does not distinguish *which round* the phase belongs to. A listener that needs to know "PREP for round 3 specifically vs round 4" — for example, a per-round escalation system — cannot get that from a phase-only comparison.
 **Trigger:** Adding a listener to `MatchEvents.PhaseChanged` that needs to act differently per round (e.g. HordeService increasing spawn budget each round). The listener would receive the correct phase but have no way to know it was a fresh round vs the same phase it already handled, if the guard were extended to suppress repeat firings.
@@ -64,10 +91,10 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-005] Odd player counts always give the extra player to Attackers
+## [DEBT-005] Odd player counts always give the extra player to Attackers — LEGACY/TRANSITIONAL
 
 **File:** `src/server/TeamService.server.lua`
-**Severity:** Medium
+**Severity:** Medium (legacy — TeamService is transitional; see DEBT-036)
 **Studio verification required:** Yes
 **Risk:** `assignTeams()` splits players with `math.ceil(n/2)` going to Attackers. With 3 players the split is 2v1; with 5 it is 3v2. Attackers always have the numerical advantage on odd counts. This is a deliberate simplification, not a bug, but it will feel unfair once the player count grows and balance matters.
 **Trigger:** The game reaches a point where balance is actively tested and odd-count matches are common (likely at the end of Milestone 0 playtesting).
@@ -176,10 +203,10 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-007] Multiple clients connect to RoundStateChanged independently
+## [DEBT-007] Multiple clients connect to RoundStateChanged independently — LEGACY/TRANSITIONAL
 
 **Files:** `src/client/MatchController.lua`, `src/client/UI/MatchUI.lua`, `src/client/UI/HUD.lua`, `src/client/UI/CrosshairUI.lua`, `src/client/ViewModelController.lua`, `src/client/UI/DeathScreen.lua`
-**Severity:** Medium-High
+**Severity:** Medium-High (context: RoundStateChanged is a legacy remote tied to the round-based loop; see DEBT-036. The proliferation risk applies now, but the remote itself may be replaced or retired with ZoneService.)
 **Studio verification required:** Yes
 **Risk:** Six separate systems now each connect their own `RoundStateChanged.OnClientEvent` listener. Every server broadcast triggers six separate handlers. If the payload format ever changes, all six must be updated together.
 **History:** Originally 1 listener (MatchController). Each new system that needs phase data adds another — now at 6. The fix of introducing a `MatchController.StateChanged` BindableEvent is overdue.
@@ -221,10 +248,10 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-019] Players.CharacterAutoLoads = false is set globally in TeamService with no fallback
+## [DEBT-019] Players.CharacterAutoLoads = false is set globally in TeamService with no fallback — LEGACY/TRANSITIONAL
 
 **File:** `src/server/TeamService.server.lua`
-**Severity:** Medium-High
+**Severity:** Medium-High (legacy — TeamService is transitional; ZoneService will own character spawn logic; see DEBT-036)
 **Studio verification required:** Yes
 **Risk:** `Players.CharacterAutoLoads = false` is set at the top of TeamService. If TeamService fails to load (a require error, a script disabled in Studio), Roblox will never auto-spawn characters, and players will see a blank screen with no error. There is no watchdog that re-enables auto-loading if TeamService fails, and no fallback spawn path.
 **Trigger:** Any unhandled error in TeamService's module-level code (e.g. a missing dependency) that prevents the script from running fully.
@@ -232,10 +259,10 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-020] Team name strings are duplicated across TeamService and ObjectiveService — PARTIALLY RESOLVED 2026-05-07
+## [DEBT-020] Team name strings are duplicated across TeamService and ObjectiveService — PARTIALLY RESOLVED 2026-05-07 — LEGACY/TRANSITIONAL
 
 **Files:** `src/server/TeamService.server.lua`, `src/server/ObjectiveService.server.lua`
-**Severity:** Medium
+**Severity:** Medium (legacy — both services are transitional; see DEBT-036)
 **Studio verification required:** No
 **Risk:** Both services define `local TEAM_ATTACKERS = "Attackers"` and both assume `TEAM_DEFENDERS = "Defenders"` (implicit). If a team is renamed, both files must be updated together. A mismatch — e.g. TeamService assigns "Attacker" (no s) but ObjectiveService checks "Attackers" — silently breaks objective capture without any runtime error, because `playerTeams[player] ~= TEAM_ATTACKERS` is always true.
 **Partial resolution (2026-05-07):** `KillFeedUI` was the third consumer that triggered the fix condition. `Constants.TEAM_ATTACKERS = "Attackers"` and `Constants.TEAM_DEFENDERS = "Defenders"` were added to `src/shared/Constants.lua`. `KillFeedUI` reads from Constants and introduces no new hardcoded strings. TeamService and ObjectiveService still have their own local declarations (not in the allowed-file scope for this task).

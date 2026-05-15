@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # Broken Reality FPS
 
-## Game concept
+## Game concept (legacy — see "Current product direction" below)
 
 This is a Roblox round-based FPS set on Earth after reality breaks open in certain zones.
 
@@ -24,6 +24,69 @@ Defenders change by map and may be civilians, scientists, soldiers, militia, or 
 Monsters attack both human teams.
 
 The morality should feel gray. Attackers may save the world, but their orders can be brutal. Defenders may protect innocent people, but they may risk spreading the break.
+
+> **Note:** The five-round attackers-vs-defenders FPS loop above was the original first milestone. It is now considered **legacy/transitional**. Do not expand round-based features or add new round-specific systems unless explicitly requested.
+
+---
+
+## Current product direction (updated 2026-05-15)
+
+**Broken Reality is a persistent PvPvE broken-reality zone shooter.**
+
+Players spawn at a safe base, enter a quarantined zone to fight other players and monsters, collect loot and earn carried cash, then choose when to extract. Depositing at the base converts dangerous carried cash into secured funds used for weapons, gear, and base improvements.
+
+### Main loop
+
+```
+Spawn at base (safe area)
+  └─ Enter zone (dangerous, persistent — no round timer)
+       └─ Fight players + monsters, loot objects, earn carried cash
+            └─ Choose: stay longer (more risk, more reward)
+                 or extract (reach an exit point)
+                      └─ Exit → deposit at base terminal
+                           └─ Spend secured funds: armory (weapons), shop (consumables)
+                                └─ Return to zone
+```
+
+### Death rule
+
+On death **inside the zone**, the player loses:
+- Equipped weapon
+- All carried loot
+- All carried cash
+- Some consumables
+
+The player **keeps**:
+- Secured funds (deposited at base before death)
+- Stash contents
+- Base upgrades
+- Reputation and unlocks
+
+Death must hurt, but never make a player quit. Always preserve a weak free respawn option so players can re-enter immediately with a basic loadout at no cost.
+
+### Money model
+
+| Currency | Earned | Lost on death | Purpose |
+|---|---|---|---|
+| **Carried cash** | Kills, loot pickups, zone contracts | In full | Risk currency; converted to secured at deposit |
+| **Secured funds** | Depositing carried cash at base | Never | Safe progression; used at armory and shop |
+
+### Early prototype scope
+
+Build the smallest playable version first:
+
+- One persistent suburban quarantine zone (no round timer; re-entry always open)
+- Safe base area with one deposit terminal and one base armory
+- One or two zone entrances; one or two extraction exit points
+- Basic carried cash earned from kills and loot pickups
+- Basic secured funds deposited at the base terminal
+- One zone shop (consumables) and one base armory (three weapons: AR15, pistol, shotgun)
+- Simple loot objects scattered in the zone (cash pickups, small drops)
+- On death: drop equipped weapon and carried cash at the death location as a droppable bag
+
+Do not build the full progression system, inventory UI, crafting, faction reputation, or monster wave escalation in one step. One feature at a time.
+
+---
 
 ## Toolchain
 
@@ -170,34 +233,56 @@ Do not write one giant script. Use small, modular scripts — one per system.
 - Never fire or listen to a remote that is not listed in that table.
 - Never assign a second script to fire or listen to an existing remote without updating the table and explaining why.
 
-## First playable goal
+## First playable goal (legacy — achieved at Milestone 0)
 
-Build the smallest playable version first:
+> The original milestone was a 5-round attackers vs defenders FPS on one small suburban map where attackers plant reality anchors and defenders try to stop them. That prototype was the build target for the legacy system. It is now complete enough to be treated as a foundation, not an active goal.
 
-A 5-round attackers vs defenders FPS on one small suburban map where attackers plant reality anchors and defenders try to stop them.
+**New first playable goal (persistent zone prototype):**
+
+A single persistent zone where any number of players can enter, fight each other and monsters, collect loot, earn carried cash, and extract through a zone exit to deposit at a base. Death drops the player's weapon and cash on the floor. The base has one armory (three weapons) and one deposit terminal. No round timer. Re-entry is always open.
 
 Do not build the full dream game first.
 
-## Build order
+## Build order (legacy — Milestone 0 complete)
 
-1. Folder structure
-2. Config modules
-3. MatchService
-4. MatchController
-5. TeamService
-6. ObjectiveService
-7. Basic UI
-8. GunService
-9. GunController
-10. DamageService
-11. MovementController
-12. DestructionService
-13. CorpseService
-14. MonsterService
-15. HordeService
-16. CutsceneController
+> The sequence below was the original Milestone 0 build order. Systems 1–10 are built. Systems 11–16 are partially built or planned. This order is now **legacy/transitional** — new systems follow the persistent zone architecture instead.
 
-Each service on the server has a matching controller on the client. Build the server side of a system before the client side.
+**Milestone 0 (legacy round-based — do not expand):**
+
+1. Folder structure ✓
+2. Config modules ✓
+3. MatchService ✓
+4. MatchController ✓
+5. TeamService ✓
+6. ObjectiveService ✓
+7. Basic UI ✓
+8. GunService ✓
+9. GunController ✓
+10. DamageService ✓
+11. MovementController (partial)
+12. DestructionService (not started)
+13. CorpseService (not started)
+14. MonsterService (not started)
+15. HordeService (not started)
+16. CutsceneController (not started)
+
+**Milestone 1 (persistent zone — new target):**
+
+Build one system at a time. Server before client. Do not start the next until the current is tested.
+
+1. ZoneService — manages persistent zone state (no rounds, persistent respawns)
+2. EconomyService — owns carried cash, secured funds, deposit logic
+3. BaseService — owns safe base area, armory access, spawn selection
+4. LootService — spawns and tracks loot objects in the zone
+5. DeathDropService — creates droppable bag on death, owned by server
+6. ExtractionService — handles exit trigger, converts carried cash to secured funds
+7. ShopService — handles zone shop and base armory purchases
+8. InventoryService — tracks equipped weapon, held consumables (deferred until needed)
+9. StashService — persistent stash across sessions (deferred until needed)
+10. ProgressionService — reputation, unlocks (deferred until needed)
+11. MonsterService — AI enemies in zone (carries forward from legacy plan)
+
+Each server service has a matching client controller. Build server side first.
 
 ## Claude behavior
 

@@ -7,6 +7,47 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-15] — Project direction pivot: persistent PvPvE zone shooter (documentation only, no runtime code changed)
+
+**This was a documentation and planning update. No `src/` files were changed. No remotes were added. No runtime behavior changed.**
+
+**Changed — `CLAUDE.md`**
+- "Game concept" section marked as legacy/transitional with a note not to expand round-based features.
+- New "**Current product direction**" section added defining:
+  - Persistent PvPvE broken-reality zone shooter (no round timer)
+  - Main loop: spawn at base → enter zone → loot/fight/earn carried cash → extract → deposit → armory → zone
+  - Death rule: lose equipped weapon, carried loot, carried cash; keep secured funds, stash, upgrades, reputation
+  - Money model: carried cash (risky, lost on death) vs secured funds (safe, never lost)
+  - Early prototype scope: one zone, one base, deposit terminal, armory, three weapons, simple loot, death drops
+- "First playable goal" updated: old five-round attacker/defender milestone marked as achieved (legacy); new persistent zone prototype goal defined.
+- "Build order" updated: Milestone 0 (legacy round-based) marked complete/legacy; Milestone 1 (persistent zone) build sequence added (ZoneService → EconomyService → BaseService → LootService → DeathDropService → ExtractionService → ShopService → deferred systems → MonsterService).
+
+**Changed — `docs/PROJECT_RULES.md`**
+- New "Persistent zone design rules" section added: loot security requires physical extraction, death must hurt but not cause quit, free respawn always available, fast re-entry, one system per prompt discipline, legacy systems must not be expanded.
+- New "Server authority — persistent zone systems" section added: server owns carried cash, secured funds, inventory, death drops, extraction success, shop purchases, base upgrades, loot positions; client fires request remotes and displays server state only.
+
+**Changed — `docs/PROJECT_MAP.md`**
+- "Match lifecycle" system map section marked as **legacy/transitional**.
+- "AI" system map section annotated (HordeService plan updated for zone ambient spawning).
+- New "**New Target Architecture**" section added with:
+  - Planned future services table (ZoneService, BaseService, EconomyService, LootService, DeathDropService, ExtractionService, ShopService, InventoryService, StashService, ProgressionService, MonsterService)
+  - Legacy services table with migration notes (MatchService → ZoneService; TeamService → faction/spawn management; ObjectiveService → zone events)
+  - Reusable systems table (GunService, DamageService, RagdollService, etc.)
+
+**Changed — `docs/TECHNICAL_DEBT.md`**
+- DEBT-036 added: "Round-based architecture no longer matches target persistent-zone design" — Severity: High — covers MatchService, TeamService, ObjectiveService, MatchUI, DeathScreen, and their client counterparts.
+- DEBT-003, DEBT-005, DEBT-007, DEBT-019, DEBT-020 annotated as **legacy/transitional** in the context of the pivot.
+
+**Validation**
+- No `src/` files changed. ✓
+- No remotes added. ✓
+- No camera behavior changed. ✓
+- No gameplay code changed. ✓
+- Old round-based documentation preserved and marked legacy/transitional (not deleted). ✓
+- No markdown linter configured locally — manual review only.
+
+---
+
 ## [2026-05-15] — Harden GunService shot validation: origin proximity and direction magnitude checks (needs Studio verification)
 
 **Changed — `src/shared/Constants.lua`**
