@@ -7,6 +7,31 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-15] — Add severity and Studio verification labels to all technical debt entries
+
+**Updated — `docs/TECHNICAL_DEBT.md`**
+- Added a **Severity legend** section near the top of the file defining Critical / High / Medium-High / Medium / Low-Medium / Low / Resolved.
+- Added **Severity:** and **Studio verification required:** fields to every debt entry (33 entries total: 25 active, 8 resolved).
+- No entry's resolution status, meaning, or existing text was changed — labels only.
+
+Severity assignments:
+- Critical: DEBT-009 (friendly fire live)
+- High: DEBT-013, DEBT-014 (weapon hardcode, tick exploit), DEBT-022 (ragdoll accumulation), DEBT-031 (untracked Studio containers)
+- Medium-High: DEBT-007 (six RoundStateChanged listeners), DEBT-019 (CharacterAutoLoads no fallback)
+- Medium: DEBT-005, DEBT-010, DEBT-011, DEBT-020, DEBT-024, DEBT-030
+- Low-Medium: DEBT-003, DEBT-017, DEBT-018, DEBT-023, DEBT-026, DEBT-034
+- Low: DEBT-001, DEBT-004, DEBT-029, DEBT-032, DEBT-033, DEBT-035
+- Resolved: DEBT-002, DEBT-006, DEBT-008, DEBT-012, DEBT-015, DEBT-016, DEBT-021, DEBT-025
+
+Studio verification required: Yes for all runtime, gameplay, combat, UI, camera, character lifecycle, and ragdoll entries. No for static-inspection-only entries. Not applicable for resolved entries.
+
+**Validation**
+- No markdown linter is installed locally — no markdown validation was run.
+- No src files changed. ✓
+- No gameplay files changed. ✓
+
+---
+
 ## [2026-05-15] — Remove invalid StarterGui/src/ui Rojo mapping; document controller-generated UI architecture
 
 **Changed — `default.project.json`**
