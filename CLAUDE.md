@@ -248,3 +248,23 @@ Every public API function that accepts required parameters must validate them wi
 - Do not make formatting-only edits to unrelated files.
 - Preserve the existing style of untouched files.
 - If a formatter is later configured, run it only on files modified by the current task unless the user explicitly requests a full-repo formatting pass.
+
+**Prompt pre-flight review:**
+- Before implementing any user prompt, briefly review the prompt first.
+- State the intended goal in 1-2 sentences.
+- State whether the prompt is safe, focused, and consistent with project rules.
+- List the files expected to change.
+- Flag any risks, especially camera, viewmodel, combat, movement, match-loop, objective, replication, remotes, or data-loss risks.
+- State whether you recommend proceeding as written, narrowing the scope, or revising the prompt.
+- If the prompt is risky, ambiguous, too broad, conflicts with project rules, or requires unavailable Studio/MCP verification, stop and ask for confirmation before editing.
+- If the prompt is safe and includes "review then proceed if safe", continue after the pre-flight review without waiting for another confirmation.
+- Do not use the pre-flight review to avoid reasonable work. If the task is clear and safe, proceed.
+
+**MCP unavailable / GitHub-only mode:**
+- If Roblox Studio MCP is unavailable, do not claim Studio verification was performed.
+- Prefer documentation, configuration, and static-validation tasks only.
+- Avoid camera, viewmodel, combat, movement, match-loop, objective, and replication changes unless the user explicitly accepts that the change is unverified in Studio.
+- Run only non-Studio validation that is available locally, such as `git diff`, `rojo build`, `selene`, or formatting checks.
+- Mark any gameplay-affecting change as "needs Studio verification" in `docs/TECHNICAL_DEBT.md` or the final response.
+- Do not mark runtime technical debt fully resolved unless the behavior was actually verified in Studio.
+- If MCP is unavailable for a task that normally requires MCP, clearly state that limitation.

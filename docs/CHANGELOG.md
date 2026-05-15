@@ -7,6 +7,18 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-15] — Add prompt pre-flight review and MCP unavailable / GitHub-only mode rules to CLAUDE.md
+
+**Updated — `CLAUDE.md`**
+- Added **Prompt pre-flight review** rule: before implementing any prompt, Claude Code must state the goal, confirm safety and scope, list expected file changes, flag any camera/viewmodel/combat/replication/data-loss risks, and either proceed (if safe and prompt includes "review then proceed if safe") or stop and ask for confirmation
+- Added **MCP unavailable / GitHub-only mode** rule: when Roblox Studio MCP is disconnected, restrict work to docs/config/static-validation only; never claim Studio verification was performed; mark any gameplay-affecting change as "needs Studio verification"; do not mark runtime debt resolved without actual Studio confirmation
+
+**Updated — `docs/TECHNICAL_DEBT.md`**
+- Added DEBT-033: prompt pre-flight review is a behavioral convention only — no tooling enforces it; a future hook or CI step would strengthen the guarantee
+- Added DEBT-034: MCP-unavailable scope guard is self-reported — no CI gate verifies that gameplay changes were tested in Studio; unverified changes must be manually tagged
+
+---
+
 ## [2026-05-14] — Fix camera pitch lock (rogue StarterCharacterScripts LocalScript removed)
 
 ### Root cause

@@ -282,6 +282,24 @@ corresponding tracked disk file.
 
 ---
 
+## [DEBT-033] Prompt pre-flight review is a convention enforced only by CLAUDE.md — not tooling
+
+**File:** `CLAUDE.md`
+**Risk:** The prompt pre-flight review rule instructs Claude Code to assess each prompt before acting. This is a behavioral convention, not a hard enforcement mechanism. A session that does not read CLAUDE.md at startup, or a tool invocation that bypasses the behavior section, will not perform the pre-flight check. There is no linter, CI gate, or hook that verifies the review happened.
+**Trigger:** Any session where CLAUDE.md is not read at startup, or where a prompt is applied directly to a file without a conversational turn.
+**Fix when:** A hook or pre-task checklist can be encoded into `.claude/settings.json` or a Stop/PreToolUse hook that reminds the session to confirm pre-flight was done. Until then, the rule is advisory only.
+
+---
+
+## [DEBT-034] MCP-unavailable work has no automated scope guard — relies on Claude self-reporting
+
+**File:** `CLAUDE.md`
+**Risk:** The MCP unavailable rule instructs Claude Code not to claim Studio verification when MCP is disconnected and to restrict scope to docs/config/static-validation. This is self-reported — there is no CI gate that checks whether a change touching gameplay files was actually tested in Studio. If a session misidentifies MCP as available, or proceeds with a runtime change without explicitly flagging it, the unverified change enters the codebase silently.
+**Trigger:** Any gameplay-affecting change (camera, viewmodel, combat, match-loop, objectives, replication) committed without a Studio session — especially in a GitHub-only session.
+**Fix when:** A CI step can run `rojo build` and `selene` automatically on every push to catch at least structural errors. Full runtime verification always requires Studio. Until CI is added, unverified gameplay changes must be manually tagged "needs Studio verification" in the PR description and in a TECHNICAL_DEBT entry.
+
+---
+
 ## [DEBT-032] Global formatter (StyLua) intentionally not run on whole repo
 
 **File:** `CLAUDE.md`, `stylua.toml`
