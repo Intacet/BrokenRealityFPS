@@ -47,7 +47,10 @@ GunController (client)
   │  fires: WeaponFired {origin, direction, tick} → server
   │
   └─ GunService (server)
-       validates: raycast, timing, ammo state
+       validates: payload types, direction magnitude (< SHOT_DIRECTION_MIN_MAGNITUDE rejected),
+         origin proximity to shooter HumanoidRootPart (> SHOT_ORIGIN_MAX_DISTANCE rejected),
+         rate limit, ammo state; direction is normalized before raycasting
+       clientTick validation deferred — see DEBT-014
        calls: DamageService:Apply()
        fires: HitConfirmed → firing client (hitmarker)
 

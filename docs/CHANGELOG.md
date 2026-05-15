@@ -7,6 +7,41 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-15] — Harden GunService shot validation: origin proximity and direction magnitude checks (needs Studio verification)
+
+**Changed — `src/shared/Constants.lua`**
+- Added `Constants.SHOT_ORIGIN_MAX_DISTANCE = 12` — maximum studs between the client-sent shot origin and the shooter's `HumanoidRootPart`; shots with farther origins are rejected.
+- Added `Constants.SHOT_DIRECTION_MIN_MAGNITUDE = 0.001` — minimum direction vector magnitude; near-zero directions are rejected before normalization.
+
+**Changed — `src/server/GunService.server.lua`**
+- Added `getShooterRootPosition(player: Player): Vector3?` — returns `HumanoidRootPart.Position` or nil if the character or root is missing.
+- Added `isValidShotPayload(shooter, origin, direction): (boolean, Vector3?, Vector3?)` — checks types, direction magnitude, and origin-to-root distance. Returns normalized direction on success; logs via `Logger.warn` and returns `false, nil, nil` on failure.
+- Replaced the thin type-only guard in `WeaponFired.OnServerEvent` with a call to `isValidShotPayload`. The returned validated origin and normalized direction are used for `workspace:Raycast`.
+- All previous validation (phase gate, rate limit, ammo check) unchanged.
+- `clientTick` validation intentionally not added — see DEBT-014.
+
+**Updated — `docs/PROJECT_MAP.md`**
+- GunService validates line updated to document payload type checks, direction magnitude rejection, origin proximity rejection, and direction normalization. clientTick deferral noted.
+
+**Updated — `docs/TECHNICAL_DEBT.md`**
+- DEBT-014: Updated to note origin/direction hardening was added. clientTick still deferred. MCP-unavailable note added.
+
+**Validation**
+- `selene` not available locally — linter could not be run.
+- `rojo` not available locally — build validation could not be run.
+- `Constants.SHOT_ORIGIN_MAX_DISTANCE = 12` confirmed. ✓
+- `Constants.SHOT_DIRECTION_MIN_MAGNITUDE = 0.001` confirmed. ✓
+- `getShooterRootPosition` added with nil-safe character/root check. ✓
+- `isValidShotPayload` added with all required checks in order. ✓
+- `validOrigin` and `validDirection` used for `workspace:Raycast`. ✓
+- `clientTick` not validated (intentional). ✓
+- No remotes added or changed. ✓
+- No client files changed. ✓
+- No camera behavior changed. ✓
+- **Needs Studio verification before DEBT-014 origin/direction portion can be closed.**
+
+---
+
 ## [2026-05-15] — Centralize default weapon name in Constants.DEFAULT_WEAPON for GunService and GunController (needs Studio verification)
 
 **Changed — `src/client/GunController.lua`**

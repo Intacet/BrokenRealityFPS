@@ -148,6 +148,8 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 **Severity:** High
 **Studio verification required:** Yes
 **Risk:** The `tick` value sent with each `WeaponFired` event is intended to let the server reject shots with timestamps too far in the past (replay attacks or lag compensation abuse). Currently `_clientTick` is discarded. Without this check, a client could theoretically queue up shots during lag and dump them all at once, bypassing the server-side rate limiter — though the rate limiter's `os.clock()` comparison already partially mitigates this.
+**Updated (2026-05-15):** Shot origin and direction are now validated server-side before raycasting via `isValidShotPayload()`: types are checked, near-zero directions (< `Constants.SHOT_DIRECTION_MIN_MAGNITUDE`) are rejected, and origins too far from the shooter's `HumanoidRootPart` (> `Constants.SHOT_ORIGIN_MAX_DISTANCE = 12` studs) are rejected. Direction is normalized before use. These checks harden against teleport-origin exploits and zero-vector crashes. `clientTick` validation remains deferred.
+**MCP unavailable:** Origin/direction hardening was not tested in Studio. Must be verified to confirm valid shots still pass at all ping levels and that the 12-stud origin limit does not produce false rejections during normal play (jump landings, character transitions).
 **Trigger:** The game is stress-tested with high-latency clients or an exploiter attempts shot-replay injection.
 **Fix when:** Combat is otherwise stable. Add a maximum acceptable age check: `if os.clock() - clientTick > MAX_SHOT_AGE then return end` where `MAX_SHOT_AGE` accounts for typical RTT plus a tolerance (e.g. 0.5 s). Add `MAX_SHOT_AGE` to Constants.
 

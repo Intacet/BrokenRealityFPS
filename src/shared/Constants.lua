@@ -99,4 +99,8 @@ Constants.AMMO_LOW_THRESHOLD = 5  -- magazine count at or below which the number
 Constants.FRIENDLY_FIRE_ENABLED = false  -- set true to allow players to damage teammates
 Constants.DEFAULT_WEAPON        = "AR15" -- weapon assigned to all players until loadouts are added
 
+-- Shot validation thresholds (server-side, GunService only)
+Constants.SHOT_ORIGIN_MAX_DISTANCE    = 12    -- max studs between client origin and shooter HumanoidRootPart; farther origins are rejected
+Constants.SHOT_DIRECTION_MIN_MAGNITUDE = 0.001 -- minimum direction vector magnitude; near-zero directions are rejected before normalization
+
 return Constants

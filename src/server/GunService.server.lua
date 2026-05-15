@@ -92,6 +92,59 @@ local function setupAmmo(player: Player)
         "| mag:", playerMag[player], "reserve:", playerReserve[player])
 end
 
+-- Returns the HumanoidRootPart world position for the player's character,
+-- or nil if the character or root part is not present.
+local function getShooterRootPosition(player: Player): Vector3?
+    assert(player ~= nil, "[GunService] getShooterRootPosition: player is required")
+    local character = player.Character
+    if not character then
+        return nil
+    end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then
+        return nil
+    end
+    return (rootPart :: BasePart).Position
+end
+
+-- Validates the client-supplied origin and direction from a WeaponFired event.
+-- Checks: Vector3 types, direction magnitude, origin distance from shooter root.
+-- Returns (true, validatedOrigin, normalizedDirection) on success.
+-- Returns (false, nil, nil) on any failure — caller must return without raycasting.
+local function isValidShotPayload(
+    shooter: Player,
+    origin: any,
+    direction: any
+): (boolean, Vector3?, Vector3?)
+    assert(shooter ~= nil, "[GunService] isValidShotPayload: shooter is required")
+
+    if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" then
+        Logger.warn("[GunService] WeaponFired: invalid payload types from", shooter.Name)
+        return false, nil, nil
+    end
+
+    -- Block zero and near-zero directions before normalization to avoid NaN/inf.
+    if direction.Magnitude < Constants.SHOT_DIRECTION_MIN_MAGNITUDE then
+        Logger.warn("[GunService] WeaponFired: near-zero direction from", shooter.Name)
+        return false, nil, nil
+    end
+
+    -- Reject origins far from the shooter's HumanoidRootPart.
+    -- This catches teleport-origin exploits without affecting legitimate shots —
+    -- the camera is typically 2–4 studs from the root; 12 is a generous ceiling.
+    local rootPosition = getShooterRootPosition(shooter)
+    if rootPosition == nil then
+        return false, nil, nil  -- no character on server; shot cannot be valid
+    end
+
+    if (origin - rootPosition).Magnitude > Constants.SHOT_ORIGIN_MAX_DISTANCE then
+        Logger.warn("[GunService] WeaponFired: origin too far from root for", shooter.Name)
+        return false, nil, nil
+    end
+
+    return true, origin, direction.Unit
+end
+
 -- ============================================================
 -- Event listeners
 -- ============================================================
@@ -122,12 +175,12 @@ WeaponFired.OnServerEvent:Connect(function(
         return
     end
 
-    -- ── Type guard ───────────────────────────────────────────────────────────
-    -- Reject payloads where an exploiter has replaced Vector3 values with
-    -- non-Vector3 types. Log as warn because malformed payloads are unexpected
-    -- and may indicate an exploiter probing the remote.
-    if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" then
-        Logger.warn("[GunService] WeaponFired: invalid payload types from", shooter.Name)
+    -- ── Payload validation ────────────────────────────────────────────────────
+    -- Validates types, direction magnitude, and origin proximity to the shooter's
+    -- root position. Returns a normalized direction on success.
+    -- Malformed or suspicious payloads are logged inside isValidShotPayload.
+    local valid, validOrigin, validDirection = isValidShotPayload(shooter, origin, direction)
+    if not valid or validOrigin == nil or validDirection == nil then
         return
     end
 
@@ -178,8 +231,8 @@ WeaponFired.OnServerEvent:Connect(function(
         and { shooter.Character } or {}
 
     local result = workspace:Raycast(
-        origin,
-        direction.Unit * weaponDef.range,
+        validOrigin,
+        validDirection * weaponDef.range,  -- validDirection is already normalized
         params
     )
 
