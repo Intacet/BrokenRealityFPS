@@ -2,12 +2,13 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > ViewModelController
 --
--- Owns the client-side viewmodel: clones ReplicatedStorage/ViewModels/AR15 (a Model
--- containing the gun mesh parts, arm MeshParts, WeldConstraints, and a Root PrimaryPart)
--- and parents it to workspace.CurrentCamera so it follows the camera every frame via PivotTo.
+-- Owns the client-side viewmodel: clones ReplicatedStorage/ViewModels/AR15 (a Model built
+-- from the imported TROY DEFENSE AR rig — HumanoidRootPart as PrimaryPart, full Motor6D arm
+-- chain, 49 BaseParts, MuzzleAttachment at barrel tip) and parents it to workspace.CurrentCamera.
+-- PivotTo(cam.CFrame * REAL_MODEL_OFFSET) is called every RenderStepped; Motor6Ds maintain
+-- arm/gun positions relative to HumanoidRootPart automatically.
 -- Falls back to a programmatic placeholder if the AR15 asset is missing from ReplicatedStorage.
--- Locks the local player to first-person and re-applies the lock on every respawn
--- so TeamService's LoadCharacter() call cannot revert the camera to third person.
+-- Locks the local player to first-person and re-applies the lock on every respawn.
 -- Shows only during ACTIVE; hidden during LOBBY, PREP, RESULTS, and MATCHEND.
 -- Exposes PlayFireAnimation() for GunController to call on each shot.
 -- Exposes GetBarrelTipCFrame() so GunController can position the muzzle flash.
@@ -30,10 +31,14 @@ local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEve
 -- Configuration
 -- ============================================================
 
--- BASE_OFFSET: pivot (PrimaryPart) position of the model relative to the camera.
--- Real AR15 model — Root is the camera-local origin; all geometry is baked into the
--- part positions relative to Root.  No additional offset needed.
-local REAL_MODEL_OFFSET : CFrame = CFrame.new(0, 0, 0)
+-- REAL_MODEL_OFFSET: fallback used only when FakeCamera cannot be found on the clone.
+-- init() computes the live offset from FakeCamera's CFrame relative to HumanoidRootPart so
+-- PivotTo(cam.CFrame * BASE_OFFSET) places FakeCamera exactly at the camera's CFrame,
+-- which is how the TROY DEFENSE AR rig was designed (FakeCamera = intended camera pivot).
+-- This constant was derived with: hrp.CFrame:ToObjectSpace(fc.CFrame):Inverse()
+-- and should stay in sync with the rig.  Re-derive it if the rig is ever re-imported.
+local REAL_MODEL_OFFSET : CFrame = CFrame.new(-0.7141, -1.6346, 2.0080)
+    * CFrame.Angles(0.055254, 0, 0)
 
 -- Programmatic placeholder — the model pivot sits at the visual gun-body centre,
 -- so we shift it right/down/forward to appear in the corner of the screen.
@@ -67,10 +72,21 @@ local recoilOffset : number  = 0
 local ViewModelController = {}
 ViewModelController.model = nil :: Model?
 
+-- Parts that must stay Transparent=1 at all times (rig helpers, not visual geometry).
+-- Used by init() and setVisibility() to avoid flashing invisible bones.
+local HELPER_PARTS: { [string]: boolean } = {
+    HumanoidRootPart = true,
+    FakeCamera       = true,
+    Torso            = true,
+    Handcontrol      = true,
+    Main             = true,
+    Root             = true,  -- placeholder fallback root part name
+}
+
 -- Attempts to clone ReplicatedStorage/ViewModels/AR15 and parent it to the camera.
--- Falls back to building a programmatic placeholder if the asset is absent.
--- All parts start hidden (Transparency = 1) via setVisibility called on the
--- next RoundStateChanged event.
+-- Uses WaitForChild so the LocalScript never clones an empty shell on first load
+-- (replication lag could return a model with 0 children from a bare FindFirstChild).
+-- Falls back to building a programmatic placeholder if the asset is absent or empty.
 -- Destroys any previously built model before creating a new one so re-init is safe.
 -- Called internally by Start() before any event listeners are registered.
 function ViewModelController:init()
@@ -82,27 +98,59 @@ function ViewModelController:init()
     local cam = workspace.CurrentCamera
 
     -- ── Attempt 1: clone AR15 production asset ────────────────────────────────
+    -- WaitForChild (5 s timeout) instead of FindFirstChild so we block until the
+    -- model and its key child (HumanoidRootPart) have replicated to the client.
     local viewModels = ReplicatedStorage:FindFirstChild("ViewModels")
-    local ar15Asset  = viewModels and viewModels:FindFirstChild("AR15")
+    local ar15Asset: Model? = nil
+    if viewModels then
+        local found = viewModels:WaitForChild("AR15", 5)
+        if found and found:IsA("Model") then
+            -- Also wait for HumanoidRootPart so the children have replicated
+            found:WaitForChild("HumanoidRootPart", 5)
+            ar15Asset = found :: Model
+        end
+    end
+
     if ar15Asset then
         local clone = ar15Asset:Clone()
-        -- Hide all parts BEFORE parenting so there is no single-frame flash at the
-        -- stored world positions (which are the build-time positions, not camera-local).
-        -- setVisibility(true) will be called by the RoundStateChanged listener when
-        -- the ACTIVE phase begins.
-        for _, desc in ipairs(clone:GetDescendants()) do
-            if desc:IsA("BasePart") then
-                (desc :: BasePart).Transparency = 1
-            end
+
+        -- Verify the clone is not empty (guards against a very rare race where
+        -- children replicate after WaitForChild returns the Model instance).
+        local clonePartCount = 0
+        for _, d in ipairs(clone:GetDescendants()) do
+            if d:IsA("BasePart") then clonePartCount += 1 end
         end
-        clone.Parent = cam
-        self.model  = clone
-        BASE_OFFSET = REAL_MODEL_OFFSET
-        -- Reset visible so the next RoundStateChanged always fires setVisibility,
-        -- even if the phase has not changed since the previous character load.
-        visible = false
-        Logger.debug("[ViewModelController] AR15 model cloned from ReplicatedStorage")
-        return
+        if clonePartCount == 0 then
+            Logger.warn("[ViewModelController] init: AR15 clone has 0 BaseParts (replication race) — using placeholder")
+            clone:Destroy()
+            ar15Asset = nil
+        else
+            -- Hide only visual parts before parenting; helper parts (HRP, FakeCamera, etc.)
+            -- are already Transparent=1 in the asset and must stay that way permanently.
+            for _, desc in ipairs(clone:GetDescendants()) do
+                if desc:IsA("BasePart") and not HELPER_PARTS[desc.Name] then
+                    (desc :: BasePart).Transparency = 1
+                end
+            end
+            -- Compute BASE_OFFSET dynamically so FakeCamera aligns exactly with
+            -- CurrentCamera every frame.  PivotTo(cam.CFrame * BASE_OFFSET) moves HRP
+            -- to that CFrame; Motor6Ds then place FakeCamera at cam.CFrame exactly.
+            local hrpPart = clone:FindFirstChild("HumanoidRootPart")
+            local fcPart  = clone:FindFirstChild("FakeCamera")
+            if hrpPart and fcPart then
+                BASE_OFFSET = hrpPart.CFrame:ToObjectSpace(fcPart.CFrame):Inverse()
+            else
+                BASE_OFFSET = REAL_MODEL_OFFSET
+                Logger.warn("[ViewModelController] FakeCamera not found on AR15 clone — using hardcoded offset")
+            end
+            clone.Parent = cam
+            self.model  = clone
+            -- Reset visible so the next RoundStateChanged always fires setVisibility,
+            -- even if the phase has not changed since the previous character load.
+            visible = false
+            Logger.debug("[ViewModelController] AR15 model cloned from ReplicatedStorage")
+            return
+        end
     end
 
     -- ── Attempt 2: programmatic placeholder ───────────────────────────────────
@@ -182,9 +230,11 @@ function ViewModelController:Start()
         Logger.debug("[ViewModelController] Model rebuilt on character respawn")
     end)
 
-    -- Sets Transparency on every BasePart descendant of the model.
-    -- Hiding: ALL BaseParts → Transparency 1.
-    -- Showing: all BaseParts → Transparency 0.
+    -- Sets Transparency on visual BasePart descendants of the model.
+    -- Hiding (show=false): ALL BaseParts → Transparency 1.
+    -- Showing (show=true): visual BaseParts → Transparency 0.
+    --   Helper parts (HRP, FakeCamera, Torso, Handcontrol, Main, Root) are NEVER
+    --   made visible — they are physics/rig anchors, not rendered geometry.
     -- Reads self.model per-call so re-builds after CharacterAdded are always used.
     local function setVisibility(show: boolean)
         Logger.debug(string.format("[ViewModelController] setVisibility(%s)", tostring(show)))
@@ -193,8 +243,16 @@ function ViewModelController:Start()
         local count = 0
         for _, desc in ipairs(m:GetDescendants()) do
             if desc:IsA("BasePart") then
-                (desc :: BasePart).Transparency = show and 0 or 1
-                count += 1
+                if show then
+                    -- Only reveal geometry parts; helpers stay permanently transparent.
+                    if not HELPER_PARTS[desc.Name] then
+                        (desc :: BasePart).Transparency = 0
+                        count += 1
+                    end
+                else
+                    (desc :: BasePart).Transparency = 1
+                    count += 1
+                end
             end
         end
         Logger.debug(string.format("[ViewModelController] setVisibility(%s) — %d parts", tostring(show), count))

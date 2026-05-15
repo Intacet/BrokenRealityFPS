@@ -7,6 +7,30 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-14] — Replace AR15 viewmodel with imported rig; fix camera alignment and replication race
+
+### Changes
+
+**Built in Studio via MCP — `ReplicatedStorage/ViewModels/AR15` (replaced)**
+- Replaced the previous 30-part WeldConstraint-based asset with the full 49-BasePart TROY DEFENSE AR Motor6D rig
+- All 49 BaseParts: CanCollide=false, CanQuery=false, CanTouch=false, Massless=true, CastShadow=false
+- PrimaryPart = HumanoidRootPart; Motor6D arm chain (L and R sub-models, Torso, Handcontrol) preserved intact
+- HELPER_PARTS (HumanoidRootPart, FakeCamera, Torso, Handcontrol, Main): Transparency=1 permanently
+- Visual parts (arm MeshParts, gun MeshParts): Transparency=0 during ACTIVE; 40 visual BaseParts
+- MuzzleAttachment added at barrel tip Part for muzzle flash placement in `GetBarrelTipCFrame()`
+- Humanoid removed; no scripts remain in the model
+- Previous 30-part WeldConstraint asset backed up as `ReplicatedStorage/ViewModels/AR15_Old_Backup`
+
+**Updated — `src/client/ViewModelController.lua`**
+- `init()` now uses `WaitForChild("AR15", 5)` + `found:WaitForChild("HumanoidRootPart", 5)` instead of bare `FindFirstChild` — fixes the play-mode "clone has 0 BaseParts" replication race that caused the placeholder to load instead of the real rig
+- Post-clone part-count guard added: if clone still has 0 BaseParts after WaitForChild, logs a warning and falls through to the programmatic placeholder
+- `HELPER_PARTS` table added at module level — lists 6 physics/rig-anchor part names (HumanoidRootPart, FakeCamera, Torso, Handcontrol, Main, Root) that must remain Transparency=1 permanently
+- `setVisibility(show=true)` now skips HELPER_PARTS to avoid flashing invisible rig anchors as visible geometry
+- `init()` now dynamically computes `BASE_OFFSET = hrp.CFrame:ToObjectSpace(fc.CFrame):Inverse()` from the clone's FakeCamera so `PivotTo(cam.CFrame * BASE_OFFSET)` aligns FakeCamera exactly with CurrentCamera (the rig's intended camera pivot); falls back to hardcoded `REAL_MODEL_OFFSET` if FakeCamera is absent
+- `REAL_MODEL_OFFSET` updated to the pre-computed FakeCamera inverse `CFrame.new(-0.7141, -1.6346, 2.0080) * CFrame.Angles(0.055254, 0, 0)` — used only as a fallback constant
+
+---
+
 ## [2026-05-14] — Add AR15 first-person viewmodel from Workspace assets
 
 **Asset flow:** `Workspace["TROY DEFENSE AR"]` + `Workspace.Viewmodel` → `ReplicatedStorage/ViewModels/AR15` (built via MCP Lua) → `ViewModelController:init()` clones and parents to `CurrentCamera` → `RenderStepped` drives `PivotTo` every frame → `setVisibility` shows/hides on phase change.

@@ -237,8 +237,9 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 ## [DEBT-029] ViewModelController setVisibility called every RoundStateChanged tick, not only on phase transitions
 
 **File:** `src/client/ViewModelController.lua`
-**Risk:** The `if show ~= visible then` guard was removed to fix the re-init visibility bug (2026-05-12). Without the guard, `setVisibility` is called every second during ACTIVE (and every tick during any other phase), iterating all model descendants and setting Transparency on each call. The AR15 viewmodel has 30 BaseParts (30× the placeholder's 4) — the iterator work is now meaningfully larger but still well within budget at 60fps.
-**Trigger:** Adding a high-polygon viewmodel with 50+ BaseParts, or introducing a phase that toggles rapidly. The AR15 model (30 parts) is below the threshold.
+**Risk:** The `if show ~= visible then` guard was removed to fix the re-init visibility bug (2026-05-12). Without the guard, `setVisibility` is called every second during ACTIVE (and every tick during any other phase), iterating all model descendants and setting Transparency on each call. The full TROY DEFENSE AR rig has 49 BaseParts total; 40 are visual (setVisibility(true) touches 40, setVisibility(false) touches all 49). This is 10× the placeholder's work but still well within frame budget at 60fps.
+**Updated (2026-05-14):** Part count corrected — the new 49-BasePart Motor6D rig replaced the previous 30-part WeldConstraint asset. Observed count: `setVisibility(true) — 40 parts`, `setVisibility(false) — 49 parts`.
+**Trigger:** Adding a high-polygon viewmodel with 50+ BaseParts, or introducing a phase that toggles rapidly.
 **Fix when:** Frame-time profiling reveals the GetDescendants iteration inside setVisibility contributes meaningfully to client frame budget. At that point, restore a state guard (`if show ~= visible then ... end`) — `visible` is already reset to `false` at the end of `init()` so the guard fires correctly after CharacterAdded re-runs `init()`.
 
 ---
