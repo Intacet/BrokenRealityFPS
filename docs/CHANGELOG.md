@@ -7,6 +7,40 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-15] — Centralize default weapon name in Constants.DEFAULT_WEAPON for GunService and GunController (needs Studio verification)
+
+**Changed — `src/client/GunController.lua`**
+- Removed `local CURRENT_WEAPON = "AR15"`. GunController now reads `Constants.DEFAULT_WEAPON` directly for all client-side prediction: dry-fire checks, `WeaponData` range for the cosmetic raycast, and local rate limiting.
+- Updated Configuration comment block to document that `Constants.DEFAULT_WEAPON` is the single source of truth and that `GunService` remains authoritative for all server-side validation.
+
+**Changed — `src/server/GunService.server.lua`**
+- Updated Configuration comment to reflect that both GunService and GunController now read `Constants.DEFAULT_WEAPON`. Removed stale reference to GunController's `CURRENT_WEAPON` local.
+- No logic changes. All `Constants.DEFAULT_WEAPON` usages were already in place from the previous session.
+
+**No change — `src/shared/Constants.lua`**
+- `Constants.DEFAULT_WEAPON = "AR15"` was already present. No edit required.
+
+**Updated — `docs/PROJECT_MAP.md`**
+- GunService combat section expanded to document: GunService uses `Constants.DEFAULT_WEAPON` authoritatively; GunController uses it only for client-side prediction; a single rename of `Constants.DEFAULT_WEAPON` covers both sides; `WeaponFired` and `ReloadRequest` carry no weapon name by design.
+
+**Updated — `docs/TECHNICAL_DEBT.md`**
+- DEBT-013: Second partial resolution entry added. `CURRENT_WEAPON` local removed from GunController; remaining risk (no weapon name in `WeaponFired`/`ReloadRequest`) documented as intentional. Studio verification still required.
+
+**Validation**
+- `selene` not available locally — linter could not be run.
+- `rojo` not available locally — build validation could not be run.
+- `Constants.DEFAULT_WEAPON = "AR15"` confirmed present in `src/shared/Constants.lua`. ✓
+- `GunService.server.lua` confirmed: no `local DEFAULT_WEAPON` declaration; all usages are `Constants.DEFAULT_WEAPON`. ✓
+- `GunController.lua` confirmed: no `local CURRENT_WEAPON` declaration; both usages replaced with `Constants.DEFAULT_WEAPON`. ✓
+- No remotes added or changed. ✓
+- No viewmodel files changed. ✓
+- No camera behavior changed. ✓
+- `WeaponFired` payload unchanged: `(origin, direction, tick)`. ✓
+- `ReloadRequest` payload unchanged: no arguments. ✓
+- **Needs Studio verification before DEBT-013 can be closed.**
+
+---
+
 ## [2026-05-15] — Tighten friendly-fire guard with Player.Team fallback (needs Studio verification)
 
 **Changed — `src/server/DamageService.lua`**

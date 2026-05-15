@@ -36,10 +36,13 @@ local ReloadRequest  = Remotes:WaitForChild("ReloadRequest")  :: RemoteEvent
 -- Configuration
 -- ============================================================
 
--- Active weapon name is Constants.DEFAULT_WEAPON (src/shared/Constants.lua).
--- AmmoChanged now includes this name so HUD can display the server-authoritative weapon.
--- GunController's CURRENT_WEAPON local is still used for client-side weapon lookups;
--- both must match until DEBT-013 is fully resolved and weaponName is sent in WeaponFired.
+-- Active weapon identity is Constants.DEFAULT_WEAPON (src/shared/Constants.lua).
+-- GunService uses Constants.DEFAULT_WEAPON as the authoritative weapon name for all
+-- server-side validation, ammo setup, and AmmoChanged broadcasts.
+-- GunController also reads Constants.DEFAULT_WEAPON for client-side prediction,
+-- dry-fire checks, range for the cosmetic raycast, and local rate limiting.
+-- Renaming the default weapon requires changing Constants.DEFAULT_WEAPON only.
+-- WeaponFired and ReloadRequest carry no weapon name by design — see DEBT-013.
 
 -- ============================================================
 -- State

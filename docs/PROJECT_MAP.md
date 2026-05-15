@@ -52,10 +52,19 @@ GunController (client)
        fires: HitConfirmed → firing client (hitmarker)
 
 GunService (server)
-  │  owns: weapon identity for this stage — Constants.DEFAULT_WEAPON is the single source
-  │    of truth; the client never decides which weapon is equipped
+  │  owns: weapon identity for this stage — Constants.DEFAULT_WEAPON (src/shared/Constants.lua)
+  │    is the single source of truth for both server and client; the client never decides
+  │    which weapon is equipped
+  │  GunService reads Constants.DEFAULT_WEAPON authoritatively for WeaponData lookup,
+  │    ammo setup, rate-limit validation, and all AmmoChanged broadcasts
+  │  GunController reads Constants.DEFAULT_WEAPON only for client-side prediction:
+  │    dry-fire checks, WeaponData range for the cosmetic raycast, local rate limiting
+  │  Renaming the default weapon requires changing Constants.DEFAULT_WEAPON only
   │  AmmoChanged payload: weaponName (Constants.DEFAULT_WEAPON), mag, reserve
-  │    GunController receives weaponName but ignores it; HUD displays it
+  │    GunController receives weaponName but ignores it (uses Constants.DEFAULT_WEAPON directly);
+  │    HUD displays it
+  │  WeaponFired and ReloadRequest carry no weapon name by design — intentionally
+  │    omitted until a full server-owned loadout/equipment system exists (see DEBT-013)
   │
 DamageService (server)
   │  owns: all health mutation

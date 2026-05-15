@@ -46,9 +46,11 @@ local LocalPlayer = Players.LocalPlayer
 -- Configuration
 -- ============================================================
 
--- Must stay in sync with GunService's DEFAULT_WEAPON until DEBT-013 is resolved
--- and both sides are updated to pass the weapon name in the WeaponFired payload.
-local CURRENT_WEAPON = "AR15"
+-- Constants.DEFAULT_WEAPON is the single source of truth for the active weapon name.
+-- GunController reads it only for client-side prediction: dry-fire checks,
+-- WeaponData range for the cosmetic raycast, and local rate limiting.
+-- GunService remains authoritative — it validates all shots, ammo, and damage.
+-- WeaponFired and ReloadRequest carry no weapon name by design; see DEBT-013.
 
 -- ============================================================
 -- State
@@ -95,9 +97,9 @@ function GunController:Start()
             return
         end
 
-        local weaponDef = WeaponData[CURRENT_WEAPON]
+        local weaponDef = WeaponData[Constants.DEFAULT_WEAPON]
         if not weaponDef then
-            Logger.warn("[GunController] No WeaponData entry for:", CURRENT_WEAPON)
+            Logger.warn("[GunController] No WeaponData entry for:", Constants.DEFAULT_WEAPON)
             return
         end
 
