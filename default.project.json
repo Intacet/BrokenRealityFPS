@@ -33,11 +33,6 @@
       }
     },
 
-    "StarterGui": {
-      "$className": "StarterGui",
-      "$path": "src/ui"
-    },
-
     "Workspace": {
       "$className": "Workspace",
       "Map":          { "$className": "Folder" },

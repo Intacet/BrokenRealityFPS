@@ -99,6 +99,26 @@ DeathScreen             -- driven by RagdollApplied (death trigger), RoundStateC
 KillFeedUI              -- driven by KillFeed; top-right scrolling kill entries, max 5, fade after display time
 ```
 
+### StarterGui / UI source mapping
+
+**Current stage:** UI is created entirely at runtime by client controllers. There is no static `StarterGui` content in the Rojo source tree.
+
+- All ScreenGui instances (`HUD`, `MatchUI`, `DeathScreen`, `KillFeedUI`, `CrosshairUI`) are built programmatically in `init(playerGui)` methods inside `src/client/UI/*.lua` ModuleScripts.
+- `ClientInit.client.lua` calls each `init(playerGui)` at startup, passing `Players.LocalPlayer.PlayerGui`.
+- **`default.project.json` does not map StarterGui to any source folder.** Rojo leaves StarterGui unmanaged; the built-in service is populated at runtime by controllers, not by synced disk files.
+- **No `src/ui/` folder is expected or used at this stage.** The empty `src/ui/` directory that exists on disk has no files and is not referenced by Rojo.
+
+**When a `src/ui/` folder becomes necessary** (e.g. for static decal frames, pre-built ObjectiveUI assets, or map-specific loading screens):
+1. Add files to `src/ui/` with the `.lua` or `.client.lua` extension as appropriate.
+2. Restore the StarterGui mapping in `default.project.json`:
+   ```json
+   "StarterGui": {
+     "$className": "StarterGui",
+     "$path": "src/ui"
+   }
+   ```
+3. Update this section and `docs/CHANGELOG.md`.
+
 ### Client initialization pattern
 
 All client controllers are **ModuleScripts** (`.lua`). They do not run automatically.

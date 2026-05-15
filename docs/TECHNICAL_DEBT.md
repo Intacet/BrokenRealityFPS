@@ -254,22 +254,25 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 ---
 
 
-## [DEBT-031] StarterCharacterScripts not tracked by Rojo — imported assets can silently add scripts there — PARTIALLY RESOLVED 2026-05-14
+## [DEBT-031] StarterCharacterScripts and StarterGui not tracked by Rojo — imported assets can silently add scripts there — PARTIALLY RESOLVED 2026-05-14
 
-**File:** `StarterPlayer.StarterCharacterScripts` (Studio only, no Rojo mapping)
+**File:** `StarterPlayer.StarterCharacterScripts`, `StarterGui` (Studio only, no Rojo mapping)
 **Risk:** `default.project.json` maps `StarterPlayerScripts/Controllers` → `src/client` and no other
-`StarterPlayer` containers. `StarterCharacterScripts` is entirely outside Rojo's managed tree. Any
+`StarterPlayer` containers. `StarterCharacterScripts` and `StarterGui` are outside Rojo's managed tree. Any
 Creator Marketplace import or drag-and-drop asset that includes a LocalScript in `StarterCharacterScripts`
-will be silently accepted by Studio with no corresponding disk file, no git tracking, and no Rojo
-sync mechanism to detect or remove it.
+or a ScreenGui in `StarterGui` will be silently accepted by Studio with no corresponding disk file, no
+git tracking, and no Rojo sync mechanism to detect or remove it.
 
 The TROY DEFENSE AR viewmodel import included exactly such a script: a LocalScript named `"LocalScript"`
 that set `camera.CameraType = Scriptable` every RenderStep using yaw-only rotation — locking the
 player's vertical camera movement for the entire life of the project until manually found and deleted.
 
-**Partial resolution (2026-05-14):** The specific rogue script was deleted. The structural gap — no
-Rojo tracking of `StarterCharacterScripts` — remains. A future asset import could re-introduce
-scripts in the same location with no warning.
+**Partial resolution (2026-05-14):** The specific rogue script in `StarterCharacterScripts` was deleted. The structural gap remains.
+
+**Updated (2026-05-15):** The invalid `StarterGui → src/ui` mapping was removed from `default.project.json`
+(it pointed to an empty folder with no files). `StarterGui` is now intentionally unmanaged by Rojo:
+all ScreenGui instances are created at runtime by client controllers. This is correct for the current
+stage, but it means StarterGui is now an explicitly untracked container — see DEBT-035.
 
 **Trigger:** Any future import from the Creator Marketplace or from a `.rbxm` file that includes
 scripts in `StarterCharacterScripts`, `StarterGui`, or other Studio containers not listed in
@@ -297,6 +300,20 @@ corresponding tracked disk file.
 **Risk:** The MCP unavailable rule instructs Claude Code not to claim Studio verification when MCP is disconnected and to restrict scope to docs/config/static-validation. This is self-reported — there is no CI gate that checks whether a change touching gameplay files was actually tested in Studio. If a session misidentifies MCP as available, or proceeds with a runtime change without explicitly flagging it, the unverified change enters the codebase silently.
 **Trigger:** Any gameplay-affecting change (camera, viewmodel, combat, match-loop, objectives, replication) committed without a Studio session — especially in a GitHub-only session.
 **Fix when:** A CI step can run `rojo build` and `selene` automatically on every push to catch at least structural errors. Full runtime verification always requires Studio. Until CI is added, unverified gameplay changes must be manually tagged "needs Studio verification" in the PR description and in a TECHNICAL_DEBT entry.
+
+---
+
+## [DEBT-035] StarterGui has no Rojo source mapping — UI is controller-generated (intentional at this stage)
+
+**File:** `default.project.json`, `src/ui/` (empty directory)
+**Risk:** StarterGui is not mapped to a source folder in `default.project.json`. All ScreenGui instances are built programmatically by `init(playerGui)` methods inside `src/client/UI/*.lua` at runtime. This is correct for the current development stage — no static StarterGui assets exist. However, if a developer adds files to `src/ui/` without also restoring the mapping in `default.project.json`, those files will never sync into Studio. Conversely, if a developer adds the mapping without adding files, Rojo will error on build because `src/ui` contains no `.lua` files (Rojo requires a non-empty source path for `$path` mappings on a container).
+**Context:** The `StarterGui → src/ui` mapping was removed on 2026-05-15 because `src/ui/` was empty and the mapping was misleading. See DEBT-031 for the broader untracked-container risk.
+**Trigger:** Any task that introduces static StarterGui content (pre-built ObjectiveUI assets, map-specific loading screens, or any ScreenGui that should exist before `ClientInit` runs).
+**Fix when:** The first file is added to `src/ui/`. At that point:
+1. Add the file(s) to `src/ui/`.
+2. Restore the StarterGui mapping in `default.project.json`.
+3. Update `docs/PROJECT_MAP.md` (StarterGui / UI source mapping section).
+4. Run `rojo build` to confirm the mapping is valid.
 
 ---
 

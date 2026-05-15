@@ -7,6 +7,27 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-15] — Remove invalid StarterGui/src/ui Rojo mapping; document controller-generated UI architecture
+
+**Changed — `default.project.json`**
+- Removed the `StarterGui` block that mapped `"$path": "src/ui"`. The `src/ui/` directory exists on disk but is empty — no `.lua` files are present. The mapping caused Rojo to attempt to sync an empty folder into `StarterGui`, which is misleading and would produce an empty synced container. All ScreenGui instances are created at runtime by client controllers (`HUD`, `MatchUI`, `DeathScreen`, `KillFeedUI`, `CrosshairUI`), not by static disk files. StarterGui is now unmanaged by Rojo, which is correct for this development stage.
+- All other mappings preserved: `ReplicatedStorage/Modules → src/shared`, `ServerScriptService/Services → src/server`, `StarterPlayer/StarterPlayerScripts/Controllers → src/client`, all Workspace sub-folders.
+
+**Updated — `docs/PROJECT_MAP.md`**
+- Added a **StarterGui / UI source mapping** section documenting that UI is controller-generated, StarterGui has no Rojo mapping, `src/ui/` has no files, and explaining exactly what steps to take when static StarterGui content is needed.
+
+**Updated — `docs/TECHNICAL_DEBT.md`**
+- DEBT-031: Updated title and body to explicitly include StarterGui as a second untracked Rojo container alongside StarterCharacterScripts. Added 2026-05-15 update note explaining why the mapping was removed.
+- Added DEBT-035: Documents that StarterGui intentionally has no Rojo source mapping at this stage. Captures the forward risk that a developer adding files to `src/ui/` must also restore the mapping, and that restoring the mapping without files causes a Rojo build error.
+
+**Validation**
+- `default.project.json` is valid JSON (no `src/ui` reference remains). ✓
+- No `src/` files changed. ✓
+- Rojo binary not available locally — static `rojo build` validation was not run. Needs Rojo/Studio verification on next Studio session.
+- MCP unavailable — no Studio verification performed.
+
+---
+
 ## [2026-05-15] — Add prompt pre-flight review and MCP unavailable / GitHub-only mode rules to CLAUDE.md
 
 **Updated — `CLAUDE.md`**
