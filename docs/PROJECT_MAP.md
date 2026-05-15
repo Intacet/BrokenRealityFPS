@@ -239,6 +239,8 @@ The project is pivoting to a persistent PvPvE zone shooter. The systems below ar
 
 > **First persistent-zone code milestone:** Build `EconomyService` (carried cash + secured funds) and the deposit/extraction trigger before any other new system. The core carried-cash → deposit → secured-funds loop is the foundation everything else depends on.
 
+> **Staged implementation plan:** See `docs/PERSISTENT_ZONE_ROADMAP.md` for the full 11-stage build order, per-stage scope gates, files affected, and Studio verification requirements.
+
 ### Legacy services and their fate
 
 | Service | Legacy role | Target fate |

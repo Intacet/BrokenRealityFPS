@@ -7,6 +7,34 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-15] — Add docs/PERSISTENT_ZONE_ROADMAP.md: staged implementation plan for persistent-zone pivot (documentation only, no runtime code changed)
+
+**This was a documentation and planning update. No `src/` files were changed. No remotes were added. No runtime behavior changed.**
+
+**Added — `docs/PERSISTENT_ZONE_ROADMAP.md`**
+- New file: 11-stage (Stage 0–10) staged build plan for the persistent PvPvE zone shooter pivot.
+- Each stage defines: goal, checklist, files likely affected later, explicit scope gates ("not in this stage"), Studio/MCP verification requirement, and maintenance risks.
+- Stage 0 (FPS foundation — GunService, DamageService, HUD, KillFeed, Constants) is marked partially complete. Stages 1–10 are not started.
+- Stage 1: EconomyService (carried cash + secured funds, deposit logic, RemoteEvents).
+- Stage 2: ZoneService (persistent zone state, entry/exit gates, player tracking).
+- Stage 3: BaseService (safe base area, spawn selection, deposit terminal area).
+- Stage 4: LootService (zone loot pickups, cash awards on pickup).
+- Stage 5: DeathDropService (death bag, weapon + cash dropped at death position).
+- Stage 6: ExtractionService (exit trigger, converts carried cash to secured funds on extract).
+- Stage 7: ShopService (zone shop via carried cash; base armory via secured funds).
+- Stage 8: MonsterService (zone AI enemies, pathfinding, attack logic).
+- Stage 9: ZoneEventService (periodic timed events; deferred until Stages 1–8 stable).
+- Stage 10: InventoryService / StashService / ProgressionService (deferred; do not start until full loop verified).
+- Stage reference summary table included at the bottom of the file.
+
+**Changed — `docs/PROJECT_MAP.md`**
+- Added one-line reference to `docs/PERSISTENT_ZONE_ROADMAP.md` in the New Target Architecture section, below the first-milestone note.
+
+**Changed — `docs/TECHNICAL_DEBT.md`**
+- DEBT-036: Added roadmap reference note clarifying that `docs/PERSISTENT_ZONE_ROADMAP.md` is planning-only and does not resolve the debt entry; runtime systems must still be built and verified in Studio stage by stage.
+
+---
+
 ## [2026-05-15] — Extend persistent-zone pivot documentation: in-zone shops, zone events, base/zone distinction, ZoneEventService (documentation only, no runtime code changed)
 
 **This was a documentation and planning update. No `src/` files were changed. No remotes were added. No runtime behavior changed.**

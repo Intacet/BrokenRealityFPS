@@ -46,6 +46,8 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 **Resolve when:** The core persistent zone loop (zone entry → loot → extract → deposit → armory → zone) is working in Studio and the legacy round-based systems are no longer needed for active play.
 
+**Roadmap reference:** `docs/PERSISTENT_ZONE_ROADMAP.md` defines the 11-stage staged build order for the persistent zone pivot. That document is planning-only — it does not resolve this debt entry. Runtime systems must still be built and verified in Studio stage by stage before this entry can be closed.
+
 ---
 
 ## [DEBT-001] Phase type union manually duplicated from Constants.Phase — PARTIALLY RESOLVED 2026-05-07
