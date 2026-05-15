@@ -7,6 +7,41 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-15] — AmmoChanged now sends weapon name; HUD displays server-provided weapon (needs Studio verification)
+
+**Changed — `src/shared/Constants.lua`**
+- Added `Constants.DEFAULT_WEAPON = "AR15"` in the **Combat rules** section. Single source of truth for the active weapon name used by GunService and HUD.
+
+**Changed — `src/server/GunService.server.lua`**
+- Removed `local DEFAULT_WEAPON = "AR15"`. All five `AmmoChanged:FireClient` call sites now pass `Constants.DEFAULT_WEAPON` as the first argument before `mag` and `reserve`.
+- All `WeaponData` lookups and logger messages now reference `Constants.DEFAULT_WEAPON`.
+
+**Changed — `src/client/GunController.lua`**
+- `AmmoChanged.OnClientEvent` listener updated from `function(mag, reserve)` to `function(_weaponName, mag, reserve)`. `_weaponName` is ignored here; HUD displays it.
+
+**Changed — `src/client/UI/HUD.lua`**
+- Removed hardcoded `"SCAR"` weapon-name label from the ammo block.
+- Added `weaponLabel: TextLabel` reference populated during `init()` with `Constants.DEFAULT_WEAPON` as the initial text (never blank before the first `AmmoChanged` fires).
+- `setAmmo()` now accepts `weaponName: string` as first argument and sets `weaponLabel.Text`.
+- `AmmoChanged.OnClientEvent` listener updated to `function(weaponName, mag, reserve)`.
+
+**Updated — `docs/PROJECT_MAP.md`**
+- `AmmoChanged` remote registry row updated with new payload (`weaponName, mag, reserve`).
+- Added GunService combat section note: server owns weapon identity; `Constants.DEFAULT_WEAPON` is the single source of truth.
+
+**Updated — `docs/TECHNICAL_DEBT.md`**
+- DEBT-013: Updated to "Partially resolved." Single source of truth established; HUD now server-driven. `WeaponFired`/`ReloadRequest` still do not carry weapon name — intentional at this stage.
+
+**Validation**
+- `selene` not available locally — linter could not be run.
+- `rojo` not available locally — build validation could not be run.
+- No new remotes created. ✓
+- No viewmodel files changed. ✓
+- No camera behavior changed. ✓
+- **Needs Studio verification before DEBT-013 can be closed.**
+
+---
+
 ## [2026-05-15] — Add friendly-fire prevention to DamageService (needs Studio verification)
 
 **Changed — `src/server/DamageService.lua`**

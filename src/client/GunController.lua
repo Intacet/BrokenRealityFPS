@@ -201,8 +201,8 @@ function GunController:Start()
     end)
 
     -- GunService updated this player's ammo. Cache for dry-fire check and GetAmmo().
-    -- HUD listens to AmmoChanged independently for its display.
-    AmmoChanged.OnClientEvent:Connect(function(mag: number, reserve: number)
+    -- _weaponName is forwarded by the server but not used here; HUD displays it.
+    AmmoChanged.OnClientEvent:Connect(function(_weaponName: string, mag: number, reserve: number)
         currentMag     = mag
         currentReserve = reserve
         Logger.debug(string.format("[GunController] Ammo: %d / %d", mag, reserve))

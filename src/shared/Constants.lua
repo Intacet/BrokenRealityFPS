@@ -97,5 +97,6 @@ Constants.AMMO_LOW_THRESHOLD = 5  -- magazine count at or below which the number
 -- Combat rules
 -- ============================================================
 Constants.FRIENDLY_FIRE_ENABLED = false  -- set true to allow players to damage teammates
+Constants.DEFAULT_WEAPON        = "AR15" -- weapon assigned to all players until loadouts are added
 
 return Constants

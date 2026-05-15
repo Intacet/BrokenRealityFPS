@@ -36,10 +36,10 @@ local ReloadRequest  = Remotes:WaitForChild("ReloadRequest")  :: RemoteEvent
 -- Configuration
 -- ============================================================
 
--- GunController will include the weapon name in the WeaponFired payload once it is
--- built. Until then, every shot is attributed to this default weapon.
--- Must stay in sync with GunController's CURRENT_WEAPON — see DEBT-013.
-local DEFAULT_WEAPON = "AR15"
+-- Active weapon name is Constants.DEFAULT_WEAPON (src/shared/Constants.lua).
+-- AmmoChanged now includes this name so HUD can display the server-authoritative weapon.
+-- GunController's CURRENT_WEAPON local is still used for client-side weapon lookups;
+-- both must match until DEBT-013 is fully resolved and weaponName is sent in WeaponFired.
 
 -- ============================================================
 -- State
@@ -77,14 +77,14 @@ end
 -- Initialises a player's ammo from WeaponData and fires AmmoChanged so their HUD
 -- shows the correct values immediately. Called on TeamAssigned (PREP phase).
 local function setupAmmo(player: Player)
-    local weaponDef = WeaponData[DEFAULT_WEAPON]
+    local weaponDef = WeaponData[Constants.DEFAULT_WEAPON]
     if not weaponDef then
-        Logger.warn("[GunService] setupAmmo: no WeaponData for", DEFAULT_WEAPON)
+        Logger.warn("[GunService] setupAmmo: no WeaponData for", Constants.DEFAULT_WEAPON)
         return
     end
     playerMag[player]     = weaponDef.magazineSize
     playerReserve[player] = weaponDef.reserveAmmo
-    AmmoChanged:FireClient(player, playerMag[player], playerReserve[player])
+    AmmoChanged:FireClient(player, Constants.DEFAULT_WEAPON, playerMag[player], playerReserve[player])
     Logger.debug("[GunService] Ammo set for", player.Name,
         "| mag:", playerMag[player], "reserve:", playerReserve[player])
 end
@@ -129,9 +129,9 @@ WeaponFired.OnServerEvent:Connect(function(
     end
 
     -- ── Weapon lookup ────────────────────────────────────────────────────────
-    local weaponDef = WeaponData[DEFAULT_WEAPON]
+    local weaponDef = WeaponData[Constants.DEFAULT_WEAPON]
     if not weaponDef then
-        Logger.warn("[GunService] No WeaponData entry for:", DEFAULT_WEAPON)
+        Logger.warn("[GunService] No WeaponData entry for:", Constants.DEFAULT_WEAPON)
         return
     end
 
@@ -155,14 +155,14 @@ WeaponFired.OnServerEvent:Connect(function(
     if mag <= 0 then
         -- Magazine empty. Fire AmmoChanged so the client HUD stays in sync if it
         -- somehow drifted (e.g. a client-side prediction bug).
-        AmmoChanged:FireClient(shooter, 0, playerReserve[shooter] or 0)
+        AmmoChanged:FireClient(shooter, Constants.DEFAULT_WEAPON, 0, playerReserve[shooter] or 0)
         return
     end
 
     -- Consume one round before the raycast so exploiters cannot fire ahead of
     -- the decrement and overflow back to a positive value.
     playerMag[shooter] = mag - 1
-    AmmoChanged:FireClient(shooter, playerMag[shooter], playerReserve[shooter] or 0)
+    AmmoChanged:FireClient(shooter, Constants.DEFAULT_WEAPON, playerMag[shooter], playerReserve[shooter] or 0)
 
     -- ── Server raycast ───────────────────────────────────────────────────────
     -- Re-run the shot on the server. The client's claimed hit is ignored —
@@ -223,16 +223,16 @@ ReloadRequest.OnServerEvent:Connect(function(player: Player)
         return
     end
 
-    local weaponDef = WeaponData[DEFAULT_WEAPON]
+    local weaponDef = WeaponData[Constants.DEFAULT_WEAPON]
     if not weaponDef then
-        Logger.warn("[GunService] ReloadRequest: no WeaponData for", DEFAULT_WEAPON)
+        Logger.warn("[GunService] ReloadRequest: no WeaponData for", Constants.DEFAULT_WEAPON)
         return
     end
 
     if reserve <= 0 or mag >= weaponDef.magazineSize then
         -- Nothing to reload: no reserve left, or magazine already full.
         -- Fire AmmoChanged so the client HUD stays accurate.
-        AmmoChanged:FireClient(player, mag, reserve)
+        AmmoChanged:FireClient(player, Constants.DEFAULT_WEAPON, mag, reserve)
         return
     end
 
@@ -242,7 +242,7 @@ ReloadRequest.OnServerEvent:Connect(function(player: Player)
     local pulled = math.min(weaponDef.magazineSize, reserve)
     playerMag[player]     = pulled
     playerReserve[player] = reserve - pulled
-    AmmoChanged:FireClient(player, playerMag[player], playerReserve[player])
+    AmmoChanged:FireClient(player, Constants.DEFAULT_WEAPON, playerMag[player], playerReserve[player])
 
     Logger.debug(string.format(
         "[GunService] %s reloaded: %d→%d (reserve %d→%d)",

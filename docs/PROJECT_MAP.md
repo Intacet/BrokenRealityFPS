@@ -51,6 +51,12 @@ GunController (client)
        calls: DamageService:Apply()
        fires: HitConfirmed → firing client (hitmarker)
 
+GunService (server)
+  │  owns: weapon identity for this stage — Constants.DEFAULT_WEAPON is the single source
+  │    of truth; the client never decides which weapon is equipped
+  │  AmmoChanged payload: weaponName (Constants.DEFAULT_WEAPON), mag, reserve
+  │    GunController receives weaponName but ignores it; HUD displays it
+  │
 DamageService (server)
   │  owns: all health mutation
   │  blocks same-team damage when Constants.FRIENDLY_FIRE_ENABLED == false (server-side only;
@@ -206,7 +212,7 @@ Add a row here **before** implementing any new remote. Every row must have exact
 | `WeaponFired` | RemoteEvent | `GunController.lua` | `GunService.server.lua` | Client requests hit validation |
 | `HitConfirmed` | RemoteEvent | `GunService.server.lua` | `GunController.lua`, `SoundController.lua` | Server confirms hit for cosmetic hitmarker and hit sound |
 | `HealthChanged` | RemoteEvent | `DamageService.lua` | `GunController.lua`, `HUD.lua` | Server sends updated health to affected client |
-| `AmmoChanged` | RemoteEvent | `GunService.server.lua` | `GunController.lua`, `HUD.lua` | Server sends updated magazine and reserve ammo after each shot or reload |
+| `AmmoChanged` | RemoteEvent | `GunService.server.lua` | `GunController.lua`, `HUD.lua` | Server sends updated weapon name, magazine, and reserve ammo after each shot or reload; payload: `weaponName: string, mag: number, reserve: number` |
 | `ReloadRequest` | RemoteEvent | `GunController.lua` | `GunService.server.lua` | Client requests a magazine reload |
 | `RoundStateChanged` | RemoteEvent | `MatchService.server.lua` | `MatchController.lua`, `MatchUI.lua`, `HUD.lua`, `CrosshairUI.lua`, `ViewModelController.lua` | Phase, round, timer, winner, and win-count updates every tick |
 | `TeamAssigned` | RemoteEvent | `TeamService.server.lua` | `MatchUI.lua` (pending) | Tells each client their team for this round |

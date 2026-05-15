@@ -62,6 +62,7 @@ local aliveLabel    : TextLabel
 local magLabel      : TextLabel
 local magScale      : UIScale
 local reserveLabel  : TextLabel
+local weaponLabel   : TextLabel  -- server-sent weapon name shown below reserve count
 
 -- ============================================================
 -- Helpers
@@ -117,7 +118,8 @@ local function setHealth(hp: number)
     setHealthColor(ratio)
 end
 
-local function setAmmo(mag: number, reserve: number)
+local function setAmmo(weaponName: string, mag: number, reserve: number)
+    weaponLabel.Text  = weaponName
     magLabel.Text     = tostring(mag)
     reserveLabel.Text = tostring(reserve)
 
@@ -212,7 +214,7 @@ function HUD:init(playerGui: PlayerGui)
     --   [magazine number large]
     --   ────────────────  (thin line)
     --   [reserve small grey]
-    --   [SCAR small grey]
+    --   [weapon name small grey]  ← text set by AmmoChanged, defaults to Constants.DEFAULT_WEAPON
 
     local ammoW = 90
     local ammoH = 70
@@ -267,11 +269,13 @@ function HUD:init(playerGui: PlayerGui)
         14, false, GREY)
     reserveLabel.TextXAlignment = Enum.TextXAlignment.Center
 
-    -- Weapon name
-    label(ammoFrame, "SCAR",
+    -- Weapon name — populated by AmmoChanged; defaults to Constants.DEFAULT_WEAPON
+    -- until the first event arrives so the label is never blank at startup.
+    weaponLabel = label(ammoFrame, Constants.DEFAULT_WEAPON,
         UDim2.fromOffset(ammoW, 12),
         UDim2.fromOffset(0, 57),
-        10, false, GREY).TextXAlignment = Enum.TextXAlignment.Center
+        10, false, GREY)
+    weaponLabel.TextXAlignment = Enum.TextXAlignment.Center
 
     Logger.debug("[HUD] GUI created")
 end
@@ -293,8 +297,8 @@ function HUD:Start()
         local __ = COLOR_DEF
     end)
 
-    AmmoChanged.OnClientEvent:Connect(function(mag: number, reserve: number)
-        setAmmo(mag, reserve)
+    AmmoChanged.OnClientEvent:Connect(function(weaponName: string, mag: number, reserve: number)
+        setAmmo(weaponName, mag, reserve)
     end)
 
     RoundStateChanged.OnClientEvent:Connect(function(raw: any)
