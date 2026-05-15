@@ -133,10 +133,17 @@ These rules apply to all new systems built for the persistent zone architecture.
 - Death should hurt but never make the player quit. Always provide a weak free respawn option (free pistol or equivalent) so a player can re-enter immediately after dying with nothing.
 - Keep re-entry fast. A player who dies should be able to return to the zone within a few seconds of choosing to respawn.
 
+**Zone shops and base armory:**
+- Zone shops accept carried cash only. They provide useful in-zone items (guns, ammo, consumables) but must not replace or shortcut base progression. A player should still need the base armory and secured funds for better loadouts and upgrades.
+- Base armory purchases use secured funds only. The two economies must remain separate: spending carried cash in-zone is a tactical choice; spending secured funds at base is a progression choice.
+
+**Periodic zone events:**
+- Zone events (timed loot surges, monster waves, cash bounties) create pressure and reward aggression. They must not lock players into mandatory participation or turn the persistent zone into a round-based mode. A player who ignores an event should still be able to extract safely.
+
 **Scope discipline:**
-- Build persistent zone systems in small, testable stages. Do not build full inventory, base upgrade trees, shops, monsters, and extraction in one prompt.
+- Build persistent zone systems in small, testable stages. Do not build full inventory, base upgrade trees, shops, monsters, zone events, extraction, and death drops in one prompt.
 - One new server-side system per task unless the systems are trivially coupled.
-- Deferred systems (StashService, ProgressionService, InventoryService) must not be started until the core loop (zone → extract → deposit → armory → zone) is working in Studio.
+- Deferred systems (StashService, ProgressionService, InventoryService, ZoneEventService) must not be started until the core loop (zone → extract → deposit → armory → zone) is working in Studio.
 
 **Legacy systems:**
 - The round-based MatchService, TeamService, and ObjectiveService are legacy. Do not expand them or add round-specific features unless explicitly requested.

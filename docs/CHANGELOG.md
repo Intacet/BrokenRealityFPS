@@ -7,6 +7,39 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-15] — Extend persistent-zone pivot documentation: in-zone shops, zone events, base/zone distinction, ZoneEventService (documentation only, no runtime code changed)
+
+**This was a documentation and planning update. No `src/` files were changed. No remotes were added. No runtime behavior changed.**
+
+**Changed — `CLAUDE.md`**
+- Main loop diagram extended: in-zone zone shop step added; periodic zone events step added; base spend step expanded to include base upgrades and stash.
+- Money model table extended with "Spendable" column: carried cash is spendable in-zone at zone shops; secured funds are spendable at base.
+- New "**Base / zone distinction**" table added: base = safe, secured funds, armory/upgrades/stash; zone = dangerous, carried cash, shops, events, death drops.
+- Early prototype scope updated: zone shop described as "consumables and basic guns" (base armory with full tiers added later); one simple periodic zone event added as a deferred scope item.
+
+**Changed — `docs/PROJECT_MAP.md`**
+- `ZoneEventService` added to planned services table: owns periodic zone events (timed loot surges, cash bonuses, monster waves); deferred until core loop is stable.
+- `ShopService` description clarified: zone shop uses carried cash; base armory uses secured funds.
+- First persistent-zone code milestone note added: build `EconomyService` (carried cash + secured funds + deposit/extraction) before any other new system.
+
+**Changed — `docs/PROJECT_RULES.md`**
+- "Zone shops and base armory" rule added: zone shops accept carried cash only and must not shortcut base progression; base armory uses secured funds only; two economies must remain separate.
+- "Periodic zone events" rule added: events create pressure and reward aggression but must not lock players into mandatory participation or convert the persistent zone into a round mode.
+- "Scope discipline" updated to include `ZoneEventService` in the deferred list and mention zone events in the "do not batch" example.
+
+**Changed — `docs/TECHNICAL_DEBT.md`**
+- DEBT-036 updated: added no-respawn assumption (TeamService's `CharacterAutoLoads = false` is incompatible with always-open re-entry) and old objective win conditions (ObjectiveService treats anchor completion as match-ending) to affected legacy systems list. Added stage-and-verify migration rule.
+
+**Validation**
+- No `src/` files changed. ✓
+- No remotes added. ✓
+- No camera behavior changed. ✓
+- No gameplay code changed. ✓
+- Old round-based documentation preserved and marked legacy/transitional (not deleted). ✓
+- No markdown linter configured locally — manual review only.
+
+---
+
 ## [2026-05-15] — Project direction pivot: persistent PvPvE zone shooter (documentation only, no runtime code changed)
 
 **This was a documentation and planning update. No `src/` files were changed. No remotes were added. No runtime behavior changed.**

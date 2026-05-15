@@ -28,10 +28,12 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 **Affected legacy systems:**
 - `MatchService` — round loop, phase management; must be replaced or dormant when ZoneService is built
 - `TeamService` — Attackers/Defenders split; spawn logic will need to become faction/base-spawn management
-- `ObjectiveService` — anchor planting; will need to become zone events or contracts
+- `ObjectiveService` — anchor planting, objective win conditions; will need to become zone events or contracts
 - `MatchUI` — displays round countdown, results screen; irrelevant in a persistent zone
-- `DeathScreen` — triggers on `RagdollApplied` + cleaned up on PREP; PREP cleanup path breaks without rounds
+- `DeathScreen` — triggers on `RagdollApplied` + cleaned up on PREP; PREP cleanup path breaks without rounds; should adapt to zone death/respawn choice screen
 - Round scoring, win conditions, and `RoundStateChanged` payload format — all round-specific
+- No-respawn assumption — `TeamService` disables `CharacterAutoLoads` and loads characters only on PREP; persistent zone requires continuous respawn; this assumption is incompatible with always-open re-entry (see DEBT-019)
+- Old objective win conditions — `ObjectiveService` treats anchor completion as a match-ending event; persistent zone has no match end
 
 **What carries forward as-is:** `GunService`, `DamageService`, `RagdollService`, `GunController`, `ViewModelController`, `SoundController`, `HUD` (ammo/health panels), `KillFeedUI`, `WeaponData`, `Logger`, `Constants`.
 
@@ -40,6 +42,7 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 - Do not expand legacy services with new round-specific features.
 - Retire legacy services one at a time when their replacement is tested.
 - `RoundStateChanged` and associated phase constants may be repurposed or replaced with a `ZoneStateChanged` remote when ZoneService is built.
+- Every new persistent-zone system must be built in stages and verified in Studio before the next system is started. Do not batch multiple new services into one prompt.
 
 **Resolve when:** The core persistent zone loop (zone entry → loot → extract → deposit → armory → zone) is working in Studio and the legacy round-based systems are no longer needed for active play.
 

@@ -230,11 +230,14 @@ The project is pivoting to a persistent PvPvE zone shooter. The systems below ar
 | `LootService` | Spawns and tracks loot objects in the zone; respawns on pickup | Not started |
 | `DeathDropService` | Creates a droppable bag at death position with player's weapon and carried cash | Not started |
 | `ExtractionService` | Handles extraction exit triggers; credits secured funds on successful extract | Not started |
-| `ShopService` | Validates and fulfills zone shop and base armory purchases | Not started |
+| `ShopService` | Validates and fulfills zone shop (carried cash) and base armory (secured funds) purchases | Not started |
+| `ZoneEventService` | Owns periodic zone events (timed loot surges, cash bonuses, monster waves); creates pressure without breaking the core loop | Not started (deferred) |
 | `InventoryService` | Tracks equipped weapon and held consumables per player | Not started (deferred) |
 | `StashService` | Persistent stash across sessions (server-side storage) | Not started (deferred) |
 | `ProgressionService` | Reputation, unlocks, faction standing | Not started (deferred) |
 | `MonsterService` | Zone AI enemies; carried forward from legacy plan | Not started |
+
+> **First persistent-zone code milestone:** Build `EconomyService` (carried cash + secured funds) and the deposit/extraction trigger before any other new system. The core carried-cash → deposit → secured-funds loop is the foundation everything else depends on.
 
 ### Legacy services and their fate
 

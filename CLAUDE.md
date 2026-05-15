@@ -33,7 +33,7 @@ The morality should feel gray. Attackers may save the world, but their orders ca
 
 **Broken Reality is a persistent PvPvE broken-reality zone shooter.**
 
-Players spawn at a safe base, enter a quarantined zone to fight other players and monsters, collect loot and earn carried cash, then choose when to extract. Depositing at the base converts dangerous carried cash into secured funds used for weapons, gear, and base improvements.
+Players spawn at a safe base, enter a quarantined zone to fight other players and monsters, collect loot and earn carried cash, spend cash in-zone at zone shops, then choose when to extract. Depositing at the base converts dangerous carried cash into secured funds used for base upgrades, stash loadouts, and higher-tier gear.
 
 ### Main loop
 
@@ -41,11 +41,13 @@ Players spawn at a safe base, enter a quarantined zone to fight other players an
 Spawn at base (safe area)
   └─ Enter zone (dangerous, persistent — no round timer)
        └─ Fight players + monsters, loot objects, earn carried cash
-            └─ Choose: stay longer (more risk, more reward)
-                 or extract (reach an exit point)
-                      └─ Exit → deposit at base terminal
-                           └─ Spend secured funds: armory (weapons), shop (consumables)
-                                └─ Return to zone
+            └─ Spend carried cash in-zone (zone shop: guns, ammo, consumables)
+                 └─ Respond to periodic zone events (optional pressure)
+                      └─ Choose: stay longer (more risk, more reward)
+                           or extract (reach an exit point)
+                                └─ Exit → deposit at base terminal
+                                     └─ Spend secured funds: base armory, upgrades, stash
+                                          └─ Return to zone
 ```
 
 ### Death rule
@@ -66,10 +68,19 @@ Death must hurt, but never make a player quit. Always preserve a weak free respa
 
 ### Money model
 
-| Currency | Earned | Lost on death | Purpose |
-|---|---|---|---|
-| **Carried cash** | Kills, loot pickups, zone contracts | In full | Risk currency; converted to secured at deposit |
-| **Secured funds** | Depositing carried cash at base | Never | Safe progression; used at armory and shop |
+| Currency | Earned | Lost on death | Spendable | Purpose |
+|---|---|---|---|---|
+| **Carried cash** | Kills, loot pickups, zone contracts | In full | In-zone (zone shop) or at deposit terminal | Risk currency; converted to secured at deposit |
+| **Secured funds** | Depositing carried cash at base | Never | At base (armory, upgrades, stash) | Safe progression |
+
+### Base / zone distinction
+
+| | **Base** | **Zone** |
+|---|---|---|
+| Safety | Safe — no PvP or monsters | Dangerous — full PvP + monsters |
+| Currency accepted | Secured funds | Carried cash |
+| Activities | Stash, armory, upgrades, preparation | Looting, fighting, shops, events, death drops |
+| On death | N/A | Lose weapon, carried cash, carried loot |
 
 ### Early prototype scope
 
@@ -80,11 +91,12 @@ Build the smallest playable version first:
 - One or two zone entrances; one or two extraction exit points
 - Basic carried cash earned from kills and loot pickups
 - Basic secured funds deposited at the base terminal
-- One zone shop (consumables) and one base armory (three weapons: AR15, pistol, shotgun)
+- One zone shop (consumables and basic guns) — base armory with full weapon tiers added later
 - Simple loot objects scattered in the zone (cash pickups, small drops)
 - On death: drop equipped weapon and carried cash at the death location as a droppable bag
+- One simple periodic zone event (e.g. high-value loot spawn or timed cash bonus) — added later
 
-Do not build the full progression system, inventory UI, crafting, faction reputation, or monster wave escalation in one step. One feature at a time.
+Do not build the full progression system, inventory UI, crafting, faction reputation, monster wave escalation, or zone events in one step. One feature at a time.
 
 ---
 
