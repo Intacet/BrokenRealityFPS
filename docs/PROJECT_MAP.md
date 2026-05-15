@@ -156,6 +156,29 @@ ClientInit.client.lua
 
 ---
 
+## Rojo-managed vs unmanaged Studio containers
+
+The table below lists every top-level Studio container and whether Rojo tracks it via `default.project.json`. **Unmanaged containers are not synced — any script placed in them by a Marketplace import or manual Studio edit will not appear in git and will not be detected by Rojo.**
+
+| Studio container | Rojo-managed? | Source path | Notes |
+|---|---|---|---|
+| `ReplicatedStorage/Remotes` | Partial — folder only | (no `$path`) | Folder exists in project tree; RemoteEvent instances are created at runtime by `RemoteSetup.server.lua`, not synced from disk |
+| `ReplicatedStorage/Modules` | Yes | `src/shared/` | All shared ModuleScripts |
+| `ServerScriptService/Services` | Yes | `src/server/` | All server Scripts and ModuleScripts |
+| `StarterPlayer/StarterPlayerScripts/Controllers` | Yes | `src/client/` | All client LocalScripts and ModuleScripts |
+| `StarterGui` | **No** | (none) | UI is created at runtime by client controller `init()` methods. No static disk source. See DEBT-035. |
+| `StarterPlayer/StarterCharacterScripts` | **No** | (none) | Not mapped. Any script placed here by an asset import is invisible to Rojo and git. See DEBT-031. |
+| `StarterPack` | **No** | (none) | Not mapped. |
+| `ReplicatedFirst` | **No** | (none) | Not mapped. |
+| `Lighting` | **No** | (none) | Not mapped. Effects (BlurEffect, EqualizerSoundEffect) created at runtime by DeathScreen. |
+| `SoundService` | **No** | (none) | Not mapped. |
+| `Workspace/Map` | Partial — folder only | (no `$path`) | Static geometry placed manually in Studio |
+| `Workspace/Spawns`, `/Objectives`, `/Destructibles`, `/MonsterSpawns`, `/CorpseFolder` | Partial — folder only | (no `$path`) | Folders exist; content placed manually in Studio |
+
+> **Warning:** Any Script or LocalScript found in an unmanaged container after a Marketplace or `.rbxm` import will not appear in git and can silently alter runtime behavior — including camera, character movement, and game state. Follow the asset import safety checklist in `CLAUDE.md` and `docs/PROJECT_RULES.md` after every import.
+
+---
+
 ## Workspace layout
 
 ```

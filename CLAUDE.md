@@ -268,3 +268,22 @@ Every public API function that accepts required parameters must validate them wi
 - Mark any gameplay-affecting change as "needs Studio verification" in `docs/TECHNICAL_DEBT.md` or the final response.
 - Do not mark runtime technical debt fully resolved unless the behavior was actually verified in Studio.
 - If MCP is unavailable for a task that normally requires MCP, clearly state that limitation.
+
+**Asset import safety checklist:**
+Before importing any Marketplace, Toolbox, `.rbxm`, or `.rbxmx` asset into Studio, state which containers the asset is expected to modify. After importing, perform all of the following checks before committing or syncing:
+
+1. **State expected changes** — before importing, list which Studio containers the asset is known to modify (e.g. "ReplicatedStorage/ViewModels only").
+2. **Inspect unmanaged containers** — after importing, open each of the following containers in Studio and look for any new Scripts or LocalScripts that were not there before:
+   - `StarterPlayer.StarterCharacterScripts`
+   - `StarterGui`
+   - `StarterPack`
+   - `ReplicatedFirst`
+   - `Lighting`
+   - `SoundService`
+   - `Workspace` (and all imported Model descendants)
+3. **Resolve every untracked script** — any Script or LocalScript found outside the Rojo-managed `src/` tree must be either:
+   - Deleted (if it is a rig helper, camera controller, or other import artifact not needed by this project), or
+   - Moved into the appropriate `src/` subfolder so it is tracked by Rojo and appears in git.
+   No Studio-only script may remain untracked unless explicitly approved and documented as a new entry in `docs/TECHNICAL_DEBT.md`.
+4. **Viewmodel imports** — delete or disable any LocalScript that controls `CameraType`, `camera.CFrame`, character movement, or `RenderStepped` camera behavior. These override the project's camera system and will silently break player input.
+5. **Mark for Studio verification** — if the import affects the camera, viewmodel, combat, or character controls, mark the change as requiring Studio verification in `docs/TECHNICAL_DEBT.md` and the task response. Do not claim the change is verified until it has been tested in Studio play mode.

@@ -7,6 +7,28 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-15] — Add asset import safety checklist to reduce risk of untracked rogue Studio scripts
+
+**Updated — `CLAUDE.md`**
+- Added **Asset import safety checklist** section to the Claude behavior rules. Requires: stating expected container changes before importing; inspecting `StarterCharacterScripts`, `StarterGui`, `StarterPack`, `ReplicatedFirst`, `Lighting`, `SoundService`, `Workspace`, and all imported Model descendants after every import; deleting or moving every untracked Script or LocalScript to `src/`; deleting any LocalScript that controls `CameraType`, `camera.CFrame`, or `RenderStepped` camera behavior; and marking camera/viewmodel/combat imports as requiring Studio verification.
+
+**Updated — `docs/PROJECT_RULES.md`**
+- Added **Asset import safety checklist** section with the same rules in the project-rules format (concise, imperative).
+
+**Updated — `docs/PROJECT_MAP.md`**
+- Added **Rojo-managed vs unmanaged Studio containers** table documenting every top-level Studio container, whether Rojo tracks it, the source path (if any), and notes. Clearly marks `StarterCharacterScripts`, `StarterGui`, `StarterPack`, `ReplicatedFirst`, `Lighting`, and `SoundService` as unmanaged. Includes a warning about import-introduced scripts in unmanaged containers.
+
+**Updated — `docs/TECHNICAL_DEBT.md`**
+- DEBT-031: Added "Partially mitigated (2026-05-15)" note documenting the checklist as a process control. Severity stays High — the structural gap (no Rojo mapping for `StarterCharacterScripts`) remains. Studio verification required: Yes — only Studio inspection after each import can confirm no rogue scripts were introduced.
+
+**Validation**
+- No markdown linter installed locally.
+- No src files changed. ✓
+- No gameplay files changed. ✓
+- MCP unavailable — no Studio verification performed. ✓
+
+---
+
 ## [2026-05-15] — Add severity and Studio verification labels to all technical debt entries
 
 **Updated — `docs/TECHNICAL_DEBT.md`**

@@ -341,14 +341,24 @@ player's vertical camera movement for the entire life of the project until manua
 all ScreenGui instances are created at runtime by client controllers. This is correct for the current
 stage, but it means StarterGui is now an explicitly untracked container — see DEBT-035.
 
+**Partially mitigated (2026-05-15):** An asset import safety checklist was added to `CLAUDE.md` and
+`docs/PROJECT_RULES.md`. The checklist requires: (1) stating which containers an import is expected
+to modify before importing; (2) manually inspecting `StarterCharacterScripts`, `StarterGui`,
+`StarterPack`, `ReplicatedFirst`, `Lighting`, `SoundService`, `Workspace`, and all imported Model
+descendants after every import; (3) deleting or moving to `src/` any untracked Script or LocalScript
+found; and (4) explicitly deleting any LocalScript that controls `CameraType`, `camera.CFrame`, or
+`RenderStepped` camera behavior. The structural gap — no Rojo tracking of these containers — remains.
+The checklist is a process control, not a structural fix. Severity stays High until
+`StarterCharacterScripts` is added to `default.project.json` as a mapped source folder.
+
 **Trigger:** Any future import from the Creator Marketplace or from a `.rbxm` file that includes
 scripts in `StarterCharacterScripts`, `StarterGui`, or other Studio containers not listed in
 `default.project.json`.
 
-**Fix when:** The next asset import task. Before importing any asset, check all containers outside
-the Rojo tree for new scripts after the import. Optionally, add a `StarterCharacterScripts` mapping
-to `default.project.json` pointing at `src/character/` so that any script placed there must have a
-corresponding tracked disk file.
+**Fix when:** Add a `StarterCharacterScripts` mapping to `default.project.json` pointing at
+`src/character/` (or `src/character-scripts/`) so any script placed there must have a corresponding
+tracked disk file. At that point, the checklist process becomes a secondary backstop rather than the
+primary protection.
 
 ---
 

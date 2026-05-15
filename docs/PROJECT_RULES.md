@@ -93,3 +93,30 @@ Every time code is written or edited, explain:
 2. **How the new code connects** — describe how it fits into the existing system: which services call it, which remotes it uses, which modules it reads from.
 3. **Maintenance risks** — call out anything that may become hard to change or debug later (tight coupling, assumptions about load order, growing conditionals, etc.).
 4. **Test steps** — give concrete steps to verify the change works in Studio before moving on.
+
+## Asset import safety checklist
+
+Apply this checklist every time a Marketplace, Toolbox, `.rbxm`, or `.rbxmx` asset is imported into Studio.
+
+**Before importing:**
+- State which Studio containers the asset is expected to modify.
+
+**After importing — inspect these unmanaged containers for new Scripts or LocalScripts:**
+- `StarterPlayer.StarterCharacterScripts`
+- `StarterGui`
+- `StarterPack`
+- `ReplicatedFirst`
+- `Lighting`
+- `SoundService`
+- `Workspace` (and all descendants of any imported Model)
+
+**For every Script or LocalScript found outside `src/`:**
+- Delete it if it is a rig helper, camera controller, or other import artifact not needed by this project.
+- Move it into the appropriate `src/` subfolder if it is intentionally part of the project, so Rojo tracks it and it appears in git.
+- No Studio-only script may remain untracked unless it is explicitly approved and documented in `docs/TECHNICAL_DEBT.md`.
+
+**Viewmodel and camera imports:**
+- Delete or disable any LocalScript that touches `CameraType`, `camera.CFrame`, character movement, or `RenderStepped` camera logic. These override the project's first-person camera system.
+
+**Verification:**
+- If the import affects the camera, viewmodel, combat, or character controls, mark it as requiring Studio verification and do not claim it verified until tested in play mode.
