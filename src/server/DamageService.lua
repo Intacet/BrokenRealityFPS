@@ -39,7 +39,7 @@ local KillFeed      = Remotes:WaitForChild("KillFeed")      :: RemoteEvent
 local playerHealth: { [Player]: number } = {}
 
 -- Team memberships received from TeamService via MatchEvents.TeamAssigned.
--- Used by DamageService:Apply() for friendly-fire checks once that rule is added.
+-- Used by getTeamName() for the friendly-fire guard in Apply(); also queried by GetTeam().
 local playerTeam: { [Player]: string } = {}
 
 -- ============================================================
@@ -86,6 +86,25 @@ local function killPlayer(player: Player, attacker: Player?)
     Logger.debug("[DamageService]", player.Name, "killed by", attackerName)
 end
 
+-- Returns the team name for a player, preferring the TeamAssigned cache over
+-- the live Player.Team.Name lookup.  The cache is populated at PREP via
+-- MatchEvents.TeamAssigned; players who joined after that window may have
+-- Player.Team set by Roblox's team system even without a cache entry.
+-- Returns nil if neither source has a team entry — callers must not assume
+-- team membership when nil is returned.
+local function getTeamName(player: Player): string?
+    assert(player ~= nil, "[DamageService] getTeamName: player is required")
+    local cached = playerTeam[player]
+    if cached ~= nil then
+        return cached
+    end
+    local team = player.Team
+    if team ~= nil then
+        return team.Name
+    end
+    return nil
+end
+
 -- ============================================================
 -- Public API
 -- ============================================================
@@ -102,16 +121,17 @@ function DamageService:Apply(victim: Player, amount: number, attacker: Player?)
     end
 
     -- Friendly-fire guard: block same-team damage when Constants.FRIENDLY_FIRE_ENABLED is false.
-    -- Both team entries must be present; skips the check for environment damage (attacker == nil)
-    -- and for players who missed TeamAssigned (one or both team entries are nil).
-    if not Constants.FRIENDLY_FIRE_ENABLED
-        and attacker ~= nil
-        and playerTeam[attacker] ~= nil
-        and playerTeam[victim] ~= nil
-        and playerTeam[attacker] == playerTeam[victim]
-    then
-        Logger.debug("[DamageService] Blocked friendly fire:", attacker.Name, "→", victim.Name)
-        return
+    -- getTeamName() checks the TeamAssigned cache first, then falls back to Player.Team.Name
+    -- so late-joiners whose cache entry is missing are still protected.
+    -- Skips for environment damage (attacker == nil) and when either team is truly unknown
+    -- (nil return) — never blocks damage when team membership cannot be confirmed.
+    if not Constants.FRIENDLY_FIRE_ENABLED and attacker ~= nil then
+        local attackerTeam = getTeamName(attacker)
+        local victimTeam   = getTeamName(victim)
+        if attackerTeam ~= nil and victimTeam ~= nil and attackerTeam == victimTeam then
+            Logger.debug("[DamageService] Blocked friendly fire:", attacker.Name, "→", victim.Name)
+            return
+        end
     end
 
     local current = playerHealth[victim]
@@ -135,8 +155,9 @@ function DamageService:GetHealth(player: Player): number
     return playerHealth[player] or Constants.MAX_HEALTH
 end
 
--- Returns the player's team name as tracked from TeamAssigned events, or nil.
--- Future friendly-fire logic in Apply() will read this.
+-- Returns the cached TeamAssigned team name for the player, or nil if not yet assigned.
+-- External callers should prefer this over reading Player.Team.Name directly, as it
+-- reflects the match-assigned team rather than any incidental Roblox team membership.
 function DamageService:GetTeam(player: Player): string?
     return playerTeam[player]
 end

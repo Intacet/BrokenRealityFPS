@@ -7,6 +7,34 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-15] — Tighten friendly-fire guard with Player.Team fallback (needs Studio verification)
+
+**Changed — `src/server/DamageService.lua`**
+- Added `getTeamName(player: Player): string?` private helper. Checks `playerTeam[]` cache first (populated via `MatchEvents.TeamAssigned` at PREP). If the cache entry is nil, falls back to `player.Team.Name`. Returns nil if both are unavailable — in that case the guard does not block damage.
+- Friendly-fire guard in `Apply()` refactored to call `getTeamName(attacker)` and `getTeamName(victim)`. Same early-return behavior (no health change, no `HealthChanged`, no `RagdollService`) when both team names are non-nil and equal. If either is nil, the shot passes through.
+- Updated stale comments on `playerTeam` table and `GetTeam()` public method.
+
+**Confirmed — `src/shared/Constants.lua`**
+- `Constants.FRIENDLY_FIRE_ENABLED = false` already present (added in previous task). No change required.
+
+**Updated — `docs/PROJECT_MAP.md`**
+- DamageService combat section updated to document the two-tier team lookup (cache → `Player.Team.Name` fallback) and the nil-team pass-through behavior.
+
+**Updated — `docs/TECHNICAL_DEBT.md`**
+- DEBT-009: Updated to "Code improved; needs Studio verification." Fallback behavior and runtime test steps (including late-joiner scenario) documented.
+
+**Validation**
+- `selene` not available locally — linter could not be run.
+- `rojo` not available locally — build validation could not be run.
+- No remotes added or changed. ✓
+- No client files changed. ✓
+- No camera files changed. ✓
+- `Constants.FRIENDLY_FIRE_ENABLED = false` confirmed present. ✓
+- `getTeamName()` helper confirmed added with cache-first / `Player.Team.Name` fallback. ✓
+- **Needs Studio verification before DEBT-009 can be closed.**
+
+---
+
 ## [2026-05-15] — AmmoChanged now sends weapon name; HUD displays server-provided weapon (needs Studio verification)
 
 **Changed — `src/shared/Constants.lua`**

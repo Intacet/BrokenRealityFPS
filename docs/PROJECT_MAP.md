@@ -61,6 +61,8 @@ DamageService (server)
   │  owns: all health mutation
   │  blocks same-team damage when Constants.FRIENDLY_FIRE_ENABLED == false (server-side only;
   │    the client never decides whether a shot is friendly fire)
+  │  team lookup order: TeamAssigned cache (playerTeam[]) first → Player.Team.Name fallback;
+  │    if both return nil the shot is allowed through (unknown team membership is not blocked)
   │  calls: CorpseService:Spawn() on kill
   └─ fires: HealthChanged → affected client
 ```

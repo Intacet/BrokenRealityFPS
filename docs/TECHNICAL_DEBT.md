@@ -85,20 +85,21 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-009] DamageService:Apply() friendly-fire guard — CODE ADDED, NEEDS STUDIO VERIFICATION (2026-05-15)
+## [DEBT-009] DamageService:Apply() friendly-fire guard — CODE IMPROVED, NEEDS STUDIO VERIFICATION (2026-05-15)
 
 **File:** `src/server/DamageService.lua`
 **Severity:** Critical
 **Studio verification required:** Yes
 **Risk:** ~~`Apply()` tracks the attacker and victim but does not yet check whether they are on the same team. The `playerTeam` table is populated and `GetTeam()` is exposed, but the friendly-fire guard was not written. Any weapon that called `Apply()` would hit teammates.~~
-**Code-side fix (2026-05-15):** A friendly-fire guard was added to `DamageService:Apply()` immediately after the `amount <= 0` early-return. When `Constants.FRIENDLY_FIRE_ENABLED == false` (the default), the guard returns without mutating health, firing `HealthChanged`, or calling `RagdollService` if both the attacker and victim have a known team entry in `playerTeam`. Environment damage (`attacker == nil`) and players who missed `TeamAssigned` (nil team entries) bypass the guard and take damage as before. `Constants.FRIENDLY_FIRE_ENABLED = false` was added to `src/shared/Constants.lua` (Combat rules section). Setting it to `true` re-enables full friendly fire without a code change.
-**MCP unavailable:** This change was not tested in Roblox Studio. The static code is correct, but runtime behavior — especially the interaction between `playerTeam` population timing and the guard — must be verified in play mode before this is marked resolved.
+**Code-side fix (2026-05-15):** `Constants.FRIENDLY_FIRE_ENABLED = false` added to `src/shared/Constants.lua` (Combat rules section). A friendly-fire guard added to `DamageService:Apply()` using direct `playerTeam[]` cache lookups. When `FRIENDLY_FIRE_ENABLED == false` and both players had cached team entries, same-team shots returned early without mutating health, firing `HealthChanged`, or calling `RagdollService`.
+**Improved (2026-05-15):** Guard refactored to use a new `getTeamName(player: Player): string?` private helper. Lookup order: (1) `playerTeam[player]` cache (populated at PREP via `MatchEvents.TeamAssigned`); (2) `player.Team.Name` fallback if the cache entry is nil. This protects late-joiners and players who missed `TeamAssigned` but have a Roblox Team object assigned. If both sources return nil, the guard does not block — unknown team membership is never assumed to be same-team. `Constants.FRIENDLY_FIRE_ENABLED` is the explicit toggle; setting it `true` re-enables full friendly fire without a code change.
+**MCP unavailable:** Neither the initial fix nor the improvement was tested in Roblox Studio. Runtime behavior must be verified before this is marked resolved.
 **Runtime test required:**
-1. Start a play session with two players on the same team (Attackers vs Attackers — may require temporarily setting `MIN_PLAYERS = 1` and manually assigning both to Attackers via TeamService).
-2. Have one Attacker shoot another. Confirm the victim's health does not decrease and no death screen appears.
+1. Start a play session. Reach ACTIVE phase with at least two players on the same team.
+2. Have one Attacker shoot another. Confirm health does not decrease and no death screen appears. Check Output for `[DamageService] Blocked friendly fire:`.
 3. Have an Attacker shoot a Defender. Confirm the Defender's health decreases normally.
-4. Set `Constants.FRIENDLY_FIRE_ENABLED = true` and repeat both tests. Both shots should deal damage.
-5. Check Output for `[DamageService] Blocked friendly fire:` log lines on blocked shots.
+4. Simulate a late-joiner (player who missed TeamAssigned but has `Player.Team` set): confirm the `Player.Team.Name` fallback still blocks same-team damage.
+5. Set `Constants.FRIENDLY_FIRE_ENABLED = true`. Repeat steps 2–3; both shots should now deal damage.
 **Resolve when:** Steps 1–5 above pass in Studio play mode with MCP available.
 
 ---
