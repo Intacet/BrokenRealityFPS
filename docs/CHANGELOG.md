@@ -217,6 +217,14 @@ All priority server files (MatchService, GunService, TeamService) were read and 
 - DEBT-026 (ammo mid-round joiners): unaffected
 - Added DEBT-029: setVisibility no longer guarded (see entry)
 
+## [2026-05-12] — Add formatting and diff hygiene rule to CLAUDE.md
+
+**Updated — `CLAUDE.md`**
+- Added **Formatting and diff hygiene** rule to the Claude behavior section: global formatter (`stylua src/`) must not be run unless explicitly requested; format only files touched by the current task; keep diffs small and focused; preserve style of untouched files
+
+**Updated — `docs/TECHNICAL_DEBT.md`**
+- Added DEBT-032: documents that global StyLua passes are intentionally deferred to avoid noisy diffs; records the policy and the condition under which a full-repo format would be acceptable
+
 ---
 
 ## [2026-05-12] — Add object pooling, connection cleanup, and API validation rules to CLAUDE.md

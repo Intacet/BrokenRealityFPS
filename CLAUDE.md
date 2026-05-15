@@ -240,3 +240,11 @@ Store all `RBXScriptConnection`s in a local array when created inside a service 
 
 **Public API validation:**
 Every public API function that accepts required parameters must validate them with `assert()` before any other logic. Example: `assert(typeof(victim) == 'Instance' and victim:IsA('Player'), '[ServiceName] method requires a valid Player')`. This prevents silent failures from bad callers and makes errors immediately traceable.
+
+**Formatting and diff hygiene:**
+- Do not run a global formatter across the whole repository unless explicitly asked.
+- When modifying code, format only the files touched by the current task.
+- Keep diffs small and focused so gameplay changes remain easy to review.
+- Do not make formatting-only edits to unrelated files.
+- Preserve the existing style of untouched files.
+- If a formatter is later configured, run it only on files modified by the current task unless the user explicitly requests a full-repo formatting pass.

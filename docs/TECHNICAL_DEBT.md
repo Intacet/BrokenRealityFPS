@@ -282,6 +282,15 @@ corresponding tracked disk file.
 
 ---
 
+## [DEBT-032] Global formatter (StyLua) intentionally not run on whole repo
+
+**File:** `CLAUDE.md`, `stylua.toml`
+**Risk:** `stylua src/` is listed in `CLAUDE.md`'s Commands section as a convenience reference but is intentionally not run as a blanket pass during normal development. Running it globally would reformat every Luau file — including files unrelated to the current task — producing noisy diffs that bury actual gameplay changes and make code review harder.
+**Current policy (added 2026-05-12):** CLAUDE.md now explicitly prohibits global formatting passes unless the user asks for one. StyLua should only be run on files modified by the current task.
+**Fix when:** A deliberate "format the whole repo" cleanup is scheduled and the user explicitly requests it as a standalone commit with no other changes mixed in.
+
+---
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.lua`
