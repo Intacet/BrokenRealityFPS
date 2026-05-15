@@ -93,4 +93,9 @@ Constants.COLOR_TEAM_NEUTRAL   = Color3.fromRGB(160, 160, 160)  -- medium grey â
 -- ============================================================
 Constants.AMMO_LOW_THRESHOLD = 5  -- magazine count at or below which the number turns amber
 
+-- ============================================================
+-- Combat rules
+-- ============================================================
+Constants.FRIENDLY_FIRE_ENABLED = false  -- set true to allow players to damage teammates
+
 return Constants

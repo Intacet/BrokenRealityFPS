@@ -7,6 +7,30 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-15] — Add friendly-fire prevention to DamageService (needs Studio verification)
+
+**Changed — `src/server/DamageService.lua`**
+- Added a friendly-fire guard to `DamageService:Apply()`. When `Constants.FRIENDLY_FIRE_ENABLED == false`, shots from a player at a teammate (both with known `playerTeam` entries) return immediately without mutating health, firing `HealthChanged`, or triggering `RagdollService`. Environment damage (`attacker == nil`) and players whose team was never assigned (nil entry in `playerTeam`) bypass the guard. Blocked shots are logged via `Logger.debug`.
+
+**Changed — `src/shared/Constants.lua`**
+- Added `Constants.FRIENDLY_FIRE_ENABLED = false` in a new **Combat rules** section. Set to `true` to re-enable full friendly fire without a code change.
+
+**Updated — `docs/PROJECT_MAP.md`**
+- Combat section now documents that `DamageService` blocks same-team damage when `Constants.FRIENDLY_FIRE_ENABLED == false`, and that this decision is server-side only.
+
+**Updated — `docs/TECHNICAL_DEBT.md`**
+- DEBT-009: Updated to "Code added; needs Studio verification." Runtime test steps documented. Not marked fully resolved — MCP was unavailable during this task.
+
+**Validation**
+- `selene` not available locally — linter could not be run.
+- `rojo` not available locally — build validation could not be run.
+- No remotes added or changed. ✓
+- No client files changed. ✓
+- No camera files changed. ✓
+- **Needs Studio verification before DEBT-009 can be closed.**
+
+---
+
 ## [2026-05-15] — Add asset import safety checklist to reduce risk of untracked rogue Studio scripts
 
 **Updated — `CLAUDE.md`**

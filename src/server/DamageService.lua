@@ -101,6 +101,19 @@ function DamageService:Apply(victim: Player, amount: number, attacker: Player?)
         return  -- ignore zero-damage and healing calls routed here by mistake
     end
 
+    -- Friendly-fire guard: block same-team damage when Constants.FRIENDLY_FIRE_ENABLED is false.
+    -- Both team entries must be present; skips the check for environment damage (attacker == nil)
+    -- and for players who missed TeamAssigned (one or both team entries are nil).
+    if not Constants.FRIENDLY_FIRE_ENABLED
+        and attacker ~= nil
+        and playerTeam[attacker] ~= nil
+        and playerTeam[victim] ~= nil
+        and playerTeam[attacker] == playerTeam[victim]
+    then
+        Logger.debug("[DamageService] Blocked friendly fire:", attacker.Name, "→", victim.Name)
+        return
+    end
+
     local current = playerHealth[victim]
     if current == nil then
         -- Player joined between phases; initialise to full health before applying damage.

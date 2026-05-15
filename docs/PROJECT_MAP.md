@@ -53,6 +53,8 @@ GunController (client)
 
 DamageService (server)
   │  owns: all health mutation
+  │  blocks same-team damage when Constants.FRIENDLY_FIRE_ENABLED == false (server-side only;
+  │    the client never decides whether a shot is friendly fire)
   │  calls: CorpseService:Spawn() on kill
   └─ fires: HealthChanged → affected client
 ```

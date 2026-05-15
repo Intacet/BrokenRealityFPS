@@ -85,14 +85,21 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-009] DamageService:Apply() has no friendly-fire enforcement yet
+## [DEBT-009] DamageService:Apply() friendly-fire guard — CODE ADDED, NEEDS STUDIO VERIFICATION (2026-05-15)
 
 **File:** `src/server/DamageService.lua`
 **Severity:** Critical
 **Studio verification required:** Yes
-**Risk:** `Apply()` tracks the attacker and victim but does not yet check whether they are on the same team. The `playerTeam` table is populated and `GetTeam()` is exposed, but the friendly-fire guard (`if playerTeam[victim] == playerTeam[attacker] then return end`) is not written. Any weapon that calls `Apply()` will hit teammates.
-**Trigger:** GunService is now built and calls `Apply()`. Friendly fire is live.
-**Fix when:** Immediately — add the team-equality check at the top of `Apply()` before the damage calculation, along with a design decision on whether friendly fire should be blocked entirely or penalised (reflected damage, etc.).
+**Risk:** ~~`Apply()` tracks the attacker and victim but does not yet check whether they are on the same team. The `playerTeam` table is populated and `GetTeam()` is exposed, but the friendly-fire guard was not written. Any weapon that called `Apply()` would hit teammates.~~
+**Code-side fix (2026-05-15):** A friendly-fire guard was added to `DamageService:Apply()` immediately after the `amount <= 0` early-return. When `Constants.FRIENDLY_FIRE_ENABLED == false` (the default), the guard returns without mutating health, firing `HealthChanged`, or calling `RagdollService` if both the attacker and victim have a known team entry in `playerTeam`. Environment damage (`attacker == nil`) and players who missed `TeamAssigned` (nil team entries) bypass the guard and take damage as before. `Constants.FRIENDLY_FIRE_ENABLED = false` was added to `src/shared/Constants.lua` (Combat rules section). Setting it to `true` re-enables full friendly fire without a code change.
+**MCP unavailable:** This change was not tested in Roblox Studio. The static code is correct, but runtime behavior — especially the interaction between `playerTeam` population timing and the guard — must be verified in play mode before this is marked resolved.
+**Runtime test required:**
+1. Start a play session with two players on the same team (Attackers vs Attackers — may require temporarily setting `MIN_PLAYERS = 1` and manually assigning both to Attackers via TeamService).
+2. Have one Attacker shoot another. Confirm the victim's health does not decrease and no death screen appears.
+3. Have an Attacker shoot a Defender. Confirm the Defender's health decreases normally.
+4. Set `Constants.FRIENDLY_FIRE_ENABLED = true` and repeat both tests. Both shots should deal damage.
+5. Check Output for `[DamageService] Blocked friendly fire:` log lines on blocked shots.
+**Resolve when:** Steps 1–5 above pass in Studio play mode with MCP available.
 
 ---
 
