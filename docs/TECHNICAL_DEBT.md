@@ -254,6 +254,34 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 ---
 
 
+## [DEBT-031] StarterCharacterScripts not tracked by Rojo — imported assets can silently add scripts there — PARTIALLY RESOLVED 2026-05-14
+
+**File:** `StarterPlayer.StarterCharacterScripts` (Studio only, no Rojo mapping)
+**Risk:** `default.project.json` maps `StarterPlayerScripts/Controllers` → `src/client` and no other
+`StarterPlayer` containers. `StarterCharacterScripts` is entirely outside Rojo's managed tree. Any
+Creator Marketplace import or drag-and-drop asset that includes a LocalScript in `StarterCharacterScripts`
+will be silently accepted by Studio with no corresponding disk file, no git tracking, and no Rojo
+sync mechanism to detect or remove it.
+
+The TROY DEFENSE AR viewmodel import included exactly such a script: a LocalScript named `"LocalScript"`
+that set `camera.CameraType = Scriptable` every RenderStep using yaw-only rotation — locking the
+player's vertical camera movement for the entire life of the project until manually found and deleted.
+
+**Partial resolution (2026-05-14):** The specific rogue script was deleted. The structural gap — no
+Rojo tracking of `StarterCharacterScripts` — remains. A future asset import could re-introduce
+scripts in the same location with no warning.
+
+**Trigger:** Any future import from the Creator Marketplace or from a `.rbxm` file that includes
+scripts in `StarterCharacterScripts`, `StarterGui`, or other Studio containers not listed in
+`default.project.json`.
+
+**Fix when:** The next asset import task. Before importing any asset, check all containers outside
+the Rojo tree for new scripts after the import. Optionally, add a `StarterCharacterScripts` mapping
+to `default.project.json` pointing at `src/character/` so that any script placed there must have a
+corresponding tracked disk file.
+
+---
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.lua`

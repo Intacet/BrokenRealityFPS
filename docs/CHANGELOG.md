@@ -7,6 +7,38 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-14] — Fix camera pitch lock (rogue StarterCharacterScripts LocalScript removed)
+
+### Root cause
+A `LocalScript` (named `"LocalScript"`) was present in `StarterPlayer.StarterCharacterScripts`.
+It was **not** part of the Rojo-tracked `src/` tree — it was imported into the place directly
+when the TROY DEFENSE AR viewmodel asset was brought in. It ran on every spawned character and:
+
+- Bound `"overTheShoulderCamera"` to `RunService:BindToRenderStep` at priority 201
+- Set `camera.CameraType = Enum.CameraType.Scriptable` every frame, overriding the Roblox camera system
+- Computed `camera.CFrame = CFrame.lookAt(rootPart-relative offset, rootPart-relative target)` using
+  fixed vertical offsets — **zero pitch input, yaw only**
+- Rotated a `BodyGyro` with `CFrame.fromAxisAngle(Vector3.new(0,1,0), …)` — Y-axis only
+- Forced `UserInputService.MouseBehavior = LockCenter` and disabled `human.AutoRotate`
+
+Result: mouse left/right worked (BodyGyro yaw), mouse up/down was silently discarded.
+The `"Camera has been binded"` and `"ACL_Toggle"` messages in the console were produced by this script.
+
+### Fix (Studio-side only — no Rojo source file)
+Deleted `StarterPlayer.StarterCharacterScripts.LocalScript` via Roblox Studio MCP `execute_luau`.
+`StarterCharacterScripts` is not mapped in `default.project.json`, so no disk file exists.
+**The deletion must be saved in Studio (Ctrl+S) to persist across Studio restarts.**
+The standard `PlayerModule.CameraModule` (ClassicCamera + `LockFirstPerson` mode set by
+`ViewModelController`) now handles both yaw and pitch. `ViewModelController` reads `camera.CFrame`
+in RenderStepped and passes full pitch+yaw to `PivotTo` — the viewmodel follows up/down correctly.
+
+### Verified in play mode
+- No `CameraType = Scriptable`, `overTheShoulderCamera`, or `ACL_Toggle` log messages ✓
+- `setVisibility(true) — 40 parts` during ACTIVE (viewmodel BaseParts present) ✓
+- `MuzzleAttachment` found (no fallback warning logged) ✓
+
+---
+
 ## [2026-05-14] — Replace AR15 viewmodel with imported rig; fix camera alignment and replication race
 
 ### Changes
