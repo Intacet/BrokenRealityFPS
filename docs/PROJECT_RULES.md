@@ -177,3 +177,34 @@ The same server-owns-authoritative-state rule applies to all new systems. The cl
 - Extraction success (a player cannot declare their own extraction valid)
 - Death drop spawning or contents
 - Shop prices or purchase results
+
+---
+
+## Character rig target
+
+**All new code targets R6.**
+
+The project's character rig is R6. Every new system — animations, hitbox lookups, ragdoll filters, weapon attachments — must reference R6 body-part names only.
+
+**R6 canonical part names:**
+
+| Name | Role |
+|---|---|
+| `HumanoidRootPart` | Physics root |
+| `Torso` | Central torso |
+| `Head` | Head |
+| `Left Arm` | Left arm |
+| `Right Arm` | Right arm |
+| `Left Leg` | Left leg |
+| `Right Leg` | Right leg |
+
+**Rules:**
+
+1. Never write code that strings-matches or iterates by R15 part names (`UpperTorso`, `LowerTorso`, `LeftUpperArm`, `RightUpperArm`, `LeftLowerArm`, `RightLowerArm`, etc.) in any new service or controller.
+2. Animation asset IDs must be recorded against an R6 rig. R15 animation IDs will play incorrectly on an R6 character.
+3. Hitbox or region checks that name specific body parts must use R6 names.
+4. Weapon viewmodel attachment points (barrel tip, eject port) must be aligned to R6 arm geometry.
+5. The `StarterPlayer.CharacterRigType` is set to `Enum.HumanoidRigType.R6` (value 0) in `default.project.json`. Do not change this without a dedicated rig-migration task.
+6. Before adding any third-party rig or animation pack, confirm the asset targets R6. If it targets R15, do not import it without a dedicated rig-migration task and explicit approval.
+
+**Existing legacy code** (e.g. `RagdollService` iterating all `Motor6D` joints by type rather than by name) is acceptable because rig-agnostic iteration works for both R6 and R15. The rule above applies to all new code going forward.

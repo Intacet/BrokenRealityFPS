@@ -24,6 +24,11 @@
 
     "StarterPlayer": {
       "$className": "StarterPlayer",
+      "$properties": {
+        "CharacterRigType": {
+          "Enum": 0
+        }
+      },
       "StarterPlayerScripts": {
         "$className": "StarterPlayerScripts",
         "Controllers": {

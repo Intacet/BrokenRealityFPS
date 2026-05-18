@@ -7,6 +7,49 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-18] — Set R6 as project character rig target; document rig rules in all project docs
+
+### Summary
+Establishes R6 as the canonical character rig for BrokenRealityFPS. Sets `StarterPlayer.CharacterRigType` to `Enum.HumanoidRigType.R6` (ordinal 0) in `default.project.json` via Rojo `$properties`. Documents R6 body-part names, rig rules, and future-system constraints across `CLAUDE.md`, `docs/PROJECT_RULES.md`, `docs/PROJECT_MAP.md`, `docs/TECHNICAL_DEBT.md`. No `src/` files were changed. No remotes added. No camera, movement, or gameplay logic changed.
+
+### Changed files
+
+- **`default.project.json`** — added `"$properties": { "CharacterRigType": { "Enum": 0 } }` to the `StarterPlayer` entry. Enum ordinal 0 = `Enum.HumanoidRigType.R6`. Rojo 7.x applies this when syncing into Studio.
+
+- **`CLAUDE.md`** — added "Character rig target" section (between Toolchain and Commands sections):
+  - States R6 as the current target; R15 as legacy.
+  - Lists the 7 R6 canonical body-part names with roles.
+  - Notes where the setting lives in Studio and `default.project.json`.
+  - Lists future systems that must target R6 (animations, hitbox, ragdoll Stage 2, weapon attachment points).
+
+- **`docs/PROJECT_RULES.md`** — added "Character rig target" section at the end of the file:
+  - Hard rules: no R15 part names in new code, animation IDs must be R6-rigged, hitbox lookups use R6 names, weapon attachment points align to R6 geometry.
+  - Clarifies that rig-agnostic code (e.g. `RagdollService` iterating Motor6D by type) is acceptable.
+
+- **`docs/PROJECT_MAP.md`** — added "Character Rig Target" section (between Workspace layout and New Target Architecture):
+  - Shows the Rojo JSON snippet for `CharacterRigType`.
+  - Lists R6 body-part reference table.
+  - Lists systems that must target R6 and their specific R6 dependency.
+  - Notes that `RagdollService`'s rig-agnostic Motor6D iteration requires no change.
+
+- **`docs/TECHNICAL_DEBT.md`** — two changes:
+  - Added DEBT-049 (High): R6 `CharacterRigType` set via Rojo `$properties` — requires Studio manual verification that `StarterPlayer` shows `R6`, not `R15`, after each `rojo serve` session.
+  - Updated DEBT-023: notes the project rig changed from R15 to R6; `RagdollService` Motor6D iteration is rig-agnostic and requires no code change; R6 has fewer joints (6 vs ~15) so accidental joint capture risk is lower.
+
+### What was NOT changed
+All `src/` files: no changes to any service, controller, shared module, or UI. No remotes. No camera changes. No gameplay logic. No animation changes. `wally.toml`, `selene.toml`, `stylua.toml` untouched.
+
+### Debt entries added
+- DEBT-049: R6 rig target needs Studio manual verification after each `rojo serve` session.
+
+### Debt entries updated
+- DEBT-023: Updated to reflect R6 as the current rig target; no code changes required to `RagdollService`.
+
+### Studio verification required
+Yes — see DEBT-049. After `rojo serve`, confirm `StarterPlayer.CharacterRigType = R6` in the Properties panel. If Rojo does not apply the property, set it manually via `Game Settings → Avatar → R6`.
+
+---
+
 ## [2026-05-18] — Add Constants.FORCE_FIRST_PERSON testing flag; ViewModelController supports normal-camera testing mode
 
 ### Summary

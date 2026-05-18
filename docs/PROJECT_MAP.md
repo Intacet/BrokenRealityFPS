@@ -256,6 +256,46 @@ Workspace
 
 ---
 
+## Character Rig Target
+
+**Current rig: R6** (set 2026-05-18)
+
+`StarterPlayer.CharacterRigType` is set to `Enum.HumanoidRigType.R6` (ordinal 0) via `default.project.json`:
+
+```json
+"StarterPlayer": {
+  "$className": "StarterPlayer",
+  "$properties": {
+    "CharacterRigType": { "Enum": 0 }
+  }
+}
+```
+
+**Also set manually in Studio:** `Game Settings → Avatar → Avatar Type → R6`. Studio does not always pick up the `CharacterRigType` property from Rojo on first sync — verify manually when setting up a new Studio session.
+
+### R6 body-part reference
+
+| Part | Role |
+|---|---|
+| `HumanoidRootPart` | Physics root |
+| `Torso` | Central torso |
+| `Head` | Head |
+| `Left Arm` / `Right Arm` | Arms |
+| `Left Leg` / `Right Leg` | Legs |
+
+### Systems that must target R6
+
+| System | R6 dependency |
+|---|---|
+| MovementController (Stage 2+) | Animation IDs must reference R6-rigged assets |
+| RagdollService | Motor6D iteration is rig-agnostic; per-part name filtering (if added) must use R6 names |
+| Future hitbox system | Part-name lookups must use R6 names |
+| Future weapon alignment | Attachment points on `Right Arm` / `Torso` must match R6 geometry |
+
+> **Note (legacy transitional):** `RagdollService` currently iterates all `Motor6D` descendants without filtering by part name — this is rig-agnostic and works correctly for both R6 and R15. No change required. The constraint above applies to new code only.
+
+---
+
 ## New Target Architecture (persistent zone — planned 2026-05-15)
 
 The project is pivoting to a persistent PvPvE zone shooter. The systems below are the planned target architecture. None are built yet unless explicitly noted. Build one at a time.

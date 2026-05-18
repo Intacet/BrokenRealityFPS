@@ -288,12 +288,13 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-023] BallSocketConstraint ragdoll assumes a standard Roblox R15 or R6 character rig
+## [DEBT-023] BallSocketConstraint ragdoll assumes a standard Roblox R6 character rig — UPDATED 2026-05-18
 
 **File:** `src/server/RagdollService.lua`
 **Severity:** Low-Medium
 **Studio verification required:** Yes
-**Risk:** `RagdollService:Apply()` iterates `character:GetDescendants()` and converts every `Motor6D` it finds. This works correctly for standard Roblox R15 and R6 characters, which have a known, predictable Motor6D hierarchy. If a custom character rig is introduced (e.g. a non-humanoid defender faction, a monster that uses the Humanoid class, or a weapon held by a player model with its own Motor6Ds), `Apply()` may convert joints that should not be ragdolled — breaking the custom rig or producing unexpected physics behavior.
+**Risk:** `RagdollService:Apply()` iterates `character:GetDescendants()` and converts every `Motor6D` it finds. This works correctly for standard Roblox R6 characters (and would also work for R15), which have a known, predictable Motor6D hierarchy. If a custom character rig is introduced (e.g. a non-humanoid defender faction, a monster that uses the Humanoid class, or a weapon held by a player model with its own Motor6Ds), `Apply()` may convert joints that should not be ragdolled — breaking the custom rig or producing unexpected physics behavior.
+**Updated (2026-05-18 — R6 migration):** The project's rig target was changed from R15 (original) to R6. `RagdollService` iterates Motor6Ds by type, not by part name — this is rig-agnostic and requires no code change for the R6 migration. The risk noted above (custom rig Motor6D confusion) is unchanged. R6 has fewer Motor6Ds than R15 (6 joints vs ~15), so the ragdoll is simpler and the risk of accidentally capturing unintended joints is lower.
 **Trigger:** Adding any non-standard character rig to the game.
 **Fix when:** A custom rig is introduced. Add a tag or attribute (e.g. `Instance:SetAttribute("RagdollEnabled", true)`) to each Motor6D that should participate in ragdolling, and filter by that attribute in `convertJoint()`.
 
@@ -573,6 +574,26 @@ primary protection.
 4. **Muzzle flash still fires when false.** When `FORCE_FIRST_PERSON = false`, `GetBarrelTipCFrame()` returns the hidden barrel's WorldPosition (the model follows the camera via PivotTo). GunController uses this to place the muzzle flash Part. The flash will appear at the ghost barrel position, which is invisible but not at the expected screen position for the Classic camera view.
 **Trigger:** Shipping or playtesting without flipping the flag to `true`, or a future system that needs to read camera/viewmodel mode dynamically rather than from a compile-time constant.
 **Fix when:** Before the first FPS playtesting session, flip to `true`. Long-term: replace the boolean constant with a read from a `GameModeConfig` or `SettingsService` module so the decision can vary per game mode or build target without touching Constants.
+
+---
+
+## [DEBT-049] R6 rig target set in default.project.json — Studio manual verification required — ADDED 2026-05-18
+
+**Files:** `default.project.json`, Studio Game Settings
+**Severity:** High
+**Studio verification required:** Yes
+**Risk:** `StarterPlayer.CharacterRigType` is set to `Enum.HumanoidRigType.R6` (ordinal 0) via Rojo `$properties` in `default.project.json`. Rojo 7.x supports enum properties via `{"Enum": ordinalValue}` syntax. However, Rojo does not always apply `StarterPlayer` property overrides on first sync in an existing Studio session — the `CharacterRigType` value shown in Studio's `StarterPlayer` Properties panel should be manually confirmed after every `rojo serve` session.
+
+**What to verify:**
+1. Open Studio and start `rojo serve default.project.json`.
+2. In Studio, select `StarterPlayer` in the Explorer.
+3. In the Properties panel, confirm `CharacterRigType` shows `R6` (not `R15`).
+4. If it shows `R15`: manually set `Game Settings → Avatar → Avatar Type → R6` as a fallback. Document this as a required manual step if the Rojo property is not applied.
+5. Playtest: spawn a character and confirm the character model uses the R6 body parts (`Torso`, `Left Arm`, `Right Arm`, `Left Leg`, `Right Leg`) — not R15 parts.
+
+**Fallback:** If Rojo does not reliably apply `CharacterRigType` from `default.project.json`, the property must be set manually in Studio each session. In that case, document this as a blocking manual step here and in `docs/PROJECT_RULES.md`.
+
+**Resolve when:** Steps 1–5 above are confirmed in Studio. If the Rojo property applies cleanly, mark resolved and note the Rojo version under which it was verified. If it does not apply, update this entry with the fallback procedure and leave severity at High.
 
 ---
 

@@ -109,6 +109,34 @@ Do not build the full progression system, inventory UI, crafting, faction reputa
 | [Selene](https://kampfkarren.github.io/selene/) | Luau linter |
 | [StyLua](https://github.com/JohnnyMorganz/StyLua) | Luau formatter |
 
+## Character rig target
+
+**Current target: R6.**
+
+All character rigs, animations, hitbox logic, ragdoll joints, and weapon attachment points must target the R6 body-part hierarchy:
+
+| Part name | Role |
+|---|---|
+| `HumanoidRootPart` | Physics root, anchor point for all calculations |
+| `Torso` | Central torso body part |
+| `Head` | Head |
+| `Left Arm` | Left arm |
+| `Right Arm` | Right arm |
+| `Left Leg` | Left leg |
+| `Right Leg` | Right leg |
+
+**R15 is legacy.** R15 part names (`UpperTorso`, `LowerTorso`, `LeftUpperArm`, `RightUpperArm`, etc.) must not appear in any new code. Existing references to R15 in RagdollService (Motor6D iteration) are acceptable because the logic is rig-agnostic, but new animation, hitbox, and weapon-alignment code must use R6 names.
+
+**Setting in Studio:** `Game Settings → Avatar → Avatar Type → R6`. This is enforced programmatically via `StarterPlayer.CharacterRigType = Enum.HumanoidRigType.R6` in `default.project.json` (`"$properties": { "CharacterRigType": { "Enum": 0 } }`).
+
+**Future systems that must target R6:**
+- Movement animations (Stage 2+) — animation IDs and track names must be R6 rigs
+- Hitbox system — part-name lookups must use R6 names
+- Ragdoll Stage 2 — any per-part joint filtering must use R6 body-part names
+- Weapon attachment points (`EjectPortAttachment`, barrel tip alignment) — must be rigged to R6 `Right Arm` / `Torso`
+
+---
+
 ## Commands
 
 ```bash
