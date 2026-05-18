@@ -24,6 +24,11 @@ local Modules   = ReplicatedStorage:WaitForChild("Modules")
 local Constants = require(Modules:WaitForChild("Constants"))
 local Logger    = require(Modules:WaitForChild("Logger"))
 
+-- MovementController provides bob/tilt offsets for the viewmodel each frame.
+-- Requiring it here (not GunController) keeps the dependency one-directional:
+--   GunController → ViewModelController → MovementController (no circular).
+local MovementController = require(script.Parent:WaitForChild("MovementController"))
+
 local Remotes           = ReplicatedStorage:WaitForChild("Remotes")
 local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEvent
 
@@ -64,6 +69,11 @@ local MUZZLE_FALLBACK_DIST : number = 1.5
 
 local visible      : boolean = false
 local recoilOffset : number  = 0
+
+-- Recoil CFrame pushed by GunController each frame via SetRecoilOffset().
+-- Represents a rotation offset applied to the viewmodel in camera space.
+-- Starts as identity; GunController snaps it on shot and lerps it back to identity.
+local viewRecoilCFrame: CFrame = CFrame.new()
 
 -- ============================================================
 -- Controller
@@ -280,13 +290,19 @@ function ViewModelController:Start()
         local m = self.model
         if not m then return end
 
-        -- Decay recoil offset back to zero at RECOIL_RATE studs/second.
+        -- Decay positional recoil offset back to zero at RECOIL_RATE studs/second.
         if recoilOffset > 0 then
             recoilOffset = math.max(0, recoilOffset - dt * RECOIL_RATE)
         end
 
         local cam = workspace.CurrentCamera
-        m:PivotTo(cam.CFrame * BASE_OFFSET * CFrame.new(0, 0, recoilOffset))
+
+        -- Compose: camera → recoil rotation (from GunController) → bob/tilt (from MovementController)
+        --          → model base offset → positional recoil kick.
+        -- viewRecoilCFrame rotates the whole assembly from camera space (gun kick/recovery).
+        -- moveCF adds vertical bob and slide roll to the viewmodel independently.
+        local moveCF = MovementController:GetViewmodelAddCFrame()
+        m:PivotTo(cam.CFrame * viewRecoilCFrame * moveCF * BASE_OFFSET * CFrame.new(0, 0, recoilOffset))
     end)
 
     Logger.debug("[ViewModelController] Ready")
@@ -302,6 +318,14 @@ function ViewModelController:PlayFireAnimation()
     recoilOffset = RECOIL_DIST
     -- Apply the snap immediately so the first rendered frame shows the kicked position.
     model:PivotTo(model:GetPivot() * CFrame.new(0, 0, recoilOffset))
+end
+
+-- Receives the current recoil CFrame from GunController each RenderStepped.
+-- GunController pushes this every frame (not just on shots) so recovery is smooth.
+-- Using a setter (push pattern) keeps the dependency one-directional:
+-- GunController → ViewModelController, never the reverse.
+function ViewModelController:SetRecoilOffset(cf: CFrame)
+    viewRecoilCFrame = cf
 end
 
 -- Returns a CFrame at the barrel muzzle tip for muzzle flash placement.

@@ -457,6 +457,83 @@ primary protection.
 
 ---
 
+## [DEBT-039] WeaponFeel AR15 entry is an alias for SCAR — no separate tuning
+
+**File:** `src/shared/WeaponFeel.lua`
+**Risk:** `WeaponFeel["AR15"] = WeaponFeel["SCAR"]` — both weapons share the same feel table by reference. Any write to the SCAR entry would mutate AR15 simultaneously (though no code currently writes to feel tables at runtime). More practically, the two weapons fire and feel identically, which is incorrect — the AR15 should have lighter recoil and faster reset.
+**Trigger:** A second weapon tuning pass, or the addition of any third weapon with a different feel.
+**Fix when:** A per-weapon design pass is scheduled. Replace the alias with a full copy of the SCAR table, adjust values for AR15 (typically lower `recoilUp`, faster `recoilRecoverySpeed`, slightly tighter `hipfireSpread`), and add a comment explaining the intended feel difference.
+
+---
+
+## [DEBT-040] ADS visual transition not implemented
+
+**File:** `src/client/GunController.lua`, `src/client/ViewModelController.lua`
+**Risk:** `isADS` is tracked and gates spread calculation, but there is no visual change when MouseButton2 is held. The viewmodel does not move into a sights-up position, no FOV change occurs, and no TweenService transition plays. The player receives mechanical benefit (tighter spread) with no visual feedback that ADS is active.
+**Trigger:** Any playtesting session where a player notices pressing right-click does nothing visible.
+**Fix when:** ViewModelController is extended to expose a `SetADS(isADS: boolean)` setter. GunController calls it on MouseButton2 down/up. ViewModelController tweens the viewmodel position to an ADS offset CFrame over `WeaponFeel.adsTime` seconds. Optionally, `workspace.CurrentCamera.FieldOfView` is tweened to 50° and back.
+
+---
+
+## [DEBT-041] Shell ejection VFX not implemented
+
+**File:** `src/shared/WeaponFeel.lua`, `src/client/GunController.lua`
+**Risk:** `shellEjectEnabled = false` is stored in WeaponFeel but GunController never reads it. No shell casing part is spawned or ejected from the ejection port on each shot. The field exists only as a forward-declaration for when the system is built.
+**Trigger:** Any art review where shell casings are expected.
+**Fix when:** A VFX pass is scheduled. Create an `ObjectPool` (per CLAUDE.md pooling rules) of small cylinder Parts; on each shot, retrieve a part from the pool, position it at an `EjectPortAttachment` on the viewmodel, apply a random rightward velocity + tumble AngularVelocity, and return it to the pool after 2–3 seconds. Read `shellEjectEnabled` from WeaponFeel to gate the spawn.
+
+---
+
+## [DEBT-042] Sprint stamina system not implemented
+
+**File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
+**Risk:** `Constants.SPRINT_STAMINA_ENABLED = false`. Sprint is currently unlimited — the player can hold Shift indefinitely with no stamina drain. `MovementController` reads this constant but only as a disable gate (the stamina system is entirely unimplemented). There is no stamina UI, no drain-per-second, no recovery rate, and no exhaustion state.
+**Trigger:** Any balance pass where unlimited sprint is identified as exploitable or too permissive.
+**Fix when:** A stamina design spec is written. Add `SPRINT_STAMINA_MAX`, `SPRINT_DRAIN_RATE`, and `SPRINT_REGEN_RATE` to Constants. In MovementController's RenderStepped, decrement stamina while `isSprinting`, increment while not, and force exit from sprint when it reaches zero. Fire a BindableEvent or call a HUD setter to update the stamina indicator.
+
+---
+
+## [DEBT-043] Prone stance not implemented
+
+**File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
+**Risk:** `Constants.PRONE_ENABLED = false`. No prone state, animation, hitbox change, or camera height exists. The constant is a placeholder so the feature slot is visible in code review.
+**Trigger:** Any design pass where prone is added to the movement spec.
+**Fix when:** Prone is added to the movement design doc. Requires: prone animation ID in `ANIM_IDS`, `PRONE_SPEED` constant, camera height offset, hitbox height reduction (scale HRP Y), `Stance.Prone` state, and input key assignment (default X or toggle from crouch).
+
+---
+
+## [DEBT-044] All MovementController animation IDs are placeholder zeroes
+
+**File:** `src/client/MovementController.lua`
+**Risk:** Every entry in `ANIM_IDS` is 0. The `loadAnims()` function skips IDs equal to 0, so no animation track is ever loaded or played. All 13 animation states (Idle, WalkForward, WalkBack, WalkLeft, WalkRight, WalkDiagFL, WalkDiagFR, WalkDiagBL, WalkDiagBR, Sprint, CrouchIdle, CrouchWalk, Slide) play nothing. The state machine logic is fully wired — only the asset IDs are missing.
+**Trigger:** Any playtesting session where the lack of movement animations is noticed.
+**Fix when:** An animator provides the 13 animation assets. Upload each to Roblox, copy the numeric asset ID, replace the corresponding 0 in `ANIM_IDS`, and remove the `if id ~= 0 then` skip guard once all IDs are filled.
+
+---
+
+## [DEBT-045] Recoil is viewmodel-only — no camera-space kick
+
+**File:** `src/client/GunController.lua`, `src/client/ViewModelController.lua`
+**Risk:** The recoil CFrame is composed into `ViewModelController`'s PivotTo call, rotating the viewmodel assembly in camera space. The camera itself does not move. In most competitive FPS games, camera recoil (the crosshair rising on screen) is a core mechanic that requires compensating pull-down; without it the weapon feels "floaty" and aiming is trivially easy. Implementing camera recoil requires switching to `CameraType.Scriptable` and managing the full camera transform per frame, which would need to be coordinated with the viewmodel's `PivotTo` call to avoid desync.
+**Trigger:** Any feel review where the lack of camera kick is flagged as making the gun feel disconnected.
+**Fix when:** A full camera-management refactor is scheduled. Switch `workspace.CurrentCamera.CameraType` to `Scriptable`; manage yaw/pitch from raw mouse delta; compose the recoil CFrame on top each frame; revert to the engine camera on focus loss.
+
+---
+
+## [DEBT-007] Seven RoundStateChanged listeners — worsened by MovementController addition
+
+**File:** `src/client/ViewModelController.lua`, `src/client/GunController.lua`, `src/client/MovementController.lua`, plus four UI controllers
+**Updated (2026-05-14):** MovementController adds an 8th `RoundStateChanged.OnClientEvent` listener, worsening this debt. See original DEBT-007 entry.
+
+---
+
+## [DEBT-017] ClientInit now manages 10 controllers — update threshold
+
+**File:** `src/client/ClientInit.client.lua`
+**Updated (2026-05-14):** MovementController inserted at position 9, shifting GunController to 10. The debt entry threshold condition (refactor if >10 controllers) has now been reached. Consider splitting ClientInit into a UI group and a gameplay group, or adopting a registry pattern where controllers self-register. See original DEBT-017 entry.
+
+---
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.lua`

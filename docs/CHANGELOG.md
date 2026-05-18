@@ -345,6 +345,53 @@ Studio verification required: Yes for all runtime, gameplay, combat, UI, camera,
 
 ---
 
+## [2026-05-14] — Add full movement system and Ready or Not gunplay feel
+
+### New files
+- **`src/shared/WeaponFeel.lua`** — per-weapon gunplay feel parameters. SCAR entry (recoil up/right/buildup/recovery/reset, hip/ads spread, moving/sprinting/crouch spread modifiers, ADS time, fire rate, muzzle flash duration, shell eject flag). AR15 is an alias for SCAR pending a separate tuning pass (DEBT-039).
+- **`src/client/MovementController.lua`** — complete movement feel controller:
+  - Sprint (Left Shift), crouch toggle (C), slide (C while sprinting with cooldown), vault (auto step-up over 0.5–2.5 stud obstacles, raycast every 0.1 s)
+  - 13-state animation machine: Idle, WalkForward, WalkBack, WalkLeft, WalkRight, WalkDiagFL, WalkDiagFR, WalkDiagBL, WalkDiagBR, Sprint, CrouchIdle, CrouchWalk, Slide. All IDs are 0 (placeholder, DEBT-044).
+  - 8-directional walk classification via camera-relative dot products
+  - Camera bob: sine wave on `Humanoid.CameraOffset` at BOB_FREQ_WALK=9 Hz / BOB_AMP_WALK=0.07 stud while walking, BOB_FREQ_SPRINT=13 Hz / BOB_AMP_SPRINT=0.11 stud while sprinting
+  - Crouch camera height tween via `Humanoid.CameraOffset` (CROUCH_CAM_OFFSET=-1.4 over 0.15 s)
+  - Landing dip via `Humanoid.CameraOffset` (0.3 stud down over 0.08 s, rise over 0.2 s)
+  - Viewmodel slide tilt roll (8°, lerped at 12/s) exposed via `GetViewmodelAddCFrame()`
+  - Phase awareness: movement features gated on ACTIVE; speed and stance reset on other phases
+  - Exposes: `GetMoveState()`, `IsADSBlocked()`, `GetViewmodelAddCFrame()`, `Start()`
+
+### Changed files
+- **`src/shared/Constants.lua`** — updated speed values and added movement constants:
+  - `WALK_SPEED` 16 → 14, `SPRINT_SPEED` 24 → 22
+  - Added `CROUCH_SPEED=10`, `SLIDE_SPEED=30`, `SLIDE_DURATION=0.6`, `SLIDE_COOLDOWN=1.5`
+  - Added `SPRINT_STAMINA_ENABLED=false` (DEBT-042), `PRONE_ENABLED=false` (DEBT-043)
+- **`src/client/GunController.lua`** — recoil, spread, ADS, and WeaponFeel integration:
+  - Requires `WeaponFeel` and `MovementController`
+  - Recoil CFrame accumulated per shot (`recoilBuildup` increases with sustained fire, resets after `recoilResetTime` seconds of silence). Lerps to identity in RenderStepped. Pushed to ViewModelController via `SetRecoilOffset()` every frame (push pattern — no circular dependency).
+  - Spread: half-cone angle computed from `WeaponFeel` + `MovementController:GetMoveState()`. Applied as random polar deviation to raycast direction before `WeaponFired:FireServer()`.
+  - ADS: `isADS` toggled by MouseButton2. Blocks if `MovementController:IsADSBlocked()`. Gates spread to `baseSpread` only (visual transition deferred, DEBT-040).
+  - Muzzle flash duration now reads `WeaponFeel.muzzleFlashDuration` instead of hardcoded 0.05 s.
+  - Exposes `GetRecoilOffset(): CFrame`.
+- **`src/client/ViewModelController.lua`** — applies recoil and movement offsets:
+  - Requires `MovementController` (no circular — MovementController does not require ViewModelController).
+  - Added `viewRecoilCFrame: CFrame` state variable.
+  - Added `SetRecoilOffset(cf: CFrame)` public setter for GunController to push into.
+  - RenderStepped now composes: `cam.CFrame * viewRecoilCFrame * MovementController:GetViewmodelAddCFrame() * BASE_OFFSET * CFrame.new(0, 0, recoilOffset)`.
+- **`src/client/ClientInit.client.lua`** — added MovementController at position 9, GunController moved to 10. Header comment updated to 10 controllers. Dependency notes updated.
+- **`docs/PROJECT_MAP.md`** — expanded MovementController entry, added WeaponFeel to shared modules table, updated initialization order to 10.
+- **`docs/TECHNICAL_DEBT.md`** — added DEBT-039 through DEBT-045; updated DEBT-007 and DEBT-017 notes.
+
+### Debt entries added
+- DEBT-039: WeaponFeel AR15 is an alias for SCAR (no separate tuning)
+- DEBT-040: ADS visual transition not implemented
+- DEBT-041: Shell ejection VFX not implemented
+- DEBT-042: Sprint stamina system not implemented
+- DEBT-043: Prone stance not implemented
+- DEBT-044: All animation IDs are placeholder zeroes
+- DEBT-045: Recoil is viewmodel-only (no camera-space kick)
+
+---
+
 ## [2026-05-14] — Fix camera pitch lock (rogue StarterCharacterScripts LocalScript removed)
 
 ### Root cause

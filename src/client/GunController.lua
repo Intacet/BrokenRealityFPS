@@ -2,43 +2,73 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > GunController
 --
--- Owns client-side weapon input and shot reporting.
--- Reads left mouse button clicks, performs a client-side raycast to produce
--- origin + direction, and fires WeaponFired to GunService for server-authoritative
--- validation. Never decides whether a hit landed — that is GunService's job.
+-- Owns client-side weapon input, shot reporting, recoil, and spread.
+--
+-- Weapon identity:
+--   This controller reads Constants.DEFAULT_WEAPON for all client-side lookups
+--   (WeaponData stats, WeaponFeel parameters). These lookups are used for
+--   client-side rate-limiting, cosmetic muzzle flash duration, and recoil feel only.
+--   GunService independently reads Constants.DEFAULT_WEAPON for authoritative
+--   validation — GunController does not decide hits, damage, health, ammo, or the
+--   real equipped weapon. When multiple weapons exist as a player choice, both sides
+--   will read server-owned loadout state instead of a shared constant (DEBT-013).
+--
+-- Shot flow:
+--   MouseButton1 → phase/rate/ammo guards → spread-perturbed raycast → WeaponFired:FireServer()
+--   → PlayFireAnimation() on ViewModelController + muzzle flash + gunshot sound
+--   → recoil CFrame snap pushed to ViewModelController via SetRecoilOffset()
+--
+-- Recoil:
+--   Each shot adds an upward/sideways kick to a viewmodel-space recoil CFrame.
+--   recoilBuildup accumulates while firing and resets after recoilResetTime seconds
+--   of silence. RenderStepped lerps recoilCFrame back toward identity each frame.
+--   The recovered CFrame is pushed to ViewModelController:SetRecoilOffset() so the
+--   viewmodel rotates with each kick and smoothly returns to rest.
+--   This is viewmodel-only recoil. Camera-space recoil requires CameraType.Scriptable
+--   (deferred; see DEBT-045).
+--
+-- Spread:
+--   A random angular deviation (half-cone) is applied to the raycast direction before
+--   firing. Cone angle is computed from WeaponFeel values + MovementController state.
+--
+-- ADS:
+--   isADS tracks whether MouseButton2 is held. WeaponFeel.baseSpread is used instead
+--   of hipfireSpread when isADS is true. Visual ADS transition is deferred; DEBT-040.
 --
 -- What this controller does NOT do:
 --   - Decide if a shot hit or apply damage  →  GunService + DamageService (server)
---   - Render a viewmodel or muzzle flash    →  ViewModelController
+--   - Render a viewmodel                    →  ViewModelController
 --   - Show ammo count UI                    →  HUD (driven by AmmoChanged remote)
 --
--- Initialized by ClientInit.client.lua after MatchController:Start() has run.
+-- Initialized by ClientInit.client.lua after MovementController:Start() has run.
 
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService  = game:GetService("UserInputService")
+local RunService        = game:GetService("RunService")
 
 -- ============================================================
 -- Dependencies
 -- ============================================================
 
-local Modules    = ReplicatedStorage:WaitForChild("Modules")
-local Constants  = require(Modules:WaitForChild("Constants"))
-local WeaponData = require(Modules:WaitForChild("WeaponData"))
-local Logger     = require(Modules:WaitForChild("Logger"))
+local Modules      = ReplicatedStorage:WaitForChild("Modules")
+local Constants    = require(Modules:WaitForChild("Constants"))
+local WeaponData   = require(Modules:WaitForChild("WeaponData"))
+local WeaponFeel   = require(Modules:WaitForChild("WeaponFeel"))
+local Logger       = require(Modules:WaitForChild("Logger"))
 
--- MatchController is a sibling ModuleScript in StarterPlayerScripts/Controllers.
-local MatchController      = require(script.Parent:WaitForChild("MatchController"))
-local ViewModelController  = require(script.Parent:WaitForChild("ViewModelController"))
-local CrosshairUI          = require(script.Parent:WaitForChild("UI"):WaitForChild("CrosshairUI"))
-local SoundController      = require(script.Parent:WaitForChild("SoundController"))
+local MatchController     = require(script.Parent:WaitForChild("MatchController"))
+local ViewModelController = require(script.Parent:WaitForChild("ViewModelController"))
+local MovementController  = require(script.Parent:WaitForChild("MovementController"))
+local CrosshairUI         = require(script.Parent:WaitForChild("UI"):WaitForChild("CrosshairUI"))
+local SoundController     = require(script.Parent:WaitForChild("SoundController"))
 
-local Remotes         = ReplicatedStorage:WaitForChild("Remotes")
-local WeaponFired     = Remotes:WaitForChild("WeaponFired")     :: RemoteEvent
-local HitConfirmed    = Remotes:WaitForChild("HitConfirmed")    :: RemoteEvent
-local HealthChanged   = Remotes:WaitForChild("HealthChanged")   :: RemoteEvent
-local AmmoChanged     = Remotes:WaitForChild("AmmoChanged")     :: RemoteEvent
-local ReloadRequest   = Remotes:WaitForChild("ReloadRequest")   :: RemoteEvent
+local Remotes       = ReplicatedStorage:WaitForChild("Remotes")
+local WeaponFired   = Remotes:WaitForChild("WeaponFired")   :: RemoteEvent
+local HitConfirmed  = Remotes:WaitForChild("HitConfirmed")  :: RemoteEvent
+local HealthChanged = Remotes:WaitForChild("HealthChanged") :: RemoteEvent
+local AmmoChanged   = Remotes:WaitForChild("AmmoChanged")   :: RemoteEvent
+local ReloadRequest = Remotes:WaitForChild("ReloadRequest") :: RemoteEvent
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -56,16 +86,61 @@ local LocalPlayer = Players.LocalPlayer
 -- State
 -- ============================================================
 
--- Timestamp of the last accepted shot on the client.
--- Prevents the client from sending WeaponFired events faster than the weapon
--- allows — events that would be silently rejected by GunService anyway.
+-- Client-side rate limiting (mirrors GunService).
 local lastShotTime: number = 0
 
--- Local mirror of the server-authoritative ammo state.
--- Updated exclusively by AmmoChanged — never mutated by this controller.
--- Starts at 0/0 until the first AmmoChanged fires (on TeamAssigned/PREP).
+-- Server-mirrored ammo state. Updated by AmmoChanged only.
 local currentMag:     number = 0
 local currentReserve: number = 0
+
+-- ADS state. Visual transition is deferred (DEBT-040).
+local isADS: boolean = false
+
+-- Recoil CFrame accumulator. Applied to ViewModelController each frame.
+-- Snapped outward on each shot, lerped back to identity by RenderStepped.
+local recoilCFrame:    CFrame  = CFrame.new()
+local recoilBuildup:   number  = 0   -- accumulated multiplier from sustained fire
+local recoilResetTimer:number  = 0   -- counts down from feel.recoilResetTime after last shot
+local recoilAltRight:  boolean = true -- alternates sign of lateral kick each shot
+
+-- ============================================================
+-- Private helpers
+-- ============================================================
+
+-- Applies a spread cone perturbation to a unit direction vector.
+-- spreadDeg is the half-cone angle in degrees.
+-- Returns a new unit vector that deviates from dir by a random angle within the cone.
+local function applySpread(dir: Vector3, spreadDeg: number): Vector3
+    if spreadDeg <= 0 then return dir end
+    local halfAngle = math.rad(spreadDeg)
+    -- Random polar coordinates within the cone.
+    local theta  = math.random() * halfAngle           -- deviation from axis
+    local phi    = math.random() * math.pi * 2         -- rotation around axis
+    -- Build a perpendicular basis.
+    local up     = math.abs(dir.Y) < 0.99 and Vector3.new(0, 1, 0) or Vector3.new(1, 0, 0)
+    local right  = dir:Cross(up).Unit
+    local upPerp = dir:Cross(right).Unit
+    -- Apply deviation.
+    local deviation = (right * math.cos(phi) + upPerp * math.sin(phi)) * math.tan(theta)
+    return (dir + deviation).Unit
+end
+
+-- Computes the total spread half-cone angle in degrees from WeaponFeel + movement state.
+local function computeSpread(feel: { [string]: any }): number
+    local moveState = MovementController:GetMoveState()
+    local spread    = (isADS and (feel.baseSpread :: number) or
+                      (feel.baseSpread :: number) + (feel.hipfireSpread :: number))
+
+    if moveState == "Walking" then
+        spread = spread + (feel.movingSpreadAdd :: number)
+    elseif moveState == "Sprinting" or moveState == "Sliding" then
+        spread = spread + (feel.sprintingSpreadAdd :: number)
+    elseif moveState == "Crouching" then
+        spread = spread * (feel.crouchSpreadMult :: number)
+    end
+
+    return spread
+end
 
 -- ============================================================
 -- Controller
@@ -73,27 +148,56 @@ local currentReserve: number = 0
 
 local GunController = {}
 
--- Called by ClientInit after MatchController:Start() has run.
--- Ordering matters: the InputBegan handler calls MatchController:GetPhase() on
--- every click, so MatchController must be initialized first.
 function GunController:Start()
 
-    -- ── Input handler ─────────────────────────────────────────────────────────
+    -- ── RenderStepped: recoil recovery ────────────────────────────────────────
+    -- Lerps recoilCFrame back toward identity each frame, then pushes the result
+    -- to ViewModelController so the viewmodel tracks the recovery.
+    RunService.RenderStepped:Connect(function(dt: number)
+        local feel = WeaponFeel[Constants.DEFAULT_WEAPON]
+        if not feel then return end
+
+        -- Decay the recoil CFrame back to identity.
+        if recoilCFrame ~= CFrame.new() then
+            recoilCFrame = recoilCFrame:Lerp(
+                CFrame.new(),
+                math.min(1, dt * (feel.recoilRecoverySpeed :: number))
+            )
+            -- Snap to identity when close enough to avoid float drift.
+            local _, _, _, r00, r01, r02, r10, r11, r12, r20, r21, r22 = recoilCFrame:GetComponents()
+            local off = math.abs(1 - r00) + math.abs(r01) + math.abs(r02)
+                      + math.abs(r10) + math.abs(1 - r11) + math.abs(r12)
+                      + math.abs(r20) + math.abs(r21) + math.abs(1 - r22)
+            if off < 0.0001 then
+                recoilCFrame = CFrame.new()
+            end
+        end
+
+        -- Decay recoil buildup after last shot.
+        if recoilResetTimer > 0 then
+            recoilResetTimer = recoilResetTimer - dt
+            if recoilResetTimer <= 0 then
+                recoilBuildup    = 0
+                recoilResetTimer = 0
+            end
+        end
+
+        -- Push the current recoil CFrame to ViewModelController every frame
+        -- so the viewmodel smoothly returns to rest as recoilCFrame decays.
+        ViewModelController:SetRecoilOffset(recoilCFrame)
+    end)
+
+    -- ── Input: Fire ───────────────────────────────────────────────────────────
 
     UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
-        -- Ignore input already consumed by a UI element (chat, menu, etc.).
-        if gameProcessed then
-            return
-        end
+        if gameProcessed then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
 
-        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then
-            return
-        end
+        if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
 
-        -- Phase gate: refuse to fire outside the ACTIVE phase.
-        -- GetPhase() returns whatever the server last told us — close enough for
-        -- a client-side guard. The server enforces this independently.
-        if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then
+        local feel = WeaponFeel[Constants.DEFAULT_WEAPON]
+        if not feel then
+            Logger.warn("[GunController] No WeaponFeel entry for:", Constants.DEFAULT_WEAPON)
             return
         end
 
@@ -103,36 +207,30 @@ function GunController:Start()
             return
         end
 
-        -- Dry fire: magazine empty — play click and stop here.
-        -- This check runs before the rate limit so an empty-mag click always
-        -- gives immediate audio feedback without waiting for the cooldown window.
+        -- Dry fire.
         if currentMag <= 0 then
             SoundController:PlayDryFire()
             return
         end
 
-        -- Client-side rate limit: mirrors the server's fireRate check so the client
-        -- does not spam WeaponFired events that GunService will silently discard.
+        -- Client-side rate limit.
         local now = os.clock()
-        if now - lastShotTime < weaponDef.fireRate then
-            return
+        if now - lastShotTime < weaponDef.fireRate then return end
+
+        -- ADS blocks sprint; sprinting blocks ADS (MovementController gate).
+        if isADS and MovementController:IsADSBlocked() then
+            isADS = false
         end
 
         local character = LocalPlayer.Character
-        if not character then
-            return
-        end
+        if not character then return end
 
-        -- ── Client-side raycast ─────────────────────────────────────────────────
-        -- Cast from the camera center forward. The local character is excluded so
-        -- the ray does not immediately self-hit (the camera sits inside the torso).
-        --
-        -- The result is NOT used for damage — GunService re-runs the ray on the
-        -- server from the same origin + direction inputs. The result will feed
-        -- client-side hit-effect visuals once the viewmodel is built.
+        -- ── Spread-perturbed raycast ──────────────────────────────────────────
         local camera    = workspace.CurrentCamera
         local origin    = camera.CFrame.Position
-        local direction = camera.CFrame.LookVector
+        local baseDir   = camera.CFrame.LookVector
+        local spread    = computeSpread(feel)
+        local direction = applySpread(baseDir, spread)
 
         local params = RaycastParams.new()
         params.FilterType = Enum.RaycastFilterType.Exclude
@@ -140,55 +238,73 @@ function GunController:Start()
 
         workspace:Raycast(origin, direction.Unit * weaponDef.range, params)
 
-        -- Record the shot time only after all guards pass. Aborted shots (wrong
-        -- phase, no character, no weapon def) do not consume the cooldown window.
         lastShotTime = now
 
-        -- Fire the shot request. The server validates origin + direction with its
-        -- own raycast and decides whether damage is applied.
         WeaponFired:FireServer(origin, direction, now)
 
-        -- ── Client-side audio and visuals (cosmetic only, no gameplay impact) ───
+        -- ── Recoil CFrame snap ────────────────────────────────────────────────
+        -- Accumulate buildup and compute this shot's kick angles.
+        recoilBuildup = math.min(
+            recoilBuildup + (feel.recoilBuildup :: number),
+            feel.recoilBuildupMax :: number
+        )
+        recoilResetTimer = feel.recoilResetTime :: number
+
+        local kickUp    = math.rad((feel.recoilUp :: number) * (1 + recoilBuildup))
+        local kickRight = math.rad((feel.recoilRight :: number) * (1 + recoilBuildup))
+        if feel.recoilRightAlternate then
+            kickRight = recoilAltRight and kickRight or -kickRight
+            recoilAltRight = not recoilAltRight
+        end
+
+        -- Compose kick onto the existing recoil CFrame so bursts stack correctly.
+        recoilCFrame = recoilCFrame * CFrame.Angles(-kickUp, kickRight, 0)
+
+        -- ── Audio and visuals ─────────────────────────────────────────────────
 
         SoundController:PlayGunshot()
-
-        -- Snap gun body back; RenderStepped in ViewModelController lerps it forward.
         ViewModelController:PlayFireAnimation()
 
-        -- Brief muzzle flash: a glowing sphere at the barrel tip, removed after 0.05 s.
-        local flash         = Instance.new("Part")
-        flash.Name          = "MuzzleFlash"
-        flash.Size          = Vector3.new(0.3, 0.3, 0.3)
-        flash.BrickColor    = BrickColor.new("Bright yellow")
-        flash.Material      = Enum.Material.Neon
-        flash.CanCollide    = false
-        flash.CastShadow    = false
-        flash.Anchored      = true
-        flash.CFrame        = ViewModelController:GetBarrelTipCFrame()
-        flash.Parent        = workspace.CurrentCamera
-        local flashMesh     = Instance.new("SpecialMesh")
-        flashMesh.MeshType  = Enum.MeshType.Sphere
-        flashMesh.Parent    = flash
-        task.delay(0.05, function()
+        -- Muzzle flash. Duration from WeaponFeel so designers can tune it.
+        local flash        = Instance.new("Part")
+        flash.Name         = "MuzzleFlash"
+        flash.Size         = Vector3.new(0.3, 0.3, 0.3)
+        flash.BrickColor   = BrickColor.new("Bright yellow")
+        flash.Material     = Enum.Material.Neon
+        flash.CanCollide   = false
+        flash.CastShadow   = false
+        flash.Anchored     = true
+        flash.CFrame       = ViewModelController:GetBarrelTipCFrame()
+        flash.Parent       = workspace.CurrentCamera
+        local flashMesh    = Instance.new("SpecialMesh")
+        flashMesh.MeshType = Enum.MeshType.Sphere
+        flashMesh.Parent   = flash
+        task.delay(feel.muzzleFlashDuration :: number, function()
             flash:Destroy()
         end)
     end)
 
-    -- ── Reload input handler ──────────────────────────────────────────────────
+    -- ── Input: ADS ────────────────────────────────────────────────────────────
+    -- Visual ADS transition is deferred (DEBT-040). This tracks state for spread.
+    UserInputService.InputBegan:Connect(function(input: InputObject, gp: boolean)
+        if gp then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton2 then return end
+        if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
+        if MovementController:IsADSBlocked() then return end
+        isADS = true
+    end)
+
+    UserInputService.InputEnded:Connect(function(input: InputObject, _gp: boolean)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton2 then return end
+        isADS = false
+    end)
+
+    -- ── Input: Reload ─────────────────────────────────────────────────────────
 
     UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
-        if gameProcessed then
-            return
-        end
-        if input.KeyCode ~= Enum.KeyCode.R then
-            return
-        end
-        if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then
-            return
-        end
-        -- Fire the request first so the server acts immediately, then play the
-        -- sound optimistically. The server will no-op if the reload is invalid
-        -- (full mag, empty reserve) and fire AmmoChanged to keep the client in sync.
+        if gameProcessed then return end
+        if input.KeyCode ~= Enum.KeyCode.R then return end
+        if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
         ReloadRequest:FireServer()
         SoundController:PlayReload()
         Logger.debug("[GunController] Reload requested")
@@ -196,7 +312,6 @@ function GunController:Start()
 
     -- ── Server event listeners ────────────────────────────────────────────────
 
-    -- GunService confirmed a hit on the server. Show the hitmarker and log.
     HitConfirmed.OnClientEvent:Connect(function()
         CrosshairUI:ShowHitmarker()
         Logger.debug("[GunController] HIT")
@@ -210,7 +325,6 @@ function GunController:Start()
         Logger.debug(string.format("[GunController] Ammo: %d / %d", mag, reserve))
     end)
 
-    -- DamageService updated this player's health.
     HealthChanged.OnClientEvent:Connect(function(current: number, maximum: number)
         Logger.debug(string.format("[GunController] Health: %d / %d", current, maximum))
     end)
@@ -219,9 +333,14 @@ function GunController:Start()
 end
 
 -- Returns the locally cached magazine and reserve ammo counts.
--- These mirror the server-authoritative values from the last AmmoChanged event.
 function GunController:GetAmmo(): (number, number)
     return currentMag, currentReserve
+end
+
+-- Returns the current recoil CFrame (rotation offset applied to the viewmodel).
+-- Read by external systems that need to know current recoil state.
+function GunController:GetRecoilOffset(): CFrame
+    return recoilCFrame
 end
 
 return GunController

@@ -48,8 +48,14 @@ Constants.ANCHOR_PLANT_TIME = 5  -- seconds an attacker must stand on an objecti
 Constants.MAX_HEALTH        = 100 -- maximum and starting health for every player
 Constants.TELEPORT_Y_OFFSET = 3   -- studs above a spawn part's centre so characters land on top
 Constants.RESPAWN_DELAY     = 5   -- seconds before a player re-enters play at round start (reserved for reinforcement system)
-Constants.WALK_SPEED        = 16  -- default WalkSpeed for all players (studs/s)
-Constants.SPRINT_SPEED      = 24  -- WalkSpeed while sprinting (reserved for MovementController)
+Constants.WALK_SPEED             = 14    -- default WalkSpeed for all players (studs/s)
+Constants.SPRINT_SPEED           = 22    -- WalkSpeed while sprinting
+Constants.CROUCH_SPEED           = 10    -- WalkSpeed while crouching
+Constants.SLIDE_SPEED            = 30    -- initial WalkSpeed applied at slide start
+Constants.SLIDE_DURATION         = 0.6   -- seconds a slide lasts before returning to crouch
+Constants.SLIDE_COOLDOWN         = 1.5   -- seconds before another slide is allowed after one ends
+Constants.SPRINT_STAMINA_ENABLED = false -- stamina system not yet implemented (DEBT-042)
+Constants.PRONE_ENABLED          = false -- prone stance not yet implemented (DEBT-043)
 
 -- ============================================================
 -- Timing constants
@@ -97,7 +103,12 @@ Constants.AMMO_LOW_THRESHOLD = 5  -- magazine count at or below which the number
 -- Combat rules
 -- ============================================================
 Constants.FRIENDLY_FIRE_ENABLED = false  -- set true to allow players to damage teammates
-Constants.DEFAULT_WEAPON        = "AR15" -- weapon assigned to all players until loadouts are added
+
+-- Single source of truth for the active weapon name used by both GunService
+-- (authoritative stat / ammo lookups) and GunController (client-side prediction
+-- and cosmetics only). When multiple weapons exist as a player choice, replace
+-- this constant with server-owned loadout state sent via a RemoteEvent — DEBT-013.
+Constants.DEFAULT_WEAPON = "AR15"
 
 -- Shot validation thresholds (server-side, GunService only)
 Constants.SHOT_ORIGIN_MAX_DISTANCE    = 12    -- max studs between client origin and shooter HumanoidRootPart; farther origins are rejected

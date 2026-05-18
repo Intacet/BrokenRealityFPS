@@ -7,18 +7,21 @@
 -- ModuleScripts so they can be required by each other without running automatically.
 --
 -- Initialization order is explicit and load-order-safe:
---   1. MatchController      — must be first; owns GetPhase() which GunController reads
---   2. MatchUI              — reads RoundStateChanged; needs PlayerGui
---   3. HUD                  — reads HealthChanged, TeamStatusUpdate, RoundStateChanged; needs PlayerGui
---   4. DeathScreen          — reads RagdollApplied, RoundStateChanged; needs PlayerGui
---   5. KillFeedUI           — reads KillFeed; needs PlayerGui; no deps on other controllers
---   6. CrosshairUI          — reads RoundStateChanged, exposes ShowHitmarker(); needs PlayerGui
---   7. ViewModelController  — reads RoundStateChanged, exposes PlayFireAnimation(); no PlayerGui
---   8. SoundController      — reads HitConfirmed, RagdollApplied; no PlayerGui; must start before GunController
---   9. GunController        — reads MatchController:GetPhase(); calls ViewModelController, CrosshairUI, SoundController
+--   1.  MatchController      — must be first; owns GetPhase() which GunController reads
+--   2.  MatchUI              — reads RoundStateChanged; needs PlayerGui
+--   3.  HUD                  — reads HealthChanged, TeamStatusUpdate, RoundStateChanged; needs PlayerGui
+--   4.  DeathScreen          — reads RagdollApplied, RoundStateChanged; needs PlayerGui
+--   5.  KillFeedUI           — reads KillFeed; needs PlayerGui; no deps on other controllers
+--   6.  CrosshairUI          — reads RoundStateChanged, exposes ShowHitmarker(); needs PlayerGui
+--   7.  ViewModelController  — reads RoundStateChanged, exposes PlayFireAnimation(); no PlayerGui
+--                              requires MovementController at module level (no circular)
+--   8.  SoundController      — reads HitConfirmed, RagdollApplied; no PlayerGui; must start before GunController
+--   9.  MovementController   — reads RoundStateChanged; must start before GunController reads GetMoveState()
+--   10. GunController        — reads MatchController:GetPhase(); calls ViewModelController, CrosshairUI,
+--                              SoundController, MovementController
 --
--- GunController requires ViewModelController, CrosshairUI, and SoundController at module level,
--- so all three must be initialized (Start()ed) before GunController:Start() runs.
+-- GunController requires ViewModelController, CrosshairUI, SoundController, and MovementController
+-- at module level, so all four must be initialized (Start()ed) before GunController:Start() runs.
 -- DeathScreen and KillFeedUI have no deps on other controllers and none depend on them.
 --
 -- To add a new controller: require it here and call its Start() (or init()+Start())
@@ -152,8 +155,15 @@ loadInitNoGuiAndStart("SoundController", function()
     return require(script.Parent:WaitForChild("SoundController"))
 end)
 
--- 9. GunController — reads MatchController:GetPhase(); calls ViewModelController,
---    CrosshairUI, and SoundController at module level — all three must be Start()ed first.
+-- 9. MovementController — no PlayerGui; must start before GunController so GetMoveState()
+--    and IsADSBlocked() return valid state when the first shot fires.
+loadAndStart("MovementController", function()
+    return require(script.Parent:WaitForChild("MovementController"))
+end)
+
+-- 10. GunController — reads MatchController:GetPhase(); calls ViewModelController,
+--     CrosshairUI, SoundController, and MovementController at module level —
+--     all four must be Start()ed first.
 loadAndStart("GunController", function()
     return require(script.Parent:WaitForChild("GunController"))
 end)

@@ -109,15 +109,33 @@ HordeService (server)   [LEGACY PLAN — replaces with zone ambient spawn budget
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- camera, character feel, footsteps
+MovementController      -- sprint/crouch/slide/vault, 13-state anim machine, camera bob,
+                        --   landing dip, viewmodel sway/tilt; exposes GetMoveState(),
+                        --   IsADSBlocked(), GetViewmodelAddCFrame()
 CutsceneController      -- intro/outro sequences, triggered by RoundStateChanged
 HUD                     -- driven by HealthChanged, TeamStatusUpdate, AmmoChanged, RoundStateChanged
 ObjectiveUI             -- driven by ObjectiveUpdated, ObjectiveComplete
 MatchUI                 -- driven by RoundStateChanged
 CrosshairUI             -- driven by RoundStateChanged; exposes ShowHitmarker()
-ViewModelController     -- driven by RoundStateChanged; exposes PlayFireAnimation(), GetBarrelTipCFrame()
+ViewModelController     -- driven by RoundStateChanged; exposes PlayFireAnimation(),
+                        --   GetBarrelTipCFrame(), SetRecoilOffset(); reads MovementController
 DeathScreen             -- driven by RagdollApplied (death trigger), RoundStateChanged (PREP cleanup)
 KillFeedUI              -- driven by KillFeed; top-right scrolling kill entries, max 5, fade after display time
+```
+
+### Shared modules (ReplicatedStorage/Modules)
+
+```
+Constants    -- single source of truth for all tunable numbers and phase enums.
+             --   Constants.DEFAULT_WEAPON is the single weapon identity source for
+             --   the one-weapon prototype. GunService reads it authoritatively
+             --   (stat lookups, ammo init, rate-limit). GunController reads it for
+             --   client-side prediction and cosmetics only (rate-limit mirror,
+             --   WeaponFeel lookup, muzzle flash duration). When multiple weapons
+             --   exist, replace with server-owned loadout state — see DEBT-013.
+WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
+WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
+Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag
 ```
 
 ### StarterGui / UI source mapping
@@ -152,15 +170,18 @@ All client controllers are **ModuleScripts** (`.lua`). They do not run automatic
 **Current initialization order:**
 ```
 ClientInit.client.lua
-  1. MatchController:Start()         -- must be first; owns GetPhase() which GunController reads
-  2. MatchUI:init()+Start()          -- no controller deps; connects RoundStateChanged; needs PlayerGui
-  3. HUD:init()+Start()              -- no controller deps; connects HealthChanged, TeamStatusUpdate, RoundStateChanged; needs PlayerGui
-  4. DeathScreen:init()+Start()      -- no controller deps; connects RagdollApplied, RoundStateChanged; needs PlayerGui
-  5. KillFeedUI:init()+Start()       -- no controller deps; connects KillFeed; needs PlayerGui
-  6. CrosshairUI:init()+Start()      -- no controller deps; exposes ShowHitmarker(); needs PlayerGui
-  7. ViewModelController:Start()     -- no controller deps; exposes PlayFireAnimation(), GetBarrelTipCFrame()
-  8. SoundController:init()+Start()  -- no controller deps; no PlayerGui; must start before GunController
-  9. GunController:Start()           -- reads MatchController:GetPhase(); calls ViewModelController, CrosshairUI, SoundController
+  1.  MatchController:Start()         -- must be first; owns GetPhase() which GunController reads
+  2.  MatchUI:init()+Start()          -- no controller deps; connects RoundStateChanged; needs PlayerGui
+  3.  HUD:init()+Start()              -- no controller deps; connects HealthChanged, TeamStatusUpdate, RoundStateChanged; needs PlayerGui
+  4.  DeathScreen:init()+Start()      -- no controller deps; connects RagdollApplied, RoundStateChanged; needs PlayerGui
+  5.  KillFeedUI:init()+Start()       -- no controller deps; connects KillFeed; needs PlayerGui
+  6.  CrosshairUI:init()+Start()      -- no controller deps; exposes ShowHitmarker(); needs PlayerGui
+  7.  ViewModelController:Start()     -- requires MovementController (no circular); exposes PlayFireAnimation(),
+                                      --   GetBarrelTipCFrame(), SetRecoilOffset()
+  8.  SoundController:init()+Start()  -- no controller deps; no PlayerGui; must start before GunController
+  9.  MovementController:Start()      -- reads RoundStateChanged; must start before GunController reads GetMoveState()
+  10. GunController:Start()           -- reads MatchController:GetPhase(); calls ViewModelController, CrosshairUI,
+                                      --   SoundController, MovementController
 ```
 
 **Three initialization helpers:**
