@@ -59,6 +59,28 @@ Constants.SPRINT_STAMINA_ENABLED = false -- stamina system not yet implemented (
 Constants.PRONE_ENABLED          = false -- prone stance not yet implemented (DEBT-043)
 
 -- ============================================================
+-- Movement animation IDs (Movement Stage 2A — R6 only)
+-- Keyed by rig type → weapon-set name → animation name.
+-- Do not add R15 animation IDs here.
+-- armed/unarmed selection is deferred (DEBT-050); MovementController
+-- currently defaults to the AR15 set for the Stage 2A prototype.
+-- ============================================================
+Constants.MOVEMENT_ANIMATION_IDS = {
+    R6 = {
+        Unarmed = {
+            WalkForward = "rbxassetid://83927286289016",
+            RunForward  = "rbxassetid://98612697944606",
+        },
+        AR15 = {
+            WalkForward = "rbxassetid://110651810525086",
+            RunForward  = "rbxassetid://124640088553427",
+        },
+    },
+}
+
+Constants.MOVEMENT_ANIMATION_FADE_TIME = 0.15  -- seconds to cross-fade between movement animations
+
+-- ============================================================
 -- Timing constants
 -- ============================================================
 Constants.COUNTDOWN_TICK     = 1  -- seconds between each broadcast inside a phase countdown

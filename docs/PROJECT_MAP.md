@@ -109,13 +109,27 @@ HordeService (server)   [LEGACY PLAN — replaces with zone ambient spawn budget
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- Stage 1: owns local movement input (LeftShift=sprint, C=crouch toggle),
-                        --   movementState table, and Humanoid.WalkSpeed.
+MovementController      -- Stage 1 + 2A: owns local movement input (LeftShift=sprint, C=crouch toggle),
+                        --   movementState table, Humanoid.WalkSpeed, and R6 walk/run animation playback.
                         --   Reads workspace.CurrentCamera.CFrame for 8-directional camera-relative
                         --   direction detection; does NOT write camera.CFrame, CameraOffset, or FOV.
-                        --   No new remotes. No slide, vault, animations, or camera effects in Stage 1.
+                        --   No new remotes. No slide, vault, or camera effects.
+                        --
+                        --   Stage 2A animation support (R6 only, forward walk/run only):
+                        --     Loads 4 AnimationTrack objects per character via Humanoid.Animator.
+                        --     Plays during ACTIVE phase only; stops on phase exit and when not moving.
+                        --     Defaults to AR15 animation set (true armed/unarmed state deferred — DEBT-050).
+                        --     Animation IDs (Constants.MOVEMENT_ANIMATION_IDS.R6):
+                        --       Unarmed.WalkForward = rbxassetid://83927286289016
+                        --       Unarmed.RunForward  = rbxassetid://98612697944606
+                        --       AR15.WalkForward    = rbxassetid://110651810525086
+                        --       AR15.RunForward     = rbxassetid://124640088553427
+                        --     Not in Stage 2A: crouch anim, strafe, backward, diagonal, lower/upper-body
+                        --       split, reload/fire/ADS weapon animations.
+                        --     If character is not R6, animation loading is skipped; Stage 1 logic active.
+                        --
                         --   Exposes: GetMovementState() → table; GetMoveState() → string (GunController
-                        --   compat); IsADSBlocked() → bool; GetViewmodelAddCFrame() → identity (Stage 1);
+                        --   compat); IsADSBlocked() → bool; GetViewmodelAddCFrame() → identity (Stage 1/2A);
                         --   Start(); destroy()
 CutsceneController      -- intro/outro sequences, triggered by RoundStateChanged
 HUD                     -- driven by HealthChanged, TeamStatusUpdate, AmmoChanged, RoundStateChanged

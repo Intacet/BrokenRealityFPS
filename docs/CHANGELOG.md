@@ -7,6 +7,60 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-18] — Movement Stage 2A: R6 walk/run animation playback in MovementController
+
+### Summary
+Adds prototype R6 walk/run animation playback to `MovementController` (Movement Stage 2A). Four AnimationTrack objects are loaded per character respawn via `Humanoid.Animator` and played during ACTIVE phase only. Sprint plays `RunForward`; all other movement plays `WalkForward` (strafing, backward, and diagonal fallback — full per-direction set is deferred to Stage 2B). All Stage 1 speed and direction logic is unchanged. Non-R6 characters skip animation loading cleanly. No new remotes. No camera changes. No server files touched.
+
+### Changed files
+
+- **`src/shared/Constants.lua`** — two additions in a new "Movement animation IDs" section:
+  - `Constants.MOVEMENT_ANIMATION_IDS` — nested table keyed by rig type (`R6`) → weapon set (`Unarmed`, `AR15`) → animation name (`WalkForward`, `RunForward`). Four asset IDs total:
+    - `Unarmed.WalkForward = "rbxassetid://83927286289016"`
+    - `Unarmed.RunForward  = "rbxassetid://98612697944606"`
+    - `AR15.WalkForward    = "rbxassetid://110651810525086"`
+    - `AR15.RunForward     = "rbxassetid://124640088553427"`
+  - `Constants.MOVEMENT_ANIMATION_FADE_TIME = 0.15` — cross-fade duration for all animation transitions.
+
+- **`src/client/MovementController.lua`** — Stage 2A animation layer added on top of Stage 1:
+  - New private state: `animationTracks: { [string]: AnimationTrack }`, `currentAnimationName: string`, `rigTypeWarned: boolean`.
+  - New private helpers:
+    - `getAnimator(character)` — finds `Humanoid.Animator`; warns and returns nil if absent.
+    - `getAnimationSetName()` — returns `"AR15"` (prototype default; true state deferred — DEBT-050).
+    - `stopCurrentMovementAnimation()` — stops playing track with fade; clears `currentAnimationName`.
+    - `playMovementAnimation(animationName)` — switches to a named track with fade; guards against duplicate play and missing keys.
+    - `loadMovementAnimations(character)` — clears stale track references, checks `HumanoidRigType.R6`, loads all four tracks via `Animator:LoadAnimation`; sets `Looped = true`; skips with a one-time warn on non-R6.
+    - `updateMovementAnimation()` — called every Heartbeat during ACTIVE; stops when not moving; plays `RunForward` while sprinting, `WalkForward` otherwise.
+  - `setupCharacter()` updated: calls `loadMovementAnimations(char)` after acquiring Humanoid.
+  - `destroy()` updated: calls `stopCurrentMovementAnimation()` then `table.clear(animationTracks)` before disconnecting connections.
+  - `phaseConn` handler updated: calls `stopCurrentMovementAnimation()` when leaving ACTIVE.
+  - `heartbeatConn` updated: calls `updateMovementAnimation()` after `applySpeed()`.
+  - Module header comment updated to document Stage 2A scope and limitations.
+  - Log message updated: `"Ready (Stage 1 + Stage 2A)"`.
+
+- **`docs/PROJECT_MAP.md`** — `MovementController` entry in Presentation section updated:
+  - Documents Stage 2A animation support, all four animation IDs, and per-animation meanings.
+  - Documents what is NOT in Stage 2A (crouch anim, strafe/backward/diagonal, lower/upper-body split, reload/fire/ADS).
+  - Notes that non-R6 characters skip animation loading safely.
+
+- **`docs/TECHNICAL_DEBT.md`** — two changes:
+  - DEBT-044 updated: partial resolution — Stage 2A forward walk/run exists; remaining gaps listed (crouch, strafe, backward, diagonal, splits, weapon anims, armed/unarmed state).
+  - DEBT-050 added (Medium): `getAnimationSetName()` always returns `"AR15"`; true armed/unarmed selection requires server-owned equipment state (InventoryService/EquipmentService).
+
+### What was NOT changed
+`GunController`, `ViewModelController`, `ClientInit`, `SoundController`, all UI controllers, all server files, `WeaponData`, `default.project.json`, `CLAUDE.md`, `PROJECT_RULES.md`, `NAMING.md`. No remotes added. No camera.CFrame writes. No `CameraOffset` writes. No `FieldOfView` changes. No movement speeds changed. No new RenderStepped connections.
+
+### Debt entries added
+- DEBT-050: `getAnimationSetName()` defaults to AR15; true armed/unarmed state deferred to InventoryService/EquipmentService.
+
+### Debt entries updated
+- DEBT-044: Partially resolved — Stage 2A forward walk/run added. Crouch, strafe, backward, diagonal, splits, and weapon anims remain deferred.
+
+### Studio verification required
+Yes — see Studio test steps in the task prompt. Key: character is R6, AR15 WalkForward plays in ACTIVE while walking forward, RunForward plays while sprinting, animation stops when not moving or leaving ACTIVE, no duplicate tracks on respawn.
+
+---
+
 ## [2026-05-18] — Set R6 as project character rig target; document rig rules in all project docs
 
 ### Summary

@@ -503,13 +503,22 @@ primary protection.
 
 ---
 
-## [DEBT-044] MovementController has no animation system — Stage 1 foundation only
+## [DEBT-044] MovementController animation system — Stage 2A forward walk/run only — UPDATED 2026-05-18
 
-**File:** `src/client/MovementController.lua`
-**Updated (2026-05-18):** Movement Stage 1 was rewritten from scratch. The previous implementation had a 13-state animation machine (`ANIM_IDS` table with placeholder-zero asset IDs and a `loadAnims()` / `playAnim()` pipeline). Stage 1 removes the animation system entirely — no `ANIM_IDS` table, no `Animator` lookup, no `AnimationTrack` loading or crossfading. The `movementState.directionName` field (one of 9 directional strings) is the foundation the animation system will read when it is built.
-**Risk:** No character animations play during movement — the player's arms and legs remain in T-pose or idle. `directionName` is computed correctly each Heartbeat but nothing consumes it yet.
-**Trigger:** Any playtesting session where the absence of movement animations is noticeable.
-**Fix when:** A future movement stage adds animations. At that point: (1) add an `ANIM_IDS` table with real Roblox asset IDs; (2) add `loadAnims(animator)` in `setupCharacter()`; (3) drive `playAnim()` from `directionName` and movement flags in the Heartbeat loop. Do not build this until Stage 1 is verified in Studio.
+**File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
+**Severity:** Medium
+**Studio verification required:** Yes
+**Updated (2026-05-18 — Stage 2A):** R6 walk/run animation playback added. Four AnimationTrack objects are loaded per character via `Humanoid.Animator`. Tracks are played during ACTIVE phase only and cleared on respawn/destroy. `directionName` is correctly computed and drives animation selection alongside `isSprinting`.
+
+**Remaining gaps (not in Stage 2A):**
+- Crouch walk animation — not implemented; crouching uses WalkForward at CROUCH_SPEED.
+- Strafe, backward, and diagonal direction animations — not implemented; WalkForward is used as a fallback for all non-Forward directions.
+- Lower-body / upper-body animation split — not implemented; the full body plays the movement animation.
+- Reload, fire, ADS, and sprint-hold weapon animations — deferred to a weapon-anim stage.
+- True armed/unarmed set selection — deferred; see DEBT-050 (defaults to AR15 set).
+
+**Trigger:** Any playtesting session where missing strafing/backward animations or the always-AR15-set are noticeable.
+**Fix when:** A future movement stage (Stage 2B) adds per-direction animation clips and armed/unarmed state integration. Do not build until Stage 2A is verified in Studio.
 
 ---
 
@@ -594,6 +603,20 @@ primary protection.
 **Fallback:** If Rojo does not reliably apply `CharacterRigType` from `default.project.json`, the property must be set manually in Studio each session. In that case, document this as a blocking manual step here and in `docs/PROJECT_RULES.md`.
 
 **Resolve when:** Steps 1–5 above are confirmed in Studio. If the Rojo property applies cleanly, mark resolved and note the Rojo version under which it was verified. If it does not apply, update this entry with the fallback procedure and leave severity at High.
+
+---
+
+## [DEBT-050] MovementController animation set defaults to AR15 regardless of actual equipped weapon — ADDED 2026-05-18
+
+**File:** `src/client/MovementController.lua` (`getAnimationSetName()`)
+**Severity:** Medium
+**Studio verification required:** No (structural coupling, not a runtime bug)
+**Risk:** `getAnimationSetName()` always returns `"AR15"` because the client has no authoritative knowledge of what weapon the player currently holds. True armed/unarmed selection requires a server-owned equipment state (e.g. `InventoryService` or `EquipmentService`) that sends the equipped weapon to the client. Until that system exists, all players play the AR15 animation set regardless of whether they are holding a weapon.
+**Current exposure:** In Stage 2A only one weapon exists (AR15) and all players always have it, so the incorrect set selection is invisible. The risk surfaces when:
+- An unarmed player (no weapon held) is added to the game — they will play the AR15 armed walking animation.
+- A second weapon type is added — players holding it will still play AR15 animations.
+**Trigger:** An unarmed state is introduced (death drop, loadout selection screen, spawn before pickup) or a second weapon is added.
+**Fix when:** `InventoryService` or `EquipmentService` is built and sends the current equipped weapon name (or `nil` for unarmed) to the client. Replace `getAnimationSetName()` with a lookup against that received state. Use `"Unarmed"` when nil.
 
 ---
 
