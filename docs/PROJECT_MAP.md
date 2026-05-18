@@ -109,9 +109,14 @@ HordeService (server)   [LEGACY PLAN — replaces with zone ambient spawn budget
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- sprint/crouch/slide/vault, 13-state anim machine, camera bob,
-                        --   landing dip, viewmodel sway/tilt; exposes GetMoveState(),
-                        --   IsADSBlocked(), GetViewmodelAddCFrame()
+MovementController      -- Stage 1: owns local movement input (LeftShift=sprint, C=crouch toggle),
+                        --   movementState table, and Humanoid.WalkSpeed.
+                        --   Reads workspace.CurrentCamera.CFrame for 8-directional camera-relative
+                        --   direction detection; does NOT write camera.CFrame, CameraOffset, or FOV.
+                        --   No new remotes. No slide, vault, animations, or camera effects in Stage 1.
+                        --   Exposes: GetMovementState() → table; GetMoveState() → string (GunController
+                        --   compat); IsADSBlocked() → bool; GetViewmodelAddCFrame() → identity (Stage 1);
+                        --   Start(); destroy()
 CutsceneController      -- intro/outro sequences, triggered by RoundStateChanged
 HUD                     -- driven by HealthChanged, TeamStatusUpdate, AmmoChanged, RoundStateChanged
 ObjectiveUI             -- driven by ObjectiveUpdated, ObjectiveComplete
@@ -179,7 +184,10 @@ ClientInit.client.lua
   7.  ViewModelController:Start()     -- requires MovementController (no circular); exposes PlayFireAnimation(),
                                       --   GetBarrelTipCFrame(), SetRecoilOffset()
   8.  SoundController:init()+Start()  -- no controller deps; no PlayerGui; must start before GunController
-  9.  MovementController:Start()      -- reads RoundStateChanged; must start before GunController reads GetMoveState()
+  9.  MovementController:Start()      -- reads RoundStateChanged; reads MatchController:GetPhase(); owns
+                                      --   movementState and Humanoid.WalkSpeed; reads camera.CFrame for
+                                      --   direction detection (no camera.CFrame writes); must start before
+                                      --   GunController so GetMoveState() / IsADSBlocked() return valid state
   10. GunController:Start()           -- reads MatchController:GetPhase(); calls ViewModelController, CrosshairUI,
                                       --   SoundController, MovementController
 ```

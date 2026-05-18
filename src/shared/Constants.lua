@@ -51,6 +51,7 @@ Constants.RESPAWN_DELAY     = 5   -- seconds before a player re-enters play at r
 Constants.WALK_SPEED             = 14    -- default WalkSpeed for all players (studs/s)
 Constants.SPRINT_SPEED           = 22    -- WalkSpeed while sprinting
 Constants.CROUCH_SPEED           = 10    -- WalkSpeed while crouching
+Constants.MOVEMENT_DIRECTION_DEADZONE = 0.15 -- Humanoid.MoveDirection magnitude below which the player is "Idle"
 Constants.SLIDE_SPEED            = 30    -- initial WalkSpeed applied at slide start
 Constants.SLIDE_DURATION         = 0.6   -- seconds a slide lasts before returning to crouch
 Constants.SLIDE_COOLDOWN         = 1.5   -- seconds before another slide is allowed after one ends

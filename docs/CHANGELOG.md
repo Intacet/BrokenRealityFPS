@@ -7,6 +7,45 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-18] — Movement Stage 1: walk/sprint/crouch speed, 8-direction detection, phase gating, respawn handling, connection cleanup
+
+### Summary
+Movement Stage 1 replaces the previous over-built MovementController (which included slide, vault, camera bob, CameraOffset manipulation, animation machine, viewmodel sway, and landing dip) with a clean, minimal foundation. All features beyond Stage 1 scope are deferred to future stages. No new remotes were added. Camera rules strictly observed: no writes to `camera.CFrame`, `Humanoid.CameraOffset`, or `FieldOfView`.
+
+### Changed files
+
+- **`src/client/MovementController.lua`** — complete rewrite (Stage 1 only):
+  - Removed: slide, vault, camera bob, `Humanoid.CameraOffset` manipulation, animation machine (`ANIM_IDS`, `loadAnims`, `playAnim`), viewmodel sway/tilt, landing dip, `TweenService` calls, `Stance` enum.
+  - Added: `movementState` table (`isMoving`, `isSprinting`, `isCrouching`, `directionName`, `moveVector`).
+  - Sprint: LeftShift held enables sprint in ACTIVE; ignored while crouching. Speed = `SPRINT_SPEED` only when sprinting AND moving.
+  - Crouch: C toggles in ACTIVE; entering crouch clears sprint. Speed = `CROUCH_SPEED`.
+  - Phase gating: WalkSpeed = 0 outside ACTIVE; `WALK_SPEED` / `SPRINT_SPEED` / `CROUCH_SPEED` during ACTIVE.
+  - Respawn: `CharacterAdded` connection re-acquires Humanoid, resets state, applies phase-appropriate speed.
+  - Direction detection: Heartbeat reads `humanoid.MoveDirection`, flattens camera `LookVector` / `RightVector` onto XZ, dot products classify into one of 9 directions: `"Idle"`, `"Forward"`, `"Backward"`, `"Left"`, `"Right"`, `"ForwardLeft"`, `"ForwardRight"`, `"BackwardLeft"`, `"BackwardRight"`. Uses `Constants.MOVEMENT_DIRECTION_DEADZONE` for the magnitude gate.
+  - Connection cleanup: all 6 connections stored in `_connections`; `destroy()` disconnects all.
+  - Public API: `GetMovementState()` (table), `GetMoveState()` (string, backward-compat for GunController), `IsADSBlocked()` (bool), `GetViewmodelAddCFrame()` (identity in Stage 1), `Start()`, `destroy()`.
+
+- **`src/shared/Constants.lua`** — added one constant:
+  - `Constants.MOVEMENT_DIRECTION_DEADZONE = 0.15` — `Humanoid.MoveDirection` magnitude below which the player is considered "Idle"; placed in the Player settings section alongside the speed constants.
+
+- **`src/client/ClientInit.client.lua`** — updated position-9 comment to describe Stage 1 behavior (no functional change to initialization order or controller count).
+
+- **`docs/PROJECT_MAP.md`** — updated MovementController entry and initialization-order row to reflect Stage 1 scope, camera-read-only rule, and new public API.
+
+- **`docs/TECHNICAL_DEBT.md`** — updated DEBT-044 (animation system now explicitly absent, not placeholder); updated DEBT-007 and DEBT-017 notes; added DEBT-046 (phase gating couples to legacy MatchController / ZoneService migration note) and DEBT-047 (movementState returned by reference — callers must treat as read-only).
+
+### What was NOT added (Stage 1 scope gates)
+Slide, vault, stamina, prone, footsteps, animations, camera bob, landing dip, camera height changes (`CameraOffset`), viewmodel sway, `TweenService`, `FieldOfView` changes.
+
+### Debt entries added
+- DEBT-046: Phase gating uses legacy MatchController/Constants.Phase.ACTIVE; must adapt to ZoneService.
+- DEBT-047: movementState returned by reference — callers must not write to the table.
+
+### Studio verification required
+Yes — see test steps in the task prompt. MCP Studio test will follow.
+
+---
+
 ## [2026-05-15] — Add docs/PERSISTENT_ZONE_ROADMAP.md: staged implementation plan for persistent-zone pivot (documentation only, no runtime code changed)
 
 **This was a documentation and planning update. No `src/` files were changed. No remotes were added. No runtime behavior changed.**

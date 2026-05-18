@@ -502,12 +502,37 @@ primary protection.
 
 ---
 
-## [DEBT-044] All MovementController animation IDs are placeholder zeroes
+## [DEBT-044] MovementController has no animation system — Stage 1 foundation only
 
 **File:** `src/client/MovementController.lua`
-**Risk:** Every entry in `ANIM_IDS` is 0. The `loadAnims()` function skips IDs equal to 0, so no animation track is ever loaded or played. All 13 animation states (Idle, WalkForward, WalkBack, WalkLeft, WalkRight, WalkDiagFL, WalkDiagFR, WalkDiagBL, WalkDiagBR, Sprint, CrouchIdle, CrouchWalk, Slide) play nothing. The state machine logic is fully wired — only the asset IDs are missing.
-**Trigger:** Any playtesting session where the lack of movement animations is noticed.
-**Fix when:** An animator provides the 13 animation assets. Upload each to Roblox, copy the numeric asset ID, replace the corresponding 0 in `ANIM_IDS`, and remove the `if id ~= 0 then` skip guard once all IDs are filled.
+**Updated (2026-05-18):** Movement Stage 1 was rewritten from scratch. The previous implementation had a 13-state animation machine (`ANIM_IDS` table with placeholder-zero asset IDs and a `loadAnims()` / `playAnim()` pipeline). Stage 1 removes the animation system entirely — no `ANIM_IDS` table, no `Animator` lookup, no `AnimationTrack` loading or crossfading. The `movementState.directionName` field (one of 9 directional strings) is the foundation the animation system will read when it is built.
+**Risk:** No character animations play during movement — the player's arms and legs remain in T-pose or idle. `directionName` is computed correctly each Heartbeat but nothing consumes it yet.
+**Trigger:** Any playtesting session where the absence of movement animations is noticeable.
+**Fix when:** A future movement stage adds animations. At that point: (1) add an `ANIM_IDS` table with real Roblox asset IDs; (2) add `loadAnims(animator)` in `setupCharacter()`; (3) drive `playAnim()` from `directionName` and movement flags in the Heartbeat loop. Do not build this until Stage 1 is verified in Studio.
+
+---
+
+## [DEBT-046] MovementController phase gating uses legacy MatchController / Constants.Phase.ACTIVE — ADDED 2026-05-18
+
+**File:** `src/client/MovementController.lua`
+**Severity:** Low-Medium
+**Studio verification required:** No (structural coupling, not a runtime bug)
+**Risk:** MovementController listens to `RoundStateChanged` (the legacy remote from the round-based `MatchService`) and calls `MatchController:GetPhase()` to gate speed, sprint, and crouch. When the persistent zone architecture is built and `ZoneService` replaces `MatchService`, the phase constants and remote will change or be retired. MovementController will need to be updated to gate on `ZoneService` state instead (e.g. "player is in zone" rather than `Constants.Phase.ACTIVE`).
+**In practice (Stage 1):** This coupling is intentional — the legacy round-based system is the only phase source available. All movement features are correctly gated: WalkSpeed=0 outside ACTIVE, normal movement inside ACTIVE.
+**Trigger:** ZoneService is built and `RoundStateChanged` is retired or repurposed. At that point MovementController's phase listener must be migrated to the new zone-state remote and `MatchController:GetPhase()` calls replaced.
+**Fix when:** ZoneService replaces MatchService. Update the `RoundStateChanged` listener to the zone-state equivalent; replace `Constants.Phase.ACTIVE` checks with zone-entry state; remove the `MatchController` require.
+
+---
+
+## [DEBT-047] movementState is a shared table returned by reference — callers must treat it as read-only — ADDED 2026-05-18
+
+**File:** `src/client/MovementController.lua`
+**Severity:** Low
+**Studio verification required:** No
+**Risk:** `GetMovementState()` returns the `movementState` table by reference. Any caller that writes to the returned table (e.g. `ms.isSprinting = true`) would corrupt MovementController's internal state without any error. This is intentional for performance (no copy allocation per call) but requires caller discipline.
+**Current callers:** None in Stage 1 — `GetMovementState()` is reserved for future animation and HUD systems that will read (not write) the fields.
+**Trigger:** Any system that receives the table and writes to a field — especially if a future sprint-stamina or slide system is built outside MovementController.
+**Fix when:** A second system needs write access to movement state, or if a caller is found mutating the returned table. At that point, either (a) return a shallow copy (`table.clone(movementState)`) at a small allocation cost per call, or (b) expose individual getters (`GetIsSprinting()`, `GetDirectionName()`, etc.) and remove `GetMovementState()`.
 
 ---
 
@@ -520,17 +545,19 @@ primary protection.
 
 ---
 
-## [DEBT-007] Seven RoundStateChanged listeners — worsened by MovementController addition
+## [DEBT-007] Eight RoundStateChanged listeners — MovementController Stage 1 retains its listener
 
-**File:** `src/client/ViewModelController.lua`, `src/client/GunController.lua`, `src/client/MovementController.lua`, plus four UI controllers
-**Updated (2026-05-14):** MovementController adds an 8th `RoundStateChanged.OnClientEvent` listener, worsening this debt. See original DEBT-007 entry.
+**File:** `src/client/ViewModelController.lua`, `src/client/GunController.lua`, `src/client/MovementController.lua`, plus four UI controllers (MatchUI, HUD, CrosshairUI, DeathScreen)
+**Updated (2026-05-14):** MovementController added an 8th `RoundStateChanged.OnClientEvent` listener.
+**Updated (2026-05-18):** Movement Stage 1 rewrite retains the single `RoundStateChanged` listener in MovementController. Listener count unchanged at 8. See original DEBT-007 entry for fix guidance.
 
 ---
 
-## [DEBT-017] ClientInit now manages 10 controllers — update threshold
+## [DEBT-017] ClientInit manages 10 controllers — threshold reached
 
 **File:** `src/client/ClientInit.client.lua`
-**Updated (2026-05-14):** MovementController inserted at position 9, shifting GunController to 10. The debt entry threshold condition (refactor if >10 controllers) has now been reached. Consider splitting ClientInit into a UI group and a gameplay group, or adopting a registry pattern where controllers self-register. See original DEBT-017 entry.
+**Updated (2026-05-14):** MovementController inserted at position 9, shifting GunController to 10. The threshold condition (refactor if >10 controllers) has now been reached.
+**Updated (2026-05-18):** Movement Stage 1 rewrite does not change the controller count — MovementController remains at position 9. Consider splitting ClientInit into a UI group and a gameplay-controller group, or adopting a registry pattern where controllers self-register. See original DEBT-017 entry.
 
 ---
 

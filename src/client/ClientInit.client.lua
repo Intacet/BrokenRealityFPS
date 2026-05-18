@@ -16,7 +16,10 @@
 --   7.  ViewModelController  — reads RoundStateChanged, exposes PlayFireAnimation(); no PlayerGui
 --                              requires MovementController at module level (no circular)
 --   8.  SoundController      — reads HitConfirmed, RagdollApplied; no PlayerGui; must start before GunController
---   9.  MovementController   — reads RoundStateChanged; must start before GunController reads GetMoveState()
+--   9.  MovementController   — reads RoundStateChanged; uses MatchController:GetPhase(); owns
+--                              movementState and Humanoid.WalkSpeed; reads camera.CFrame for
+--                              direction detection (does NOT write camera.CFrame or CameraOffset);
+--                              must start before GunController reads GetMoveState() / IsADSBlocked()
 --   10. GunController        — reads MatchController:GetPhase(); calls ViewModelController, CrosshairUI,
 --                              SoundController, MovementController
 --
@@ -155,8 +158,10 @@ loadInitNoGuiAndStart("SoundController", function()
     return require(script.Parent:WaitForChild("SoundController"))
 end)
 
--- 9. MovementController — no PlayerGui; must start before GunController so GetMoveState()
---    and IsADSBlocked() return valid state when the first shot fires.
+-- 9. MovementController — no PlayerGui; Stage 1: walk/sprint/crouch speed, 8-dir direction
+--    detection, phase gating, respawn handling, connection cleanup. Must start before
+--    GunController so GetMoveState(), IsADSBlocked(), and GetViewmodelAddCFrame()
+--    return valid state when the first shot fires. Depends on MatchController (position 1).
 loadAndStart("MovementController", function()
     return require(script.Parent:WaitForChild("MovementController"))
 end)
