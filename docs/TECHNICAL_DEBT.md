@@ -561,6 +561,21 @@ primary protection.
 
 ---
 
+## [DEBT-048] Constants.FORCE_FIRST_PERSON=false is a development/testing shortcut — ADDED 2026-05-18
+
+**File:** `src/shared/Constants.lua`, `src/client/ViewModelController.lua`
+**Severity:** Low-Medium
+**Studio verification required:** Yes
+**Risk:** `Constants.FORCE_FIRST_PERSON = false` allows movement, map, and zone testing with normal Roblox camera and a permanently hidden viewmodel. This is intentional for development. However:
+1. **Must be set to `true` before any FPS playtesting or shipping.** If forgotten, players will have no first-person camera lock and no visible weapon — the game will feel like a top-down or third-person experience.
+2. **No automated enforcement.** There is no CI gate, build step, or Selene rule that warns when `FORCE_FIRST_PERSON = false` ships in a production build. The flip is a manual edit.
+3. **Not a real game-mode decision.** A production game would read this from a game mode config, a player settings module, or a server-side flag (e.g. "FPS mode" vs "overhead map testing mode") rather than hardcoding it in Constants.
+4. **Muzzle flash still fires when false.** When `FORCE_FIRST_PERSON = false`, `GetBarrelTipCFrame()` returns the hidden barrel's WorldPosition (the model follows the camera via PivotTo). GunController uses this to place the muzzle flash Part. The flash will appear at the ghost barrel position, which is invisible but not at the expected screen position for the Classic camera view.
+**Trigger:** Shipping or playtesting without flipping the flag to `true`, or a future system that needs to read camera/viewmodel mode dynamically rather than from a compile-time constant.
+**Fix when:** Before the first FPS playtesting session, flip to `true`. Long-term: replace the boolean constant with a read from a `GameModeConfig` or `SettingsService` module so the decision can vary per game mode or build target without touching Constants.
+
+---
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.lua`

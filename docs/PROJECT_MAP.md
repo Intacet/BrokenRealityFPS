@@ -123,7 +123,13 @@ ObjectiveUI             -- driven by ObjectiveUpdated, ObjectiveComplete
 MatchUI                 -- driven by RoundStateChanged
 CrosshairUI             -- driven by RoundStateChanged; exposes ShowHitmarker()
 ViewModelController     -- driven by RoundStateChanged; exposes PlayFireAnimation(),
-                        --   GetBarrelTipCFrame(), SetRecoilOffset(); reads MovementController
+                        --   GetBarrelTipCFrame(), SetRecoilOffset(); reads MovementController.
+                        --   Camera mode and viewmodel visibility are controlled by
+                        --   Constants.FORCE_FIRST_PERSON (src/shared/Constants.lua):
+                        --     true  = LockFirstPerson camera, AR15 viewmodel shown during ACTIVE.
+                        --     false = Classic camera for testing, viewmodel permanently hidden.
+                        --   Reads workspace.CurrentCamera.CFrame for PivotTo each RenderStepped.
+                        --   Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
 DeathScreen             -- driven by RagdollApplied (death trigger), RoundStateChanged (PREP cleanup)
 KillFeedUI              -- driven by KillFeed; top-right scrolling kill entries, max 5, fade after display time
 ```
@@ -138,6 +144,11 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --   client-side prediction and cosmetics only (rate-limit mirror,
              --   WeaponFeel lookup, muzzle flash duration). When multiple weapons
              --   exist, replace with server-owned loadout state — see DEBT-013.
+             --   Constants.FORCE_FIRST_PERSON (bool, default false) — controls
+             --   ViewModelController's camera mode and viewmodel visibility.
+             --     false = Classic camera + viewmodel hidden (development/testing).
+             --     true  = LockFirstPerson + viewmodel shown during ACTIVE only.
+             --   Set true before shipping the FPS experience. See DEBT-048.
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag

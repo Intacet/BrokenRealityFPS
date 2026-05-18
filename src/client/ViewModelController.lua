@@ -8,8 +8,17 @@
 -- PivotTo(cam.CFrame * REAL_MODEL_OFFSET) is called every RenderStepped; Motor6Ds maintain
 -- arm/gun positions relative to HumanoidRootPart automatically.
 -- Falls back to a programmatic placeholder if the AR15 asset is missing from ReplicatedStorage.
--- Locks the local player to first-person and re-applies the lock on every respawn.
--- Shows only during ACTIVE; hidden during LOBBY, PREP, RESULTS, and MATCHEND.
+--
+-- Camera mode and viewmodel visibility are controlled by Constants.FORCE_FIRST_PERSON:
+--   true  = locks the local player to first-person (LockFirstPerson) and shows the viewmodel
+--           during ACTIVE only. Re-applies the lock on every respawn.
+--   false = allows normal Roblox camera (Classic) for development/testing.
+--           The viewmodel remains permanently hidden (Transparency = 1) regardless of phase.
+--           Useful for movement, map, and zone testing without a floating gun in view.
+--           PivotTo still runs every frame so unanchored parts do not fall and get destroyed.
+--
+-- Reads workspace.CurrentCamera.CFrame for PivotTo positioning each RenderStepped.
+-- Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
 -- Exposes PlayFireAnimation() for GunController to call on each shot.
 -- Exposes GetBarrelTipCFrame() so GunController can position the muzzle flash.
 --
@@ -70,6 +79,11 @@ local MUZZLE_FALLBACK_DIST : number = 1.5
 local visible      : boolean = false
 local recoilOffset : number  = 0
 
+-- Tracks the most recently received phase from RoundStateChanged.
+-- Used by shouldShowViewModel() so CharacterAdded can evaluate visibility without
+-- waiting for the next tick to arrive.
+local currentPhase : string = Constants.Phase.LOBBY
+
 -- Recoil CFrame pushed by GunController each frame via SetRecoilOffset().
 -- Represents a rotation offset applied to the viewmodel in camera space.
 -- Starts as identity; GunController snaps it on shot and lerps it back to identity.
@@ -92,6 +106,34 @@ local HELPER_PARTS: { [string]: boolean } = {
     Main             = true,
     Root             = true,  -- placeholder fallback root part name
 }
+
+-- ============================================================
+-- Private helpers
+-- ============================================================
+
+-- Sets the local player's CameraMode based on Constants.FORCE_FIRST_PERSON.
+-- Called in Start() and after every CharacterAdded so respawns do not revert to
+-- the Roblox default (Classic / third-person) when FORCE_FIRST_PERSON is true.
+local function applyCameraMode()
+    local localPlayer = Players.LocalPlayer
+    if Constants.FORCE_FIRST_PERSON then
+        localPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+    else
+        localPlayer.CameraMode = Enum.CameraMode.Classic
+    end
+end
+
+-- Returns true only when all three conditions hold:
+--   1. Constants.FORCE_FIRST_PERSON is true (testing mode disables viewmodel when false)
+--   2. currentPhase == Constants.Phase.ACTIVE
+--   3. ViewModelController.model exists (init() completed successfully)
+-- When Constants.FORCE_FIRST_PERSON is false, the viewmodel stays permanently hidden
+-- regardless of phase, allowing normal-camera movement/map/zone testing.
+local function shouldShowViewModel(): boolean
+    return Constants.FORCE_FIRST_PERSON
+        and currentPhase == Constants.Phase.ACTIVE
+        and ViewModelController.model ~= nil
+end
 
 -- Attempts to clone ReplicatedStorage/ViewModels/AR15 and parent it to the camera.
 -- Uses WaitForChild so the LocalScript never clones an empty shell on first load
@@ -229,22 +271,17 @@ function ViewModelController:Start()
     end
 
     local localPlayer = Players.LocalPlayer
-    localPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
 
-    -- Re-build the viewmodel and re-apply the camera lock after each respawn.
-    -- TeamService calls player:LoadCharacter() at the start of every PREP which
-    -- would otherwise revert CameraMode to the default (Classic / third-person).
-    localPlayer.CharacterAdded:Connect(function(_character: Model)
-        self:init()
-        localPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
-        Logger.debug("[ViewModelController] Model rebuilt on character respawn")
-    end)
+    -- Apply camera mode immediately based on Constants.FORCE_FIRST_PERSON.
+    -- Does NOT unconditionally set LockFirstPerson — Classic is used during testing.
+    applyCameraMode()
 
     -- Sets Transparency on visual BasePart descendants of the model.
     -- Hiding (show=false): ALL BaseParts → Transparency 1.
     -- Showing (show=true): visual BaseParts → Transparency 0.
     --   Helper parts (HRP, FakeCamera, Torso, Handcontrol, Main, Root) are NEVER
     --   made visible — they are physics/rig anchors, not rendered geometry.
+    -- Defined before CharacterAdded so the respawn handler can call it directly.
     -- Reads self.model per-call so re-builds after CharacterAdded are always used.
     local function setVisibility(show: boolean)
         Logger.debug(string.format("[ViewModelController] setVisibility(%s)", tostring(show)))
@@ -268,23 +305,40 @@ function ViewModelController:Start()
         Logger.debug(string.format("[ViewModelController] setVisibility(%s) — %d parts", tostring(show), count))
     end
 
-    -- Phase listener: show only during ACTIVE; hide during all other phases.
-    -- Guard removed intentionally: after CharacterAdded re-runs init(), visible is
-    -- reset to false, so the next RoundStateChanged must always call setVisibility
-    -- even when the phase hasn't changed (e.g. ACTIVE fires again after respawn).
+    -- Re-build the viewmodel, re-apply camera mode, and re-evaluate visibility
+    -- after each respawn. TeamService calls player:LoadCharacter() at PREP which
+    -- reverts CameraMode to the default — applyCameraMode() restores it correctly
+    -- based on the current FORCE_FIRST_PERSON flag.
+    localPlayer.CharacterAdded:Connect(function(_character: Model)
+        self:init()
+        applyCameraMode()
+        local show = shouldShowViewModel()
+        visible = show
+        setVisibility(show)
+        Logger.debug("[ViewModelController] Model rebuilt on character respawn")
+    end)
+
+    -- Phase listener: update currentPhase and show only when shouldShowViewModel() is true.
+    -- shouldShowViewModel() gates on both currentPhase == ACTIVE and FORCE_FIRST_PERSON == true.
+    -- When FORCE_FIRST_PERSON is false, show is always false — viewmodel stays hidden.
+    -- Guard on visible intentionally removed: after CharacterAdded re-runs init(), visible is
+    -- reset to false, so the next RoundStateChanged must always call setVisibility even when
+    -- the phase hasn't changed (e.g. ACTIVE fires again after respawn in ACTIVE).
     RoundStateChanged.OnClientEvent:Connect(function(raw: any)
         local payload = raw :: { phase: string }
-        local show    = (payload.phase == Constants.Phase.ACTIVE)
+        currentPhase  = payload.phase
+        local show    = shouldShowViewModel()
         visible = show
         setVisibility(show)
     end)
 
     -- RenderStepped: reposition the model pivot every frame to follow the camera.
-    -- PivotTo is called unconditionally — never skipped based on visibility.
-    -- The model must track the camera at all times (even during PREP/RESULTS) because
-    -- all parts are Anchored=false. Without PivotTo, gravity pulls the assembly
-    -- below FallenPartsDestroyHeight and Roblox destroys the parts. Visibility is
-    -- controlled by Transparency=1 (set in setVisibility), not by skipping PivotTo.
+    -- PivotTo is called unconditionally — never skipped based on visibility or FORCE_FIRST_PERSON.
+    -- The model must track the camera at all times (even during PREP/RESULTS, or when
+    -- FORCE_FIRST_PERSON is false) because all parts are Anchored=false. Without PivotTo,
+    -- gravity pulls the assembly below FallenPartsDestroyHeight and Roblox destroys the parts.
+    -- Visibility is controlled by Transparency=1 (set in setVisibility), not by skipping PivotTo.
+    -- Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
     -- Reads self.model per-call so re-builds after CharacterAdded are always used.
     RunService.RenderStepped:Connect(function(dt: number)
         local m = self.model

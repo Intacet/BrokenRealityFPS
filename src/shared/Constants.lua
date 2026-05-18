@@ -115,4 +115,13 @@ Constants.DEFAULT_WEAPON = "AR15"
 Constants.SHOT_ORIGIN_MAX_DISTANCE    = 12    -- max studs between client origin and shooter HumanoidRootPart; farther origins are rejected
 Constants.SHOT_DIRECTION_MIN_MAGNITUDE = 0.001 -- minimum direction vector magnitude; near-zero directions are rejected before normalization
 
+-- ============================================================
+-- Client presentation flags (development / testing)
+-- ============================================================
+-- false = allow normal Roblox camera for development/testing and hide first-person viewmodel.
+-- true  = lock first person and show first-person viewmodel during gameplay.
+-- Set to true before shipping or playtesting the FPS experience.
+-- See ViewModelController.lua and DEBT-048 for full context.
+Constants.FORCE_FIRST_PERSON = false
+
 return Constants

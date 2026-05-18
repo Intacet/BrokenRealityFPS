@@ -7,6 +7,51 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-18] — Add Constants.FORCE_FIRST_PERSON testing flag; ViewModelController supports normal-camera testing mode
+
+### Summary
+Adds `Constants.FORCE_FIRST_PERSON = false` (default) and updates `ViewModelController` so that both the first-person camera lock and the AR15 viewmodel visibility are conditional on this flag. When `false` (the default), the player keeps the normal Roblox Classic camera and the viewmodel stays permanently hidden — useful for movement, map, and zone testing without a floating gun in view. When `true`, behaviour matches the original FPS experience: LockFirstPerson camera and the viewmodel shown during ACTIVE only. No new remotes. No changes to GunController, MovementController, or any server file.
+
+### Changed files
+
+- **`src/shared/Constants.lua`** — added one constant at the end of the file:
+  - `Constants.FORCE_FIRST_PERSON = false` — development/testing flag; set `true` before FPS playtesting or shipping.
+
+- **`src/client/ViewModelController.lua`** — behaviour changes only in `Start()` and the `CharacterAdded` handler:
+  - Added module-level state: `local currentPhase : string = Constants.Phase.LOBBY` — tracks the last received phase so `CharacterAdded` can evaluate visibility immediately without waiting for the next `RoundStateChanged` tick.
+  - Added `local function applyCameraMode()` — sets `Players.LocalPlayer.CameraMode` to `LockFirstPerson` when `FORCE_FIRST_PERSON` is `true`, or `Classic` when `false`. Replaces the unconditional `LockFirstPerson` assignment.
+  - Added `local function shouldShowViewModel(): boolean` — returns `true` only when `FORCE_FIRST_PERSON == true` AND `currentPhase == ACTIVE` AND `self.model ~= nil`. All three conditions must hold.
+  - `Start()`: calls `applyCameraMode()` instead of unconditionally setting `LockFirstPerson`. Moved `setVisibility` definition before `CharacterAdded` connection (forward-reference fix).
+  - `CharacterAdded`: calls `self:init()`, then `applyCameraMode()`, then `setVisibility(shouldShowViewModel())`. Previously only called `init()` and set `LockFirstPerson`.
+  - `RoundStateChanged` listener: now updates `currentPhase` from `payload.phase` before calling `setVisibility(shouldShowViewModel())`. Previously derived `show` directly from `payload.phase == ACTIVE`.
+  - `RenderStepped` / `PivotTo`: unchanged — still runs unconditionally when `FORCE_FIRST_PERSON` is `false` so unanchored model parts do not fall and get destroyed by Roblox's `FallenPartsDestroyHeight` mechanism.
+  - `PlayFireAnimation()`, `GetBarrelTipCFrame()`, `SetRecoilOffset()`: unchanged — all public APIs preserved. No errors when viewmodel is hidden (model exists; Transparency=1 has no effect on CFrame operations).
+  - Module header comment updated to document the FORCE_FIRST_PERSON camera rule and the read-only camera constraint.
+
+- **`docs/PROJECT_MAP.md`** — updated two sections:
+  - `ViewModelController` entry in Presentation section: documents `FORCE_FIRST_PERSON` modes, camera-read-only rule.
+  - `Constants` entry in Shared modules section: documents `FORCE_FIRST_PERSON` with both values described.
+
+- **`docs/TECHNICAL_DEBT.md`** — added DEBT-048.
+
+### What was NOT changed
+GunController, MovementController, ClientInit, SoundController, all UI controllers, all server files, WeaponData, default.project.json, CLAUDE.md, PROJECT_RULES.md, NAMING.md. No remotes added or changed. No camera.CFrame writes. No CameraOffset writes. No FieldOfView changes. No new animations, bob, sway, ADS, or recoil logic.
+
+### Debt entries added
+- DEBT-048: FORCE_FIRST_PERSON=false is a development shortcut; must be flipped to `true` before FPS playtesting or shipping. Long-term: replace with a GameModeConfig or SettingsService read.
+
+### Debt evaluation
+- DEBT-029 (setVisibility called every tick): **unaffected** — setVisibility is still called every `RoundStateChanged` tick with `shouldShowViewModel()` result; when `FORCE_FIRST_PERSON=false` this is always `false`, iterating 49 parts unnecessarily each tick. No change to severity.
+- DEBT-045 (recoil viewmodel-only): **unaffected**.
+- DEBT-040 (ADS visual not implemented): **unaffected**.
+- DEBT-007 (RoundStateChanged fan-out, 8 listeners): **unaffected** — ViewModelController still has exactly one listener.
+- DEBT-017 (ClientInit manual update): **unaffected** — no new controller added.
+
+### Studio verification required
+Yes — see Studio test steps in the task prompt.
+
+---
+
 ## [2026-05-18] — Movement Stage 1: walk/sprint/crouch speed, 8-direction detection, phase gating, respawn handling, connection cleanup
 
 ### Summary
