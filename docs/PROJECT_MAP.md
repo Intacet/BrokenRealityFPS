@@ -109,14 +109,41 @@ HordeService (server)   [LEGACY PLAN — replaces with zone ambient spawn budget
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- Stage 1 + 2A (Animate-disable, R6 detection, animation-set selection):
+MovementController      -- Stage 1 + 2A + 2C (Animate-disable, R6 detection, animation-set selection,
+                        --   strafe gating, animation speed multipliers, shift-lock sprint fix):
                         --   owns local movement input (LeftShift=sprint, C=crouch toggle),
                         --   movementState table, Humanoid.WalkSpeed, R6 animation playback,
-                        --   character.Animate suppression (R6 characters only), and
-                        --   presentation-only equippedWeaponName for animation set selection.
+                        --   character.Animate suppression (R6 characters only),
+                        --   presentation-only equippedWeaponName for animation set selection, and
+                        --   mouse-lock detection for strafe animation gating.
                         --   Reads workspace.CurrentCamera.CFrame for 8-directional camera-relative
-                        --   direction detection; does NOT write camera.CFrame, CameraOffset, or FOV.
+                        --   direction detection. Reads UserInputService.MouseBehavior to detect
+                        --   mouse-lock / shift-lock state for strafe animation gating.
+                        --   Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
                         --   No new remotes. No slide, vault, or camera effects.
+                        --
+                        --   Strafe animation gating (Stage 2C — 2026-05-18):
+                        --     WalkLeft/WalkRight only play when UserInputService.MouseBehavior ==
+                        --     LockCenter (mouse-lock / Roblox shift-lock style state is active).
+                        --     Without mouse lock, left/right/diagonal movement falls back to WalkForward.
+                        --     Sprint uses RunForward in all directions regardless of mouse lock.
+                        --     Gated by Constants.MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK (default true).
+                        --     Set false to play strafe anims regardless of mouse-lock state.
+                        --
+                        --   LeftShift sprint + shift-lock fix (Stage 2C — 2026-05-18):
+                        --     Sprint InputBegan no longer uses the gameProcessed (gp) guard for LeftShift.
+                        --     Roblox's built-in shift-lock marks Shift as gameProcessed = true, which
+                        --     previously silently blocked sprint while shift lock was active.
+                        --     Fix: sprint only blocks if UserInputService:GetFocusedTextBox() ~= nil
+                        --     (player is typing). All other gameProcessed reasons (including shift lock)
+                        --     are allowed through for LeftShift only. Crouch (C key) still uses gp guard.
+                        --
+                        --   Animation playback speed multipliers (Stage 2C — 2026-05-18):
+                        --     AnimationTrack:AdjustSpeed() is called on play. Speeds do NOT change
+                        --     Humanoid.WalkSpeed. Values from Constants.lua:
+                        --       MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 2.0  (WalkForward)
+                        --       MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.35 (WalkLeft, WalkRight)
+                        --       MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.0  (RunForward — unchanged)
                         --
                         --   Animation set selection (added 2026-05-18):
                         --     Default animation set is Unarmed (no gun) when equippedWeaponName == nil.
@@ -124,7 +151,6 @@ MovementController      -- Stage 1 + 2A (Animate-disable, R6 detection, animatio
                         --     equippedWeaponName is PRESENTATION ONLY — it does not affect server weapon
                         --     state, ammo, damage, hit validation, reload, or inventory.
                         --     True server-owned equipment state is deferred — see DEBT-050.
-                        --     Must eventually be set by a real EquipmentController or weapon equip system.
                         --     SetEquippedWeaponName(nil or "") → Unarmed set.
                         --     SetEquippedWeaponName("AR15") → AR15 set.
                         --     Any other name → Unarmed fallback + one-time warn.
@@ -151,31 +177,25 @@ MovementController      -- Stage 1 + 2A (Animate-disable, R6 detection, animatio
                         --     Gated by two constants (both default true):
                         --       Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED — master switch
                         --       Constants.DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT — animate gate
-                        --     If DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = false, Animate is left
-                        --     running and custom tracks may conflict with avatar pack locomotion.
                         --
-                        --   Stage 2A animation support (R6 only):
+                        --   Stage 2A + 2C animation support (R6 only):
                         --     Loads AnimationTrack objects per character via Humanoid.Animator.
                         --     Both Unarmed and AR15 tracks pre-loaded at spawn for instant set switching.
                         --     Plays during ACTIVE phase only; stops on phase exit and when not moving.
-                        --     WalkLeft/WalkRight played if tracks exist; falls back to WalkForward.
-                        --     Debug: set-change logged once per change behind MOVEMENT_ANIMATION_DEBUG.
+                        --     WalkLeft/WalkRight played only when mouse lock active (see strafe gating above).
+                        --     Debug: set-change and strafe-blocked-change logged once per change.
                         --     Animation IDs (Constants.MOVEMENT_ANIMATION_IDS.R6):
                         --       Unarmed.WalkForward = rbxassetid://83927286289016
                         --       Unarmed.RunForward  = rbxassetid://98612697944606
-                        --       Unarmed.WalkLeft    = rbxassetid://101275785187464  ← no-gun strafe left
-                        --       Unarmed.WalkRight   = rbxassetid://72765640529019   ← no-gun strafe right
+                        --       Unarmed.WalkLeft    = rbxassetid://101275785187464
+                        --       Unarmed.WalkRight   = rbxassetid://72765640529019
                         --       AR15.WalkForward    = rbxassetid://110651810525086
                         --       AR15.RunForward     = rbxassetid://124640088553427
-                        --     Not in Stage 2A: crouch anim, backward-specific, diagonal-specific,
+                        --     Not in Stage 2A/2C: crouch anim, backward-specific, diagonal-specific,
                         --       lower/upper-body split, reload/fire/ADS weapon animations.
-                        --     If character fails R6 detection, getRigDebugSummary is logged and
-                        --       animation loading is skipped; Stage 1 speed logic remains active.
-                        --     If animation IDs are private/not owned by the game, Roblox may refuse to
-                        --     load them — check Output for permission errors.
                         --
                         --   Exposes: GetMovementState() → table; GetMoveState() → string (GunController
-                        --   compat); IsADSBlocked() → bool; GetViewmodelAddCFrame() → identity (Stage 1/2A);
+                        --   compat); IsADSBlocked() → bool; GetViewmodelAddCFrame() → identity;
                         --   SetEquippedWeaponName(name: string?) → switches animation set (presentation only);
                         --   GetEquippedWeaponName() → string? (nil = Unarmed set active);
                         --   Start(); destroy()
@@ -221,8 +241,14 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --     DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT — when true, MovementController
              --       sets character.Animate.Disabled = true before loading custom tracks;
              --       false leaves Animate running (may cause override/blend conflicts).
-             --     MOVEMENT_ANIMATION_DEBUG — when true, logs animation load, switch, and
-             --       set-change events to Output for diagnostics; set false in production.
+             --     MOVEMENT_ANIMATION_DEBUG — when true, logs animation load, switch,
+             --       set-change, and strafe-blocked-change events; set false in production.
+             --     MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK = true — strafe anims only when
+             --       UserInputService.MouseBehavior == LockCenter (shift-lock active).
+             --   Movement animation playback speed multipliers (Stage 2C):
+             --     MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 2.0  (WalkForward)
+             --     MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.35 (WalkLeft, WalkRight)
+             --     MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.0  (RunForward — unchanged)
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag

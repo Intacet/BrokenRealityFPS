@@ -94,6 +94,19 @@ Constants.MOVEMENT_ANIMATION_IDS = {
 
 Constants.MOVEMENT_ANIMATION_FADE_TIME = 0.15  -- seconds to cross-fade between movement animations
 
+-- Animation playback speed multipliers (Stage 2C).
+-- Applied via AnimationTrack:AdjustSpeed() when a track starts playing.
+-- Tune these to match clip cadence without changing Humanoid.WalkSpeed.
+Constants.MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 2.0   -- WalkForward plays at 2× clip speed
+Constants.MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.35  -- WalkLeft/WalkRight play at 1.35× clip speed
+Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.0   -- RunForward plays at original clip speed
+
+-- When true, WalkLeft/WalkRight strafe animations only play while mouse lock / shift-lock
+-- style state is active (UserInputService.MouseBehavior == LockCenter).
+-- Left/right/diagonal movement falls back to WalkForward when mouse lock is off.
+-- Set false to play strafe animations regardless of mouse-lock state.
+Constants.MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK = true
+
 -- Master switch: when false, MovementController does not disable Animate and does not
 -- play any custom movement tracks — the default avatar animation pack runs as normal.
 -- Set true (default) to use the custom R6 animation system with Unarmed/AR15 sets.

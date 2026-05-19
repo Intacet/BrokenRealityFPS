@@ -7,6 +7,91 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-18] — Movement Stage 2C: strafe animation mouse-lock gating, LeftShift sprint fix, animation speed multipliers
+
+### Summary
+Three behaviour fixes applied to `MovementController` (Stage 2C):
+
+1. **Strafe animation gating** — WalkLeft/WalkRight now only play when mouse-lock / shift-lock style
+   state is active (`UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter`). Without mouse
+   lock the character faces the camera direction, so dedicated strafe clips look wrong; all walking
+   falls back to WalkForward in that state. Gated by `Constants.MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK`
+   (default `true`); set `false` to always play strafe anims regardless.
+2. **LeftShift sprint fix while shift lock is enabled** — Roblox's built-in shift lock marks LeftShift
+   as `gameProcessed = true`, which the previous `if gp then return end` guard silently honoured,
+   blocking sprint whenever shift lock was active. The guard is replaced with
+   `UserInputService:GetFocusedTextBox() ~= nil` — sprint is now blocked only when the player is
+   typing in a TextBox. The crouch handler (C key) keeps the original guard.
+3. **Animation playback speed multipliers** — `AnimationTrack:AdjustSpeed()` is now called whenever
+   a track starts (and on same-track re-checks) to set clip cadence independently of `Humanoid.WalkSpeed`:
+   WalkForward 2.0×, WalkLeft/WalkRight 1.35×, RunForward 1.0× (unchanged).
+
+### Changed files
+
+- **`src/shared/Constants.lua`**:
+  - `MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 2.0`  — WalkForward plays at 2× clip speed.
+  - `MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.35` — WalkLeft/WalkRight play at 1.35×.
+  - `MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.0`  — RunForward plays at original clip speed.
+  - `MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK   = true` — master switch gating strafe anims on mouse lock.
+
+- **`src/client/MovementController.lua`**:
+  - New private state `lastStrafeBlockedState: boolean = false` — prevents per-frame log spam for
+    strafe-blocked/enabled state changes; logs only on transition.
+  - New helper `isMouseLockedForStrafeAnimations()` — returns
+    `UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter`. Read-only; does not write
+    camera or toggle shift lock.
+  - New helper `getAnimationSpeedMultiplier(animationName)` — maps short anim name to the matching
+    `Constants.MOVEMENT_*_ANIMATION_SPEED_MULTIPLIER` value; defaults to 1.0 for unknown names.
+  - `playMovementAnimation()` rewritten:
+    - Extracts short name from full key (`"Unarmed_WalkForward"` → `"WalkForward"`) via
+      `animationName:match("_(.+)$")` for multiplier lookup.
+    - Calls `track:AdjustSpeed(speedMult)` immediately after `track:Play()`.
+    - On same-track re-check, calls `track:AdjustSpeed(speedMult)` only (no restart).
+    - Debug log now includes the speed multiplier suffix (e.g. `"×2"`, `"×1.35"`).
+  - `updateMovementAnimation()` updated:
+    - Evaluates `canUseStrafeAnimations` each tick based on `MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK`
+      and `isMouseLockedForStrafeAnimations()`.
+    - When `canUseStrafeAnimations` is false, all walking falls back to `setName .. "_WalkForward"`.
+    - Strafe-blocked/enabled state change logged once per transition behind `MOVEMENT_ANIMATION_DEBUG`.
+  - `sprintBeginConn` in `Start()` updated:
+    - Removed `if gp then return end` guard for LeftShift (was silently blocking sprint while shift
+      lock was active).
+    - Added `if UserInputService:GetFocusedTextBox() ~= nil then return end` (blocks sprint only
+      when typing). Comment documents why the standard guard is intentionally absent.
+  - `loadMovementAnimations()` updated: resets `lastStrafeBlockedState = false` so the first
+    movement after respawn re-logs the strafe state.
+  - `destroy()` updated: resets `lastStrafeBlockedState = false`.
+  - Module header, Owns/Camera-rule/Stage-scope sections updated to document Stage 2C.
+
+- **`docs/PROJECT_MAP.md`** — `MovementController` and Constants entries fully updated with Stage 2C:
+  - Strafe gating logic, `canUseStrafeAnimations`, `lastStrafeBlockedState` guard.
+  - `isMouseLockedForStrafeAnimations()` and `getAnimationSpeedMultiplier()` helpers.
+  - LeftShift sprint fix and `GetFocusedTextBox` guard.
+  - Speed multiplier constants and `AdjustSpeed` call.
+  - Note that `UserInputService.MouseBehavior` is read but not written.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated (x5) with Stage 2C notes (see Debt entries section).
+
+### What was NOT changed
+`GunController`, `ViewModelController`, `ClientInit`, `SoundController`, all UI controllers, all server
+files, `WeaponData`, `default.project.json`, `CLAUDE.md`, `PROJECT_RULES.md`, `NAMING.md`.
+No remotes added. No camera writes. No new weapon or inventory state. No server-side changes.
+
+### Debt entries updated
+- DEBT-044: updated (x5) with Stage 2C strafe gating, sprint fix, speed multipliers, updated remaining
+  gaps (true shift-lock system not built) and risks (speed multipliers need Studio tuning, Shift + sprint
+  UX may feel awkward with built-in shift lock).
+
+### Studio verification required
+Yes. With `MOVEMENT_ANIMATION_DEBUG = true`:
+- Without mouse lock active: walk in any direction → Output: `"strafe animations blocked: mouse lock not active"` on first movement. WalkForward plays regardless of direction.
+- Enable Roblox built-in shift lock, then hold LeftShift and move → sprint starts normally (RunForward); no longer silently blocked.
+- Hold LeftShift and click a TextBox → sprint blocked correctly.
+- With mouse lock active: strafe left/right → WalkLeft/WalkRight plays. Output: `"strafe animations enabled: mouse lock active"` on first movement.
+- Walk forward → Output log includes `"×2"` multiplier suffix. Strafe → `"×1.35"`. Sprint → `"×1"`.
+
+---
+
 ## [2026-05-18] — Movement animation-set fix: default to Unarmed; add no-gun strafe IDs; SetEquippedWeaponName API
 
 ### Summary

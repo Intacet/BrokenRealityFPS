@@ -2,7 +2,8 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A (Animate-disable bug fix, R6 detection, animation-set selection) —
+-- Movement Stage 1 + 2A + 2C (Animate-disable, R6 detection, animation-set selection,
+-- strafe gating, animation speed multipliers, shift-lock sprint fix) —
 -- walk, sprint, crouch speed; 8-direction camera-relative movement state; phase gating;
 -- respawn handling; connection cleanup; R6 animation playback with Unarmed default set.
 --
@@ -23,6 +24,14 @@
 -- MovementController.SetEquippedWeaponName("AR15") to switch to AR15 movement animations.
 -- This is presentation-only and does not affect server state, ammo, or combat.
 --
+-- Stage 2C (2026-05-18): Strafe animations (WalkLeft/WalkRight) now only play when
+-- UserInputService.MouseBehavior == LockCenter (shift-lock / mouse-lock active). Without
+-- mouse lock, left/right/diagonal movement falls back to WalkForward. LeftShift sprint
+-- now works while shift lock is enabled: the gameProcessed guard was replaced with a
+-- UserInputService:GetFocusedTextBox() check so Roblox's shift-lock Shift interception
+-- no longer blocks sprint. Animation playback speeds are tuned via AdjustSpeed:
+-- WalkForward at 2.0×, WalkLeft/WalkRight at 1.35×, RunForward unchanged at 1.0×.
+--
 -- NOTE: disabling Animate removes idle, jump, fall, and climb animations in addition
 -- to locomotion. Custom replacements for those states are needed in a future stage.
 --
@@ -39,24 +48,34 @@
 --   • Disabling character.Animate (R6 characters only) to prevent avatar animation pack override
 --   • Robust R6 rig detection: RigType primary, structural body-part fallback, debug summary on skip
 --   • presentation-only equippedWeaponName driving animation set selection (Unarmed default)
+--   • mouse-lock detection for strafe animation gating (reads UserInputService.MouseBehavior)
+--   • animation playback speed multipliers applied via AnimationTrack:AdjustSpeed
 --
 -- Animation control constants (all in Constants.lua):
 --   CUSTOM_MOVEMENT_ANIMATIONS_ENABLED = true       — master switch for custom anim system
 --   DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = true — disables character.Animate
 --   MOVEMENT_ANIMATION_DEBUG = true                 — logs load/switch events to Output
+--   MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK = true — strafe anims require LockCenter
+--   MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER = 2.0  — WalkForward AdjustSpeed multiplier
+--   MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.35 — WalkLeft/WalkRight AdjustSpeed multiplier
+--   MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER = 1.0   — RunForward AdjustSpeed multiplier
 --
--- Camera rule (Stage 1 + 2A):
+-- Camera rule (Stage 1 + 2A + 2C):
 --   Reads workspace.CurrentCamera.CFrame for direction detection only.
+--   Reads UserInputService.MouseBehavior to detect mouse-lock state for strafe gating.
 --   Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
 --   Does NOT add camera bob, sway, landing dip, tilt, or viewmodel effects.
 --
--- Stage 2A animation scope:
+-- Stage 2A + 2C animation scope:
 --   Defaults to Unarmed animation set when equippedWeaponName == nil (no weapon equipped).
 --   Call SetEquippedWeaponName("AR15") to switch to AR15 movement animations.
 --   True server-owned equipment state is deferred — see DEBT-050.
---   WalkLeft/WalkRight played if tracks exist for the active set; falls back to WalkForward.
---   No crouch, backward, diagonal, reload, fire, or ADS animations in Stage 2A.
---   No lower-body/upper-body animation split in Stage 2A.
+--   WalkLeft/WalkRight played only when mouse lock is active (MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK).
+--   Without mouse lock, left/right/diagonal movement falls back to WalkForward.
+--   WalkForward: 2.0× speed. WalkLeft/WalkRight: 1.35× speed. RunForward: 1.0× speed.
+--   Sprint works with LeftShift even while shift lock is active (TextBox check instead of gp).
+--   No crouch, backward, diagonal, reload, fire, or ADS animations in Stage 2A/2C.
+--   No lower-body/upper-body animation split in Stage 2A/2C.
 --   Non-R6 characters: animation loading skipped; getRigDebugSummary logged; Stage 1 speed logic remains active.
 --
 -- Not in Stage 1/2A: slide, vault, stamina, prone, footsteps, crouch body lowering,
@@ -147,6 +166,11 @@ local equippedWeaponName: string? = nil
 -- Guards against per-frame spam: only logs when the set name changes.
 -- Reset to "" on each character load so the first movement after respawn re-logs.
 local lastAnimationSet: string = ""
+
+-- Last known "strafe animations blocked" state for strafe-blocked debug log deduplication.
+-- true = strafe was blocked on the last frame that logged. Logs only on state change.
+-- Reset to false on each character load and in destroy().
+local lastStrafeBlockedState: boolean = false
 
 -- ============================================================
 -- Private helpers — Stage 1
@@ -373,6 +397,31 @@ local function getAnimationSetName(): string
     return Constants.MOVEMENT_ANIMATION_SET_UNARMED
 end
 
+-- Returns true when the game is in mouse-lock / shift-lock style state.
+-- Uses UserInputService.MouseBehavior == LockCenter as the practical signal: this is
+-- the state Roblox sets when shift lock is active or when any system calls
+-- UserInputService.MouseBehaviorOverride = LockCenter.
+-- Does NOT toggle shift lock. Does NOT write camera.CFrame. Read-only check.
+local function isMouseLockedForStrafeAnimations(): boolean
+    return UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
+end
+
+-- Returns the playback speed multiplier for the given short animation name.
+-- animationName must be the short name portion (e.g. "WalkForward", not "Unarmed_WalkForward").
+-- Used by playMovementAnimation() to call AnimationTrack:AdjustSpeed() on play.
+-- Does not affect Humanoid.WalkSpeed or any movement speed constant.
+local function getAnimationSpeedMultiplier(animationName: string): number
+    assert(animationName ~= nil, "[MovementController] getAnimationSpeedMultiplier: animationName is required")
+    if animationName == "WalkForward" then
+        return Constants.MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER
+    elseif animationName == "WalkLeft" or animationName == "WalkRight" then
+        return Constants.MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER
+    elseif animationName == "RunForward" then
+        return Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER
+    end
+    return 1.0
+end
+
 -- Stops the currently playing movement animation with a fade-out.
 -- Safe to call when nothing is playing (currentAnimationName == "").
 local function stopCurrentMovementAnimation()
@@ -384,18 +433,31 @@ local function stopCurrentMovementAnimation()
     currentAnimationName = ""
 end
 
--- Plays the named animation track (key format: "SetName_AnimName", e.g. "AR15_WalkForward").
--- Fades in over MOVEMENT_ANIMATION_FADE_TIME. No-ops if already playing that track.
--- Logs the switch if MOVEMENT_ANIMATION_DEBUG is true.
+-- Plays the named animation track (key format: "SetName_AnimName", e.g. "Unarmed_WalkForward").
+-- Fades in over MOVEMENT_ANIMATION_FADE_TIME. Applies a playback speed multiplier via
+-- AdjustSpeed using getAnimationSpeedMultiplier on the short animation name.
+-- If the same track is already playing, AdjustSpeed is still called (no restart).
+-- Logs the switch (with speed multiplier) if MOVEMENT_ANIMATION_DEBUG is true.
 -- Warns and clears currentAnimationName if the requested key is absent.
 local function playMovementAnimation(animationName: string)
-    if currentAnimationName == animationName then return end  -- already playing; no restart needed
+    -- Extract the short name from the full key ("Unarmed_WalkForward" → "WalkForward").
+    local animShortName = animationName:match("_(.+)$") or animationName
+    local speedMult = getAnimationSpeedMultiplier(animShortName)
+
+    if currentAnimationName == animationName then
+        -- Same track already playing. Ensure speed is correct without restarting.
+        local track = animationTracks[animationName]
+        if track then
+            track:AdjustSpeed(speedMult)
+        end
+        return
+    end
 
     if Constants.MOVEMENT_ANIMATION_DEBUG then
         Logger.debug(
             "[MovementController] anim switch: ["
             .. (currentAnimationName == "" and "none" or currentAnimationName)
-            .. "] → [" .. animationName .. "]"
+            .. "] → [" .. animationName .. "] ×" .. speedMult
         )
     end
 
@@ -415,6 +477,7 @@ local function playMovementAnimation(animationName: string)
     end
 
     track:Play(Constants.MOVEMENT_ANIMATION_FADE_TIME)
+    track:AdjustSpeed(speedMult)
     currentAnimationName = animationName
 end
 
@@ -435,7 +498,9 @@ local function loadMovementAnimations(character: Model)
     currentAnimationName = ""
     rigTypeWarned        = false
     -- Reset set-change log guard so the first movement after respawn re-logs the active set.
-    lastAnimationSet     = ""
+    lastAnimationSet       = ""
+    -- Reset strafe-blocked log guard so the first movement after respawn re-logs the state.
+    lastStrafeBlockedState = false
 
     -- Destroy and clear old Animation instances from the previous character.
     for _, inst in pairs(animationInstances) do
@@ -507,12 +572,13 @@ end
 -- Selects and triggers the correct movement animation for the current movementState.
 -- Called every Heartbeat tick during ACTIVE phase.
 -- Skipped if CUSTOM_MOVEMENT_ANIMATIONS_ENABLED is false.
--- currentAnimationName guard prevents restarting the same track every frame.
+-- currentAnimationName guard inside playMovementAnimation prevents track restarts.
 --
--- Stage 2A scope:
---   WalkLeft/WalkRight played if present in animationTracks; falls back to WalkForward.
---   Crouch animation not implemented; crouching uses WalkForward at CROUCH_SPEED.
---   Backward, diagonal directions also fall back to WalkForward in Stage 2A.
+-- Stage 2A + 2C scope:
+--   WalkLeft/WalkRight only play when canUseStrafeAnimations is true (mouse lock active).
+--   Without mouse lock, all walking directions fall back to WalkForward.
+--   Sprint uses RunForward in all directions.
+--   Crouch, backward-specific, and diagonal-specific animations not yet implemented.
 local function updateMovementAnimation()
     if not Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED then return end
     if next(animationTracks) == nil then return end
@@ -531,26 +597,55 @@ local function updateMovementAnimation()
         lastAnimationSet = setName
     end
 
+    -- Determine whether strafe animations are allowed for this frame.
+    -- When MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK is true, strafe only plays in
+    -- mouse-lock / shift-lock style state (UserInputService.MouseBehavior == LockCenter).
+    local canUseStrafeAnimations: boolean
+    if Constants.MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK then
+        canUseStrafeAnimations = isMouseLockedForStrafeAnimations()
+    else
+        canUseStrafeAnimations = true
+    end
+
+    -- Debug: log once when the strafe-blocked state changes (not every Heartbeat frame).
+    if Constants.MOVEMENT_ANIMATION_DEBUG then
+        local strafeBlocked = not canUseStrafeAnimations
+        if strafeBlocked ~= lastStrafeBlockedState then
+            lastStrafeBlockedState = strafeBlocked
+            if strafeBlocked then
+                Logger.debug("[MovementController] strafe animations blocked: mouse lock not active")
+            else
+                Logger.debug("[MovementController] strafe animations enabled: mouse lock active")
+            end
+        end
+    end
+
     local dirName = movementState.directionName
     local animName: string
 
     if movementState.isSprinting then
+        -- Sprint uses RunForward in all directions.
         animName = setName .. "_RunForward"
 
-    elseif dirName == "Left" or dirName == "ForwardLeft" or dirName == "BackwardLeft" then
-        -- Attempt left-strafe; fall back to WalkForward if not loaded in Stage 2A.
-        local leftKey   = setName .. "_WalkLeft"
-        local leftTrack = animationTracks[leftKey]
-        animName = if leftTrack ~= nil then leftKey else (setName .. "_WalkForward")
+    elseif canUseStrafeAnimations then
+        -- Mouse lock active: attempt left/right strafe animations with WalkForward fallback.
+        if dirName == "Left" or dirName == "ForwardLeft" or dirName == "BackwardLeft" then
+            local leftKey   = setName .. "_WalkLeft"
+            local leftTrack = animationTracks[leftKey]
+            animName = if leftTrack ~= nil then leftKey else (setName .. "_WalkForward")
 
-    elseif dirName == "Right" or dirName == "ForwardRight" or dirName == "BackwardRight" then
-        -- Attempt right-strafe; fall back to WalkForward if not loaded in Stage 2A.
-        local rightKey   = setName .. "_WalkRight"
-        local rightTrack = animationTracks[rightKey]
-        animName = if rightTrack ~= nil then rightKey else (setName .. "_WalkForward")
+        elseif dirName == "Right" or dirName == "ForwardRight" or dirName == "BackwardRight" then
+            local rightKey   = setName .. "_WalkRight"
+            local rightTrack = animationTracks[rightKey]
+            animName = if rightTrack ~= nil then rightKey else (setName .. "_WalkForward")
+
+        else
+            -- Forward, Backward, or near-idle magnitude → WalkForward.
+            animName = setName .. "_WalkForward"
+        end
 
     else
-        -- Forward, Backward, or Idle-magnitude directions → WalkForward.
+        -- Mouse lock not active: all walking directions use WalkForward.
         animName = setName .. "_WalkForward"
     end
 
@@ -684,6 +779,7 @@ function MovementController:destroy()
     rigTypeWarned          = false
     equippedWeaponName     = nil
     lastAnimationSet       = ""
+    lastStrafeBlockedState = false
 
     -- Explicitly destroy Animation instances.
     for _, inst in pairs(animationInstances) do
@@ -746,10 +842,16 @@ function MovementController:Start()
     table.insert(_connections, phaseConn)
 
     -- ── Input: Sprint (LeftShift) ─────────────────────────────────────────────
+    -- The standard gameProcessed (gp) guard is intentionally NOT used for LeftShift.
+    -- Roblox's built-in shift-lock feature marks LeftShift as gameProcessed = true even
+    -- when the player intends to sprint, which would silently block sprint while shift
+    -- lock is active. Instead, sprint is only blocked while the player is typing in a
+    -- TextBox — any other gameProcessed reason (including shift lock) is allowed through.
     local sprintBeginConn = UserInputService.InputBegan:Connect(
-        function(input: InputObject, gp: boolean)
-            if gp then return end
+        function(input: InputObject, _gp: boolean)
             if input.KeyCode ~= Enum.KeyCode.LeftShift then return end
+            -- Block sprint while the player is focused on a TextBox (typing).
+            if UserInputService:GetFocusedTextBox() ~= nil then return end
             if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
             if movementState.isCrouching then return end
             movementState.isSprinting = true
@@ -804,7 +906,7 @@ function MovementController:Start()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1 + Stage 2A with R6 detection)")
+    Logger.debug("[MovementController] Ready (Stage 1 + 2A + 2C: strafe gating, speed multipliers, shift-lock sprint)")
 end
 
 return MovementController
