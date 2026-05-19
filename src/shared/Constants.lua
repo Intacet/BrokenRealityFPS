@@ -30,8 +30,8 @@ Constants.MIN_PLAYERS  = 1  -- minimum players needed before lobby countdown sta
 -- Phase durations (in seconds)
 -- Adjust these to change how long each phase lasts.
 -- ============================================================
-Constants.LOBBY_TIME        = 30  -- how long to wait in lobby after MIN_PLAYERS is reached
-Constants.PREP_TIME         = 10  -- how long the prep countdown lasts before active play
+Constants.LOBBY_TIME        = 2   -- how long to wait in lobby after MIN_PLAYERS is reached
+Constants.PREP_TIME         = 2   -- how long the prep countdown lasts before active play
 Constants.ACTIVE_TIME       = 180 -- how long each active round lasts (3 minutes)
 Constants.RESULTS_TIME      = 10  -- how long results are shown between rounds
 Constants.RESULTS_DURATION  = 10  -- alias used by MatchService for the per-round end screen
