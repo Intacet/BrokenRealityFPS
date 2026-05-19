@@ -185,12 +185,13 @@ MovementController      -- Stage 1 + 2A + 2C (Animate-disable, R6 detection, ani
                         --     WalkLeft/WalkRight played only when mouse lock active (see strafe gating above).
                         --     Debug: set-change and strafe-blocked-change logged once per change.
                         --     Animation IDs (Constants.MOVEMENT_ANIMATION_IDS.R6):
-                        --       Unarmed.WalkForward = rbxassetid://83927286289016
-                        --       Unarmed.RunForward  = rbxassetid://98612697944606
+                        --       Unarmed.WalkForward = rbxassetid://83352851460622
+                        --       Unarmed.RunForward  = rbxassetid://101113310705500
                         --       Unarmed.WalkLeft    = rbxassetid://101275785187464
                         --       Unarmed.WalkRight   = rbxassetid://72765640529019
-                        --       AR15.WalkForward    = rbxassetid://110651810525086
-                        --       AR15.RunForward     = rbxassetid://124640088553427
+                        --       AR15.WalkForward    = rbxassetid://138802532485746
+                        --       AR15.RunForward     = rbxassetid://79735501581082
+                        --     (IDs updated 2026-05-19 — asset swap only, MovementController logic unchanged)
                         --     Not in Stage 2A/2C: crouch anim, backward-specific, diagonal-specific,
                         --       lower/upper-body split, reload/fire/ADS weapon animations.
                         --

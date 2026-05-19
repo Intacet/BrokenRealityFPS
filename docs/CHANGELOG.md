@@ -7,6 +7,47 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-19] — Movement Stage 2 animation ID update: replace forward walk/run IDs with confirmed-good assets
+
+### Summary
+Replaced the four forward walk/run animation asset IDs (Unarmed WalkForward, Unarmed RunForward,
+AR15 WalkForward, AR15 RunForward) with confirmed-good IDs. Strafe animation IDs (WalkLeft/WalkRight)
+are unchanged. `MovementController` logic and all other constants are unchanged — this is a
+pure asset ID swap.
+
+### Changed files
+
+- **`src/shared/Constants.lua`** — `Constants.MOVEMENT_ANIMATION_IDS.R6`:
+  - `Unarmed.WalkForward`: `rbxassetid://83927286289016` → `rbxassetid://83352851460622`
+  - `Unarmed.RunForward`:  `rbxassetid://98612697944606` → `rbxassetid://101113310705500`
+  - `AR15.WalkForward`:    `rbxassetid://110651810525086` → `rbxassetid://138802532485746`
+  - `AR15.RunForward`:     `rbxassetid://124640088553427` → `rbxassetid://79735501581082`
+  - `Unarmed.WalkLeft`, `Unarmed.WalkRight` — **unchanged**.
+  - No constants added or removed.
+
+- **`docs/PROJECT_MAP.md`** — animation ID table in MovementController entry updated to match.
+  Note added: "IDs updated 2026-05-19 — asset swap only, MovementController logic unchanged."
+
+### What was NOT changed
+`MovementController.lua`, all other Constants, all services, all UI controllers, all remotes,
+`default.project.json`, `CLAUDE.md`, `PROJECT_RULES.md`, `TECHNICAL_DEBT.md`, `NAMING.md`.
+No logic changes. No speed or behaviour changes.
+
+### Debt entries updated
+- DEBT-044: unaffected — this swap does not resolve or worsen any listed risk. Animation ownership
+  risk is unchanged; confirm the new IDs are owned by the game's creator/group before shipping.
+
+### Studio verification required
+Yes. Spawn in ACTIVE phase with `MOVEMENT_ANIMATION_DEBUG = true`:
+- Walk forward unarmed → Unarmed WalkForward clip plays (new ID `83352851460622`).
+- Sprint forward unarmed → Unarmed RunForward clip plays (new ID `101113310705500`).
+- Call `MovementController.SetEquippedWeaponName("AR15")`, walk forward → AR15 WalkForward plays
+  (new ID `138802532485746`).
+- Sprint with AR15 set → AR15 RunForward plays (new ID `79735501581082`).
+- Strafe left/right (with mouse lock) → WalkLeft/WalkRight play unchanged.
+
+---
+
 ## [2026-05-18] — Movement Stage 2C: strafe animation mouse-lock gating, LeftShift sprint fix, animation speed multipliers
 
 ### Summary
