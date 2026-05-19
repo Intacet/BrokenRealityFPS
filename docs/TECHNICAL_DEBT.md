@@ -503,7 +503,7 @@ primary protection.
 
 ---
 
-## [DEBT-044] MovementController animation system — Stage 2A forward walk/run only — UPDATED 2026-05-18 (x3)
+## [DEBT-044] MovementController animation system — Stage 2A — UPDATED 2026-05-18 (x4)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
@@ -511,25 +511,28 @@ primary protection.
 **Updated (2026-05-18 — Stage 2A):** R6 walk/run animation playback added. Four AnimationTrack objects are loaded per character via `Humanoid.Animator`. Tracks are played during ACTIVE phase only and cleared on respawn/destroy. `directionName` is correctly computed and drives animation selection alongside `isSprinting`.
 **Updated (2026-05-18 — Animate-disable bug fix):** Custom animation tracks were not playing because the default Roblox `Animate` LocalScript was overriding them. `disableDefaultAnimate()` now sets `character.Animate.Disabled = true` before custom tracks are loaded. Gated by `Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED` and `Constants.DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT` (both default `true`). Animation diagnostics added behind `Constants.MOVEMENT_ANIMATION_DEBUG`. WalkLeft/WalkRight fallback logic added.
 **Updated (2026-05-18 — R6 detection):** `hasR6BodyParts()`, `getRigDebugSummary()`, and `isR6Character()` helpers added. The direct `RigType ~= R6` guard replaced with `isR6Character()` (primary `RigType` check + structural body-part fallback). `disableDefaultAnimate()` moved from `setupCharacter()` into `loadMovementAnimations()` (after rig confirmation) so Animate is only disabled when the character is confirmed R6. `getRigDebugSummary()` logged when animations are skipped.
+**Updated (2026-05-18 — animation-set selection fix):** Default animation set changed from AR15 to Unarmed. `getAnimationSetName()` now reads `equippedWeaponName` (nil → Unarmed, "AR15" → AR15 set, unknown → Unarmed fallback). Two new public methods: `SetEquippedWeaponName(name)` and `GetEquippedWeaponName()`. Both Unarmed and AR15 tracks are pre-loaded at spawn. Unarmed WalkLeft (`rbxassetid://101275785187464`) and WalkRight (`rbxassetid://72765640529019`) added. Animation-set-change debug log added (fires once per change, not per frame). Three new Constants: `MOVEMENT_ANIMATION_SET_UNARMED`, `MOVEMENT_ANIMATION_SET_AR15`, `MOVEMENT_DEFAULT_ANIMATION_SET`.
 
-**Remaining gaps (not in Stage 2A):**
+**Remaining gaps (not yet in Stage 2A):**
 - Crouch walk animation — not implemented; crouching uses WalkForward at CROUCH_SPEED.
-- Strafe, backward, and diagonal direction animations — WalkLeft/WalkRight keys checked first; WalkForward used as fallback when not loaded.
+- Backward-specific animation — Backward direction falls back to WalkForward.
+- Diagonal-specific animations — ForwardLeft/ForwardRight etc. use WalkLeft/WalkRight or WalkForward.
 - Lower-body / upper-body animation split — not implemented; the full body plays the movement animation.
 - Reload, fire, ADS, and sprint-hold weapon animations — deferred to a weapon-anim stage.
-- True armed/unarmed set selection — deferred; see DEBT-050 (defaults to AR15 set).
 - Idle, jump, fall, and climb animations — suppressed along with locomotion when Animate is disabled. Custom replacements needed in a future movement stage.
+- True server-owned equipment state — equippedWeaponName is presentation-only; see DEBT-050.
 
 **Remaining risks:**
 - If custom animation IDs are private or not owned by the game's creator / group, Roblox may silently refuse to load them. `Logger.warn()` fires for any empty assetId; a failed `LoadAnimation()` call will produce an output error. Confirm animation ownership before shipping.
 - If neither `RigType == R6` nor the structural body-part check passes, R6 animations are skipped and `getRigDebugSummary()` is logged. Stage 1 speed/direction logic remains active. Verify `StarterPlayer.CharacterRigType` in Studio after each `rojo serve` (DEBT-049).
 - If the structural fallback fires (R6 parts present but `RigType` mismatch), a one-time warn is emitted. This is expected in some Studio sessions — the real fix is DEBT-049 verification.
 - Disabling Animate removes the default idle, jump, fall, and climb animations. Until custom clips are added, the character will T-pose during these states.
-- True armed/unarmed animation set selection requires server-owned equipment state. Until then, the AR15 set is always used regardless of whether the player holds a weapon (see DEBT-050).
+- `equippedWeaponName` is presentation-only. True armed/unarmed state must later come from a server-owned equipment/loadout system. `SetEquippedWeaponName` must eventually be called by a real EquipmentController or weapon equip system (see DEBT-050).
+- Sprint in all directions still uses RunForward (no directional sprint animations yet).
 - If `DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = false`, Animate keeps running and may override or blend with custom locomotion tracks. This constant must stay `true` for custom animations to take effect.
 
-**Trigger:** Any playtesting session where T-pose during idle/jump or missing strafing/backward animations is noticeable, or where the `getRigDebugSummary` warn appears.
-**Fix when:** A future movement stage (Stage 2B) adds idle/jump/fall/climb custom clips, per-direction animation clips, and armed/unarmed state integration. Do not build until Stage 2A is verified in Studio.
+**Trigger:** Any playtesting session where T-pose during idle/jump or missing backward/diagonal animations is noticeable, or where the `getRigDebugSummary` warn appears.
+**Fix when:** A future movement stage adds idle/jump/fall/climb custom clips, backward/diagonal clips, and server-owned equipment integration. Do not build until Stage 2A is verified in Studio.
 
 ---
 
@@ -617,17 +620,18 @@ primary protection.
 
 ---
 
-## [DEBT-050] MovementController animation set defaults to AR15 regardless of actual equipped weapon — ADDED 2026-05-18
+## [DEBT-050] MovementController animation set selection is presentation-only — UPDATED 2026-05-18
 
-**File:** `src/client/MovementController.lua` (`getAnimationSetName()`)
-**Severity:** Medium
-**Studio verification required:** No (structural coupling, not a runtime bug)
-**Risk:** `getAnimationSetName()` always returns `"AR15"` because the client has no authoritative knowledge of what weapon the player currently holds. True armed/unarmed selection requires a server-owned equipment state (e.g. `InventoryService` or `EquipmentService`) that sends the equipped weapon to the client. Until that system exists, all players play the AR15 animation set regardless of whether they are holding a weapon.
-**Current exposure:** In Stage 2A only one weapon exists (AR15) and all players always have it, so the incorrect set selection is invisible. The risk surfaces when:
-- An unarmed player (no weapon held) is added to the game — they will play the AR15 armed walking animation.
-- A second weapon type is added — players holding it will still play AR15 animations.
-**Trigger:** An unarmed state is introduced (death drop, loadout selection screen, spawn before pickup) or a second weapon is added.
-**Fix when:** `InventoryService` or `EquipmentService` is built and sends the current equipped weapon name (or `nil` for unarmed) to the client. Replace `getAnimationSetName()` with a lookup against that received state. Use `"Unarmed"` when nil.
+**File:** `src/client/MovementController.lua` (`getAnimationSetName()`, `SetEquippedWeaponName()`)
+**Severity:** Low-Medium (down from Medium — Unarmed is now correct default)
+**Studio verification required:** Yes
+**Partially resolved (2026-05-18):** `getAnimationSetName()` no longer hardcodes AR15. Default is now `Unarmed` (`equippedWeaponName == nil`). A new `SetEquippedWeaponName(name)` public method lets callers switch the active animation set. This is presentation-only — it controls movement animation selection only and has no effect on server weapon state, ammo, damage, or inventory. `GetEquippedWeaponName()` exposes the current value.
+**Remaining risk:** `equippedWeaponName` is set by the client-side `SetEquippedWeaponName()` call. No server-owned equipment state exists yet to drive it authoritatively. The correct call site (an `EquipmentController` or weapon equip/drop system) does not exist — `SetEquippedWeaponName` currently has no caller in the codebase. This means:
+- The default Unarmed set plays at all times until a real equip event calls `SetEquippedWeaponName("AR15")`.
+- When a player picks up or equips the AR15, something must call `MovementController.SetEquippedWeaponName("AR15")`.
+- When a player drops or loses the AR15, something must call `MovementController.SetEquippedWeaponName(nil)`.
+**Trigger:** InventoryService or EquipmentController is built and sends equipped weapon state to the client.
+**Fix when:** A real equipment/loadout system exists. Wire `SetEquippedWeaponName` to the weapon equip/unequip event from that system. At that point the client-side presentation state correctly mirrors server authority — remove the "presentation-only" caveat from this entry.
 
 ---
 

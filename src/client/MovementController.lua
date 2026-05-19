@@ -2,9 +2,9 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A (with Animate-disable bug fix and R6 detection helpers) —
+-- Movement Stage 1 + 2A (Animate-disable bug fix, R6 detection, animation-set selection) —
 -- walk, sprint, crouch speed; 8-direction camera-relative movement state; phase gating;
--- respawn handling; connection cleanup; R6 animation playback with robust rig detection.
+-- respawn handling; connection cleanup; R6 animation playback with Unarmed default set.
 --
 -- Bug fix (2026-05-18): The default Roblox Animate LocalScript inside the character
 -- was overriding custom R6 AnimationTrack objects loaded in Stage 2A. MovementController
@@ -17,6 +17,11 @@
 -- R6 detection (2026-05-18): Humanoid.RigType is the primary check. If RigType does not
 -- report R6, a structural body-part fallback (hasR6BodyParts) is tried. If neither check
 -- passes, getRigDebugSummary() is logged so the exact mismatch is immediately visible.
+--
+-- Animation-set selection (2026-05-18): MovementController defaults to the Unarmed
+-- animation set when no weapon is equipped (equippedWeaponName == nil). Call
+-- MovementController.SetEquippedWeaponName("AR15") to switch to AR15 movement animations.
+-- This is presentation-only and does not affect server state, ammo, or combat.
 --
 -- NOTE: disabling Animate removes idle, jump, fall, and climb animations in addition
 -- to locomotion. Custom replacements for those states are needed in a future stage.
@@ -33,6 +38,7 @@
 --   • R6 walk/run AnimationTracks loaded per character, played during ACTIVE phase only
 --   • Disabling character.Animate (R6 characters only) to prevent avatar animation pack override
 --   • Robust R6 rig detection: RigType primary, structural body-part fallback, debug summary on skip
+--   • presentation-only equippedWeaponName driving animation set selection (Unarmed default)
 --
 -- Animation control constants (all in Constants.lua):
 --   CUSTOM_MOVEMENT_ANIMATIONS_ENABLED = true       — master switch for custom anim system
@@ -44,9 +50,11 @@
 --   Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
 --   Does NOT add camera bob, sway, landing dip, tilt, or viewmodel effects.
 --
--- Stage 2A animation scope (forward walk/run only):
---   Defaults to AR15 animation set (true armed/unarmed state deferred — see DEBT-050).
---   WalkLeft/WalkRight played if tracks exist; falls back to WalkForward if absent.
+-- Stage 2A animation scope:
+--   Defaults to Unarmed animation set when equippedWeaponName == nil (no weapon equipped).
+--   Call SetEquippedWeaponName("AR15") to switch to AR15 movement animations.
+--   True server-owned equipment state is deferred — see DEBT-050.
+--   WalkLeft/WalkRight played if tracks exist for the active set; falls back to WalkForward.
 --   No crouch, backward, diagonal, reload, fire, or ADS animations in Stage 2A.
 --   No lower-body/upper-body animation split in Stage 2A.
 --   Non-R6 characters: animation loading skipped; getRigDebugSummary logged; Stage 1 speed logic remains active.
@@ -59,6 +67,8 @@
 --   GetMoveState(): string       → "Idle"|"Walking"|"Sprinting"|"Crouching" (GunController compat)
 --   IsADSBlocked(): boolean      → true while sprinting; blocks GunController ADS
 --   GetViewmodelAddCFrame(): CFrame → identity in Stage 1/2A; ViewModelController multiplies this in
+--   SetEquippedWeaponName(name)  → sets animation set (Unarmed if nil/"", AR15 if "AR15"); presentation only
+--   GetEquippedWeaponName()      → returns current equippedWeaponName (nil = Unarmed set active)
 --   Start()                      → called by ClientInit after MatchController:Start()
 --   destroy()                    → disconnects all connections and resets state
 --
@@ -124,6 +134,19 @@ local currentAnimationName: string = ""
 -- Whether a rig-type warning has already been issued for the current character.
 -- Reset on each new character so future warnings are not suppressed.
 local rigTypeWarned: boolean = false
+
+-- Presentation-only equipped weapon name used solely for movement animation set selection.
+-- nil  = no weapon equipped → Unarmed animation set (default).
+-- "AR15" = AR15 equipped → AR15 animation set.
+-- Any other non-empty string → Unarmed fallback (warn emitted in SetEquippedWeaponName).
+-- Set via MovementController.SetEquippedWeaponName(). Never affects server state or combat.
+-- Persists across character respawns; cleared only in destroy().
+local equippedWeaponName: string? = nil
+
+-- Last animation set name that was logged to Output.
+-- Guards against per-frame spam: only logs when the set name changes.
+-- Reset to "" on each character load so the first movement after respawn re-logs.
+local lastAnimationSet: string = ""
 
 -- ============================================================
 -- Private helpers — Stage 1
@@ -327,12 +350,27 @@ local function getAnimator(character: Model): Animator?
     return animator
 end
 
--- Returns the animation set name for the player's current weapon.
--- MAINTENANCE (DEBT-050): Always returns "AR15" — true armed/unarmed state requires
--- server-owned equipment state (InventoryService or EquipmentService). When that
--- system exists, query it here and return "Unarmed" when no weapon is held.
+-- Returns the movement animation set name based on the current equippedWeaponName.
+-- Defaults to Constants.MOVEMENT_ANIMATION_SET_UNARMED ("Unarmed") when no weapon
+-- is equipped (equippedWeaponName == nil). Returns "AR15" only when equippedWeaponName
+-- matches Constants.DEFAULT_WEAPON or Constants.MOVEMENT_ANIMATION_SET_AR15.
+-- Falls back to "Unarmed" for any unknown weapon name; the caller-side warn was already
+-- emitted in SetEquippedWeaponName so no additional per-frame warn fires here.
+--
+-- MAINTENANCE (DEBT-050 — partially resolved): equippedWeaponName is set by the
+-- presentation-only SetEquippedWeaponName() method, not by server-owned loadout state.
+-- True armed/unarmed state must eventually come from an EquipmentController or
+-- server-owned equipment system. See DEBT-050.
 local function getAnimationSetName(): string
-    return "AR15"
+    if equippedWeaponName == nil then
+        return Constants.MOVEMENT_ANIMATION_SET_UNARMED
+    end
+    if equippedWeaponName == Constants.DEFAULT_WEAPON
+        or equippedWeaponName == Constants.MOVEMENT_ANIMATION_SET_AR15 then
+        return Constants.MOVEMENT_ANIMATION_SET_AR15
+    end
+    -- Unknown weapon name — fall back to Unarmed (warn already issued in SetEquippedWeaponName).
+    return Constants.MOVEMENT_ANIMATION_SET_UNARMED
 end
 
 -- Stops the currently playing movement animation with a fade-out.
@@ -396,6 +434,8 @@ local function loadMovementAnimations(character: Model)
     table.clear(animationTracks)
     currentAnimationName = ""
     rigTypeWarned        = false
+    -- Reset set-change log guard so the first movement after respawn re-logs the active set.
+    lastAnimationSet     = ""
 
     -- Destroy and clear old Animation instances from the previous character.
     for _, inst in pairs(animationInstances) do
@@ -429,10 +469,16 @@ local function loadMovementAnimations(character: Model)
     if not animator then return end
 
     -- Build the flat "SetName_AnimName" → AnimationTrack table.
+    -- Both Unarmed and AR15 tracks are loaded at spawn so switching sets is instant
+    -- (no reload needed when SetEquippedWeaponName is called mid-session).
     local r6 = Constants.MOVEMENT_ANIMATION_IDS.R6
     local toLoad: { [string]: string } = {
+        -- Unarmed (default / no-gun) set
         ["Unarmed_WalkForward"] = r6.Unarmed.WalkForward,
         ["Unarmed_RunForward"]  = r6.Unarmed.RunForward,
+        ["Unarmed_WalkLeft"]    = r6.Unarmed.WalkLeft,    -- no-gun strafe left
+        ["Unarmed_WalkRight"]   = r6.Unarmed.WalkRight,   -- no-gun strafe right
+        -- AR15 set — only plays when SetEquippedWeaponName("AR15") is called
         ["AR15_WalkForward"]    = r6.AR15.WalkForward,
         ["AR15_RunForward"]     = r6.AR15.RunForward,
     }
@@ -477,7 +523,14 @@ local function updateMovementAnimation()
         return
     end
 
-    local setName = getAnimationSetName()   -- "AR15" or "Unarmed" (currently always "AR15")
+    local setName = getAnimationSetName()   -- "Unarmed" (default) or "AR15" (when weapon equipped)
+
+    -- Debug: log once when the active animation set changes (not every Heartbeat frame).
+    if Constants.MOVEMENT_ANIMATION_DEBUG and setName ~= lastAnimationSet then
+        Logger.debug("[MovementController] animation set: " .. setName)
+        lastAnimationSet = setName
+    end
+
     local dirName = movementState.directionName
     local animName: string
 
@@ -574,6 +627,52 @@ function MovementController:GetViewmodelAddCFrame(): CFrame
     return CFrame.new()
 end
 
+-- ── Animation set selection — presentation only ────────────────────────────────
+-- These methods control ONLY which movement animation set plays (Unarmed or AR15).
+-- They do NOT affect server weapon state, ammo, damage, hit validation, or reload.
+-- Must eventually be called by a real EquipmentController or weapon equip system
+-- when server-owned loadout state is built — see DEBT-050.
+
+-- Sets the equipped weapon name used for movement animation set selection.
+-- Pass nil or "" to return to the Unarmed (no-gun) animation set (the default).
+-- Pass Constants.DEFAULT_WEAPON / "AR15" to switch to the AR15 animation set.
+-- Any other non-empty string: stored as-is but a one-time warning is emitted because
+-- no dedicated movement animation set may exist for that weapon name.
+function MovementController.SetEquippedWeaponName(weaponName: string?)
+    assert(
+        weaponName == nil or type(weaponName) == "string",
+        "[MovementController] SetEquippedWeaponName: weaponName must be a string or nil"
+    )
+
+    if weaponName == nil or weaponName == "" then
+        equippedWeaponName = nil
+    elseif weaponName == Constants.DEFAULT_WEAPON
+        or weaponName == Constants.MOVEMENT_ANIMATION_SET_AR15 then
+        equippedWeaponName = weaponName
+    else
+        -- Unknown weapon — store the name so callers see consistent state, but warn
+        -- once that no dedicated animation set is registered for it. Movement will
+        -- fall back to Unarmed until a matching set is added to MOVEMENT_ANIMATION_IDS.
+        Logger.warn(
+            "[MovementController] SetEquippedWeaponName: no dedicated movement animation set "
+            .. "for '" .. weaponName .. "'. Movement animations will use Unarmed as fallback."
+        )
+        equippedWeaponName = weaponName
+    end
+
+    if Constants.MOVEMENT_ANIMATION_DEBUG then
+        Logger.debug(
+            "[MovementController] equippedWeaponName = " .. tostring(equippedWeaponName)
+        )
+    end
+end
+
+-- Returns the current presentation-only equipped weapon name used for animation set selection.
+-- Returns nil when no weapon is equipped (Unarmed animation set is active).
+function MovementController.GetEquippedWeaponName(): string?
+    return equippedWeaponName
+end
+
 -- Disconnects all event connections, stops all animation tracks, destroys Animation
 -- instances, and resets all state.
 -- Safe to call even if Start() was never called (iterates empty tables).
@@ -581,8 +680,10 @@ function MovementController:destroy()
     -- Stop the active animation if still playing, then clear track references.
     stopCurrentMovementAnimation()
     table.clear(animationTracks)
-    currentAnimationName = ""
-    rigTypeWarned        = false
+    currentAnimationName   = ""
+    rigTypeWarned          = false
+    equippedWeaponName     = nil
+    lastAnimationSet       = ""
 
     -- Explicitly destroy Animation instances.
     for _, inst in pairs(animationInstances) do

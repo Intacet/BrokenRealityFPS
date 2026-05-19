@@ -7,6 +7,87 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-18] — Movement animation-set fix: default to Unarmed; add no-gun strafe IDs; SetEquippedWeaponName API
+
+### Summary
+Fixed `MovementController` defaulting to the AR15/gun animation set when no weapon is equipped.
+The correct default is Unarmed. AR15 movement animations now only play when
+`MovementController.SetEquippedWeaponName("AR15")` is explicitly called.
+Two no-gun strafe animation IDs (WalkLeft/WalkRight) were added to the Unarmed set so
+left/right strafe animations play correctly without a weapon equipped.
+This is presentation-only: `equippedWeaponName` controls animation selection only and does not
+affect server weapon state, ammo, damage, hit validation, reload, or inventory.
+
+### Changed files
+
+- **`src/shared/Constants.lua`**:
+  - Three new animation-set name constants:
+    - `Constants.MOVEMENT_ANIMATION_SET_UNARMED = "Unarmed"` — key for the no-gun set.
+    - `Constants.MOVEMENT_ANIMATION_SET_AR15    = "AR15"`    — key for the AR15 set.
+    - `Constants.MOVEMENT_DEFAULT_ANIMATION_SET = Constants.MOVEMENT_ANIMATION_SET_UNARMED` — project default.
+  - Two new Unarmed animation IDs added to `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed`:
+    - `WalkLeft  = "rbxassetid://101275785187464"` — no-gun strafe left.
+    - `WalkRight = "rbxassetid://72765640529019"`  — no-gun strafe right.
+  - All existing IDs (Unarmed WalkForward/RunForward, AR15 WalkForward/RunForward) preserved.
+
+- **`src/client/MovementController.lua`**:
+  - New private state `equippedWeaponName: string? = nil` — presentation-only; nil = Unarmed set.
+  - New private state `lastAnimationSet: string = ""` — guards against per-frame set-change log spam.
+  - `getAnimationSetName()` rewritten:
+    - Returns `MOVEMENT_ANIMATION_SET_UNARMED` when `equippedWeaponName == nil` (was: always "AR15").
+    - Returns `MOVEMENT_ANIMATION_SET_AR15` when `equippedWeaponName == Constants.DEFAULT_WEAPON` or `"AR15"`.
+    - Falls back to `MOVEMENT_ANIMATION_SET_UNARMED` for unknown weapon names.
+  - `loadMovementAnimations()` updated:
+    - Resets `lastAnimationSet = ""` at the start of each character load.
+    - Expanded `toLoad` table to include `Unarmed_WalkLeft` and `Unarmed_WalkRight`.
+    - Both Unarmed and AR15 tracks are pre-loaded at spawn for instant set switching.
+  - `updateMovementAnimation()` updated:
+    - Logs `"animation set: Unarmed"` or `"animation set: AR15"` once per set change (not per frame),
+      behind `Constants.MOVEMENT_ANIMATION_DEBUG`.
+  - New public method `MovementController.SetEquippedWeaponName(weaponName: string?)`:
+    - `nil` or `""` → `equippedWeaponName = nil` (Unarmed set).
+    - `"AR15"` / `Constants.DEFAULT_WEAPON` → `equippedWeaponName = weaponName` (AR15 set).
+    - Any other non-empty string → stored with a one-time `Logger.warn`; Unarmed fallback in `getAnimationSetName`.
+    - Validated with `assert()`. Logs debug output when `MOVEMENT_ANIMATION_DEBUG = true`.
+    - Does NOT affect server weapon state, ammo, damage, hit validation, or reload.
+  - New public method `MovementController.GetEquippedWeaponName(): string?`:
+    - Returns current `equippedWeaponName`. `nil` = Unarmed set active.
+  - `destroy()` updated: resets `equippedWeaponName = nil` and `lastAnimationSet = ""`.
+  - Module header, Owns section, Stage 2A scope, and Exposes section updated to document the new API.
+
+- **`docs/PROJECT_MAP.md`** — `MovementController` entry updated:
+  - Documents `SetEquippedWeaponName`/`GetEquippedWeaponName` and the presentation-only nature of `equippedWeaponName`.
+  - Documents that Unarmed is the default; AR15 only plays after an explicit call.
+  - Documents all six animation IDs including the two new no-gun strafe IDs.
+  - Constants entry updated with the three new animation-set name constants.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 and DEBT-050 updated:
+  - DEBT-044: added animation-set fix update, revised remaining gaps and risks.
+  - DEBT-050: partially resolved; severity lowered to Low-Medium; remaining risk documented (no real equip caller exists yet).
+
+### What was NOT changed
+`GunController`, `ViewModelController`, `ClientInit`, `SoundController`, all UI controllers, all server
+files, `WeaponData`, `default.project.json`, `CLAUDE.md`, `PROJECT_RULES.md`, `NAMING.md`.
+No remotes added. No camera writes. No movement speeds changed. No gun/combat/server state changed.
+
+### Debt entries updated
+- DEBT-044: updated (x4) with animation-set selection fix.
+- DEBT-050: partially resolved — default is now Unarmed; `SetEquippedWeaponName` API added; remaining risk is no real equip caller exists yet.
+
+### Studio verification required
+Yes. With `MOVEMENT_ANIMATION_DEBUG = true`:
+- Spawn with no gun equipped → Output: `"animation set: Unarmed"`. Walking forward plays Unarmed WalkForward.
+- Sprint plays Unarmed RunForward.
+- Strafe left plays Unarmed WalkLeft (rbxassetid://101275785187464).
+- Strafe right plays Unarmed WalkRight (rbxassetid://72765640529019).
+- No AR15 movement animation plays with no gun equipped.
+- From command bar: `require(game.StarterPlayer.StarterPlayerScripts.Controllers.MovementController).SetEquippedWeaponName("AR15")` → Output: `"animation set: AR15"`. AR15 walk/run plays.
+- Call `SetEquippedWeaponName(nil)` → Output: `"animation set: Unarmed"`. Returns to no-gun animations.
+- Respawn: tracks reload without duplicates; set-change log fires once on first movement.
+- Leave ACTIVE phase: movement animations stop. No camera bob, sway, FOV, or camera.CFrame changes.
+
+---
+
 ## [2026-05-18] — Movement Stage 2A: robust R6 rig detection helpers in MovementController
 
 ### Summary

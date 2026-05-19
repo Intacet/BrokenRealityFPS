@@ -109,13 +109,25 @@ HordeService (server)   [LEGACY PLAN — replaces with zone ambient spawn budget
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- Stage 1 + 2A (Animate-disable bug fix + R6 detection): owns local movement
-                        --   input (LeftShift=sprint, C=crouch toggle), movementState table,
-                        --   Humanoid.WalkSpeed, R6 walk/run animation playback, and character.Animate
-                        --   suppression (R6 characters only).
+MovementController      -- Stage 1 + 2A (Animate-disable, R6 detection, animation-set selection):
+                        --   owns local movement input (LeftShift=sprint, C=crouch toggle),
+                        --   movementState table, Humanoid.WalkSpeed, R6 animation playback,
+                        --   character.Animate suppression (R6 characters only), and
+                        --   presentation-only equippedWeaponName for animation set selection.
                         --   Reads workspace.CurrentCamera.CFrame for 8-directional camera-relative
                         --   direction detection; does NOT write camera.CFrame, CameraOffset, or FOV.
                         --   No new remotes. No slide, vault, or camera effects.
+                        --
+                        --   Animation set selection (added 2026-05-18):
+                        --     Default animation set is Unarmed (no gun) when equippedWeaponName == nil.
+                        --     AR15 animation set plays only after SetEquippedWeaponName("AR15") is called.
+                        --     equippedWeaponName is PRESENTATION ONLY — it does not affect server weapon
+                        --     state, ammo, damage, hit validation, reload, or inventory.
+                        --     True server-owned equipment state is deferred — see DEBT-050.
+                        --     Must eventually be set by a real EquipmentController or weapon equip system.
+                        --     SetEquippedWeaponName(nil or "") → Unarmed set.
+                        --     SetEquippedWeaponName("AR15") → AR15 set.
+                        --     Any other name → Unarmed fallback + one-time warn.
                         --
                         --   R6 rig detection (added 2026-05-18):
                         --     isR6Character(character, hum) — primary check: Humanoid.RigType == R6.
@@ -142,19 +154,21 @@ MovementController      -- Stage 1 + 2A (Animate-disable bug fix + R6 detection)
                         --     If DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = false, Animate is left
                         --     running and custom tracks may conflict with avatar pack locomotion.
                         --
-                        --   Stage 2A animation support (R6 only, forward walk/run only):
+                        --   Stage 2A animation support (R6 only):
                         --     Loads AnimationTrack objects per character via Humanoid.Animator.
+                        --     Both Unarmed and AR15 tracks pre-loaded at spawn for instant set switching.
                         --     Plays during ACTIVE phase only; stops on phase exit and when not moving.
-                        --     Defaults to AR15 animation set (true armed/unarmed state deferred — DEBT-050).
-                        --     WalkLeft/WalkRight played if tracks are present; falls back to WalkForward.
-                        --     Animation diagnostics logged when Constants.MOVEMENT_ANIMATION_DEBUG = true.
+                        --     WalkLeft/WalkRight played if tracks exist; falls back to WalkForward.
+                        --     Debug: set-change logged once per change behind MOVEMENT_ANIMATION_DEBUG.
                         --     Animation IDs (Constants.MOVEMENT_ANIMATION_IDS.R6):
                         --       Unarmed.WalkForward = rbxassetid://83927286289016
                         --       Unarmed.RunForward  = rbxassetid://98612697944606
+                        --       Unarmed.WalkLeft    = rbxassetid://101275785187464  ← no-gun strafe left
+                        --       Unarmed.WalkRight   = rbxassetid://72765640529019   ← no-gun strafe right
                         --       AR15.WalkForward    = rbxassetid://110651810525086
                         --       AR15.RunForward     = rbxassetid://124640088553427
-                        --     Not in Stage 2A: crouch anim, backward, diagonal, lower/upper-body
-                        --       split, reload/fire/ADS weapon animations.
+                        --     Not in Stage 2A: crouch anim, backward-specific, diagonal-specific,
+                        --       lower/upper-body split, reload/fire/ADS weapon animations.
                         --     If character fails R6 detection, getRigDebugSummary is logged and
                         --       animation loading is skipped; Stage 1 speed logic remains active.
                         --     If animation IDs are private/not owned by the game, Roblox may refuse to
@@ -162,6 +176,8 @@ MovementController      -- Stage 1 + 2A (Animate-disable bug fix + R6 detection)
                         --
                         --   Exposes: GetMovementState() → table; GetMoveState() → string (GunController
                         --   compat); IsADSBlocked() → bool; GetViewmodelAddCFrame() → identity (Stage 1/2A);
+                        --   SetEquippedWeaponName(name: string?) → switches animation set (presentation only);
+                        --   GetEquippedWeaponName() → string? (nil = Unarmed set active);
                         --   Start(); destroy()
 CutsceneController      -- intro/outro sequences, triggered by RoundStateChanged
 HUD                     -- driven by HealthChanged, TeamStatusUpdate, AmmoChanged, RoundStateChanged
@@ -195,14 +211,18 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --     false = Classic camera + viewmodel hidden (development/testing).
              --     true  = LockFirstPerson + viewmodel shown during ACTIVE only.
              --   Set true before shipping the FPS experience. See DEBT-048.
+             --   Movement animation set name constants:
+             --     MOVEMENT_ANIMATION_SET_UNARMED = "Unarmed" — key for the no-gun animation set.
+             --     MOVEMENT_ANIMATION_SET_AR15    = "AR15"    — key for the AR15 animation set.
+             --     MOVEMENT_DEFAULT_ANIMATION_SET = MOVEMENT_ANIMATION_SET_UNARMED — project default.
              --   Movement animation control constants (all default true):
              --     CUSTOM_MOVEMENT_ANIMATIONS_ENABLED — master switch; false disables all
              --       custom movement track loading and playback; Animate runs as normal.
              --     DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT — when true, MovementController
              --       sets character.Animate.Disabled = true before loading custom tracks;
              --       false leaves Animate running (may cause override/blend conflicts).
-             --     MOVEMENT_ANIMATION_DEBUG — when true, logs animation load and switch
-             --       events to Output for diagnostics; set false to silence in production.
+             --     MOVEMENT_ANIMATION_DEBUG — when true, logs animation load, switch, and
+             --       set-change events to Output for diagnostics; set false in production.
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag

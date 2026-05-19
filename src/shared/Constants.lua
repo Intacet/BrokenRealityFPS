@@ -59,17 +59,31 @@ Constants.SPRINT_STAMINA_ENABLED = false -- stamina system not yet implemented (
 Constants.PRONE_ENABLED          = false -- prone stance not yet implemented (DEBT-043)
 
 -- ============================================================
+-- Movement animation set names
+-- Used by MovementController to key into MOVEMENT_ANIMATION_IDS and to validate
+-- the argument passed to MovementController.SetEquippedWeaponName().
+-- ============================================================
+Constants.MOVEMENT_ANIMATION_SET_UNARMED = "Unarmed"  -- no weapon equipped
+Constants.MOVEMENT_ANIMATION_SET_AR15    = "AR15"     -- AR15 rifle equipped
+
+-- Default animation set played when no weapon is explicitly equipped.
+-- Changing this constant switches the project-wide default without touching controllers.
+Constants.MOVEMENT_DEFAULT_ANIMATION_SET = Constants.MOVEMENT_ANIMATION_SET_UNARMED
+
+-- ============================================================
 -- Movement animation IDs (Movement Stage 2A — R6 only)
 -- Keyed by rig type → weapon-set name → animation name.
 -- Do not add R15 animation IDs here.
--- armed/unarmed selection is deferred (DEBT-050); MovementController
--- currently defaults to the AR15 set for the Stage 2A prototype.
+-- Default set is Unarmed (no gun). AR15 set plays only when
+-- MovementController.SetEquippedWeaponName("AR15") is called.
 -- ============================================================
 Constants.MOVEMENT_ANIMATION_IDS = {
     R6 = {
         Unarmed = {
             WalkForward = "rbxassetid://83927286289016",
             RunForward  = "rbxassetid://98612697944606",
+            WalkLeft    = "rbxassetid://101275785187464",  -- no-gun strafe left
+            WalkRight   = "rbxassetid://72765640529019",   -- no-gun strafe right
         },
         AR15 = {
             WalkForward = "rbxassetid://110651810525086",
@@ -82,6 +96,7 @@ Constants.MOVEMENT_ANIMATION_FADE_TIME = 0.15  -- seconds to cross-fade between 
 
 -- Master switch: when false, MovementController does not disable Animate and does not
 -- play any custom movement tracks — the default avatar animation pack runs as normal.
+-- Set true (default) to use the custom R6 animation system with Unarmed/AR15 sets.
 Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED = true
 
 -- When true, MovementController sets character.Animate.Disabled = true before loading
