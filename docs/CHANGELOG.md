@@ -7,6 +7,62 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-18] — Movement Stage 2A: robust R6 rig detection helpers in MovementController
+
+### Summary
+Added three private helpers to `MovementController` to diagnose and recover from cases where
+`Humanoid.RigType` does not report R6 despite `StarterPlayer.CharacterRigType` being set to R6.
+The primary check (`RigType == R6`) is supplemented by a structural fallback (`hasR6BodyParts`)
+that inspects the seven canonical R6 body-part names. If neither check passes,
+`getRigDebugSummary` is logged showing the exact `RigType.Name`, which parts are present, and
+the character name — making any mismatch immediately visible in Output.
+The `disableDefaultAnimate()` call was moved from `setupCharacter()` into `loadMovementAnimations()`
+(after the rig check passes) so Animate is only disabled when the character is confirmed R6.
+
+### Changed files
+
+- **`src/client/MovementController.lua`**:
+  - New helper `hasR6BodyParts(character: Model): boolean` — returns true when all seven R6 body
+    parts (`HumanoidRootPart`, `Torso`, `Head`, `Left Arm`, `Right Arm`, `Left Leg`, `Right Leg`)
+    are direct children of `character`. Used as structural fallback only.
+  - New helper `getRigDebugSummary(character: Model, hum: Humanoid): string` — returns a formatted
+    string with `RigType.Name`, presence of `Torso`/`UpperTorso`/`LowerTorso`/`Left Arm`/`LeftUpperArm`,
+    and `character.Name`. Logged when R6 animations are skipped.
+  - New helper `isR6Character(character: Model, hum: Humanoid): boolean` — primary check is
+    `RigType == R6`; structural fallback via `hasR6BodyParts()`; emits a one-time `Logger.warn`
+    (guarded by `rigTypeWarned`) if the fallback fires with a reference to DEBT-049.
+  - `loadMovementAnimations()`: replaced direct `RigType ~= R6` check with `isR6Character()`;
+    logs `getRigDebugSummary()` when skipping; `disableDefaultAnimate()` call moved here from
+    `setupCharacter()`, placed immediately after `isR6Character()` passes.
+  - `setupCharacter()`: removed explicit `disableDefaultAnimate(char)` call; updated comment
+    noting that Animate disable now happens inside `loadMovementAnimations` after rig confirmation.
+  - Module header updated to document R6 detection behaviour and corrected Animate-disable placement.
+
+- **`docs/PROJECT_MAP.md`** — `MovementController` entry updated:
+  - Documents `hasR6BodyParts`, `getRigDebugSummary`, `isR6Character` helpers.
+  - Notes corrected Animate-disable placement (inside `loadMovementAnimations` after rig check).
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated:
+  - Notes R6 detection helpers added, `disableDefaultAnimate` moved inside rig check.
+  - Remaining risk: if neither `RigType` nor structural check passes, animations are skipped and
+    the developer must verify `StarterPlayer.CharacterRigType` after each `rojo serve` (DEBT-049).
+
+### What was NOT changed
+`Constants.lua`, `GunController`, `ViewModelController`, `ClientInit`, all server files, all UI
+controllers, all remotes, `default.project.json`, `CLAUDE.md`, `PROJECT_RULES.md`. No animation
+IDs changed. No movement speeds changed. No camera writes. No new remotes.
+
+### Debt entries updated
+- DEBT-044: updated with R6 detection helpers, corrected Animate-disable placement.
+
+### Studio verification required
+Yes — test in Studio play mode. With `MOVEMENT_ANIMATION_DEBUG = true`:
+- If character is R6 (`RigType` path): no warn, Animate disabled, custom animations play.
+- If character has R6 parts but `RigType` mismatch: structural fallback warning fires once, Animate disabled, custom animations play.
+- If character is not R6 at all: `getRigDebugSummary` logged in Output, Stage 1 speed/direction still active.
+
+---
+
 ## [2026-05-18] — Movement Stage 2A bug fix: disable default Animate script so custom R6 locomotion plays
 
 ### Summary

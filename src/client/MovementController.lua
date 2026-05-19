@@ -2,17 +2,21 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A (with Animate-disable bug fix) — walk, sprint, crouch speed;
--- 8-direction camera-relative movement state; phase gating; respawn handling;
--- connection cleanup; R6 animation playback.
+-- Movement Stage 1 + 2A (with Animate-disable bug fix and R6 detection helpers) —
+-- walk, sprint, crouch speed; 8-direction camera-relative movement state; phase gating;
+-- respawn handling; connection cleanup; R6 animation playback with robust rig detection.
 --
 -- Bug fix (2026-05-18): The default Roblox Animate LocalScript inside the character
 -- was overriding custom R6 AnimationTrack objects loaded in Stage 2A. MovementController
--- now calls disableDefaultAnimate() on every CharacterAdded — before loading custom
--- tracks — to stop the avatar animation pack from controlling locomotion.
+-- now calls disableDefaultAnimate() inside loadMovementAnimations() — after the character
+-- is confirmed R6 — to stop the avatar animation pack from controlling locomotion.
 -- This is gated by Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED and
 -- Constants.DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT (both default true).
--- Animate is disabled, not destroyed, so it can be re-enabled if needed.
+-- Animate is disabled (not destroyed) only when the rig is confirmed R6.
+--
+-- R6 detection (2026-05-18): Humanoid.RigType is the primary check. If RigType does not
+-- report R6, a structural body-part fallback (hasR6BodyParts) is tried. If neither check
+-- passes, getRigDebugSummary() is logged so the exact mismatch is immediately visible.
 --
 -- NOTE: disabling Animate removes idle, jump, fall, and climb animations in addition
 -- to locomotion. Custom replacements for those states are needed in a future stage.
@@ -27,7 +31,8 @@
 --       Constants.CROUCH_SPEED     when ACTIVE and crouching
 --   • 8-directional direction detection via Humanoid.MoveDirection dot products
 --   • R6 walk/run AnimationTracks loaded per character, played during ACTIVE phase only
---   • Disabling character.Animate to prevent avatar animation pack override
+--   • Disabling character.Animate (R6 characters only) to prevent avatar animation pack override
+--   • Robust R6 rig detection: RigType primary, structural body-part fallback, debug summary on skip
 --
 -- Animation control constants (all in Constants.lua):
 --   CUSTOM_MOVEMENT_ANIMATIONS_ENABLED = true       — master switch for custom anim system
@@ -44,7 +49,7 @@
 --   WalkLeft/WalkRight played if tracks exist; falls back to WalkForward if absent.
 --   No crouch, backward, diagonal, reload, fire, or ADS animations in Stage 2A.
 --   No lower-body/upper-body animation split in Stage 2A.
---   Non-R6 characters: animation loading skipped; Stage 1 speed logic remains active.
+--   Non-R6 characters: animation loading skipped; getRigDebugSummary logged; Stage 1 speed logic remains active.
 --
 -- Not in Stage 1/2A: slide, vault, stamina, prone, footsteps, crouch body lowering,
 --   camera height changes, viewmodel sway, strafe/backward/diagonal animations.
@@ -243,6 +248,69 @@ local function disableDefaultAnimate(character: Model)
     end
 end
 
+-- Returns true when all seven canonical R6 body parts are direct children of character.
+-- Used as a structural fallback when Humanoid.RigType does not report R6.
+-- Does NOT indicate that the Humanoid.RigType value is R6 — use isR6Character() for that.
+local function hasR6BodyParts(character: Model): boolean
+    assert(character ~= nil, "[MovementController] hasR6BodyParts: character is required")
+    return character:FindFirstChild("HumanoidRootPart") ~= nil
+        and character:FindFirstChild("Torso") ~= nil
+        and character:FindFirstChild("Head") ~= nil
+        and character:FindFirstChild("Left Arm") ~= nil
+        and character:FindFirstChild("Right Arm") ~= nil
+        and character:FindFirstChild("Left Leg") ~= nil
+        and character:FindFirstChild("Right Leg") ~= nil
+end
+
+-- Returns a formatted diagnostic string showing the rig identity of a character.
+-- Logged whenever R6 animations are skipped so the exact mismatch is visible in Output.
+-- Checks for both R6 and R15 key parts so the log immediately shows which rig is present.
+local function getRigDebugSummary(character: Model, hum: Humanoid): string
+    assert(character ~= nil, "[MovementController] getRigDebugSummary: character is required")
+    assert(hum ~= nil,       "[MovementController] getRigDebugSummary: humanoid is required")
+    return string.format(
+        "RigType=%s Torso=%s UpperTorso=%s LowerTorso=%s LeftArm=%s LeftUpperArm=%s Character=%s",
+        hum.RigType.Name,
+        tostring(character:FindFirstChild("Torso")       ~= nil),
+        tostring(character:FindFirstChild("UpperTorso")  ~= nil),
+        tostring(character:FindFirstChild("LowerTorso")  ~= nil),
+        tostring(character:FindFirstChild("Left Arm")    ~= nil),
+        tostring(character:FindFirstChild("LeftUpperArm") ~= nil),
+        character.Name
+    )
+end
+
+-- Primary R6 check: Humanoid.RigType == R6.
+-- Structural fallback: if RigType does not report R6 but all seven R6 body parts are
+-- present, treat the character as R6 and emit a one-time warning so the mismatch is
+-- visible. This handles edge cases where CharacterRigType was set in StarterPlayer but
+-- the Humanoid.RigType value did not propagate in the current Studio session.
+-- rigTypeWarned must be reset to false before calling (loadMovementAnimations() does this).
+local function isR6Character(character: Model, hum: Humanoid): boolean
+    assert(character ~= nil, "[MovementController] isR6Character: character is required")
+    assert(hum ~= nil,       "[MovementController] isR6Character: humanoid is required")
+
+    if hum.RigType == Enum.HumanoidRigType.R6 then
+        return true
+    end
+
+    -- RigType did not report R6. Try the structural fallback.
+    if hasR6BodyParts(character) then
+        if not rigTypeWarned then
+            rigTypeWarned = true
+            Logger.warn(
+                "[MovementController] isR6Character: structural R6 body parts found but "
+                .. "Humanoid.RigType is not R6 (RigType=" .. hum.RigType.Name
+                .. "). Treating as R6 and loading custom animations. "
+                .. "Verify StarterPlayer.CharacterRigType after rojo serve — see DEBT-049."
+            )
+        end
+        return true
+    end
+
+    return false
+end
+
 -- Finds the Animator inside a character's Humanoid.
 -- Returns nil and warns if not found; all callers skip animation and continue safely.
 local function getAnimator(character: Model): Animator?
@@ -313,8 +381,11 @@ local function playMovementAnimation(animationName: string)
 end
 
 -- Clears old animation state and loads all R6 movement AnimationTracks for the character.
--- Called from setupCharacter() on every spawn/respawn, after disableDefaultAnimate().
+-- Called from setupCharacter() on every spawn/respawn.
 -- Skipped entirely if CUSTOM_MOVEMENT_ANIMATIONS_ENABLED is false.
+-- Rig detection: isR6Character() is checked first (RigType primary, structural fallback).
+--   If the character is confirmed R6, disableDefaultAnimate() is called here before tracks load.
+--   If the character is not R6, getRigDebugSummary() is logged and the function returns early.
 -- Old AnimationTrack references are cleared (previous Animator may already be destroyed).
 -- Old Animation instances are explicitly destroyed before new ones are created.
 local function loadMovementAnimations(character: Model)
@@ -332,21 +403,27 @@ local function loadMovementAnimations(character: Model)
     end
     table.clear(animationInstances)
 
-    -- Rig type safety: only load R6 animations for R6 characters. Warn once per
-    -- character so the log is not spammed from Heartbeat.
+    -- Rig detection: use isR6Character() which checks RigType first and falls back to
+    -- structural body-part inspection. rigTypeWarned was reset above so mismatch warnings
+    -- are not suppressed for this character.
     local hum = character:FindFirstChildOfClass("Humanoid") :: Humanoid?
     if not hum then
         Logger.warn("[MovementController] loadMovementAnimations: no Humanoid — skipping")
         return
     end
-    if hum.RigType ~= Enum.HumanoidRigType.R6 then
-        rigTypeWarned = true
+    if not isR6Character(character, hum) then
         Logger.warn(
-            "[MovementController] Character rig is not R6 — R6 movement animations skipped. "
-            .. "Stage 1 speed/direction logic remains active."
+            "[MovementController] Custom R6 animations skipped. "
+            .. getRigDebugSummary(character, hum)
         )
         return
     end
+
+    -- Character confirmed R6 — disable Animate before loading custom tracks.
+    -- Order matters: Animate must be disabled first so the avatar animation pack cannot
+    -- override custom tracks. Only called here (not in setupCharacter) so Animate is
+    -- left running on non-R6 characters.
+    disableDefaultAnimate(character)
 
     local animator = getAnimator(character)
     if not animator then return end
@@ -432,8 +509,10 @@ end
 -- ============================================================
 
 -- Called on every CharacterAdded. Re-acquires the Humanoid reference, resets
--- movementState, applies the phase-appropriate WalkSpeed immediately, disables the
--- default Animate script, then loads R6 movement animations (Stage 2A layer).
+-- movementState, applies the phase-appropriate WalkSpeed immediately, then loads
+-- R6 movement animations (Stage 2A layer).
+-- Note: disableDefaultAnimate() is called inside loadMovementAnimations() — after the
+-- rig is confirmed R6 — so Animate is only disabled when the rig is actually R6.
 local function setupCharacter(char: Model)
     humanoid = char:WaitForChild("Humanoid") :: Humanoid
 
@@ -447,13 +526,9 @@ local function setupCharacter(char: Model)
         hum.WalkSpeed = 0  -- freeze in LOBBY / PREP / RESULTS / MATCHEND
     end
 
-    -- Disable the default Animate script before loading custom tracks.
-    -- Order matters: Animate must be disabled first so it cannot start playing
-    -- avatar locomotion animations that would override custom tracks.
-    disableDefaultAnimate(char)
-
     -- Load R6 movement animations. Skipped if CUSTOM_MOVEMENT_ANIMATIONS_ENABLED is
     -- false, rig is not R6, or Animator is missing. Stage 1 speed logic is unaffected.
+    -- disableDefaultAnimate() is called inside loadMovementAnimations after rig confirmation.
     loadMovementAnimations(char)
 
     Logger.debug("[MovementController] Character set up: " .. char.Name)
@@ -538,7 +613,8 @@ function MovementController:Start()
     end
 
     -- ── CharacterAdded ────────────────────────────────────────────────────────
-    -- Re-acquires Humanoid, resets state, disables Animate, and loads animations.
+    -- Re-acquires Humanoid, resets state, and loads R6 animations (Animate disable
+    -- is handled inside loadMovementAnimations after rig confirmation).
     local charConn = localPlayer.CharacterAdded:Connect(function(char: Model)
         setupCharacter(char)
     end)
@@ -627,7 +703,7 @@ function MovementController:Start()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1 + Stage 2A)")
+    Logger.debug("[MovementController] Ready (Stage 1 + Stage 2A with R6 detection)")
 end
 
 return MovementController

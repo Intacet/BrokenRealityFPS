@@ -503,13 +503,14 @@ primary protection.
 
 ---
 
-## [DEBT-044] MovementController animation system — Stage 2A forward walk/run only — UPDATED 2026-05-18
+## [DEBT-044] MovementController animation system — Stage 2A forward walk/run only — UPDATED 2026-05-18 (x3)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
 **Studio verification required:** Yes
 **Updated (2026-05-18 — Stage 2A):** R6 walk/run animation playback added. Four AnimationTrack objects are loaded per character via `Humanoid.Animator`. Tracks are played during ACTIVE phase only and cleared on respawn/destroy. `directionName` is correctly computed and drives animation selection alongside `isSprinting`.
-**Updated (2026-05-18 — Animate-disable bug fix):** Custom animation tracks were not playing because the default Roblox `Animate` LocalScript was overriding them. `disableDefaultAnimate()` now sets `character.Animate.Disabled = true` on every `CharacterAdded`, before custom tracks are loaded. Gated by `Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED` and `Constants.DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT` (both default `true`). Animation diagnostics added behind `Constants.MOVEMENT_ANIMATION_DEBUG`. WalkLeft/WalkRight fallback logic added.
+**Updated (2026-05-18 — Animate-disable bug fix):** Custom animation tracks were not playing because the default Roblox `Animate` LocalScript was overriding them. `disableDefaultAnimate()` now sets `character.Animate.Disabled = true` before custom tracks are loaded. Gated by `Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED` and `Constants.DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT` (both default `true`). Animation diagnostics added behind `Constants.MOVEMENT_ANIMATION_DEBUG`. WalkLeft/WalkRight fallback logic added.
+**Updated (2026-05-18 — R6 detection):** `hasR6BodyParts()`, `getRigDebugSummary()`, and `isR6Character()` helpers added. The direct `RigType ~= R6` guard replaced with `isR6Character()` (primary `RigType` check + structural body-part fallback). `disableDefaultAnimate()` moved from `setupCharacter()` into `loadMovementAnimations()` (after rig confirmation) so Animate is only disabled when the character is confirmed R6. `getRigDebugSummary()` logged when animations are skipped.
 
 **Remaining gaps (not in Stage 2A):**
 - Crouch walk animation — not implemented; crouching uses WalkForward at CROUCH_SPEED.
@@ -521,12 +522,13 @@ primary protection.
 
 **Remaining risks:**
 - If custom animation IDs are private or not owned by the game's creator / group, Roblox may silently refuse to load them. `Logger.warn()` fires for any empty assetId; a failed `LoadAnimation()` call will produce an output error. Confirm animation ownership before shipping.
-- If the character is not R6, R6 animations are skipped and `Logger.warn()` fires once per character. Stage 1 speed/direction logic remains active.
+- If neither `RigType == R6` nor the structural body-part check passes, R6 animations are skipped and `getRigDebugSummary()` is logged. Stage 1 speed/direction logic remains active. Verify `StarterPlayer.CharacterRigType` in Studio after each `rojo serve` (DEBT-049).
+- If the structural fallback fires (R6 parts present but `RigType` mismatch), a one-time warn is emitted. This is expected in some Studio sessions — the real fix is DEBT-049 verification.
 - Disabling Animate removes the default idle, jump, fall, and climb animations. Until custom clips are added, the character will T-pose during these states.
 - True armed/unarmed animation set selection requires server-owned equipment state. Until then, the AR15 set is always used regardless of whether the player holds a weapon (see DEBT-050).
 - If `DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = false`, Animate keeps running and may override or blend with custom locomotion tracks. This constant must stay `true` for custom animations to take effect.
 
-**Trigger:** Any playtesting session where T-pose during idle/jump or missing strafing/backward animations is noticeable.
+**Trigger:** Any playtesting session where T-pose during idle/jump or missing strafing/backward animations is noticeable, or where the `getRigDebugSummary` warn appears.
 **Fix when:** A future movement stage (Stage 2B) adds idle/jump/fall/climb custom clips, per-direction animation clips, and armed/unarmed state integration. Do not build until Stage 2A is verified in Studio.
 
 ---

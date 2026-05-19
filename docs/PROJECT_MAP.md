@@ -109,18 +109,31 @@ HordeService (server)   [LEGACY PLAN — replaces with zone ambient spawn budget
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- Stage 1 + 2A (with Animate-disable bug fix): owns local movement input
-                        --   (LeftShift=sprint, C=crouch toggle), movementState table, Humanoid.WalkSpeed,
-                        --   R6 walk/run animation playback, and character.Animate suppression.
+MovementController      -- Stage 1 + 2A (Animate-disable bug fix + R6 detection): owns local movement
+                        --   input (LeftShift=sprint, C=crouch toggle), movementState table,
+                        --   Humanoid.WalkSpeed, R6 walk/run animation playback, and character.Animate
+                        --   suppression (R6 characters only).
                         --   Reads workspace.CurrentCamera.CFrame for 8-directional camera-relative
                         --   direction detection; does NOT write camera.CFrame, CameraOffset, or FOV.
                         --   No new remotes. No slide, vault, or camera effects.
                         --
+                        --   R6 rig detection (added 2026-05-18):
+                        --     isR6Character(character, hum) — primary check: Humanoid.RigType == R6.
+                        --       Structural fallback: hasR6BodyParts() checks all seven canonical R6
+                        --       part names under character. If fallback fires, a one-time Logger.warn
+                        --       is emitted (see DEBT-049 — verify CharacterRigType after rojo serve).
+                        --     hasR6BodyParts(character) — returns true when all seven R6 parts are
+                        --       direct children: HumanoidRootPart, Torso, Head, Left Arm, Right Arm,
+                        --       Left Leg, Right Leg.
+                        --     getRigDebugSummary(character, hum) — returns a formatted string with
+                        --       RigType.Name, Torso/UpperTorso/LowerTorso/Left Arm/LeftUpperArm
+                        --       presence, and character.Name. Logged when animations are skipped.
+                        --
                         --   Animate script suppression (bug fix — 2026-05-18):
-                        --     disableDefaultAnimate() sets character.Animate.Disabled = true on every
-                        --     CharacterAdded, before custom tracks are loaded. This prevents the avatar
-                        --     animation pack (the default Animate LocalScript) from overriding custom
-                        --     R6 locomotion animations. Animate is DISABLED, not DESTROYED.
+                        --     disableDefaultAnimate() is called inside loadMovementAnimations() AFTER
+                        --     isR6Character() passes — NOT from setupCharacter() directly.
+                        --     This ensures Animate is only disabled for confirmed R6 characters.
+                        --     Sets character.Animate.Disabled = true; does NOT destroy Animate.
                         --     Side effect: idle, jump, fall, and climb animations are also suppressed
                         --     until custom replacements are added in a future stage.
                         --     Gated by two constants (both default true):
@@ -142,7 +155,8 @@ MovementController      -- Stage 1 + 2A (with Animate-disable bug fix): owns loc
                         --       AR15.RunForward     = rbxassetid://124640088553427
                         --     Not in Stage 2A: crouch anim, backward, diagonal, lower/upper-body
                         --       split, reload/fire/ADS weapon animations.
-                        --     If character is not R6, animation loading is skipped; Stage 1 logic active.
+                        --     If character fails R6 detection, getRigDebugSummary is logged and
+                        --       animation loading is skipped; Stage 1 speed logic remains active.
                         --     If animation IDs are private/not owned by the game, Roblox may refuse to
                         --     load them — check Output for permission errors.
                         --
