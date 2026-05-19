@@ -149,6 +149,22 @@ Constants.CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY = true
 -- Set false to silence custom mouse-lock diagnostics in production.
 Constants.CUSTOM_MOUSE_LOCK_DEBUG = true
 
+-- When true, MovementController calls LocalPlayer.DevEnableMouseLock = false on Start()
+-- and on CharacterAdded to prevent Roblox's built-in Shift Lock from interfering with
+-- LeftShift sprint. This is a client-side fix; also set StarterPlayer.EnableMouseLockOption
+-- = false in the project (default.project.json / Studio) for a full solution.
+Constants.DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK = true
+
+-- When true, MovementController writes UserInputService.MouseBehavior = LockCenter on every
+-- Heartbeat while customMouseLocked is true. Prevents CoreScripts or UI transitions from
+-- stealing mouse lock after the LeftAlt toggle applies it.
+Constants.CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME = true
+
+-- ContextActionService priority for the custom mouse-lock toggle binding.
+-- Higher numbers take priority over lower ones. 3000 is above the default CoreScript
+-- input priority (2000) so the LeftAlt bind is processed before CoreScripts can intercept.
+Constants.CUSTOM_MOUSE_LOCK_INPUT_PRIORITY = 3000
+
 -- ============================================================
 -- Timing constants
 -- ============================================================

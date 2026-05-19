@@ -126,8 +126,10 @@ MovementController      -- Stage 1 + 2A + 2C + 2D (Animate-disable, R6 detection
                         --   Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
                         --   Does NOT implement a full custom camera controller.
                         --   No new remotes. No slide, vault, or camera effects.
-                        --   Manual Studio step: disable StarterPlayer.EnableMouseLockOption = false
-                        --     to prevent Roblox default Shift Lock from conflicting with LeftShift sprint.
+                        --   StarterPlayer.EnableMouseLockOption = false is now set in default.project.json
+                        --     (Rojo "Bool" property) — no manual Studio step required for this setting.
+                        --   LocalPlayer.DevEnableMouseLock = false is also applied client-side on Start
+                        --     and on each CharacterAdded via disableRobloxDefaultMouseLock() (pcall).
                         --
                         --   Custom mouse-lock toggle (Stage 2D — 2026-05-19):
                         --     LeftAlt (Constants.CUSTOM_MOUSE_LOCK_TOGGLE_KEY) toggles customMouseLocked.
@@ -135,13 +137,28 @@ MovementController      -- Stage 1 + 2A + 2C + 2D (Animate-disable, R6 detection
                         --     customMouseLocked is the source of truth for strafe animation gating.
                         --     SetCustomMouseLocked(true):  customMouseLocked=true,  MouseBehavior=LockCenter.
                         --     SetCustomMouseLocked(false): customMouseLocked=false, MouseBehavior=Default.
-                        --     Mouse lock is released to Default when:
-                        --       • leaving ACTIVE phase
+                        --     Mouse lock is released to Default ONLY when:
                         --       • character respawns (loadMovementAnimations reset)
                         --       • destroy() is called
+                        --     Phase exits (ACTIVE → LOBBY → RESULTS) do NOT reset customMouseLocked.
+                        --     The player's LeftAlt toggle state is preserved across all phase changes.
                         --     Gated by Constants.CUSTOM_MOUSE_LOCK_ENABLED (default true).
                         --     This is NOT a full custom camera system — LockCenter locks the cursor but
                         --     camera rotation still runs through the Roblox default camera controller.
+                        --
+                        --   Stage 2D bugfix (2026-05-19):
+                        --     disableRobloxDefaultMouseLock() — called in Start() and on every
+                        --       CharacterAdded; uses pcall on LocalPlayer.DevEnableMouseLock = false;
+                        --       gated by Constants.DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK (default true).
+                        --     ContextActionService:BindActionAtPriority — replaces UserInputService.InputBegan
+                        --       for the LeftAlt toggle. Priority 3000 (> CoreScript default 2000) eliminates
+                        --       the ~1-frame input lag. Action name: MOUSE_LOCK_ACTION_NAME (module constant).
+                        --       Unbound by name in destroy(); NOT stored in _connections.
+                        --     Reapply-every-frame — Heartbeat re-writes MouseBehavior = LockCenter while
+                        --       customMouseLocked is true; prevents CoreScripts from stealing the lock state.
+                        --       Gated by Constants.CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME (default true).
+                        --     default.project.json EnableMouseLockOption = false — StarterPlayer property
+                        --       set via Rojo "Bool" syntax; replaces the previous "Manual Studio step".
                         --
                         --   Strafe animation gating (Stage 2C + 2D):
                         --     WalkLeft/WalkRight only play when customMouseLocked == true (LeftAlt on).
@@ -279,6 +296,13 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --     CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY = true — when true, strafe gating reads
              --       customMouseLocked (not UserInputService.MouseBehavior / Roblox ShiftLock).
              --     CUSTOM_MOUSE_LOCK_DEBUG = true — logs mouse-lock toggle events to Output.
+             --   Custom mouse-lock bugfix constants (Stage 2D bugfix — 2026-05-19):
+             --     DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK = true — gates disableRobloxDefaultMouseLock()
+             --       which sets LocalPlayer.DevEnableMouseLock = false on Start and CharacterAdded.
+             --     CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME = true — Heartbeat re-writes MouseBehavior
+             --       = LockCenter every frame while customMouseLocked is true.
+             --     CUSTOM_MOUSE_LOCK_INPUT_PRIORITY = 3000 — ContextActionService priority for LeftAlt
+             --       bind; 3000 > CoreScript default 2000 ensures immediate response.
              --   Movement animation playback speed multipliers (Stage 2C):
              --     MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 2.0  (WalkForward)
              --     MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.35 (WalkLeft, WalkRight)

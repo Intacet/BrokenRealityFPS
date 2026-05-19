@@ -7,6 +7,83 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-19] — Movement Stage 2D bugfix: DevEnableMouseLock, ContextActionService bind, reapply-every-frame, phase-exit preserves lock
+
+### Summary
+Three runtime bugs found after Stage 2D shipped are fixed:
+1. **Roblox default Shift Lock still activating on LeftShift** — `default.project.json` now sets
+   `StarterPlayer.EnableMouseLockOption = false` via Rojo `"Bool"` syntax. MovementController's
+   `Start()` and every `CharacterAdded` call `disableRobloxDefaultMouseLock()` (pcall on
+   `LocalPlayer.DevEnableMouseLock = false`) to suppress the built-in lock client-side.
+2. **LeftAlt toggle had ~1-frame delay** — `UserInputService.InputBegan` handler replaced with
+   `ContextActionService:BindActionAtPriority` at priority 3000 (above CoreScript default 2000).
+   The action is bound and unbound by name; NOT stored in `_connections`.
+3. **WalkLeft/WalkRight strafe animations not playing** — new Heartbeat reapply: while
+   `customMouseLocked` is `true`, `MouseBehavior = LockCenter` is re-written every frame so
+   CoreScripts cannot silently steal the lock state after the LeftAlt toggle fires.
+
+**Phase-exit behavior changed:** `customMouseLocked` is no longer reset on leaving ACTIVE.
+The player's LeftAlt toggle state is now preserved across phase changes. Only respawn
+(`loadMovementAnimations`) and `destroy()` reset it to `false`.
+
+### Changed files
+
+- **`src/shared/Constants.lua`** — three new constants in the custom mouse-lock section:
+  - `DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK = true` — gates the `DevEnableMouseLock = false` call.
+  - `CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME = true` — causes Heartbeat to reapply LockCenter while locked.
+  - `CUSTOM_MOUSE_LOCK_INPUT_PRIORITY = 3000` — ContextActionService bind priority for LeftAlt.
+
+- **`default.project.json`** — added `EnableMouseLockOption: { "Bool": false }` to
+  `StarterPlayer.$properties`. This disables the Roblox native Shift Lock option project-wide
+  without requiring a manual Studio step.
+
+- **`src/client/MovementController.lua`**:
+  - New `ContextActionService` service require + module-level `MOUSE_LOCK_ACTION_NAME` constant.
+  - New private helper `applyCustomMouseLock()` — writes `UserInputService.MouseBehavior` based on
+    `customMouseLocked` and `CUSTOM_MOUSE_LOCK_ENABLED`; called by `SetCustomMouseLocked()`.
+  - New private helper `disableRobloxDefaultMouseLock()` — pcall on `DevEnableMouseLock = false`;
+    warns on failure via Logger; gated by `DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK`.
+  - `Start()`: calls `disableRobloxDefaultMouseLock()` immediately; `CharacterAdded` also calls it.
+  - `Start()`: LeftAlt binding replaced — `UserInputService.InputBegan` handler removed, replaced
+    with `ContextActionService:BindActionAtPriority(MOUSE_LOCK_ACTION_NAME, ..., 3000, LeftAlt)`.
+    Returns `Sink` on `Begin`; `Pass` on `End`/`Change` and when TextBox is focused.
+  - `Start()` Heartbeat: reapply-every-frame block added at the top — writes `LockCenter` while
+    `customMouseLocked` is true; runs regardless of phase.
+  - `RoundStateChanged` handler: removed the `customMouseLocked` reset block. Phase exit no longer
+    touches `customMouseLocked` — toggle state is preserved across phases.
+  - `destroy()`: calls `ContextActionService:UnbindAction(MOUSE_LOCK_ACTION_NAME)` before connection cleanup.
+  - `SetCustomMouseLocked()`: now delegates to `applyCustomMouseLock()` instead of writing
+    `UserInputService.MouseBehavior` inline.
+  - `customMouseLocked` comment updated: documents phase-change preservation, respawn/destroy reset.
+  - Header, Owns, animation constants list, and Ready log updated for Stage 2D bugfix.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated to (x7); new "Stage 2D bugfix" update entry;
+  remaining risks updated (stale Shift Lock and phase-exit notes replaced with current behavior).
+
+- **`docs/PROJECT_MAP.md`** — MovementController and Constants sections updated:
+  - "Mouse lock released on leaving ACTIVE" removed; now only released on respawn / destroy().
+  - Three new `DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK`, `CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME`,
+    `CUSTOM_MOUSE_LOCK_INPUT_PRIORITY` constants documented.
+  - `disableRobloxDefaultMouseLock()`, `applyCustomMouseLock()`, ContextActionService bind
+    behavior documented.
+
+### What was NOT changed
+`GunController`, `ViewModelController`, `ClientInit`, `SoundController`, all UI controllers, all
+server files, `WeaponData`, animation IDs, `CLAUDE.md`, `PROJECT_RULES.md`, `NAMING.md`.
+No remotes added. No camera.CFrame writes. No movement speeds changed. No gun/combat/server changes.
+
+### Studio verification required
+- LeftAlt toggles custom mouse lock immediately (no perceptible lag).
+- LeftShift does NOT activate Roblox native Shift Lock icon or any native cursor centering.
+- WalkLeft/WalkRight strafe animations play while `customMouseLocked` is true.
+- Strafe anims stop when LeftAlt is toggled off; WalkForward plays instead.
+- `customMouseLocked` state persists through ACTIVE → LOBBY → RESULTS → ACTIVE cycles.
+- Mouse lock is released on character respawn and when the controller is destroyed.
+- No console errors. `[MovementController] Roblox default Shift Lock disabled for LocalPlayer`
+  appears in Output on Start (when `CUSTOM_MOUSE_LOCK_DEBUG = true`).
+
+---
+
 ## [2026-05-19] — Movement Stage 2D: custom mouse-lock toggle (LeftAlt), LeftShift sprint-only, strafe gating via custom lock
 
 ### Summary
@@ -72,12 +149,10 @@ files, `WeaponData`, `default.project.json`, `CLAUDE.md`, `PROJECT_RULES.md`, `N
 No remotes added. No camera.CFrame writes. No movement speeds changed. No animation IDs changed.
 No gun/combat/server state changed. `LeftShift` sprint handler unchanged.
 
-### Manual Studio step required
-- In Studio, set `StarterPlayer.EnableMouseLockOption = false` to disable Roblox's default Shift Lock.
-  If left enabled, the Roblox native shift-lock can activate on Shift key independently of the
-  custom LeftAlt toggle, causing the legacy `MouseBehavior == LockCenter` path to trigger unexpectedly
-  (if `CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY` is ever set to false).
-- `default.project.json` is NOT edited in this task — apply this setting manually in Studio.
+### Manual Studio step (now automated in Stage 2D bugfix)
+- `StarterPlayer.EnableMouseLockOption = false` was previously a required manual Studio step.
+  It has since been automated — `default.project.json` now sets this property via Rojo `"Bool"` syntax.
+  See the Stage 2D bugfix entry above for the full resolution.
 
 ### Debt entries updated
 - DEBT-044: updated (x6) with Stage 2D: custom mouse-lock toggle, LeftAlt key, strafe gate source

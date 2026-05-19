@@ -27,6 +27,9 @@
       "$properties": {
         "CharacterRigType": {
           "Enum": 0
+        },
+        "EnableMouseLockOption": {
+          "Bool": false
         }
       },
       "StarterPlayerScripts": {

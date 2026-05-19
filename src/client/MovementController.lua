@@ -43,6 +43,25 @@
 -- This is NOT a full custom camera controller — camera rotation still runs through the Roblox
 -- default camera system (LockCenter only locks cursor to center; it does not replace camera logic).
 --
+-- Stage 2D bugfix (2026-05-19): Three bugs found after Stage 2D shipped:
+--   (1) Roblox default Shift Lock still toggling with LeftShift:
+--       Fixed via LocalPlayer.DevEnableMouseLock = false (pcall, once per Start + per respawn)
+--       and StarterPlayer.EnableMouseLockOption = false in default.project.json.
+--       New helper: disableRobloxDefaultMouseLock(). Gated by DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK.
+--   (2) LeftAlt mouse-lock had ~1-frame delayed activation (InputBegan fires after CoreScripts):
+--       Fixed via ContextActionService:BindActionAtPriority at priority 3000 (above CoreScript
+--       default 2000). Action name MOUSE_LOCK_ACTION_NAME, unbound by name in destroy().
+--   (3) WalkLeft/WalkRight strafe animations no longer playing:
+--       Root cause: CoreScripts or UI transitions could reset MouseBehavior after the LeftAlt
+--       toggle fired, but customMouseLocked (the gate source) still read true. Added
+--       CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME: every Heartbeat re-writes LockCenter while
+--       customMouseLocked is true so the lock cannot be silently stolen.
+--   Phase behavior change: customMouseLocked is NO LONGER reset on phase exit. The player's
+--   LeftAlt toggle state persists across ACTIVE → LOBBY → RESULTS → ACTIVE. Only respawn
+--   (loadMovementAnimations) and destroy() reset it to false.
+--   New constants added: DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK, CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME,
+--   CUSTOM_MOUSE_LOCK_INPUT_PRIORITY (all in Constants.lua).
+--
 -- NOTE: disabling Animate removes idle, jump, fall, and climb animations in addition
 -- to locomotion. Custom replacements for those states are needed in a future stage.
 --
@@ -73,6 +92,9 @@
 --   CUSTOM_MOUSE_LOCK_TOGGLE_KEY = Enum.KeyCode.LeftAlt — toggle key (default: LeftAlt)
 --   CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY = true      — strafe gate reads customMouseLocked (not native ShiftLock)
 --   CUSTOM_MOUSE_LOCK_DEBUG = true                  — logs mouse-lock toggle events to Output
+--   DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK = true        — calls DevEnableMouseLock=false on Start/respawn
+--   CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME = true    — re-writes LockCenter every Heartbeat while locked
+--   CUSTOM_MOUSE_LOCK_INPUT_PRIORITY = 3000         — ContextActionService priority for LeftAlt bind
 --   MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER = 2.0  — WalkForward AdjustSpeed multiplier
 --   MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.35 — WalkLeft/WalkRight AdjustSpeed multiplier
 --   MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER = 1.0   — RunForward AdjustSpeed multiplier
@@ -117,10 +139,15 @@
 -- Phase source: MatchController:GetPhase() (cached value) + RoundStateChanged for live updates.
 -- Initialized at position 9 in ClientInit.client.lua.
 
-local Players           = game:GetService("Players")
-local RunService        = game:GetService("RunService")
-local UserInputService  = game:GetService("UserInputService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players               = game:GetService("Players")
+local RunService            = game:GetService("RunService")
+local UserInputService      = game:GetService("UserInputService")
+local ContextActionService  = game:GetService("ContextActionService")
+local ReplicatedStorage     = game:GetService("ReplicatedStorage")
+
+-- ContextActionService action name for the custom mouse-lock toggle.
+-- Used by both Start() (bind) and destroy() (unbind). Must be module-unique.
+local MOUSE_LOCK_ACTION_NAME: string = "MovementController_ToggleCustomMouseLock"
 
 -- ============================================================
 -- Dependencies
@@ -198,8 +225,9 @@ local lastStrafeBlockedState: boolean = false
 -- Custom mouse-lock state (Stage 2D).
 -- true  = LeftAlt has toggled mouse lock on; UserInputService.MouseBehavior == LockCenter.
 -- false = mouse lock off; UserInputService.MouseBehavior == Default.
--- Toggled by the LeftAlt input handler (Start()) and by SetCustomMouseLocked().
--- Reset to false on respawn, when leaving ACTIVE, and in destroy().
+-- Toggled by the ContextActionService handler (Start()) and by SetCustomMouseLocked().
+-- Reset to false on respawn (loadMovementAnimations) and in destroy().
+-- Phase changes do NOT reset this — the player's toggle state is preserved across phases.
 -- This is the source of truth for strafe animation gating — NOT UserInputService.MouseBehavior.
 local customMouseLocked: boolean = false
 
@@ -290,6 +318,51 @@ local function classifyDirection(moveDir: Vector3): string
     elseif isRight            then return "Right"
     elseif isLeft             then return "Left"
     else                           return "Idle"
+    end
+end
+
+-- ============================================================
+-- Private helpers — Stage 2D: custom mouse lock
+-- ============================================================
+
+-- Applies the current customMouseLocked state to UserInputService.MouseBehavior.
+-- Called by SetCustomMouseLocked() and the ContextActionService toggle handler.
+-- Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
+-- Does NOT add camera rotation logic.
+local function applyCustomMouseLock()
+    if Constants.CUSTOM_MOUSE_LOCK_ENABLED ~= true then
+        customMouseLocked                  = false
+        UserInputService.MouseBehavior     = Enum.MouseBehavior.Default
+        return
+    end
+    if customMouseLocked then
+        UserInputService.MouseBehavior     = Enum.MouseBehavior.LockCenter
+    else
+        UserInputService.MouseBehavior     = Enum.MouseBehavior.Default
+    end
+end
+
+-- Attempts to disable the Roblox built-in Shift Lock for the local player by setting
+-- LocalPlayer.DevEnableMouseLock = false. This is a client-side companion to the
+-- StarterPlayer.EnableMouseLockOption = false project setting (default.project.json).
+-- Using pcall because DevEnableMouseLock is only settable in LocalScripts and may fail
+-- if the property is not available on this Roblox version.
+-- Only acts when Constants.DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK == true.
+local function disableRobloxDefaultMouseLock()
+    if Constants.DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK ~= true then return end
+    local localPlayer = Players.LocalPlayer
+    local ok, err = pcall(function()
+        localPlayer.DevEnableMouseLock = false
+    end)
+    if ok then
+        if Constants.CUSTOM_MOUSE_LOCK_DEBUG then
+            Logger.debug("[MovementController] Roblox default Shift Lock disabled for LocalPlayer")
+        end
+    else
+        Logger.warn(
+            "[MovementController] disableRobloxDefaultMouseLock: DevEnableMouseLock failed: "
+            .. tostring(err)
+        )
     end
 end
 
@@ -824,20 +897,10 @@ function MovementController.SetCustomMouseLocked(enabled: boolean)
         "[MovementController] SetCustomMouseLocked: enabled must be a boolean"
     )
 
-    if Constants.CUSTOM_MOUSE_LOCK_ENABLED ~= true then
-        -- Feature disabled — force off and release cursor.
-        customMouseLocked                  = false
-        UserInputService.MouseBehavior     = Enum.MouseBehavior.Default
-        return
-    end
-
-    if enabled then
-        customMouseLocked                  = true
-        UserInputService.MouseBehavior     = Enum.MouseBehavior.LockCenter
-    else
-        customMouseLocked                  = false
-        UserInputService.MouseBehavior     = Enum.MouseBehavior.Default
-    end
+    customMouseLocked = enabled
+    -- applyCustomMouseLock() handles the CUSTOM_MOUSE_LOCK_ENABLED gate and writes
+    -- UserInputService.MouseBehavior immediately (no deferred task, no Heartbeat wait).
+    applyCustomMouseLock()
 
     if Constants.CUSTOM_MOUSE_LOCK_DEBUG then
         Logger.debug(
@@ -856,6 +919,9 @@ end
 -- instances, and resets all state.
 -- Safe to call even if Start() was never called (iterates empty tables).
 function MovementController:destroy()
+    -- Unbind the ContextActionService mouse-lock action (not stored in _connections).
+    ContextActionService:UnbindAction(MOUSE_LOCK_ACTION_NAME)
+
     -- Stop the active animation if still playing, then clear track references.
     stopCurrentMovementAnimation()
     table.clear(animationTracks)
@@ -890,6 +956,11 @@ end
 function MovementController:Start()
     local localPlayer = Players.LocalPlayer
 
+    -- Disable Roblox's built-in Shift Lock immediately so LeftShift is sprint-only.
+    -- Also applied on every CharacterAdded below because CoreScripts may re-enable it
+    -- on respawn. Gated by Constants.DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK.
+    disableRobloxDefaultMouseLock()
+
     -- Handle a character that already exists before Start() is called.
     -- Rare in normal play (ClientInit runs early) but correct to handle.
     if localPlayer.Character then
@@ -900,6 +971,8 @@ function MovementController:Start()
     -- Re-acquires Humanoid, resets state, and loads R6 animations (Animate disable
     -- is handled inside loadMovementAnimations after rig confirmation).
     local charConn = localPlayer.CharacterAdded:Connect(function(char: Model)
+        -- Re-disable Roblox Shift Lock after respawn — CoreScripts may restore it.
+        disableRobloxDefaultMouseLock()
         setupCharacter(char)
     end)
     table.insert(_connections, charConn)
@@ -918,16 +991,10 @@ function MovementController:Start()
             if hum then
                 hum.WalkSpeed = 0
             end
-            -- Release custom mouse lock when leaving ACTIVE.
-            -- Prefer releasing to Default outside ACTIVE for testing safety:
-            -- leaving the cursor locked in LOBBY/RESULTS/MATCHEND would be disorienting.
-            if customMouseLocked then
-                customMouseLocked              = false
-                UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-                if Constants.CUSTOM_MOUSE_LOCK_DEBUG then
-                    Logger.debug("[MovementController] custom mouse lock released: left ACTIVE phase")
-                end
-            end
+            -- Custom mouse lock is intentionally NOT reset here.
+            -- The player's LeftAlt toggle state is preserved across phase changes
+            -- (ACTIVE → LOBBY → RESULTS → ACTIVE). Only respawn (loadMovementAnimations)
+            -- and destroy() clear customMouseLocked.
         else
             -- Entering ACTIVE: restore walk speed.
             local hum = humanoid
@@ -967,24 +1034,38 @@ function MovementController:Start()
     )
     table.insert(_connections, sprintEndConn)
 
-    -- ── Input: Custom mouse-lock toggle (LeftAlt) ────────────────────────────
-    -- LeftAlt toggles the custom mouse-lock state. This replaces the role that Roblox
-    -- default Shift Lock played: locking the cursor to center enables strafing without
-    -- conflicting with LeftShift (sprint) in any way.
-    -- Note: gameProcessed is not used as a guard here — LeftAlt is not intercepted by
-    -- Roblox CoreScripts the way LeftShift is. TextBox check prevents accidental toggle
-    -- while the player is typing.
-    local mouseLockToggleConn = UserInputService.InputBegan:Connect(
-        function(input: InputObject, _gp: boolean)
-            if Constants.CUSTOM_MOUSE_LOCK_ENABLED ~= true then return end
-            if input.KeyCode ~= Constants.CUSTOM_MOUSE_LOCK_TOGGLE_KEY then return end
+    -- ── Input: Custom mouse-lock toggle (LeftAlt via ContextActionService) ──────
+    -- Priority 3000 > CoreScript default 2000 — LeftAlt is intercepted before CoreScripts
+    -- can delay or consume it, eliminating the ~1-frame toggle lag seen with InputBegan.
+    -- Returns Sink on Begin so CoreScripts never see the key; returns Pass on all other
+    -- states (End, Change) so those are handled normally.
+    -- NOT stored in _connections — unbound by name via MOUSE_LOCK_ACTION_NAME in destroy().
+    ContextActionService:BindActionAtPriority(
+        MOUSE_LOCK_ACTION_NAME,
+        function(
+            _actionName: string,
+            inputState: Enum.UserInputState,
+            _inputObj: InputObject
+        ): Enum.ContextActionResult
+            -- Only act on Begin; pass End and Change through.
+            if inputState ~= Enum.UserInputState.Begin then
+                return Enum.ContextActionResult.Pass
+            end
             -- Block toggle while the player is focused on a TextBox (typing).
-            if UserInputService:GetFocusedTextBox() ~= nil then return end
-            -- Toggle custom mouse lock state.
+            if UserInputService:GetFocusedTextBox() ~= nil then
+                return Enum.ContextActionResult.Pass
+            end
+            if Constants.CUSTOM_MOUSE_LOCK_ENABLED ~= true then
+                return Enum.ContextActionResult.Pass
+            end
             MovementController.SetCustomMouseLocked(not customMouseLocked)
-        end
+            -- Sink so CoreScripts do not see the LeftAlt key press.
+            return Enum.ContextActionResult.Sink
+        end,
+        false,                                          -- createTouchButton
+        Constants.CUSTOM_MOUSE_LOCK_INPUT_PRIORITY,    -- priority (3000)
+        Constants.CUSTOM_MOUSE_LOCK_TOGGLE_KEY          -- Enum.KeyCode.LeftAlt
     )
-    table.insert(_connections, mouseLockToggleConn)
 
     -- ── Input: Crouch (C toggle) ──────────────────────────────────────────────
     local crouchConn = UserInputService.InputBegan:Connect(
@@ -1006,6 +1087,13 @@ function MovementController:Start()
     -- Runs every physics step. Updates movementState, re-applies speed, and drives
     -- the Stage 2A animation layer. No camera writes.
     local heartbeatConn = RunService.Heartbeat:Connect(function(_dt: number)
+        -- Reapply custom mouse lock every frame while it is active.
+        -- Prevents CoreScripts or UI transitions from resetting MouseBehavior after the
+        -- LeftAlt toggle fires. Runs regardless of phase so the lock persists in all states.
+        if Constants.CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME and customMouseLocked then
+            UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+        end
+
         local hum = humanoid
         if not hum then return end
         if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
@@ -1022,7 +1110,7 @@ function MovementController:Start()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1 + 2A + 2C + 2D: strafe gating, speed multipliers, shift-lock sprint, LeftAlt custom mouse lock)")
+    Logger.debug("[MovementController] Ready (Stage 1 + 2A + 2C + 2D + bugfix: DevMouseLock disabled, ContextActionService bind at priority 3000, reapply-every-frame)")
 end
 
 return MovementController
