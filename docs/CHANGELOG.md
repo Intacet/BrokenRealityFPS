@@ -7,6 +7,52 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-19] — Workflow: MCP verification rules strengthened — always use Studio MCP when accessible
+
+### Summary
+The MCP verification rules in `CLAUDE.md` and `docs/PROJECT_RULES.md` were significantly expanded.
+Previously the rule only described what to do when MCP was *unavailable*. The updated rule now
+requires proactive MCP/Studio verification **before committing** for any runtime-affecting change,
+and explicitly states that static checks alone are not sufficient for gameplay systems.
+
+### Changed files
+
+- **`CLAUDE.md`** — "MCP unavailable / GitHub-only mode" section replaced with a full
+  "MCP verification rule" section:
+  - Positive requirement: always use MCP when accessible; do not skip it because static checks pass.
+  - Explicit list of system categories that require MCP before committing: `src/server/`,
+    `src/client/`, `src/shared/`, remotes, Rojo config, player spawning, camera/mouse behavior,
+    viewmodel, movement input, combat, UI, economy/inventory/zone systems, character rig, animation.
+  - Verification workflow: edit → `rojo serve` → MCP → play → verify → commit.
+  - Clear prohibition: never claim Studio verification unless actually performed through MCP or a
+    confirmed manual Studio test. "This should work" and "static checks pass" are not equivalents.
+  - Static checks (`selene`, `rojo build`, formatting) explicitly named as pre-conditions, not
+    replacements for runtime verification.
+  - "When MCP is unavailable" sub-section preserved and clarified.
+
+- **`docs/PROJECT_RULES.md`** — new "Studio / MCP verification" section added after "Build discipline":
+  - Verification requirement table: maps system categories to examples.
+  - Step-by-step workflow for MCP-accessible sessions.
+  - "When MCP is unavailable" behavior rules.
+  - "Systems that especially must not skip MCP" callout (movement input, camera, animation,
+    remotes, character spawn lifecycle, economy).
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-034 updated (x2):
+  - Reflects the expanded rule scope (now covers "use MCP when available", not just "MCP unavailable").
+  - Notes that the self-reporting risk remains unresolved (no CI gate yet).
+
+### What was NOT changed
+No `src/` files. No gameplay logic. No remotes. No camera changes. No Rojo config changes.
+No animation IDs. No `docs/PROJECT_MAP.md`. No `docs/NAMING.md`. No `stylua.toml`, `selene.toml`.
+
+### Validation
+- `rojo build default.project.json` — succeeds (no Rojo config changes; build confirms tree is valid).
+- No markdown linter is configured locally — no `markdownlint` or equivalent is installed.
+- `git diff --name-only` confirms only `CLAUDE.md`, `docs/PROJECT_RULES.md`, `docs/TECHNICAL_DEBT.md`,
+  and `docs/CHANGELOG.md` changed.
+
+---
+
 ## [2026-05-19] — Movement Stage 2D bugfix: DevEnableMouseLock, ContextActionService bind, reapply-every-frame, phase-exit preserves lock
 
 ### Summary

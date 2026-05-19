@@ -420,14 +420,22 @@ primary protection.
 
 ---
 
-## [DEBT-034] MCP-unavailable work has no automated scope guard — relies on Claude self-reporting
+## [DEBT-034] MCP verification relies on Claude self-reporting — no automated scope guard — UPDATED 2026-05-19 (x2)
 
-**File:** `CLAUDE.md`
+**File:** `CLAUDE.md`, `docs/PROJECT_RULES.md`
 **Severity:** Low-Medium
 **Studio verification required:** No
-**Risk:** The MCP unavailable rule instructs Claude Code not to claim Studio verification when MCP is disconnected and to restrict scope to docs/config/static-validation. This is self-reported — there is no CI gate that checks whether a change touching gameplay files was actually tested in Studio. If a session misidentifies MCP as available, or proceeds with a runtime change without explicitly flagging it, the unverified change enters the codebase silently.
-**Trigger:** Any gameplay-affecting change (camera, viewmodel, combat, match-loop, objectives, replication) committed without a Studio session — especially in a GitHub-only session.
-**Fix when:** A CI step can run `rojo build` and `selene` automatically on every push to catch at least structural errors. Full runtime verification always requires Studio. Until CI is added, unverified gameplay changes must be manually tagged "needs Studio verification" in the PR description and in a TECHNICAL_DEBT entry.
+**Risk:** MCP verification rules are behavioral conventions enforced by `CLAUDE.md` and `docs/PROJECT_RULES.md`. There is no CI gate, hook, or linter that verifies whether Studio MCP was actually used before a commit was made. A session that does not read `CLAUDE.md` at startup, or one that proceeds with a runtime change without explicitly flagging it, may commit unverified gameplay changes silently.
+**Updated (2026-05-19 — rule strengthened):** The MCP verification rule was significantly expanded. Previously it only described what to do when MCP was *unavailable*. The updated rule now:
+- Requires MCP verification **before committing** for any change touching `src/server/`, `src/client/`, `src/shared/`, remotes, Rojo config, player spawning, camera/mouse behavior, viewmodel, movement input, combat, UI, economy, inventory, zone systems, character rig, or animations.
+- Explicitly states that static checks (`selene`, `rojo build`, formatting) do **not** replace MCP runtime verification for gameplay systems.
+- Defines a workflow: edit → `rojo serve` → MCP → play → verify → commit.
+- Prohibits claiming Studio verification unless it was actually performed through MCP or a confirmed manual Studio test.
+- Lists specific systems where MCP must not be skipped even for "small" changes (movement input, camera, animation, remotes, character spawn lifecycle, economy).
+The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP verification" section with a verification table and workflow).
+**Remaining risk:** The rules are still self-enforced. No CI gate exists to confirm MCP was used. The structural gap is unchanged.
+**Trigger:** Any gameplay-affecting change (camera, viewmodel, combat, movement, match-loop, objectives, replication, economy, UI) committed without a Studio session — especially in a GitHub-only or context-limited session.
+**Fix when:** A CI step can run `rojo build` and `selene` automatically on every push to catch at least structural errors. Full runtime verification always requires Studio. Until CI is added, unverified gameplay changes must be manually tagged "needs Studio verification" in the PR description and in a TECHNICAL_DEBT entry. Separately, a `.claude/settings.json` PreToolUse hook could remind the session to confirm MCP availability before editing gameplay files.
 
 ---
 

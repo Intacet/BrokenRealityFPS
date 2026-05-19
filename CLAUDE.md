@@ -385,14 +385,47 @@ Every public API function that accepts required parameters must validate them wi
 - If the prompt is safe and includes "review then proceed if safe", continue after the pre-flight review without waiting for another confirmation.
 - Do not use the pre-flight review to avoid reasonable work. If the task is clear and safe, proceed.
 
-**MCP unavailable / GitHub-only mode:**
-- If Roblox Studio MCP is unavailable, do not claim Studio verification was performed.
+**MCP verification rule (Studio / Roblox Studio MCP):**
+
+When MCP is accessible, always use it. Do not skip MCP verification just because static checks pass.
+
+**What requires MCP/Studio verification before committing (when MCP is accessible):**
+Any change touching the following systems must be verified in Roblox Studio via MCP before the commit is made:
+- `src/server/` — any server-side service (match state, teams, objectives, damage, economy, shop, extraction, loot, death drops, monsters)
+- `src/client/` — any client controller (movement, camera, viewmodel, gun, sound, UI, animation)
+- `src/shared/` — Constants, WeaponData, WeaponFeel, or any shared module that affects runtime behavior
+- Remotes (`ReplicatedStorage/Remotes`) — any new or changed RemoteEvent / RemoteFunction
+- Rojo config (`default.project.json`) — property changes that affect StarterPlayer, character spawning, or rig type
+- Player spawning or character lifecycle
+- Camera or UserInputService behavior (CameraType, MouseBehavior, FieldOfView)
+- Viewmodel or weapon attachment changes
+- Movement input (LeftShift, LeftAlt, C, any key binding)
+- Combat (damage, hit validation, ammo, reload)
+- All UI (HUD, MatchUI, DeathScreen, KillFeedUI, CrosshairUI, ObjectiveUI)
+- Economy, inventory, shop, zone, or base systems (when built)
+- Character rig changes (R6/R15 target, StarterPlayer.CharacterRigType)
+- Animation loading, animation IDs, or AnimationTrack playback
+
+**Workflow when MCP is accessible:**
+1. Write or edit the code.
+2. Run `rojo serve default.project.json` so changes sync into Studio.
+3. Connect Studio MCP and run `rojo serve` so the MCP tool has a live session.
+4. Use MCP to verify: play mode behavior, Output panel (no errors or unexpected warns), and the specific system's observable behavior.
+5. Confirm the behavior matches the task spec.
+6. Then commit and push.
+
+Static checks (`selene`, `rojo build`, formatting) are a pre-condition, not a replacement. Static checks catch structural errors; they do not verify runtime behavior, animation playback, input handling, physics, UI layout, server–client data flow, or remote timing.
+
+**When MCP is unavailable:**
+- Do not claim Studio verification was performed.
 - Prefer documentation, configuration, and static-validation tasks only.
-- Avoid camera, viewmodel, combat, movement, match-loop, objective, and replication changes unless the user explicitly accepts that the change is unverified in Studio.
-- Run only non-Studio validation that is available locally, such as `git diff`, `rojo build`, `selene`, or formatting checks.
+- Avoid camera, viewmodel, combat, movement, match-loop, objective, replication, economy, and UI changes unless the user explicitly accepts that the change is unverified in Studio.
+- Run only non-Studio validation that is available locally: `git diff`, `rojo build`, `selene`, formatting checks.
 - Mark any gameplay-affecting change as "needs Studio verification" in `docs/TECHNICAL_DEBT.md` or the final response.
 - Do not mark runtime technical debt fully resolved unless the behavior was actually verified in Studio.
-- If MCP is unavailable for a task that normally requires MCP, clearly state that limitation.
+- Clearly state "MCP unavailable — Studio verification was not performed" in the task response when this applies.
+
+**Never claim a behavior was tested in Studio unless it was actually verified through MCP or a confirmed manual Studio test.** Stating "this should work" or "static checks pass" is not equivalent to Studio verification for any runtime system.
 
 **Asset import safety checklist:**
 Before importing any Marketplace, Toolbox, `.rbxm`, or `.rbxmx` asset into Studio, state which containers the asset is expected to modify. After importing, perform all of the following checks before committing or syncing:

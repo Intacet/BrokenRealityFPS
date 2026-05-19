@@ -85,6 +85,60 @@ Both sides may require shared modules (`src/shared/`).
 
 Build one system at a time, server before client. Do not start the next system until the current one has been manually tested. See `ROADMAP.md` for the sequence.
 
+## Studio / MCP verification (added 2026-05-19)
+
+**When Roblox Studio MCP is accessible, always use it. Do not skip MCP verification just because static checks (`selene`, `rojo build`, formatting) pass.** Static checks catch structural errors; they do not verify runtime behavior, animation playback, input handling, physics, remote timing, UI layout, or server–client data flow.
+
+### What requires MCP/Studio verification before committing
+
+Any change touching the systems below must be verified in Roblox Studio through the MCP tool before the commit is made — when MCP is accessible.
+
+| Category | Examples |
+|---|---|
+| Server services (`src/server/`) | MatchService, GunService, DamageService, EconomyService, ZoneService, TeamService, and any future service |
+| Client controllers (`src/client/`) | MovementController, GunController, ViewModelController, SoundController, and all UI controllers |
+| Shared modules (`src/shared/`) | Constants, WeaponData, WeaponFeel, Types, Logger — any change that affects runtime reads |
+| Remotes | Any new or modified RemoteEvent / RemoteFunction |
+| Rojo config (`default.project.json`) | Property overrides that affect StarterPlayer, character spawning, or rig type |
+| Player spawning / character lifecycle | CharacterAdded, CharacterAutoLoads, spawn part selection, health initialization |
+| Camera / mouse behavior | CameraType, UserInputService.MouseBehavior, FieldOfView, MouseBehavior.LockCenter |
+| Viewmodel / weapon attachments | PivotTo, barrel tip, eject port, ADS offsets |
+| Movement input | Key bindings (LeftShift, LeftAlt, C, any new key), WalkSpeed, sprint/crouch/slide logic |
+| Combat | Damage, hit validation, ammo, reload, rate limiting |
+| UI | HUD, MatchUI, DeathScreen, KillFeedUI, CrosshairUI, ObjectiveUI — any controller that creates ScreenGui |
+| Economy / inventory / zone systems | Carried cash, secured funds, zone entry/exit, shop, extraction, death drop (when built) |
+| Character rig | R6/R15 target, StarterPlayer.CharacterRigType, Motor6D iteration |
+| Animation | Animation IDs, AnimationTrack loading/playback, AdjustSpeed, Animator |
+
+### Verification workflow (MCP accessible)
+
+1. Edit the code.
+2. Run `rojo serve default.project.json` to sync changes into Studio.
+3. Use MCP to launch or connect to a live Studio session.
+4. Play in Studio. Check Output (no unexpected errors or warns). Observe the specific behavior the task specifies.
+5. Confirm observed behavior matches the task spec.
+6. Then commit and push.
+
+### When MCP is unavailable
+
+- Clearly state "MCP unavailable — Studio verification was not performed" in the task response.
+- Restrict scope to documentation, configuration, and static-validation tasks unless the user explicitly accepts unverified changes.
+- For any gameplay-affecting change made without MCP: add a "needs Studio verification" note to `docs/TECHNICAL_DEBT.md` and the task response.
+- Do not mark runtime debt entries resolved without Studio confirmation.
+- **Never claim a behavior was tested in Studio unless it was actually verified through MCP or a confirmed manual Studio test.** Stating "this should work" or "static checks pass" is not Studio verification for runtime systems.
+
+### Systems that especially must not skip MCP
+
+Even for "small" or "low-risk" changes, MCP verification is required before committing when MCP is accessible for:
+- Movement input and MouseBehavior (LeftAlt, LeftShift, mouse lock — timing and CoreScript interaction are only visible at runtime)
+- Camera (any CameraType change breaks input silently unless tested in play mode)
+- Animation playback (LoadAnimation failures, Animator missing, Animate override conflicts are runtime-only)
+- Remote data flow (payload format mismatches, missing listener connections, timing between fire and receipt)
+- Character spawn lifecycle (CharacterAdded timing, WalkSpeed init, health reset on respawn)
+- Economy correctness (carried cash / secured funds must be server-authoritative; client-side reads are presentation-only)
+
+---
+
 ## Explaining changes
 
 Every time code is written or edited, explain:
