@@ -109,18 +109,20 @@ HordeService (server)   [LEGACY PLAN — replaces with zone ambient spawn budget
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- Stage 1 + 2A + 2C + 2D (Animate-disable, R6 detection, animation-set selection,
+MovementController      -- Stage 1 + 2A + 2C + 2D + 2E (Animate-disable, R6 detection, animation-set selection,
                         --   strafe gating, animation speed multipliers, shift-lock sprint fix,
-                        --   custom mouse-lock toggle on LeftAlt):
+                        --   custom mouse-lock toggle on LeftAlt, character-facing camera yaw):
                         --   owns local movement input (LeftShift=sprint, C=crouch toggle,
                         --   LeftAlt=custom mouse-lock toggle),
                         --   customMouseLocked boolean, UserInputService.MouseBehavior writes,
+                        --   Humanoid.AutoRotate writes (false while locked+ACTIVE; restored on off/exit/respawn),
+                        --   HumanoidRootPart.CFrame yaw writes (facing camera yaw while locked; position unchanged),
                         --   movementState table, Humanoid.WalkSpeed, R6 animation playback,
                         --   character.Animate suppression (R6 characters only),
                         --   presentation-only equippedWeaponName for animation set selection, and
                         --   strafe animation gating via customMouseLocked (NOT Roblox default Shift Lock).
                         --   Reads workspace.CurrentCamera.CFrame for 8-directional camera-relative
-                        --   direction detection.
+                        --   direction detection AND for camera yaw facing (Stage 2E).
                         --   Writes UserInputService.MouseBehavior (LockCenter on, Default off) for
                         --   custom mouse lock — does NOT use MouseBehavior as strafe gate source.
                         --   Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
@@ -218,6 +220,27 @@ MovementController      -- Stage 1 + 2A + 2C + 2D (Animate-disable, R6 detection
                         --     Gated by two constants (both default true):
                         --       Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED — master switch
                         --       Constants.DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT — animate gate
+                        --
+                        --   Stage 2E — character-facing camera yaw (2026-05-19):
+                        --     When CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true (default):
+                        --       Enabling LeftAlt mouse lock: caches Humanoid.AutoRotate →
+                        --         originalAutoRotate, sets AutoRotate = false, calls applyCharacterFacing().
+                        --       Every Heartbeat while locked: getCameraFlatLookVector() reads
+                        --         workspace.CurrentCamera.CFrame.LookVector, flattens to XZ.
+                        --         HumanoidRootPart.CFrame = CFrame.lookAt(pos, pos+flatLook).
+                        --         Position is preserved — NOT a teleport.
+                        --       Toggle-off: restoreCharacterAutoRotate(), clears originalAutoRotate.
+                        --       Phase exit (REQUIRE_ACTIVE=true): restoreCharacterAutoRotate()
+                        --         but originalAutoRotate is preserved (NOT cleared) for re-entry.
+                        --       ACTIVE re-entry with lock still on: AutoRotate=false again, applyCharacterFacing().
+                        --       Respawn: originalAutoRotate = nil; new Humanoid starts fresh.
+                        --       Destroy: restoreCharacterAutoRotate() if locked, then clear all.
+                        --     getCameraFlatLookVector() returns nil if XZ magnitude < 0.001 (near-vertical
+                        --       camera); applyCharacterFacing() skips gracefully.
+                        --     lastFacingSkippedReason deduplicates skip-reason debug logs (once per change).
+                        --     New constants: CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW,
+                        --       CUSTOM_MOUSE_LOCK_REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION,
+                        --       CUSTOM_MOUSE_LOCK_ROTATION_DEBUG.
                         --
                         --   Stage 2A + 2C + 2D animation support (R6 only):
                         --     Loads AnimationTrack objects per character via Humanoid.Animator.

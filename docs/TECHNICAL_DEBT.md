@@ -511,7 +511,7 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-044] MovementController animation system — Stage 2D bugfix — UPDATED 2026-05-19 (x7)
+## [DEBT-044] MovementController animation system — Stage 2E character-facing — UPDATED 2026-05-19 (x8)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
@@ -529,7 +529,19 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 - **Phase-exit behavior changed:** `customMouseLocked` is NO LONGER reset when leaving ACTIVE phase. Player's toggle state persists across ACTIVE → LOBBY → RESULTS → ACTIVE. Only `loadMovementAnimations()` (respawn) and `destroy()` reset it to `false`. The `SetCustomMouseLocked()` call now delegates to new private helper `applyCustomMouseLock()` instead of writing `MouseBehavior` inline.
 - Three new Constants added: `DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK`, `CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME`, `CUSTOM_MOUSE_LOCK_INPUT_PRIORITY`.
 
-**Remaining gaps (not yet in Stage 2D):**
+**Updated (2026-05-19 — Stage 2E: character-facing camera yaw):**
+When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (LeftAlt) now also:
+- Caches `Humanoid.AutoRotate` (once per lock session) into `originalAutoRotate` and sets `AutoRotate = false`, preventing the engine from auto-rotating the character toward its movement direction.
+- Every Heartbeat: reads `workspace.CurrentCamera.CFrame.LookVector`, flattens to XZ, and writes `HumanoidRootPart.CFrame = CFrame.lookAt(pos, pos + flatLook)` to face the character toward the camera. Position is unchanged — this is a yaw-only rotation, not a teleport.
+- On toggle-off: `restoreCharacterAutoRotate()` is called and `originalAutoRotate` is cleared.
+- On respawn (`loadMovementAnimations`): `originalAutoRotate` is cleared; the new Humanoid starts with its own `AutoRotate` value.
+- Phase gating (`CUSTOM_MOUSE_LOCK_REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION = true`): on leaving ACTIVE, `restoreCharacterAutoRotate()` is called but `originalAutoRotate` is NOT cleared (preserved for ACTIVE re-entry). On ACTIVE re-entry with `customMouseLocked` still true, `AutoRotate` is disabled again and `applyCharacterFacing()` is called immediately.
+- `getCameraFlatLookVector()` returns nil when camera look vector is near-vertical (XZ magnitude < 0.001) to prevent NaN from `Vector3.Unit`; `applyCharacterFacing()` skips gracefully.
+- `applyCharacterFacing()` uses `lastFacingSkippedReason` deduplication to log skip transitions once per reason, not every frame.
+- New private state: `currentCharacter: Model?`, `currentRootPart: BasePart?`, `originalAutoRotate: boolean?`, `lastFacingSkippedReason: string`.
+- Three new Constants: `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW`, `CUSTOM_MOUSE_LOCK_REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION`, `CUSTOM_MOUSE_LOCK_ROTATION_DEBUG`.
+
+**Remaining gaps (not yet in Stage 2E):**
 - Crouch walk animation — not implemented; crouching uses WalkForward at CROUCH_SPEED.
 - Backward-specific animation — Backward direction falls back to WalkForward.
 - Diagonal-specific animations — ForwardLeft/ForwardRight etc. use WalkLeft/WalkRight or WalkForward.
@@ -552,7 +564,10 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 - `ContextActionService:BindActionAtPriority` at priority 3000 is the new LeftAlt binding. If a future CoreScript update changes input priority behavior, the toggle lag could return. Verify in Studio that LeftAlt toggles take effect immediately (no perceptible 1-frame delay).
 - `CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME = true` re-writes `MouseBehavior = LockCenter` every Heartbeat while `customMouseLocked` is true. If an expensive UI transition reads `MouseBehavior` to detect lock state (rather than calling `IsCustomMouseLocked()`), it may be confused by the aggressive reapply. Verify in Studio that the UI does not flicker or misread lock state during phase transitions.
 - Phase-exit no longer resets `customMouseLocked`. If `LOBBY` or `RESULTS` phases are expected to release the cursor lock for UI interaction (e.g. a settings menu or lobby screen), the reapply-every-frame will keep the cursor locked even in those phases. Address by either resetting `customMouseLocked` on specific non-ACTIVE phases when UI modals are added, or by pausing the reapply when a modal is open.
-- Input/mouse-lock behavior needs Studio verification — particularly: LeftAlt toggles immediately (no lag), LeftShift does not trigger native Shift Lock, strafe anims gate on `customMouseLocked`, cursor is released on respawn and in destroy(), cursor stays locked across ACTIVE→LOBBY→ACTIVE.
+- **Stage 2E new risk:** `HumanoidRootPart.CFrame` is written every Heartbeat while mouse lock is active. Roblox's physics engine normally controls `HumanoidRootPart` position; writing CFrame while the character is moving may cause micro-jitter visible at low frame rates. If jitter is observed in Studio, consider applying the yaw rotation only when `MoveDirection.Magnitude` exceeds the deadzone (character is moving) and reverting to `AutoRotate = true` while standing still.
+- **Stage 2E new risk:** `getCameraFlatLookVector()` returns nil and skips rotation when the camera is looking near-straight-up or near-straight-down. This is unlikely in normal FPS play but will produce a frozen character-facing during extreme camera angles. Acceptable for Stage 2E; a future camera stage may add a separate yaw-memory for this edge case.
+- **Stage 2E new risk:** `currentRootPart` is cached in `setupCharacter()` via `WaitForChild`. If the HumanoidRootPart is temporarily removed and re-added (e.g. by a ragdoll system that swaps the root), the cached reference will point to the old part. The cached reference is only refreshed on the next `CharacterAdded`. Verify in Studio that ragdoll (via `RagdollService`) does not swap the HumanoidRootPart after `setupCharacter()` runs.
+- Input/mouse-lock and character-facing behavior needs Studio verification — particularly: LeftAlt toggles cursor lock and character facing simultaneously, character visibly rotates to face camera on LeftAlt toggle, character does not jitter while moving with mouse lock on, AutoRotate is restored on toggle-off and on phase exit, facing resumes on ACTIVE re-entry when toggle was left on, respawn resets both cursor lock and AutoRotate correctly.
 
 **Trigger:** Any playtesting session where T-pose during idle/jump or missing backward/diagonal animations is noticeable, or where the `getRigDebugSummary` warn appears, or where animation speed feels off after Studio testing, or where LeftShift/LeftAlt input feels wrong.
 **Fix when:** A future movement stage adds idle/jump/fall/climb custom clips, backward/diagonal clips, and server-owned equipment integration. Tune speed multipliers after first Studio playtest. Do not build full Scriptable camera system until camera refactor is scheduled.

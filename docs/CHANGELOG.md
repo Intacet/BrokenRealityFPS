@@ -7,6 +7,65 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-19] — Movement Stage 2E: character-facing camera yaw (shift-lock style)
+
+### Summary
+Custom mouse lock (LeftAlt) now also rotates the character to face the camera's yaw direction
+every Heartbeat — proper shift-lock behavior. `Humanoid.AutoRotate` is disabled while the lock
+is active and restored on toggle-off, phase exit, respawn, or destroy.
+
+### Changed files
+
+- **`src/shared/Constants.lua`** — three new constants in the custom mouse-lock section:
+  - `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true` — enables character-facing rotation while locked.
+  - `CUSTOM_MOUSE_LOCK_REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION = true` — facing only during ACTIVE phase;
+    AutoRotate is restored on phase exit but the toggle state is preserved.
+  - `CUSTOM_MOUSE_LOCK_ROTATION_DEBUG = true` — logs facing events and skip-reason changes to Output.
+
+- **`src/client/MovementController.lua`** — Stage 2E additions:
+  - **New private state:** `currentCharacter: Model?`, `currentRootPart: BasePart?` (cached in
+    `setupCharacter()`), `originalAutoRotate: boolean?` (cached once per lock session), and
+    `lastFacingSkippedReason: string` (deduplicates debug log spam).
+  - **New helper `getCameraFlatLookVector(): Vector3?`** — reads `workspace.CurrentCamera.CFrame.LookVector`,
+    flattens to XZ, returns nil if near-vertical (XZ magnitude < 0.001) to prevent NaN.
+  - **New helper `restoreCharacterAutoRotate()`** — restores `Humanoid.AutoRotate` from
+    `originalAutoRotate` (defaults to `true` if nil). Logs under `CUSTOM_MOUSE_LOCK_ROTATION_DEBUG`.
+  - **New helper `applyCharacterFacing()`** — phase-gated, customMouseLocked-gated. Writes
+    `HumanoidRootPart.CFrame = CFrame.lookAt(pos, pos + flatLook)` (yaw only, position preserved).
+    Logs skip-reason once per reason change. Does NOT write camera.CFrame or change velocity.
+  - **`applyCustomMouseLock()` updated** — on enable: caches `originalAutoRotate`, sets
+    `AutoRotate = false`, calls `applyCharacterFacing()`. On disable: calls
+    `restoreCharacterAutoRotate()` and clears `originalAutoRotate`. Master-switch-off path also
+    restores AutoRotate.
+  - **`setupCharacter()` updated** — caches `currentCharacter` and `currentRootPart`;
+    resets `originalAutoRotate = nil` and `lastFacingSkippedReason = ""` on each spawn.
+  - **`loadMovementAnimations()` updated** — adds `originalAutoRotate = nil` to the
+    respawn-reset block alongside the existing `customMouseLocked = false` reset.
+  - **`RoundStateChanged` handler updated** — on leaving ACTIVE with
+    `REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION = true` and `customMouseLocked = true`:
+    calls `restoreCharacterAutoRotate()` (preserves `originalAutoRotate` for re-entry). On
+    ACTIVE re-entry with `customMouseLocked = true`: disables `AutoRotate` (caches if nil)
+    and calls `applyCharacterFacing()`.
+  - **`destroy()` updated** — calls `restoreCharacterAutoRotate()` before clearing state (if
+    locked); clears `originalAutoRotate`, `currentCharacter`, `currentRootPart`,
+    `lastFacingSkippedReason`.
+  - **Heartbeat updated** — calls `applyCharacterFacing()` after the MouseBehavior reapply
+    and before the `if not hum` guard; `applyCharacterFacing` self-gates on all conditions.
+  - **Header, Owns section, animation constants list, camera/rotation rule comments updated.**
+
+### What was NOT changed
+`GunController`, `ViewModelController`, `ClientInit`, `SoundController`, all UI controllers,
+all `src/server/` files, `WeaponData`, `default.project.json`, `CLAUDE.md`, `PROJECT_RULES.md`,
+`NAMING.md`, `stylua.toml`, `selene.toml`.
+
+### Validation
+- `rojo build default.project.json` — succeeds.
+- MCP unavailable — Studio verification was not performed.
+  Needs Studio verification: character-facing rotation, AutoRotate management, jitter under movement.
+  Tracked as DEBT-044 (x8).
+
+---
+
 ## [2026-05-19] — Workflow: MCP verification rules strengthened — always use Studio MCP when accessible
 
 ### Summary

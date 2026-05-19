@@ -165,6 +165,24 @@ Constants.CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME = true
 -- input priority (2000) so the LeftAlt bind is processed before CoreScripts can intercept.
 Constants.CUSTOM_MOUSE_LOCK_INPUT_PRIORITY = 3000
 
+-- When true, MovementController additionally sets Humanoid.AutoRotate = false and rotates
+-- HumanoidRootPart.CFrame to face the camera yaw direction every Heartbeat while custom
+-- mouse lock is active. This produces proper shift-lock-style character facing.
+-- On toggle-off, respawn, or phase exit (when REQUIRE_ACTIVE is true), AutoRotate is restored.
+-- Set false to disable character-facing rotation (cursor lock only, no rotation).
+Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true
+
+-- When true, character-facing rotation is only active during the ACTIVE phase.
+-- On phase exit (e.g. ACTIVE → RESULTS/LOBBY), AutoRotate is restored to its cached value
+-- while customMouseLocked remains unchanged (the toggle state is preserved).
+-- On re-entry to ACTIVE with customMouseLocked still true, AutoRotate is disabled again.
+-- Set false to apply character-facing rotation in all phases whenever mouse lock is on.
+Constants.CUSTOM_MOUSE_LOCK_REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION = true
+
+-- When true, MovementController logs character-facing rotation events and skip reasons to Output.
+-- Set false to silence facing-rotation diagnostics in production.
+Constants.CUSTOM_MOUSE_LOCK_ROTATION_DEBUG = true
+
 -- ============================================================
 -- Timing constants
 -- ============================================================

@@ -2,8 +2,9 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D (Animate-disable, R6 detection, animation-set selection,
--- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle) —
+-- Movement Stage 1 + 2A + 2C + 2D + 2E (Animate-disable, R6 detection, animation-set selection,
+-- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
+-- character-facing camera yaw) —
 -- walk, sprint, crouch speed; 8-direction camera-relative movement state; phase gating;
 -- respawn handling; connection cleanup; R6 animation playback with Unarmed default set.
 --
@@ -43,6 +44,18 @@
 -- This is NOT a full custom camera controller — camera rotation still runs through the Roblox
 -- default camera system (LockCenter only locks cursor to center; it does not replace camera logic).
 --
+-- Stage 2E (2026-05-19): Character-facing camera yaw added.
+-- When CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW is true, enabling custom mouse lock (LeftAlt) also:
+--   • Caches Humanoid.AutoRotate (once per lock session) and sets AutoRotate = false.
+--   • Reads workspace.CurrentCamera.CFrame.LookVector every Heartbeat, flattens to XZ, and
+--     rotates HumanoidRootPart.CFrame to face that direction (position is preserved, no teleport).
+-- On toggle-off or respawn, AutoRotate is restored from the cached value.
+-- When CUSTOM_MOUSE_LOCK_REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION is true, facing rotation is only
+-- applied during the ACTIVE phase. AutoRotate is restored on phase exit but the toggle state is
+-- preserved; on ACTIVE re-entry with lock still on, AutoRotate is disabled again.
+-- This is NOT a camera controller — it reads camera yaw only. It does NOT write camera.CFrame,
+-- CameraOffset, FieldOfView, or add camera bob/sway/tilt/ADS/zoom/viewmodel effects.
+--
 -- Stage 2D bugfix (2026-05-19): Three bugs found after Stage 2D shipped:
 --   (1) Roblox default Shift Lock still toggling with LeftShift:
 --       Fixed via LocalPlayer.DevEnableMouseLock = false (pcall, once per Start + per respawn)
@@ -69,6 +82,10 @@
 --   • local movement input (LeftShift = sprint, C = crouch toggle, LeftAlt = mouse-lock toggle)
 --   • customMouseLocked boolean — true when LeftAlt has toggled custom mouse lock on
 --   • UserInputService.MouseBehavior writes: LockCenter (on) / Default (off) for custom mouse lock
+--   • Humanoid.AutoRotate writes: false when custom mouse lock + FACE_CAMERA_YAW + ACTIVE phase;
+--       restored from cached originalAutoRotate on toggle-off, respawn, phase-exit, or destroy
+--   • HumanoidRootPart.CFrame yaw writes: rotates character to face camera yaw every Heartbeat
+--       while mouse lock is on and FACE_CAMERA_YAW is true (position never changes; not a teleport)
 --   • movementState table (isMoving, isSprinting, isCrouching, directionName, moveVector)
 --   • Humanoid.WalkSpeed:
 --       0                          when phase is not ACTIVE
@@ -95,16 +112,24 @@
 --   DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK = true        — calls DevEnableMouseLock=false on Start/respawn
 --   CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME = true    — re-writes LockCenter every Heartbeat while locked
 --   CUSTOM_MOUSE_LOCK_INPUT_PRIORITY = 3000         — ContextActionService priority for LeftAlt bind
+--   CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true        — rotate character to face camera yaw while locked
+--   CUSTOM_MOUSE_LOCK_REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION = true — facing only during ACTIVE phase
+--   CUSTOM_MOUSE_LOCK_ROTATION_DEBUG = true         — logs facing rotation events to Output
 --   MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER = 2.0  — WalkForward AdjustSpeed multiplier
 --   MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.35 — WalkLeft/WalkRight AdjustSpeed multiplier
 --   MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER = 1.0   — RunForward AdjustSpeed multiplier
 --
--- Camera rule (Stage 1 + 2A + 2C + 2D):
---   Reads workspace.CurrentCamera.CFrame for direction detection only.
+-- Camera rule (Stage 1 + 2A + 2C + 2D + 2E):
+--   Reads workspace.CurrentCamera.CFrame for direction detection and camera yaw facing.
 --   Writes UserInputService.MouseBehavior (LockCenter / Default) for custom mouse-lock toggle.
 --   Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
 --   Does NOT add camera bob, sway, landing dip, tilt, ADS zoom, or viewmodel effects.
 --   Does NOT implement a full custom camera controller — camera rotation uses Roblox default.
+--
+-- Stage 2E character rotation scope:
+--   Writes Humanoid.AutoRotate (false while locked + ACTIVE; restored on toggle-off/phase-exit/respawn).
+--   Writes HumanoidRootPart.CFrame yaw component every Heartbeat to face camera — preserves position.
+--   Does NOT teleport the player. Does NOT change velocity, WalkSpeed, JumpPower, or HipHeight.
 --
 -- Stage 2A + 2C + 2D animation scope:
 --   Defaults to Unarmed animation set when equippedWeaponName == nil (no weapon equipped).
@@ -231,6 +256,26 @@ local lastStrafeBlockedState: boolean = false
 -- This is the source of truth for strafe animation gating — NOT UserInputService.MouseBehavior.
 local customMouseLocked: boolean = false
 
+-- Stage 2E: character-facing state ──────────────────────────────────────────────
+
+-- Current character Model — set by setupCharacter(), cleared by destroy().
+-- Used by applyCharacterFacing() to locate HumanoidRootPart without an additional lookup.
+local currentCharacter: Model? = nil
+
+-- Current HumanoidRootPart — set by setupCharacter(), cleared by destroy().
+-- Cached to avoid FindFirstChild on every Heartbeat tick.
+local currentRootPart: BasePart? = nil
+
+-- Cached Humanoid.AutoRotate value, captured once when custom mouse lock is first enabled.
+-- Restored verbatim when lock is disabled, on respawn, phase exit (REQUIRE_ACTIVE=true), or destroy().
+-- NOT cleared on phase exit — preserved so re-entry to ACTIVE can restore it correctly.
+-- Cleared (set nil) on respawn (loadMovementAnimations) and when lock is explicitly disabled.
+local originalAutoRotate: boolean? = nil
+
+-- Last reason applyCharacterFacing() was skipped, used to deduplicate debug logs.
+-- Reset to "" on each character load.
+local lastFacingSkippedReason: string = ""
+
 -- ============================================================
 -- Private helpers — Stage 1
 -- ============================================================
@@ -322,23 +367,138 @@ local function classifyDirection(moveDir: Vector3): string
 end
 
 -- ============================================================
+-- Private helpers — Stage 2E: character-facing camera yaw
+-- ============================================================
+
+-- Returns the camera's look direction flattened to the XZ plane as a unit Vector3,
+-- or nil when the camera look vector is too near-vertical to produce a stable yaw
+-- (magnitude of XZ projection < 0.001 — avoids NaN from Unit on a near-zero vector).
+-- Reads workspace.CurrentCamera.CFrame — does NOT write it.
+local function getCameraFlatLookVector(): Vector3?
+    local camera = workspace.CurrentCamera
+    if not camera then return nil end
+    local look   = camera.CFrame.LookVector
+    local flat   = Vector3.new(look.X, 0, look.Z)
+    if flat.Magnitude < 0.001 then return nil end
+    return flat.Unit
+end
+
+-- Restores Humanoid.AutoRotate to the cached originalAutoRotate value (defaults to true
+-- if nothing was cached). Does NOT clear originalAutoRotate — callers that need to clear
+-- it (disable path, respawn, destroy) must set it to nil themselves after calling.
+-- Safe to call when humanoid is nil (no-ops silently).
+local function restoreCharacterAutoRotate()
+    local hum = humanoid
+    if not hum then return end
+    local restoreValue = if originalAutoRotate ~= nil then originalAutoRotate else true
+    hum.AutoRotate = restoreValue
+    if Constants.CUSTOM_MOUSE_LOCK_ROTATION_DEBUG then
+        Logger.debug(
+            "[MovementController] AutoRotate restored → " .. tostring(restoreValue)
+        )
+    end
+end
+
+-- Rotates the character's HumanoidRootPart to face the camera's yaw direction every
+-- Heartbeat while custom mouse lock is active and FACE_CAMERA_YAW is enabled.
+-- Phase-gated when REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION is true (only runs in ACTIVE).
+-- No-ops silently when guards fail (no humanoid, no root part, near-vertical camera look).
+-- Writes HumanoidRootPart.CFrame with the same position — the character is rotated in place;
+-- it is NOT teleported and its velocity is NOT modified.
+-- Logs skip-reason changes once per reason when CUSTOM_MOUSE_LOCK_ROTATION_DEBUG is true.
+local function applyCharacterFacing()
+    if not Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW then return end
+    if not customMouseLocked then return end
+
+    -- Phase gate: only apply rotation in ACTIVE when required.
+    if Constants.CUSTOM_MOUSE_LOCK_REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION then
+        if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then
+            -- Suppress per-frame spam: log only when the skip reason changes.
+            local reason = "phase_not_active"
+            if Constants.CUSTOM_MOUSE_LOCK_ROTATION_DEBUG and lastFacingSkippedReason ~= reason then
+                lastFacingSkippedReason = reason
+                Logger.debug("[MovementController] applyCharacterFacing: skipped — phase not ACTIVE")
+            end
+            return
+        end
+    end
+
+    local root = currentRootPart
+    if not root then
+        local reason = "no_root"
+        if Constants.CUSTOM_MOUSE_LOCK_ROTATION_DEBUG and lastFacingSkippedReason ~= reason then
+            lastFacingSkippedReason = reason
+            Logger.debug("[MovementController] applyCharacterFacing: skipped — no HumanoidRootPart")
+        end
+        return
+    end
+
+    local flatLook = getCameraFlatLookVector()
+    if not flatLook then
+        local reason = "camera_vertical"
+        if Constants.CUSTOM_MOUSE_LOCK_ROTATION_DEBUG and lastFacingSkippedReason ~= reason then
+            lastFacingSkippedReason = reason
+            Logger.debug("[MovementController] applyCharacterFacing: skipped — camera look near vertical")
+        end
+        return
+    end
+
+    -- All guards passed. Clear skip-reason so transitions are logged again if needed.
+    if lastFacingSkippedReason ~= "" then
+        lastFacingSkippedReason = ""
+    end
+
+    -- Rotate character to face camera yaw. Position is unchanged — this is a yaw-only
+    -- CFrame replacement, not a teleport and not a velocity change.
+    local pos = root.Position
+    root.CFrame = CFrame.lookAt(pos, pos + flatLook)
+end
+
+-- ============================================================
 -- Private helpers — Stage 2D: custom mouse lock
 -- ============================================================
 
--- Applies the current customMouseLocked state to UserInputService.MouseBehavior.
+-- Applies the current customMouseLocked state to UserInputService.MouseBehavior
+-- and (Stage 2E) Humanoid.AutoRotate + initial character-facing rotation.
 -- Called by SetCustomMouseLocked() and the ContextActionService toggle handler.
 -- Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
 -- Does NOT add camera rotation logic.
 local function applyCustomMouseLock()
     if Constants.CUSTOM_MOUSE_LOCK_ENABLED ~= true then
-        customMouseLocked                  = false
-        UserInputService.MouseBehavior     = Enum.MouseBehavior.Default
+        customMouseLocked              = false
+        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        -- Stage 2E: restore AutoRotate if it was disabled before the master switch was turned off.
+        restoreCharacterAutoRotate()
+        originalAutoRotate = nil
         return
     end
+
     if customMouseLocked then
-        UserInputService.MouseBehavior     = Enum.MouseBehavior.LockCenter
+        UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+
+        -- Stage 2E: disable AutoRotate once per lock session and apply initial facing.
+        if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW then
+            local hum = humanoid
+            if hum then
+                -- Cache only the first time so toggling off/on re-uses the original value.
+                if originalAutoRotate == nil then
+                    originalAutoRotate = hum.AutoRotate
+                end
+                hum.AutoRotate = false
+                if Constants.CUSTOM_MOUSE_LOCK_ROTATION_DEBUG then
+                    Logger.debug("[MovementController] AutoRotate disabled for character-facing (cached: " .. tostring(originalAutoRotate) .. ")")
+                end
+            end
+            applyCharacterFacing()
+        end
     else
-        UserInputService.MouseBehavior     = Enum.MouseBehavior.Default
+        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+
+        -- Stage 2E: restore AutoRotate when the lock is toggled off.
+        if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW then
+            restoreCharacterAutoRotate()
+            originalAutoRotate = nil
+        end
     end
 end
 
@@ -616,6 +776,9 @@ local function loadMovementAnimations(character: Model)
     -- with a locked mouse if they die or respawn while mouse lock was active.
     customMouseLocked                    = false
     UserInputService.MouseBehavior       = Enum.MouseBehavior.Default
+    -- Stage 2E: clear the cached AutoRotate value so the next lock session caches fresh.
+    -- The Humanoid itself is also new on respawn so there is nothing to restore here.
+    originalAutoRotate                   = nil
 
     -- Destroy and clear old Animation instances from the previous character.
     for _, inst in pairs(animationInstances) do
@@ -779,6 +942,13 @@ end
 local function setupCharacter(char: Model)
     humanoid = char:WaitForChild("Humanoid") :: Humanoid
 
+    -- Stage 2E: cache character and root part references for applyCharacterFacing().
+    currentCharacter = char
+    currentRootPart  = char:WaitForChild("HumanoidRootPart") :: BasePart
+    -- Reset facing state so the new character starts clean.
+    originalAutoRotate      = nil
+    lastFacingSkippedReason = ""
+
     resetState()
 
     -- Apply speed immediately — do not wait for the next Heartbeat.
@@ -930,6 +1100,15 @@ function MovementController:destroy()
     equippedWeaponName     = nil
     lastAnimationSet       = ""
     lastStrafeBlockedState = false
+    -- Stage 2E: restore AutoRotate if mouse lock is active before clearing state.
+    if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW and customMouseLocked then
+        restoreCharacterAutoRotate()
+    end
+    originalAutoRotate      = nil
+    currentCharacter        = nil
+    currentRootPart         = nil
+    lastFacingSkippedReason = ""
+
     -- Release custom mouse lock and cursor on destroy.
     customMouseLocked                  = false
     UserInputService.MouseBehavior     = Enum.MouseBehavior.Default
@@ -995,11 +1174,42 @@ function MovementController:Start()
             -- The player's LeftAlt toggle state is preserved across phase changes
             -- (ACTIVE → LOBBY → RESULTS → ACTIVE). Only respawn (loadMovementAnimations)
             -- and destroy() clear customMouseLocked.
+
+            -- Stage 2E: restore AutoRotate when leaving ACTIVE while mouse lock is on
+            -- and REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION is true. The originalAutoRotate
+            -- cache is preserved (NOT cleared) so re-entry to ACTIVE can disable it again.
+            if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW
+                and Constants.CUSTOM_MOUSE_LOCK_REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION
+                and customMouseLocked
+            then
+                restoreCharacterAutoRotate()
+                -- Intentionally do NOT clear originalAutoRotate here — preserved for ACTIVE re-entry.
+                if Constants.CUSTOM_MOUSE_LOCK_ROTATION_DEBUG then
+                    Logger.debug("[MovementController] Phase exit: AutoRotate restored (toggle state preserved)")
+                end
+            end
         else
             -- Entering ACTIVE: restore walk speed.
             local hum = humanoid
             if hum then
                 hum.WalkSpeed = Constants.WALK_SPEED
+            end
+
+            -- Stage 2E: re-disable AutoRotate if mouse lock is still on and FACE_CAMERA_YAW
+            -- is active. This handles the case where the player toggled mouse lock in a
+            -- non-ACTIVE phase and then the round transitioned back to ACTIVE.
+            if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW and customMouseLocked then
+                local h = humanoid
+                if h then
+                    if originalAutoRotate == nil then
+                        originalAutoRotate = h.AutoRotate
+                    end
+                    h.AutoRotate = false
+                    if Constants.CUSTOM_MOUSE_LOCK_ROTATION_DEBUG then
+                        Logger.debug("[MovementController] ACTIVE re-entry: AutoRotate disabled for character-facing")
+                    end
+                end
+                applyCharacterFacing()
             end
         end
     end)
@@ -1094,6 +1304,11 @@ function MovementController:Start()
             UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
         end
 
+        -- Stage 2E: rotate character to face camera yaw every frame while locked.
+        -- applyCharacterFacing() self-gates on REQUIRE_ACTIVE, customMouseLocked, nil checks.
+        -- Runs before the phase guard below so the skip-reason log fires on phase transitions.
+        applyCharacterFacing()
+
         local hum = humanoid
         if not hum then return end
         if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
@@ -1110,7 +1325,7 @@ function MovementController:Start()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1 + 2A + 2C + 2D + bugfix: DevMouseLock disabled, ContextActionService bind at priority 3000, reapply-every-frame)")
+    Logger.debug("[MovementController] Ready (Stage 1 + 2A + 2C + 2D + 2E: DevMouseLock disabled, CAS bind priority 3000, reapply-every-frame, character-facing yaw)")
 end
 
 return MovementController
