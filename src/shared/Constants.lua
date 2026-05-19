@@ -124,6 +124,32 @@ Constants.DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = true
 Constants.MOVEMENT_ANIMATION_DEBUG = true
 
 -- ============================================================
+-- Custom mouse-lock toggle (Movement Stage 2D)
+-- Replaces reliance on Roblox default Shift Lock for strafe animation gating.
+-- LeftAlt toggles custom mouse lock; LeftShift remains sprint-only.
+-- ============================================================
+
+-- Master switch: when true, MovementController toggles a custom mouse-lock state on
+-- CUSTOM_MOUSE_LOCK_TOGGLE_KEY press, and sets UserInputService.MouseBehavior to
+-- LockCenter (on) / Default (off). When false, custom mouse lock is disabled and
+-- MouseBehavior is reset to Default.
+Constants.CUSTOM_MOUSE_LOCK_ENABLED = true
+
+-- Key that toggles the custom mouse-lock state.
+-- Default: LeftAlt — keeps LeftShift free for sprint-only use.
+Constants.CUSTOM_MOUSE_LOCK_TOGGLE_KEY = Enum.KeyCode.LeftAlt
+
+-- When true, WalkLeft/WalkRight strafe animations only play when the custom mouse lock
+-- is active (customMouseLocked == true). This supersedes the Roblox-native-ShiftLock
+-- detection path that MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK previously relied on.
+-- Set false to fall back to the MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK legacy path.
+Constants.CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY = true
+
+-- When true, MovementController logs custom mouse-lock toggle events to Output.
+-- Set false to silence custom mouse-lock diagnostics in production.
+Constants.CUSTOM_MOUSE_LOCK_DEBUG = true
+
+-- ============================================================
 -- Timing constants
 -- ============================================================
 Constants.COUNTDOWN_TICK     = 1  -- seconds between each broadcast inside a phase countdown

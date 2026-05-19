@@ -503,7 +503,7 @@ primary protection.
 
 ---
 
-## [DEBT-044] MovementController animation system — Stage 2C — UPDATED 2026-05-18 (x5)
+## [DEBT-044] MovementController animation system — Stage 2D — UPDATED 2026-05-19 (x6)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
@@ -513,8 +513,9 @@ primary protection.
 **Updated (2026-05-18 — R6 detection):** `hasR6BodyParts()`, `getRigDebugSummary()`, and `isR6Character()` helpers added. The direct `RigType ~= R6` guard replaced with `isR6Character()` (primary `RigType` check + structural body-part fallback). `disableDefaultAnimate()` moved from `setupCharacter()` into `loadMovementAnimations()` (after rig confirmation) so Animate is only disabled when the character is confirmed R6. `getRigDebugSummary()` logged when animations are skipped.
 **Updated (2026-05-18 — animation-set selection fix):** Default animation set changed from AR15 to Unarmed. `getAnimationSetName()` now reads `equippedWeaponName` (nil → Unarmed, "AR15" → AR15 set, unknown → Unarmed fallback). Two new public methods: `SetEquippedWeaponName(name)` and `GetEquippedWeaponName()`. Both Unarmed and AR15 tracks are pre-loaded at spawn. Unarmed WalkLeft (`rbxassetid://101275785187464`) and WalkRight (`rbxassetid://72765640529019`) added. Animation-set-change debug log added (fires once per change, not per frame). Three new Constants: `MOVEMENT_ANIMATION_SET_UNARMED`, `MOVEMENT_ANIMATION_SET_AR15`, `MOVEMENT_DEFAULT_ANIMATION_SET`.
 **Updated (2026-05-18 — Stage 2C animation behavior):** Strafe animations (WalkLeft/WalkRight) are now gated on mouse-lock / shift-lock style state. `UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter` is the practical runtime signal used (read-only — does not toggle shift lock or write camera). When not mouse-locked, all walking falls back to WalkForward. Gated by `Constants.MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK` (default `true`); set `false` to play strafe anims regardless. LeftShift sprint now works while Roblox's built-in shift lock is active — the previous `gameProcessed` guard was replaced with `UserInputService:GetFocusedTextBox() ~= nil` (blocks sprint only when typing in a TextBox). Animation playback speed multipliers added via `AnimationTrack:AdjustSpeed()`: WalkForward at 2.0×, WalkLeft/WalkRight at 1.35×, RunForward at 1.0× (unchanged). Speed is applied on play and on same-track re-check. Three new Constants: `MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER`, `MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER`, `MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER`. `lastStrafeBlockedState` guard prevents per-frame log spam — strafe-blocked/enabled log fires only on state change.
+**Updated (2026-05-19 — Stage 2D: custom mouse-lock toggle):** LeftShift sprint conflicted with Roblox default Shift Lock — pressing Shift both sprinted and toggled native mouse lock simultaneously. Resolved by adding a custom mouse-lock toggle on LeftAlt (`Constants.CUSTOM_MOUSE_LOCK_TOGGLE_KEY`). `customMouseLocked` (local boolean) is the new source of truth for strafe animation gating. `isMouseLockedForStrafeAnimations()` now returns `customMouseLocked` when `CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY = true` (default), instead of reading `UserInputService.MouseBehavior`. `SetCustomMouseLocked(bool)` and `IsCustomMouseLocked()` are new public API methods. `UserInputService.MouseBehavior` is still written by `SetCustomMouseLocked` (LockCenter on, Default off) but is no longer the strafe gate source. Mouse lock is released to Default on respawn, leaving ACTIVE, and in `destroy()`. Four new Constants: `CUSTOM_MOUSE_LOCK_ENABLED`, `CUSTOM_MOUSE_LOCK_TOGGLE_KEY`, `CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY`, `CUSTOM_MOUSE_LOCK_DEBUG`. Manual Studio step required: set `StarterPlayer.EnableMouseLockOption = false` to prevent Roblox default Shift Lock from conflicting.
 
-**Remaining gaps (not yet in Stage 2C):**
+**Remaining gaps (not yet in Stage 2D):**
 - Crouch walk animation — not implemented; crouching uses WalkForward at CROUCH_SPEED.
 - Backward-specific animation — Backward direction falls back to WalkForward.
 - Diagonal-specific animations — ForwardLeft/ForwardRight etc. use WalkLeft/WalkRight or WalkForward.
@@ -522,7 +523,7 @@ primary protection.
 - Reload, fire, ADS, and sprint-hold weapon animations — deferred to a weapon-anim stage.
 - Idle, jump, fall, and climb animations — suppressed along with locomotion when Animate is disabled. Custom replacements needed in a future movement stage.
 - True server-owned equipment state — equippedWeaponName is presentation-only; see DEBT-050.
-- True custom shift-lock camera/control system — `UserInputService.MouseBehavior == LockCenter` is read to detect Roblox's built-in shift lock; no custom shift-lock or mouse-lock system has been built.
+- Full custom camera controller — `SetCustomMouseLocked` writes `UserInputService.MouseBehavior = LockCenter`, which locks the cursor to center and allows camera rotation via Roblox's default camera system. A full custom camera controller (Scriptable CameraType, raw mouse-delta yaw/pitch) is not built.
 
 **Remaining risks:**
 - If custom animation IDs are private or not owned by the game's creator / group, Roblox may silently refuse to load them. `Logger.warn()` fires for any empty assetId; a failed `LoadAnimation()` call will produce an output error. Confirm animation ownership before shipping.
@@ -533,10 +534,11 @@ primary protection.
 - Sprint in all directions still uses RunForward (no directional sprint animations yet). Backward and diagonal movement uses WalkForward fallback only.
 - If `DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = false`, Animate keeps running and may override or blend with custom locomotion tracks. This constant must stay `true` for custom animations to take effect.
 - Animation speed multipliers (`MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER = 2.0`, `MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.35`) were set before Studio testing. These values may need tuning after Studio verification — if the clip cadence feels too fast or too slow, adjust only the Constants without touching controller logic.
-- Roblox's built-in shift lock uses LeftShift to toggle. If both hold-to-sprint (LeftShift) and shift-lock toggle are active at the same time, the user experience may feel awkward — pressing Shift triggers sprint and also toggles mouse lock simultaneously. A future custom shift-lock implementation (or a dedicated sprint key) may be needed if this feels bad in playtesting.
+- Roblox default Shift Lock (`StarterPlayer.EnableMouseLockOption`) should be disabled in Studio if it is still accessible to players. If left enabled, Roblox Shift Lock can re-enable native `MouseBehavior = LockCenter` independently of `customMouseLocked`, causing the strafe gate to fire unexpectedly if the legacy path is ever used. Recommended Studio setting: `StarterPlayer.EnableMouseLockOption = false`.
+- Input/mouse-lock behavior needs Studio verification — particularly: LeftAlt toggles correctly, LeftShift does not trigger mouse lock, strafe anims gate on `customMouseLocked`, cursor releases on phase exit and respawn.
 
-**Trigger:** Any playtesting session where T-pose during idle/jump or missing backward/diagonal animations is noticeable, or where the `getRigDebugSummary` warn appears, or where animation speed feels off after Studio testing.
-**Fix when:** A future movement stage adds idle/jump/fall/climb custom clips, backward/diagonal clips, and server-owned equipment integration. Tune speed multipliers after first Studio playtest. Do not build true shift-lock system until the camera refactor is scheduled.
+**Trigger:** Any playtesting session where T-pose during idle/jump or missing backward/diagonal animations is noticeable, or where the `getRigDebugSummary` warn appears, or where animation speed feels off after Studio testing, or where LeftShift/LeftAlt input feels wrong.
+**Fix when:** A future movement stage adds idle/jump/fall/climb custom clips, backward/diagonal clips, and server-owned equipment integration. Tune speed multipliers after first Studio playtest. Do not build full Scriptable camera system until camera refactor is scheduled.
 
 ---
 

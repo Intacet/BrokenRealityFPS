@@ -2,8 +2,8 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C (Animate-disable, R6 detection, animation-set selection,
--- strafe gating, animation speed multipliers, shift-lock sprint fix) —
+-- Movement Stage 1 + 2A + 2C + 2D (Animate-disable, R6 detection, animation-set selection,
+-- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle) —
 -- walk, sprint, crouch speed; 8-direction camera-relative movement state; phase gating;
 -- respawn handling; connection cleanup; R6 animation playback with Unarmed default set.
 --
@@ -32,11 +32,24 @@
 -- no longer blocks sprint. Animation playback speeds are tuned via AdjustSpeed:
 -- WalkForward at 2.0×, WalkLeft/WalkRight at 1.35×, RunForward unchanged at 1.0×.
 --
+-- Stage 2D (2026-05-19): Custom mouse-lock toggle added on LeftAlt (Constants.CUSTOM_MOUSE_LOCK_TOGGLE_KEY).
+-- LeftShift is now sprint-only — it no longer conflicts with Roblox's default Shift Lock.
+-- Strafe animation gating now depends on the local customMouseLocked boolean (set by
+-- SetCustomMouseLocked / the LeftAlt toggle) rather than reading UserInputService.MouseBehavior
+-- directly. UserInputService.MouseBehavior is written by SetCustomMouseLocked (LockCenter on,
+-- Default off) but is NOT used as the strafe gate source.
+-- Roblox default Shift Lock should be disabled in Studio (StarterPlayer.EnableMouseLockOption = false)
+-- to avoid conflicts with LeftShift sprint.
+-- This is NOT a full custom camera controller — camera rotation still runs through the Roblox
+-- default camera system (LockCenter only locks cursor to center; it does not replace camera logic).
+--
 -- NOTE: disabling Animate removes idle, jump, fall, and climb animations in addition
 -- to locomotion. Custom replacements for those states are needed in a future stage.
 --
 -- Owns:
---   • local movement input (LeftShift = sprint, C = crouch toggle)
+--   • local movement input (LeftShift = sprint, C = crouch toggle, LeftAlt = mouse-lock toggle)
+--   • customMouseLocked boolean — true when LeftAlt has toggled custom mouse lock on
+--   • UserInputService.MouseBehavior writes: LockCenter (on) / Default (off) for custom mouse lock
 --   • movementState table (isMoving, isSprinting, isCrouching, directionName, moveVector)
 --   • Humanoid.WalkSpeed:
 --       0                          when phase is not ACTIVE
@@ -48,38 +61,46 @@
 --   • Disabling character.Animate (R6 characters only) to prevent avatar animation pack override
 --   • Robust R6 rig detection: RigType primary, structural body-part fallback, debug summary on skip
 --   • presentation-only equippedWeaponName driving animation set selection (Unarmed default)
---   • mouse-lock detection for strafe animation gating (reads UserInputService.MouseBehavior)
+--   • strafe animation gating via customMouseLocked (not Roblox default Shift Lock)
 --   • animation playback speed multipliers applied via AnimationTrack:AdjustSpeed
 --
 -- Animation control constants (all in Constants.lua):
 --   CUSTOM_MOVEMENT_ANIMATIONS_ENABLED = true       — master switch for custom anim system
 --   DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = true — disables character.Animate
 --   MOVEMENT_ANIMATION_DEBUG = true                 — logs load/switch events to Output
---   MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK = true — strafe anims require LockCenter
+--   MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK = true — strafe anims require mouse lock (legacy gate)
+--   CUSTOM_MOUSE_LOCK_ENABLED = true                — enables LeftAlt custom mouse-lock toggle
+--   CUSTOM_MOUSE_LOCK_TOGGLE_KEY = Enum.KeyCode.LeftAlt — toggle key (default: LeftAlt)
+--   CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY = true      — strafe gate reads customMouseLocked (not native ShiftLock)
+--   CUSTOM_MOUSE_LOCK_DEBUG = true                  — logs mouse-lock toggle events to Output
 --   MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER = 2.0  — WalkForward AdjustSpeed multiplier
 --   MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.35 — WalkLeft/WalkRight AdjustSpeed multiplier
 --   MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER = 1.0   — RunForward AdjustSpeed multiplier
 --
--- Camera rule (Stage 1 + 2A + 2C):
+-- Camera rule (Stage 1 + 2A + 2C + 2D):
 --   Reads workspace.CurrentCamera.CFrame for direction detection only.
---   Reads UserInputService.MouseBehavior to detect mouse-lock state for strafe gating.
+--   Writes UserInputService.MouseBehavior (LockCenter / Default) for custom mouse-lock toggle.
 --   Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
---   Does NOT add camera bob, sway, landing dip, tilt, or viewmodel effects.
+--   Does NOT add camera bob, sway, landing dip, tilt, ADS zoom, or viewmodel effects.
+--   Does NOT implement a full custom camera controller — camera rotation uses Roblox default.
 --
--- Stage 2A + 2C animation scope:
+-- Stage 2A + 2C + 2D animation scope:
 --   Defaults to Unarmed animation set when equippedWeaponName == nil (no weapon equipped).
 --   Call SetEquippedWeaponName("AR15") to switch to AR15 movement animations.
 --   True server-owned equipment state is deferred — see DEBT-050.
---   WalkLeft/WalkRight played only when mouse lock is active (MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK).
---   Without mouse lock, left/right/diagonal movement falls back to WalkForward.
+--   WalkLeft/WalkRight played only when customMouseLocked == true (LeftAlt toggled on).
+--   Without custom mouse lock, left/right/diagonal movement falls back to WalkForward.
+--   Sprint uses RunForward in all directions regardless of customMouseLocked.
 --   WalkForward: 2.0× speed. WalkLeft/WalkRight: 1.35× speed. RunForward: 1.0× speed.
 --   Sprint works with LeftShift even while shift lock is active (TextBox check instead of gp).
---   No crouch, backward, diagonal, reload, fire, or ADS animations in Stage 2A/2C.
---   No lower-body/upper-body animation split in Stage 2A/2C.
+--   No crouch, backward, diagonal, reload, fire, or ADS animations in Stage 2A/2C/2D.
+--   No lower-body/upper-body animation split in Stage 2A/2C/2D.
 --   Non-R6 characters: animation loading skipped; getRigDebugSummary logged; Stage 1 speed logic remains active.
 --
--- Not in Stage 1/2A: slide, vault, stamina, prone, footsteps, crouch body lowering,
+-- Not in Stage 1/2A/2D: slide, vault, stamina, prone, footsteps, crouch body lowering,
 --   camera height changes, viewmodel sway, strafe/backward/diagonal animations.
+-- Manual Studio step: disable StarterPlayer.EnableMouseLockOption = false to prevent
+--   Roblox default Shift Lock from conflicting with LeftShift sprint.
 --
 -- Exposes:
 --   GetMovementState()           → movementState table (all fields read-only for callers)
@@ -88,6 +109,8 @@
 --   GetViewmodelAddCFrame(): CFrame → identity in Stage 1/2A; ViewModelController multiplies this in
 --   SetEquippedWeaponName(name)  → sets animation set (Unarmed if nil/"", AR15 if "AR15"); presentation only
 --   GetEquippedWeaponName()      → returns current equippedWeaponName (nil = Unarmed set active)
+--   SetCustomMouseLocked(bool)   → toggles custom mouse lock; writes UserInputService.MouseBehavior
+--   IsCustomMouseLocked()        → returns current customMouseLocked boolean
 --   Start()                      → called by ClientInit after MatchController:Start()
 --   destroy()                    → disconnects all connections and resets state
 --
@@ -171,6 +194,14 @@ local lastAnimationSet: string = ""
 -- true = strafe was blocked on the last frame that logged. Logs only on state change.
 -- Reset to false on each character load and in destroy().
 local lastStrafeBlockedState: boolean = false
+
+-- Custom mouse-lock state (Stage 2D).
+-- true  = LeftAlt has toggled mouse lock on; UserInputService.MouseBehavior == LockCenter.
+-- false = mouse lock off; UserInputService.MouseBehavior == Default.
+-- Toggled by the LeftAlt input handler (Start()) and by SetCustomMouseLocked().
+-- Reset to false on respawn, when leaving ACTIVE, and in destroy().
+-- This is the source of truth for strafe animation gating — NOT UserInputService.MouseBehavior.
+local customMouseLocked: boolean = false
 
 -- ============================================================
 -- Private helpers — Stage 1
@@ -397,12 +428,19 @@ local function getAnimationSetName(): string
     return Constants.MOVEMENT_ANIMATION_SET_UNARMED
 end
 
--- Returns true when the game is in mouse-lock / shift-lock style state.
--- Uses UserInputService.MouseBehavior == LockCenter as the practical signal: this is
--- the state Roblox sets when shift lock is active or when any system calls
--- UserInputService.MouseBehaviorOverride = LockCenter.
--- Does NOT toggle shift lock. Does NOT write camera.CFrame. Read-only check.
+-- Returns true when strafe animations should be allowed for this frame.
+-- Stage 2D primary path (CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY == true):
+--   Returns customMouseLocked — the local boolean toggled by LeftAlt / SetCustomMouseLocked().
+--   Does NOT read UserInputService.MouseBehavior as the gate (that was the Stage 2C approach).
+-- Legacy path (CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY == false):
+--   Falls back to reading UserInputService.MouseBehavior == LockCenter (Roblox native shift lock).
+--   This path is deprecated; prefer the custom mouse lock system.
+-- Does NOT toggle shift lock. Does NOT write camera.CFrame.
 local function isMouseLockedForStrafeAnimations(): boolean
+    if Constants.CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY then
+        return customMouseLocked
+    end
+    -- Legacy: Roblox native MouseBehavior check (MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK path).
     return UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
 end
 
@@ -501,6 +539,10 @@ local function loadMovementAnimations(character: Model)
     lastAnimationSet       = ""
     -- Reset strafe-blocked log guard so the first movement after respawn re-logs the state.
     lastStrafeBlockedState = false
+    -- Reset custom mouse lock on respawn: release the cursor so the player is not stuck
+    -- with a locked mouse if they die or respawn while mouse lock was active.
+    customMouseLocked                    = false
+    UserInputService.MouseBehavior       = Enum.MouseBehavior.Default
 
     -- Destroy and clear old Animation instances from the previous character.
     for _, inst in pairs(animationInstances) do
@@ -613,9 +655,9 @@ local function updateMovementAnimation()
         if strafeBlocked ~= lastStrafeBlockedState then
             lastStrafeBlockedState = strafeBlocked
             if strafeBlocked then
-                Logger.debug("[MovementController] strafe animations blocked: mouse lock not active")
+                Logger.debug("[MovementController] strafe animations blocked: custom mouse lock not active (press LeftAlt to enable)")
             else
-                Logger.debug("[MovementController] strafe animations enabled: mouse lock active")
+                Logger.debug("[MovementController] strafe animations enabled: custom mouse lock active")
             end
         end
     end
@@ -768,6 +810,48 @@ function MovementController.GetEquippedWeaponName(): string?
     return equippedWeaponName
 end
 
+-- ── Custom mouse-lock (Stage 2D) ───────────────────────────────────────────────
+
+-- Sets the custom mouse-lock state and applies UserInputService.MouseBehavior accordingly.
+-- enabled == true  → customMouseLocked = true; MouseBehavior = LockCenter.
+-- enabled == false → customMouseLocked = false; MouseBehavior = Default.
+-- If Constants.CUSTOM_MOUSE_LOCK_ENABLED is false, forces off and resets to Default.
+-- Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
+-- Logs state change if Constants.CUSTOM_MOUSE_LOCK_DEBUG == true.
+function MovementController.SetCustomMouseLocked(enabled: boolean)
+    assert(
+        typeof(enabled) == "boolean",
+        "[MovementController] SetCustomMouseLocked: enabled must be a boolean"
+    )
+
+    if Constants.CUSTOM_MOUSE_LOCK_ENABLED ~= true then
+        -- Feature disabled — force off and release cursor.
+        customMouseLocked                  = false
+        UserInputService.MouseBehavior     = Enum.MouseBehavior.Default
+        return
+    end
+
+    if enabled then
+        customMouseLocked                  = true
+        UserInputService.MouseBehavior     = Enum.MouseBehavior.LockCenter
+    else
+        customMouseLocked                  = false
+        UserInputService.MouseBehavior     = Enum.MouseBehavior.Default
+    end
+
+    if Constants.CUSTOM_MOUSE_LOCK_DEBUG then
+        Logger.debug(
+            "[MovementController] custom mouse lock: " .. (customMouseLocked and "ON" or "OFF")
+        )
+    end
+end
+
+-- Returns true when the custom mouse lock is currently active (LeftAlt toggled on).
+-- Strafe animation selection (updateMovementAnimation) reads this via isMouseLockedForStrafeAnimations().
+function MovementController.IsCustomMouseLocked(): boolean
+    return customMouseLocked
+end
+
 -- Disconnects all event connections, stops all animation tracks, destroys Animation
 -- instances, and resets all state.
 -- Safe to call even if Start() was never called (iterates empty tables).
@@ -780,6 +864,9 @@ function MovementController:destroy()
     equippedWeaponName     = nil
     lastAnimationSet       = ""
     lastStrafeBlockedState = false
+    -- Release custom mouse lock and cursor on destroy.
+    customMouseLocked                  = false
+    UserInputService.MouseBehavior     = Enum.MouseBehavior.Default
 
     -- Explicitly destroy Animation instances.
     for _, inst in pairs(animationInstances) do
@@ -831,6 +918,16 @@ function MovementController:Start()
             if hum then
                 hum.WalkSpeed = 0
             end
+            -- Release custom mouse lock when leaving ACTIVE.
+            -- Prefer releasing to Default outside ACTIVE for testing safety:
+            -- leaving the cursor locked in LOBBY/RESULTS/MATCHEND would be disorienting.
+            if customMouseLocked then
+                customMouseLocked              = false
+                UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+                if Constants.CUSTOM_MOUSE_LOCK_DEBUG then
+                    Logger.debug("[MovementController] custom mouse lock released: left ACTIVE phase")
+                end
+            end
         else
             -- Entering ACTIVE: restore walk speed.
             local hum = humanoid
@@ -870,6 +967,25 @@ function MovementController:Start()
     )
     table.insert(_connections, sprintEndConn)
 
+    -- ── Input: Custom mouse-lock toggle (LeftAlt) ────────────────────────────
+    -- LeftAlt toggles the custom mouse-lock state. This replaces the role that Roblox
+    -- default Shift Lock played: locking the cursor to center enables strafing without
+    -- conflicting with LeftShift (sprint) in any way.
+    -- Note: gameProcessed is not used as a guard here — LeftAlt is not intercepted by
+    -- Roblox CoreScripts the way LeftShift is. TextBox check prevents accidental toggle
+    -- while the player is typing.
+    local mouseLockToggleConn = UserInputService.InputBegan:Connect(
+        function(input: InputObject, _gp: boolean)
+            if Constants.CUSTOM_MOUSE_LOCK_ENABLED ~= true then return end
+            if input.KeyCode ~= Constants.CUSTOM_MOUSE_LOCK_TOGGLE_KEY then return end
+            -- Block toggle while the player is focused on a TextBox (typing).
+            if UserInputService:GetFocusedTextBox() ~= nil then return end
+            -- Toggle custom mouse lock state.
+            MovementController.SetCustomMouseLocked(not customMouseLocked)
+        end
+    )
+    table.insert(_connections, mouseLockToggleConn)
+
     -- ── Input: Crouch (C toggle) ──────────────────────────────────────────────
     local crouchConn = UserInputService.InputBegan:Connect(
         function(input: InputObject, gp: boolean)
@@ -906,7 +1022,7 @@ function MovementController:Start()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1 + 2A + 2C: strafe gating, speed multipliers, shift-lock sprint)")
+    Logger.debug("[MovementController] Ready (Stage 1 + 2A + 2C + 2D: strafe gating, speed multipliers, shift-lock sprint, LeftAlt custom mouse lock)")
 end
 
 return MovementController

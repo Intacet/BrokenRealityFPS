@@ -7,6 +7,103 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-19] — Movement Stage 2D: custom mouse-lock toggle (LeftAlt), LeftShift sprint-only, strafe gating via custom lock
+
+### Summary
+Added a custom mouse-lock toggle on LeftAlt so LeftShift can be used exclusively for sprinting
+without conflict with Roblox's default Shift Lock. Strafe animations (WalkLeft/WalkRight) now
+gate on the local `customMouseLocked` boolean rather than reading `UserInputService.MouseBehavior`
+directly, decoupling strafe animation behavior from Roblox's native shift-lock state entirely.
+
+This is NOT a full custom camera controller — `LockCenter` still routes through Roblox's default
+camera system. A full Scriptable camera is deferred.
+
+### Changed files
+
+- **`src/shared/Constants.lua`** — four new custom mouse-lock constants:
+  - `CUSTOM_MOUSE_LOCK_ENABLED = true` — master switch for the LeftAlt toggle system.
+  - `CUSTOM_MOUSE_LOCK_TOGGLE_KEY = Enum.KeyCode.LeftAlt` — toggle key (LeftShift remains sprint-only).
+  - `CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY = true` — when true, strafe gating reads `customMouseLocked`
+    instead of `UserInputService.MouseBehavior` (Roblox native shift-lock detection is the legacy fallback).
+  - `CUSTOM_MOUSE_LOCK_DEBUG = true` — logs mouse-lock toggle events to Output.
+  - All existing constants preserved unchanged (`MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK`, speed multipliers, etc.).
+
+- **`src/client/MovementController.lua`**:
+  - New private state `customMouseLocked: boolean = false` — source of truth for strafe gating.
+    Written only by `SetCustomMouseLocked()` and reset on respawn/phase-exit/destroy.
+  - `isMouseLockedForStrafeAnimations()` updated:
+    - Primary path (`CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY = true`): returns `customMouseLocked`.
+    - Legacy path (`CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY = false`): reads
+      `UserInputService.MouseBehavior == LockCenter` (Stage 2C behaviour, now deprecated path).
+  - New public method `MovementController.SetCustomMouseLocked(enabled: boolean)`:
+    - `assert(typeof(enabled) == "boolean", ...)` validation.
+    - If `CUSTOM_MOUSE_LOCK_ENABLED ~= true`: forces off and resets MouseBehavior to Default.
+    - `enabled = true`: sets `customMouseLocked = true`, `UserInputService.MouseBehavior = LockCenter`.
+    - `enabled = false`: sets `customMouseLocked = false`, `UserInputService.MouseBehavior = Default`.
+    - Logs state change if `CUSTOM_MOUSE_LOCK_DEBUG == true`.
+    - Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
+  - New public method `MovementController.IsCustomMouseLocked(): boolean` — returns `customMouseLocked`.
+  - New LeftAlt input handler in `Start()`:
+    - Fires on `CUSTOM_MOUSE_LOCK_TOGGLE_KEY` (LeftAlt). No gameProcessed guard; TextBox guard only.
+    - Toggles `SetCustomMouseLocked(not customMouseLocked)`.
+    - Does NOT trigger sprint or affect movement speed.
+  - `loadMovementAnimations()` updated: resets `customMouseLocked = false` and
+    `UserInputService.MouseBehavior = Default` on respawn.
+  - `RoundStateChanged` handler updated: releases `customMouseLocked = false` and resets
+    `UserInputService.MouseBehavior = Default` when leaving ACTIVE. Logs if `CUSTOM_MOUSE_LOCK_DEBUG`.
+  - `destroy()` updated: resets `customMouseLocked = false` and `UserInputService.MouseBehavior = Default`.
+  - Strafe debug log messages updated to say "custom mouse lock" instead of "mouse lock".
+  - Module header, Owns/Camera-rule/Stage-scope/Exposes sections updated for Stage 2D.
+  - Ready log updated to include Stage 2D.
+
+- **`docs/PROJECT_MAP.md`** — MovementController and Constants entries fully updated:
+  - Documents `customMouseLocked`, `SetCustomMouseLocked`, `IsCustomMouseLocked`, LeftAlt toggle key.
+  - Documents that `UserInputService.MouseBehavior` is WRITTEN (not just read) for mouse lock.
+  - Documents that strafe gating uses `customMouseLocked`, not Roblox native Shift Lock.
+  - Documents manual Studio step: `StarterPlayer.EnableMouseLockOption = false`.
+  - Documents that this is NOT a full custom camera controller.
+  - Constants section updated with four new `CUSTOM_MOUSE_LOCK_*` constants.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated (x6) (see Debt entries section).
+
+### What was NOT changed
+`GunController`, `ViewModelController`, `ClientInit`, `SoundController`, all UI controllers, all server
+files, `WeaponData`, `default.project.json`, `CLAUDE.md`, `PROJECT_RULES.md`, `NAMING.md`.
+No remotes added. No camera.CFrame writes. No movement speeds changed. No animation IDs changed.
+No gun/combat/server state changed. `LeftShift` sprint handler unchanged.
+
+### Manual Studio step required
+- In Studio, set `StarterPlayer.EnableMouseLockOption = false` to disable Roblox's default Shift Lock.
+  If left enabled, the Roblox native shift-lock can activate on Shift key independently of the
+  custom LeftAlt toggle, causing the legacy `MouseBehavior == LockCenter` path to trigger unexpectedly
+  (if `CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY` is ever set to false).
+- `default.project.json` is NOT edited in this task — apply this setting manually in Studio.
+
+### Debt entries updated
+- DEBT-044: updated (x6) with Stage 2D: custom mouse-lock toggle, LeftAlt key, strafe gate source
+  changed to `customMouseLocked`; updated remaining gaps (full camera controller still deferred);
+  updated remaining risks (Roblox default ShiftLock should be disabled, input needs Studio verification).
+
+### Studio verification required
+Yes. With `CUSTOM_MOUSE_LOCK_DEBUG = true` and `MOVEMENT_ANIMATION_DEBUG = true`:
+- Disable `StarterPlayer.EnableMouseLockOption` in Studio before testing.
+- Spawn in ACTIVE. Walk sideways without pressing LeftAlt:
+  - WalkForward plays (strafe blocked). Output: "strafe animations blocked: custom mouse lock not active (press LeftAlt to enable)".
+- Press LeftAlt: Output: "custom mouse lock: ON". Mouse locks to center.
+  - Walk left: WalkLeft plays.
+  - Walk right: WalkRight plays.
+  - Hold LeftShift + move: RunForward plays (sprint, not affected by mouse lock).
+- Press LeftAlt again: Output: "custom mouse lock: OFF". Mouse returns to Default.
+  - Walk sideways: WalkForward plays again.
+- Hold LeftShift while mouse lock is OFF and walk sideways: sprint activates, RunForward plays,
+  mouse lock does NOT toggle on.
+- Leave ACTIVE phase: Output: "custom mouse lock released: left ACTIVE phase". Cursor released.
+- Respawn: cursor released, customMouseLocked = false confirmed by no "custom mouse lock: ON" log.
+- Confirm no camera.CFrame, CameraOffset, or FieldOfView changes.
+- Confirm no new remotes in Remotes folder.
+
+---
+
 ## [2026-05-19] — Movement Stage 2 animation ID update: replace forward walk/run IDs with confirmed-good assets
 
 ### Summary
