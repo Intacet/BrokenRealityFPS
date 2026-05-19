@@ -2,9 +2,20 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A — walk, sprint, crouch speed; 8-direction camera-relative
--- movement state; phase gating; respawn handling; connection cleanup.
--- Stage 2A adds R6 walk/run animation playback for armed (AR15) and unarmed movement.
+-- Movement Stage 1 + 2A (with Animate-disable bug fix) — walk, sprint, crouch speed;
+-- 8-direction camera-relative movement state; phase gating; respawn handling;
+-- connection cleanup; R6 animation playback.
+--
+-- Bug fix (2026-05-18): The default Roblox Animate LocalScript inside the character
+-- was overriding custom R6 AnimationTrack objects loaded in Stage 2A. MovementController
+-- now calls disableDefaultAnimate() on every CharacterAdded — before loading custom
+-- tracks — to stop the avatar animation pack from controlling locomotion.
+-- This is gated by Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED and
+-- Constants.DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT (both default true).
+-- Animate is disabled, not destroyed, so it can be re-enabled if needed.
+--
+-- NOTE: disabling Animate removes idle, jump, fall, and climb animations in addition
+-- to locomotion. Custom replacements for those states are needed in a future stage.
 --
 -- Owns:
 --   • local movement input (LeftShift = sprint, C = crouch toggle)
@@ -16,6 +27,12 @@
 --       Constants.CROUCH_SPEED     when ACTIVE and crouching
 --   • 8-directional direction detection via Humanoid.MoveDirection dot products
 --   • R6 walk/run AnimationTracks loaded per character, played during ACTIVE phase only
+--   • Disabling character.Animate to prevent avatar animation pack override
+--
+-- Animation control constants (all in Constants.lua):
+--   CUSTOM_MOVEMENT_ANIMATIONS_ENABLED = true       — master switch for custom anim system
+--   DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = true — disables character.Animate
+--   MOVEMENT_ANIMATION_DEBUG = true                 — logs load/switch events to Output
 --
 -- Camera rule (Stage 1 + 2A):
 --   Reads workspace.CurrentCamera.CFrame for direction detection only.
@@ -23,13 +40,11 @@
 --   Does NOT add camera bob, sway, landing dip, tilt, or viewmodel effects.
 --
 -- Stage 2A animation scope (forward walk/run only):
---   Plays the AR15 or Unarmed animation set based on weapon state.
---   Current prototype defaults to AR15 set (true armed/unarmed state deferred — see DEBT-050).
---   Only WalkForward and RunForward exist in Stage 2A.
---   No crouch, strafe, backward, diagonal, reload, fire, or ADS animations in this stage.
---   No lower-body/upper-body animation split in this stage.
---   If the character is not R6, animation loading is skipped safely; Stage 1 speed
---   logic remains fully active regardless.
+--   Defaults to AR15 animation set (true armed/unarmed state deferred — see DEBT-050).
+--   WalkLeft/WalkRight played if tracks exist; falls back to WalkForward if absent.
+--   No crouch, backward, diagonal, reload, fire, or ADS animations in Stage 2A.
+--   No lower-body/upper-body animation split in Stage 2A.
+--   Non-R6 characters: animation loading skipped; Stage 1 speed logic remains active.
 --
 -- Not in Stage 1/2A: slide, vault, stamina, prone, footsteps, crouch body lowering,
 --   camera height changes, viewmodel sway, strafe/backward/diagonal animations.
@@ -90,15 +105,19 @@ local _connections: { RBXScriptConnection } = {}
 -- ── Stage 2A animation state ──────────────────────────────────────────────────
 
 -- AnimationTrack table keyed by "SetName_AnimName" (e.g. "AR15_WalkForward").
--- Populated by loadMovementAnimations(); cleared on character respawn and destroy().
-local animationTracks: { [string]: AnimationTrack } = {}
+-- Typed AnimationTrack? so nil checks on absent keys are type-safe.
+local animationTracks: { [string]: AnimationTrack? } = {}
+
+-- Unparented Animation instances created during loadMovementAnimations().
+-- Stored for explicit cleanup on respawn and in destroy().
+local animationInstances: { [string]: Animation } = {}
 
 -- The key currently being played, or "" when nothing is playing.
--- Used to avoid restarting the same animation every Heartbeat tick.
+-- Guards against restarting the same track on every Heartbeat tick.
 local currentAnimationName: string = ""
 
 -- Whether a rig-type warning has already been issued for the current character.
--- Reset each time a new character is set up to avoid suppressing future warnings.
+-- Reset on each new character so future warnings are not suppressed.
 local rigTypeWarned: boolean = false
 
 -- ============================================================
@@ -195,6 +214,35 @@ end
 -- Private helpers — Stage 2A: animation
 -- ============================================================
 
+-- Disables the default Roblox Animate LocalScript so the avatar animation pack no
+-- longer controls locomotion. Custom tracks from loadMovementAnimations() will then
+-- play without being overridden.
+--
+-- Only acts when both CUSTOM_MOVEMENT_ANIMATIONS_ENABLED and
+-- DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT are true.
+-- Disables Animate; does NOT destroy it and does NOT touch any other scripts.
+--
+-- Side effect: disabling Animate also removes idle, jump, fall, and climb animations.
+-- Custom replacements for those states are needed in a future movement stage.
+local function disableDefaultAnimate(character: Model)
+    assert(character ~= nil, "[MovementController] disableDefaultAnimate: character is required")
+
+    if Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED ~= true then return end
+
+    if Constants.DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT ~= true then
+        -- Animate is left running. Custom tracks may be overridden or blend unexpectedly
+        -- with avatar animation pack locomotion. Set
+        -- DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = true to resolve conflicts.
+        return
+    end
+
+    local animate = character:FindFirstChild("Animate")
+    if animate and (animate:IsA("LocalScript") or animate:IsA("Script")) then
+        animate.Disabled = true
+        Logger.debug("[MovementController] default Animate script disabled for: " .. character.Name)
+    end
+end
+
 -- Finds the Animator inside a character's Humanoid.
 -- Returns nil and warns if not found; all callers skip animation and continue safely.
 local function getAnimator(character: Model): Animator?
@@ -212,10 +260,9 @@ local function getAnimator(character: Model): Animator?
 end
 
 -- Returns the animation set name for the player's current weapon.
--- MAINTENANCE (DEBT-050): This prototype always returns "AR15" because true
--- armed/unarmed state is not yet owned by the client — it requires server-owned
--- equipment state (InventoryService or EquipmentService). When that system exists,
--- query the equipped weapon here and return "Unarmed" when no weapon is held.
+-- MAINTENANCE (DEBT-050): Always returns "AR15" — true armed/unarmed state requires
+-- server-owned equipment state (InventoryService or EquipmentService). When that
+-- system exists, query it here and return "Unarmed" when no weapon is held.
 local function getAnimationSetName(): string
     return "AR15"
 end
@@ -232,10 +279,19 @@ local function stopCurrentMovementAnimation()
 end
 
 -- Plays the named animation track (key format: "SetName_AnimName", e.g. "AR15_WalkForward").
--- Fades in over MOVEMENT_ANIMATION_FADE_TIME. No-ops if the same track is already playing.
--- Warns and clears currentAnimationName if the requested key is absent from animationTracks.
+-- Fades in over MOVEMENT_ANIMATION_FADE_TIME. No-ops if already playing that track.
+-- Logs the switch if MOVEMENT_ANIMATION_DEBUG is true.
+-- Warns and clears currentAnimationName if the requested key is absent.
 local function playMovementAnimation(animationName: string)
-    if currentAnimationName == animationName then return end  -- already playing; no switch needed
+    if currentAnimationName == animationName then return end  -- already playing; no restart needed
+
+    if Constants.MOVEMENT_ANIMATION_DEBUG then
+        Logger.debug(
+            "[MovementController] anim switch: ["
+            .. (currentAnimationName == "" and "none" or currentAnimationName)
+            .. "] → [" .. animationName .. "]"
+        )
+    end
 
     -- Fade out the previous animation.
     if currentAnimationName ~= "" then
@@ -256,21 +312,28 @@ local function playMovementAnimation(animationName: string)
     currentAnimationName = animationName
 end
 
--- Clears and reloads all R6 movement AnimationTracks for the given character.
--- Called from setupCharacter() on every spawn/respawn.
---
--- Old tracks are safe to abandon without explicit :Stop()/:Destroy() — Roblox stops
--- and cleans up all AnimationTracks automatically when the Animator is destroyed
--- with the outgoing character. Calling methods on those stale references is unsafe.
+-- Clears old animation state and loads all R6 movement AnimationTracks for the character.
+-- Called from setupCharacter() on every spawn/respawn, after disableDefaultAnimate().
+-- Skipped entirely if CUSTOM_MOVEMENT_ANIMATIONS_ENABLED is false.
+-- Old AnimationTrack references are cleared (previous Animator may already be destroyed).
+-- Old Animation instances are explicitly destroyed before new ones are created.
 local function loadMovementAnimations(character: Model)
-    -- Clear the previous character's stale track references.
-    -- Do NOT :Stop() them — the previous Animator may already be destroyed.
+    if not Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED then return end
+
+    -- Clear stale track references. Do NOT :Stop() them — the previous Animator may
+    -- already be destroyed, making those references unsafe to call.
     table.clear(animationTracks)
     currentAnimationName = ""
     rigTypeWarned        = false
 
-    -- Rig type safety: only load R6 animations for R6 characters.
-    -- Warn once per character so the log is not spammed from Heartbeat.
+    -- Destroy and clear old Animation instances from the previous character.
+    for _, inst in pairs(animationInstances) do
+        inst:Destroy()
+    end
+    table.clear(animationInstances)
+
+    -- Rig type safety: only load R6 animations for R6 characters. Warn once per
+    -- character so the log is not spammed from Heartbeat.
     local hum = character:FindFirstChildOfClass("Humanoid") :: Humanoid?
     if not hum then
         Logger.warn("[MovementController] loadMovementAnimations: no Humanoid — skipping")
@@ -288,7 +351,7 @@ local function loadMovementAnimations(character: Model)
     local animator = getAnimator(character)
     if not animator then return end
 
-    -- Build the flat "SetName_AnimName" → AnimationTrack table for all four clips.
+    -- Build the flat "SetName_AnimName" → AnimationTrack table.
     local r6 = Constants.MOVEMENT_ANIMATION_IDS.R6
     local toLoad: { [string]: string } = {
         ["Unarmed_WalkForward"] = r6.Unarmed.WalkForward,
@@ -298,28 +361,37 @@ local function loadMovementAnimations(character: Model)
     }
 
     for key, assetId in pairs(toLoad) do
-        local animInstance       = Instance.new("Animation")
-        animInstance.AnimationId = assetId
-        local track              = animator:LoadAnimation(animInstance)
-        track.Looped             = true
-        animationTracks[key]     = track
+        if assetId == nil or assetId == "" then
+            -- Warn for missing or empty asset IDs — these may indicate an unloaded
+            -- constant, a private asset, or a placeholder not yet replaced.
+            Logger.warn("[MovementController] loadMovementAnimations: empty assetId for key: " .. key)
+        else
+            if Constants.MOVEMENT_ANIMATION_DEBUG then
+                Logger.debug("[MovementController] loading anim [" .. key .. "] = " .. assetId)
+            end
+            local animInstance       = Instance.new("Animation")
+            animInstance.AnimationId = assetId
+            animationInstances[key]  = animInstance
+            local track              = animator:LoadAnimation(animInstance)
+            track.Looped             = true
+            animationTracks[key]     = track
+        end
     end
 
     Logger.debug("[MovementController] R6 movement animations loaded for: " .. character.Name)
 end
 
--- Selects and triggers the correct movement animation based on the current movementState.
--- Called every Heartbeat tick during ACTIVE phase. Uses currentAnimationName tracking
--- to avoid restarting the same track every frame.
+-- Selects and triggers the correct movement animation for the current movementState.
+-- Called every Heartbeat tick during ACTIVE phase.
+-- Skipped if CUSTOM_MOVEMENT_ANIMATIONS_ENABLED is false.
+-- currentAnimationName guard prevents restarting the same track every frame.
 --
 -- Stage 2A scope:
---   Only WalkForward and RunForward are implemented. For non-Forward directions
---   (strafe, backward, diagonal), WalkForward is used as a fallback — this is the
---   simpler option; Stage 2B will add per-direction clips.
---   Crouch animation is not implemented; crouching uses WalkForward at CROUCH_SPEED
---   until a dedicated crouch-walk clip is added in a future stage.
+--   WalkLeft/WalkRight played if present in animationTracks; falls back to WalkForward.
+--   Crouch animation not implemented; crouching uses WalkForward at CROUCH_SPEED.
+--   Backward, diagonal directions also fall back to WalkForward in Stage 2A.
 local function updateMovementAnimation()
-    -- Nothing to animate if tracks were not loaded (non-R6 rig or missing Animator).
+    if not Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED then return end
     if next(animationTracks) == nil then return end
 
     -- Stop if not moving.
@@ -328,14 +400,28 @@ local function updateMovementAnimation()
         return
     end
 
-    -- Select animation: sprinting → RunForward, otherwise → WalkForward.
-    -- WalkForward also covers strafe, backward, and diagonal directions in Stage 2A.
-    local setName  = getAnimationSetName()  -- "AR15" or "Unarmed" (currently always "AR15")
+    local setName = getAnimationSetName()   -- "AR15" or "Unarmed" (currently always "AR15")
+    local dirName = movementState.directionName
     local animName: string
+
     if movementState.isSprinting then
         animName = setName .. "_RunForward"
+
+    elseif dirName == "Left" or dirName == "ForwardLeft" or dirName == "BackwardLeft" then
+        -- Attempt left-strafe; fall back to WalkForward if not loaded in Stage 2A.
+        local leftKey   = setName .. "_WalkLeft"
+        local leftTrack = animationTracks[leftKey]
+        animName = if leftTrack ~= nil then leftKey else (setName .. "_WalkForward")
+
+    elseif dirName == "Right" or dirName == "ForwardRight" or dirName == "BackwardRight" then
+        -- Attempt right-strafe; fall back to WalkForward if not loaded in Stage 2A.
+        local rightKey   = setName .. "_WalkRight"
+        local rightTrack = animationTracks[rightKey]
+        animName = if rightTrack ~= nil then rightKey else (setName .. "_WalkForward")
+
     else
-        animName = setName .. "_WalkForward"  -- fallback for all non-sprint movement directions
+        -- Forward, Backward, or Idle-magnitude directions → WalkForward.
+        animName = setName .. "_WalkForward"
     end
 
     playMovementAnimation(animName)
@@ -346,8 +432,8 @@ end
 -- ============================================================
 
 -- Called on every CharacterAdded. Re-acquires the Humanoid reference, resets
--- movementState, applies the phase-appropriate WalkSpeed immediately, and loads
--- R6 movement animations for the new character (Stage 2A layer).
+-- movementState, applies the phase-appropriate WalkSpeed immediately, disables the
+-- default Animate script, then loads R6 movement animations (Stage 2A layer).
 local function setupCharacter(char: Model)
     humanoid = char:WaitForChild("Humanoid") :: Humanoid
 
@@ -361,8 +447,13 @@ local function setupCharacter(char: Model)
         hum.WalkSpeed = 0  -- freeze in LOBBY / PREP / RESULTS / MATCHEND
     end
 
-    -- Stage 2A: load R6 movement animations for this character.
-    -- Skipped safely if rig is not R6; Stage 1 speed logic always runs regardless.
+    -- Disable the default Animate script before loading custom tracks.
+    -- Order matters: Animate must be disabled first so it cannot start playing
+    -- avatar locomotion animations that would override custom tracks.
+    disableDefaultAnimate(char)
+
+    -- Load R6 movement animations. Skipped if CUSTOM_MOVEMENT_ANIMATIONS_ENABLED is
+    -- false, rig is not R6, or Animator is missing. Stage 1 speed logic is unaffected.
     loadMovementAnimations(char)
 
     Logger.debug("[MovementController] Character set up: " .. char.Name)
@@ -384,7 +475,6 @@ end
 
 -- Backward-compatible single-string getter for GunController's spread computation.
 -- Returns "Sprinting", "Crouching", "Walking", or "Idle".
--- Kept alongside GetMovementState() so GunController does not need changes in Stage 1/2A.
 function MovementController:GetMoveState(): string
     if movementState.isSprinting and movementState.isMoving then
         return "Sprinting"
@@ -403,22 +493,27 @@ function MovementController:IsADSBlocked(): boolean
 end
 
 -- Stage 1/2A: no viewmodel effects. Returns identity so ViewModelController's
--- PivotTo composition is unaffected. Future stages will compose bob, tilt,
--- and sway here without changing ViewModelController's call site.
+-- PivotTo composition is unaffected. Future stages compose bob, tilt, and sway
+-- here without changing ViewModelController's call site.
 function MovementController:GetViewmodelAddCFrame(): CFrame
     return CFrame.new()
 end
 
--- Disconnects all event connections, stops all animation tracks, and resets all state.
+-- Disconnects all event connections, stops all animation tracks, destroys Animation
+-- instances, and resets all state.
 -- Safe to call even if Start() was never called (iterates empty tables).
 function MovementController:destroy()
-    -- Stage 2A: stop the active animation (if any) and clear the track table.
-    -- The character may or may not still be alive at this point; :Stop() is safe
-    -- as long as we hold a live reference (animationTracks keeps references alive).
+    -- Stop the active animation if still playing, then clear track references.
     stopCurrentMovementAnimation()
     table.clear(animationTracks)
     currentAnimationName = ""
     rigTypeWarned        = false
+
+    -- Explicitly destroy Animation instances.
+    for _, inst in pairs(animationInstances) do
+        inst:Destroy()
+    end
+    table.clear(animationInstances)
 
     for _, conn in ipairs(_connections) do
         conn:Disconnect()
@@ -443,23 +538,20 @@ function MovementController:Start()
     end
 
     -- ── CharacterAdded ────────────────────────────────────────────────────────
-    -- Re-acquires Humanoid, resets state, and loads animations on every respawn.
-    -- Stored so destroy() can disconnect it.
+    -- Re-acquires Humanoid, resets state, disables Animate, and loads animations.
     local charConn = localPlayer.CharacterAdded:Connect(function(char: Model)
         setupCharacter(char)
     end)
     table.insert(_connections, charConn)
 
     -- ── RoundStateChanged ─────────────────────────────────────────────────────
-    -- Mirrors the phase into movementState and WalkSpeed so the controller
-    -- stays correct without polling MatchController every Heartbeat.
+    -- Mirrors the phase into movementState and WalkSpeed.
     local phaseConn = RoundStateChanged.OnClientEvent:Connect(function(raw: any)
         local payload = raw :: { phase: string }
         local phase   = payload.phase
 
         if phase ~= Constants.Phase.ACTIVE then
-            -- Leaving ACTIVE: freeze the player, clear all movement state, and
-            -- stop any playing movement animation (Stage 2A).
+            -- Leaving ACTIVE: freeze the player, clear movement state, stop animation.
             resetState()
             stopCurrentMovementAnimation()
             local hum = humanoid
@@ -467,8 +559,7 @@ function MovementController:Start()
                 hum.WalkSpeed = 0
             end
         else
-            -- Entering ACTIVE: restore walk speed. State was already reset when
-            -- we left the previous phase, so sprint/crouch flags are clean.
+            -- Entering ACTIVE: restore walk speed.
             local hum = humanoid
             if hum then
                 hum.WalkSpeed = Constants.WALK_SPEED
@@ -478,15 +569,12 @@ function MovementController:Start()
     table.insert(_connections, phaseConn)
 
     -- ── Input: Sprint (LeftShift) ─────────────────────────────────────────────
-    -- Sprint is only active during ACTIVE phase and only when not crouching.
-    -- Crouching overrides sprint — pressing Shift while crouched is ignored.
-
     local sprintBeginConn = UserInputService.InputBegan:Connect(
         function(input: InputObject, gp: boolean)
             if gp then return end
             if input.KeyCode ~= Enum.KeyCode.LeftShift then return end
             if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
-            if movementState.isCrouching then return end  -- sprint ignored while crouched
+            if movementState.isCrouching then return end
             movementState.isSprinting = true
             applySpeed()
         end
@@ -504,9 +592,6 @@ function MovementController:Start()
     table.insert(_connections, sprintEndConn)
 
     -- ── Input: Crouch (C toggle) ──────────────────────────────────────────────
-    -- C toggles crouch during ACTIVE. Entering crouch clears sprint.
-    -- Sprinting while crouched is not allowed (sprint begin handler guards this too).
-
     local crouchConn = UserInputService.InputBegan:Connect(
         function(input: InputObject, gp: boolean)
             if gp then return end
@@ -515,7 +600,6 @@ function MovementController:Start()
 
             movementState.isCrouching = not movementState.isCrouching
             if movementState.isCrouching then
-                -- Entering crouch: clear sprint so applySpeed() picks CROUCH_SPEED.
                 movementState.isSprinting = false
             end
             applySpeed()
@@ -524,12 +608,8 @@ function MovementController:Start()
     table.insert(_connections, crouchConn)
 
     -- ── Heartbeat: direction detection, speed maintenance, animation update ────
-    -- Runs every physics step. Reads Humanoid.MoveDirection, classifies it into
-    -- one of 9 named directions, updates movementState, re-applies speed, and
-    -- calls updateMovementAnimation() for the Stage 2A animation layer.
-    -- Using Heartbeat (not RenderStepped) because this is physics-step work
-    -- with no camera or rendering dependency.
-
+    -- Runs every physics step. Updates movementState, re-applies speed, and drives
+    -- the Stage 2A animation layer. No camera writes.
     local heartbeatConn = RunService.Heartbeat:Connect(function(_dt: number)
         local hum = humanoid
         if not hum then return end
@@ -540,8 +620,6 @@ function MovementController:Start()
         movementState.isMoving      = moveDir.Magnitude > Constants.MOVEMENT_DIRECTION_DEADZONE
         movementState.directionName = classifyDirection(moveDir)
 
-        -- Re-apply speed each tick so sprint speed activates as soon as isMoving
-        -- becomes true after the player begins moving while Shift is held.
         applySpeed()
 
         -- Stage 2A: select and play the correct walk/run animation.

@@ -80,6 +80,21 @@ Constants.MOVEMENT_ANIMATION_IDS = {
 
 Constants.MOVEMENT_ANIMATION_FADE_TIME = 0.15  -- seconds to cross-fade between movement animations
 
+-- Master switch: when false, MovementController does not disable Animate and does not
+-- play any custom movement tracks — the default avatar animation pack runs as normal.
+Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED = true
+
+-- When true, MovementController sets character.Animate.Disabled = true before loading
+-- custom tracks so the avatar animation pack cannot override R6 locomotion.
+-- When false, Animate is left running; custom tracks may blend or be overridden.
+-- DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT has no effect when
+-- CUSTOM_MOVEMENT_ANIMATIONS_ENABLED is false.
+Constants.DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = true
+
+-- When true, MovementController logs animation load and switch events to Output.
+-- Set false to silence animation diagnostics in production.
+Constants.MOVEMENT_ANIMATION_DEBUG = true
+
 -- ============================================================
 -- Timing constants
 -- ============================================================

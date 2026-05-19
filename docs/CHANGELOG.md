@@ -7,6 +7,61 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-18] — Movement Stage 2A bug fix: disable default Animate script so custom R6 locomotion plays
+
+### Summary
+Bug fix for custom R6 movement animations not playing. The root cause was the default Roblox `Animate` LocalScript — present in every spawned character — overriding custom `AnimationTrack` objects loaded in Stage 2A. `MovementController` now calls `disableDefaultAnimate(character)` on every `CharacterAdded`, before loading custom tracks, so the avatar animation pack no longer controls locomotion. The fix is gated by two new constants (both default `true`). A third constant enables animation diagnostic logging. WalkLeft/WalkRight direction fallback logic added.
+
+### Changed files
+
+- **`src/shared/Constants.lua`** — three new constants added in the movement animation section:
+  - `Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED = true` — master switch; `false` leaves Animate running and skips all custom track logic.
+  - `Constants.DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = true` — when `true`, sets `character.Animate.Disabled = true` before loading custom tracks; `false` leaves Animate running (custom tracks may conflict).
+  - `Constants.MOVEMENT_ANIMATION_DEBUG = true` — logs animation load and switch events to Output; set `false` to silence in production.
+  - No existing constants changed. No animation IDs changed.
+
+- **`src/client/MovementController.lua`** — multiple targeted additions on top of the Stage 2A layer:
+  - New private state: `animationInstances: { [string]: Animation }` — stores unparented `Animation` instances so they can be explicitly destroyed on respawn and in `destroy()`.
+  - `animationTracks` type updated from `{ [string]: AnimationTrack }` to `{ [string]: AnimationTrack? }` — makes nil checks on absent keys type-safe.
+  - New private helper `disableDefaultAnimate(character: Model)`:
+    - Guards on `CUSTOM_MOVEMENT_ANIMATIONS_ENABLED` and `DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT`.
+    - Finds `character:FindFirstChild("Animate")`; if it is a `LocalScript` or `Script`, sets `Disabled = true`.
+    - Does NOT destroy Animate. Does NOT touch any script outside the character.
+    - Logs via `Logger.debug()` when Animate is disabled.
+  - `setupCharacter()` updated: calls `disableDefaultAnimate(char)` before `loadMovementAnimations(char)`.
+  - `loadMovementAnimations()` updated:
+    - Gated on `CUSTOM_MOVEMENT_ANIMATIONS_ENABLED` at the top.
+    - Destroys and clears `animationInstances` at the start of each respawn (old `Animation` objects explicitly destroyed).
+    - Per-track `Logger.debug()` behind `MOVEMENT_ANIMATION_DEBUG` (key + assetId).
+    - `Logger.warn()` for any empty or nil assetId.
+  - `playMovementAnimation()` updated: logs switch (prev → next) behind `MOVEMENT_ANIMATION_DEBUG`.
+  - `updateMovementAnimation()` updated:
+    - Gated on `CUSTOM_MOVEMENT_ANIMATIONS_ENABLED`.
+    - Now attempts `WalkLeft`/`WalkRight` tracks for left/right directions; falls back to `WalkForward` if not loaded (Stage 2A has no strafe IDs yet).
+  - `destroy()` updated: explicitly destroys and clears `animationInstances` in addition to clearing `animationTracks`.
+  - Module header comment updated to document the bug fix, Animate side effects, and animation constants.
+
+- **`docs/PROJECT_MAP.md`** — `MovementController` entry updated:
+  - Documents `disableDefaultAnimate()` behavior, guard constants, and "disabled not destroyed" note.
+  - Documents Animate side effect: idle/jump/fall/climb also suppressed.
+  - Documents `CUSTOM_MOVEMENT_ANIMATIONS_ENABLED`, `DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT`, `MOVEMENT_ANIMATION_DEBUG` in the Constants entry.
+  - Notes animation ID ownership risk.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated:
+  - Notes the Animate-disable bug fix.
+  - Adds remaining risks: animation ID ownership, non-R6 skip, idle/jump/fall/climb T-pose, armed/unarmed always AR15, conflict when `DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = false`.
+
+### What was NOT changed
+`GunController`, `ViewModelController`, `ClientInit`, `SoundController`, all UI controllers, all server files, `WeaponData`, `default.project.json`, `CLAUDE.md`, `PROJECT_RULES.md`, `NAMING.md`. No remotes added. No camera writes. No movement speeds changed. No new animation IDs added.
+
+### Debt entries updated
+- DEBT-044: updated with Animate-disable fix, WalkLeft/WalkRight fallback, new remaining risks listed.
+
+### Studio verification required
+Yes — see Studio test steps in the task prompt. Key: character.Animate becomes Disabled on spawn, avatar pack walk/run no longer plays, custom walk/run plays during ACTIVE.
+
+---
+
 ## [2026-05-18] — Movement Stage 2A: R6 walk/run animation playback in MovementController
 
 ### Summary

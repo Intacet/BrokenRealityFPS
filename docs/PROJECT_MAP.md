@@ -109,24 +109,42 @@ HordeService (server)   [LEGACY PLAN — replaces with zone ambient spawn budget
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- Stage 1 + 2A: owns local movement input (LeftShift=sprint, C=crouch toggle),
-                        --   movementState table, Humanoid.WalkSpeed, and R6 walk/run animation playback.
+MovementController      -- Stage 1 + 2A (with Animate-disable bug fix): owns local movement input
+                        --   (LeftShift=sprint, C=crouch toggle), movementState table, Humanoid.WalkSpeed,
+                        --   R6 walk/run animation playback, and character.Animate suppression.
                         --   Reads workspace.CurrentCamera.CFrame for 8-directional camera-relative
                         --   direction detection; does NOT write camera.CFrame, CameraOffset, or FOV.
                         --   No new remotes. No slide, vault, or camera effects.
                         --
+                        --   Animate script suppression (bug fix — 2026-05-18):
+                        --     disableDefaultAnimate() sets character.Animate.Disabled = true on every
+                        --     CharacterAdded, before custom tracks are loaded. This prevents the avatar
+                        --     animation pack (the default Animate LocalScript) from overriding custom
+                        --     R6 locomotion animations. Animate is DISABLED, not DESTROYED.
+                        --     Side effect: idle, jump, fall, and climb animations are also suppressed
+                        --     until custom replacements are added in a future stage.
+                        --     Gated by two constants (both default true):
+                        --       Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED — master switch
+                        --       Constants.DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT — animate gate
+                        --     If DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = false, Animate is left
+                        --     running and custom tracks may conflict with avatar pack locomotion.
+                        --
                         --   Stage 2A animation support (R6 only, forward walk/run only):
-                        --     Loads 4 AnimationTrack objects per character via Humanoid.Animator.
+                        --     Loads AnimationTrack objects per character via Humanoid.Animator.
                         --     Plays during ACTIVE phase only; stops on phase exit and when not moving.
                         --     Defaults to AR15 animation set (true armed/unarmed state deferred — DEBT-050).
+                        --     WalkLeft/WalkRight played if tracks are present; falls back to WalkForward.
+                        --     Animation diagnostics logged when Constants.MOVEMENT_ANIMATION_DEBUG = true.
                         --     Animation IDs (Constants.MOVEMENT_ANIMATION_IDS.R6):
                         --       Unarmed.WalkForward = rbxassetid://83927286289016
                         --       Unarmed.RunForward  = rbxassetid://98612697944606
                         --       AR15.WalkForward    = rbxassetid://110651810525086
                         --       AR15.RunForward     = rbxassetid://124640088553427
-                        --     Not in Stage 2A: crouch anim, strafe, backward, diagonal, lower/upper-body
+                        --     Not in Stage 2A: crouch anim, backward, diagonal, lower/upper-body
                         --       split, reload/fire/ADS weapon animations.
                         --     If character is not R6, animation loading is skipped; Stage 1 logic active.
+                        --     If animation IDs are private/not owned by the game, Roblox may refuse to
+                        --     load them — check Output for permission errors.
                         --
                         --   Exposes: GetMovementState() → table; GetMoveState() → string (GunController
                         --   compat); IsADSBlocked() → bool; GetViewmodelAddCFrame() → identity (Stage 1/2A);
@@ -163,6 +181,14 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --     false = Classic camera + viewmodel hidden (development/testing).
              --     true  = LockFirstPerson + viewmodel shown during ACTIVE only.
              --   Set true before shipping the FPS experience. See DEBT-048.
+             --   Movement animation control constants (all default true):
+             --     CUSTOM_MOVEMENT_ANIMATIONS_ENABLED — master switch; false disables all
+             --       custom movement track loading and playback; Animate runs as normal.
+             --     DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT — when true, MovementController
+             --       sets character.Animate.Disabled = true before loading custom tracks;
+             --       false leaves Animate running (may cause override/blend conflicts).
+             --     MOVEMENT_ANIMATION_DEBUG — when true, logs animation load and switch
+             --       events to Output for diagnostics; set false to silence in production.
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag

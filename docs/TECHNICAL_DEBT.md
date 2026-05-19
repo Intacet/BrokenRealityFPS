@@ -509,16 +509,25 @@ primary protection.
 **Severity:** Medium
 **Studio verification required:** Yes
 **Updated (2026-05-18 — Stage 2A):** R6 walk/run animation playback added. Four AnimationTrack objects are loaded per character via `Humanoid.Animator`. Tracks are played during ACTIVE phase only and cleared on respawn/destroy. `directionName` is correctly computed and drives animation selection alongside `isSprinting`.
+**Updated (2026-05-18 — Animate-disable bug fix):** Custom animation tracks were not playing because the default Roblox `Animate` LocalScript was overriding them. `disableDefaultAnimate()` now sets `character.Animate.Disabled = true` on every `CharacterAdded`, before custom tracks are loaded. Gated by `Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED` and `Constants.DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT` (both default `true`). Animation diagnostics added behind `Constants.MOVEMENT_ANIMATION_DEBUG`. WalkLeft/WalkRight fallback logic added.
 
 **Remaining gaps (not in Stage 2A):**
 - Crouch walk animation — not implemented; crouching uses WalkForward at CROUCH_SPEED.
-- Strafe, backward, and diagonal direction animations — not implemented; WalkForward is used as a fallback for all non-Forward directions.
+- Strafe, backward, and diagonal direction animations — WalkLeft/WalkRight keys checked first; WalkForward used as fallback when not loaded.
 - Lower-body / upper-body animation split — not implemented; the full body plays the movement animation.
 - Reload, fire, ADS, and sprint-hold weapon animations — deferred to a weapon-anim stage.
 - True armed/unarmed set selection — deferred; see DEBT-050 (defaults to AR15 set).
+- Idle, jump, fall, and climb animations — suppressed along with locomotion when Animate is disabled. Custom replacements needed in a future movement stage.
 
-**Trigger:** Any playtesting session where missing strafing/backward animations or the always-AR15-set are noticeable.
-**Fix when:** A future movement stage (Stage 2B) adds per-direction animation clips and armed/unarmed state integration. Do not build until Stage 2A is verified in Studio.
+**Remaining risks:**
+- If custom animation IDs are private or not owned by the game's creator / group, Roblox may silently refuse to load them. `Logger.warn()` fires for any empty assetId; a failed `LoadAnimation()` call will produce an output error. Confirm animation ownership before shipping.
+- If the character is not R6, R6 animations are skipped and `Logger.warn()` fires once per character. Stage 1 speed/direction logic remains active.
+- Disabling Animate removes the default idle, jump, fall, and climb animations. Until custom clips are added, the character will T-pose during these states.
+- True armed/unarmed animation set selection requires server-owned equipment state. Until then, the AR15 set is always used regardless of whether the player holds a weapon (see DEBT-050).
+- If `DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = false`, Animate keeps running and may override or blend with custom locomotion tracks. This constant must stay `true` for custom animations to take effect.
+
+**Trigger:** Any playtesting session where T-pose during idle/jump or missing strafing/backward animations is noticeable.
+**Fix when:** A future movement stage (Stage 2B) adds idle/jump/fall/climb custom clips, per-direction animation clips, and armed/unarmed state integration. Do not build until Stage 2A is verified in Studio.
 
 ---
 
