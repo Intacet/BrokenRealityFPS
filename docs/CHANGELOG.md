@@ -7,6 +7,114 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-20] — Movement Stage 2K: third-person zoom limits + mouse-lock camera distance/offset
+
+### Summary
+Third-person camera zoom range constrained to 4–14 studs (via `Players.LocalPlayer.CameraMinZoomDistance`
+and `CameraMaxZoomDistance`). No first-person forcing — the player can scroll freely within the range.
+Custom mouse-lock toggle key changed from LeftAlt → LeftControl (LeftAlt is now free; LeftShift remains
+sprint-only). When mouse lock is ON: zoom is pinned at 8 studs and `Humanoid.CameraOffset` is set to
+`Vector3.new(1.75, 0, 0)` for a right-shoulder over-the-shoulder view. When mouse lock is OFF: zoom
+restores to 4–14 and CameraOffset returns to zero. Camera writes use player properties only — no
+`camera.CFrame` writes, no CameraType=Scriptable, no FieldOfView changes.
+
+### Changed files
+
+- **`src/shared/Constants.lua`**:
+  - Changed `CUSTOM_MOUSE_LOCK_TOGGLE_KEY`: `Enum.KeyCode.LeftAlt` → `Enum.KeyCode.LeftControl`.
+  - Added `THIRD_PERSON_MIN_ZOOM_DISTANCE = 4`.
+  - Added `THIRD_PERSON_MAX_ZOOM_DISTANCE = 14`.
+  - Added `CUSTOM_MOUSE_LOCK_CAMERA_DISTANCE = 8`.
+  - Added `CUSTOM_MOUSE_LOCK_CAMERA_OFFSET = Vector3.new(1.75, 0, 0)`.
+  - Added `CUSTOM_MOUSE_LOCK_RESTORE_CAMERA_OFFSET = Vector3.zero`.
+  - Added `CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_DISTANCE = true`.
+  - Added `CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_OFFSET = true`.
+
+- **`src/client/MovementController.lua`**:
+  - Stage header updated: 2J → 2J + 2K.
+  - Three new module-level state variables: `defaultCameraMinZoomDistance`, `defaultCameraMaxZoomDistance`, `defaultCameraOffset`.
+  - `cacheDefaultCameraSettings()` helper: stores initial player zoom distances and humanoid CameraOffset on first call (no-op on subsequent calls).
+  - `applyThirdPersonZoomLimits()` helper: writes `CameraMin=4`, `CameraMax=14`; called in `Start()` and `CharacterAdded`.
+  - `applyCustomMouseLockCamera()` helper: pins `CameraMin=CameraMax=8` and sets `CameraOffset=Vector3.new(1.75,0,0)`. Humanoid fallback: if module-level `humanoid` is nil, looks up via `Character:FindFirstChildOfClass("Humanoid")`.
+  - `restoreNormalThirdPersonCamera()` helper: restores `CameraMin=4`, `CameraMax=14`, and `CameraOffset=zero`. Same humanoid fallback.
+  - `applyCustomMouseLock()` updated: calls `applyCustomMouseLockCamera()` when ON, `restoreNormalThirdPersonCamera()` when OFF, and `restoreNormalThirdPersonCamera()` when the master switch is disabled.
+  - `Start()` updated: calls `cacheDefaultCameraSettings()` and `applyThirdPersonZoomLimits()` at startup.
+  - `CharacterAdded` handler updated: calls `cacheDefaultCameraSettings()` then applies correct camera state for current lock state.
+  - `destroy()` updated: calls `restoreNormalThirdPersonCamera()` and clears cache variables.
+  - Camera rule section in header updated: documents CameraMin/Max and CameraOffset writes; removes "does NOT write CameraOffset".
+  - ContextActionService comment updated: notes LeftControl (Stage 2K).
+
+- **`docs/PROJECT_MAP.md`** — stage header updated to 2K; LeftControl documented throughout; CameraMin/Max and CameraOffset writes added to MovementController description; Stage 2K camera constants added to Constants section; SetCustomMouseLocked exposes entry updated.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated (x14): Stage 2K update block added; remaining-gaps "first-person integration" note added; 5 new Stage 2K risk entries added (toggle key conflict, CameraOffset character size, fallback reliability, zoom tuning, character-facing jitter).
+
+### What was NOT changed
+No `src/server/` files. No `default.project.json`. No other client controllers.
+No `src/client/GunController.lua`, `ViewModelController.lua`, `ClientInit.client.lua`, `SoundController.lua`.
+No `src/client/UI/*.lua`. No `src/shared/WeaponData.lua`.
+No `camera.CFrame` writes. No CameraType=Scriptable. No FieldOfView changes.
+No new remotes. No slide, vault, stamina, or first-person forcing.
+No movement speed, animation ID, or combat changes.
+All existing animation IDs and speed multipliers preserved.
+
+### Validation
+- `rojo build` — passes.
+- MCP/Studio verified 2026-05-20: INIT zoom=4/14 offset=0,0,0 ✅  ON zoom=8/8 offset=1.75,0,0 ✅  OFF zoom=4/14 offset=0,0,0 ✅
+
+---
+
+## [2026-05-20] — Movement Stage 2J: Unarmed 8-directional crouch-walk animations
+
+### Summary
+Nine Unarmed directional crouch-walk animation IDs added (`CrouchWalk`, `CrouchWalkForward`,
+`CrouchWalkBackward`, `CrouchWalkLeft/Right`, `CrouchWalkForwardLeft/Right`,
+`CrouchWalkBackwardLeft/Right`). CrouchWalk and CrouchWalkForward share the same forward asset (canonical
+fallback). All tracks looped. New constant `MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER = 1.0`.
+Direction selection while crouching and moving uses `customMouseLocked` as the gate — same system as
+walk strafe gating. When mouse lock is off, CrouchWalkForward is always used regardless of direction.
+AR15 armed crouched movement falls back to EnterCrouch bottom-pose hold (no AR15 CrouchWalk IDs added).
+No HipHeight, CameraOffset, or camera.CFrame changes.
+
+### Changed files
+
+- **`src/shared/Constants.lua`**:
+  - Added to `MOVEMENT_ANIMATION_IDS.R6.Unarmed`:
+    - `CrouchWalk            = "rbxassetid://82558685099409"`  (forward, canonical fallback alias)
+    - `CrouchWalkForward     = "rbxassetid://82558685099409"`
+    - `CrouchWalkBackward    = "rbxassetid://131295440357763"`
+    - `CrouchWalkLeft        = "rbxassetid://103170217015576"`
+    - `CrouchWalkRight       = "rbxassetid://84961452934451"`
+    - `CrouchWalkForwardLeft  = "rbxassetid://115919203745144"`
+    - `CrouchWalkForwardRight = "rbxassetid://107284851359368"`
+    - `CrouchWalkBackwardLeft  = "rbxassetid://118800024223445"`
+    - `CrouchWalkBackwardRight = "rbxassetid://104285284019251"`
+  - Added `MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER = 1.0`.
+
+- **`src/client/MovementController.lua`**:
+  - Stage header updated: 2I → 2I + 2J.
+  - `getAnimationSpeedMultiplier()`: `animationName:sub(1, 10) == "CrouchWalk"` prefix check → returns `MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER`.
+  - `loadMovementAnimations()`: replaces the simple `r6.Unarmed.CrouchWalk` conditional with a loop over all 9 `unarmedCrouchWalkNames`; conditionally loads each if the ID exists. AR15 generic `CrouchWalk` still loaded if populated.
+  - `updateMovementAnimation()` crouch-moving branch: full 8-directional selection. `customMouseLocked` OFF → CrouchWalkForward fallback. `customMouseLocked` ON → per-direction chains (mirrors walk system). Non-Unarmed → generic CrouchWalk or hold bottom pose. Crouch-idle (not moving) → stop any `_CrouchWalk*` and hold bottom pose.
+  - `playCrouchTransition()` EnterCrouch Stopped callback: starts CrouchWalkForward (or CrouchWalk alias) immediately when moving, to avoid a blank frame; direction is refined on the next Heartbeat.
+
+- **`docs/PROJECT_MAP.md`** — stage header updated to 2J; 9 new Unarmed CrouchWalk* IDs documented; crouch-walk behavior + direction gating + fallback documented; AR15 deferred noted; multiplier documented.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated (x15): Stage 2J update block added; remaining-gaps "crouch walk" entry updated (Unarmed done, AR15 deferred); 4 new Stage 2J risk entries added; Trigger/Fix when lines updated.
+
+### What was NOT changed
+No `src/server/` files. No `default.project.json`. No other client controllers.
+No camera changes. No gun/combat changes. No new remotes.
+No AR15 CrouchWalk IDs added. No HipHeight, CameraOffset, or FieldOfView changes.
+No CrouchIdle animation added. No slide, vault, or stamina changes.
+Existing animation IDs (walk, run, idle, EnterCrouch/ExitCrouch, AR15 set) unchanged.
+All existing speed multipliers (walk 1.3×, strafe 1.4×, run 1.15×, idle 0.75×, crouch transition 0.9×) preserved.
+
+### Validation
+- `rojo build` — passes.
+- MCP/Studio verification pending. See DEBT-044 (x15) for test steps.
+
+---
+
 ## [2026-05-20] — Movement Stage 2I: Hold-to-crouch + EnterCrouch bottom-pose hold
 
 ### Summary

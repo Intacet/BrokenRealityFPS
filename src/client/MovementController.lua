@@ -2,12 +2,14 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I (Animate-disable, R6 detection, animation-set selection,
+-- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K (Animate-disable, R6 detection, animation-set selection,
 -- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
 -- character-facing camera yaw, Unarmed backward/diagonal directional animations,
 -- Unarmed run-forward-left/right diagonal sprint animations,
 -- standing idle + enter/exit crouch one-shot transition animations,
--- hold-to-crouch + EnterCrouch bottom-pose hold + optional CrouchWalk support) —
+-- hold-to-crouch + EnterCrouch bottom-pose hold,
+-- Unarmed 8-directional crouch-walk animations + CrouchWalk speed multiplier,
+-- third-person zoom limits + custom mouse-lock camera distance/offset) —
 -- walk, sprint, crouch speed; 8-direction camera-relative movement state; phase gating;
 -- respawn handling; connection cleanup; R6 animation playback with Unarmed default set.
 --
@@ -37,6 +39,11 @@
 -- WalkForward at 2.0×, WalkLeft/WalkRight at 1.35×, RunForward unchanged at 1.0×.
 --
 -- Stage 2D (2026-05-19): Custom mouse-lock toggle added on LeftAlt (Constants.CUSTOM_MOUSE_LOCK_TOGGLE_KEY).
+-- Stage 2K (2026-05-20): Toggle key changed from LeftAlt to LeftControl.
+--   Third-person camera zoom clamped to min=4 / max=14 studs (applied on Start + CharacterAdded).
+--   Custom mouse lock ON:  CameraMin = CameraMax = 8 studs; Humanoid.CameraOffset = Vector3.new(1.75,0,0).
+--   Custom mouse lock OFF: CameraMin=4, CameraMax=14; CameraOffset = Vector3.zero.
+--   No camera.CFrame writes. No CameraType=Scriptable. No FieldOfView changes.
 -- LeftShift is now sprint-only — it no longer conflicts with Roblox's default Shift Lock.
 -- Strafe animation gating now depends on the local customMouseLocked boolean (set by
 -- SetCustomMouseLocked / the LeftAlt toggle) rather than reading UserInputService.MouseBehavior
@@ -82,8 +89,8 @@
 -- to locomotion. Custom replacements for those states are needed in a future stage.
 --
 -- Owns:
---   • local movement input (LeftShift = sprint, C = crouch toggle, LeftAlt = mouse-lock toggle)
---   • customMouseLocked boolean — true when LeftAlt has toggled custom mouse lock on
+--   • local movement input (LeftShift = sprint, C = hold-to-crouch, LeftControl = mouse-lock toggle)
+--   • customMouseLocked boolean — true when LeftControl has toggled custom mouse lock on
 --   • UserInputService.MouseBehavior writes: LockCenter (on) / Default (off) for custom mouse lock
 --   • Humanoid.AutoRotate writes: false when custom mouse lock + FACE_CAMERA_YAW + ACTIVE phase;
 --       restored from cached originalAutoRotate on toggle-off, respawn, phase-exit, or destroy
@@ -109,7 +116,7 @@
 --   MOVEMENT_ANIMATION_DEBUG = true                 — logs load/switch events to Output
 --   MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK = true — strafe anims require mouse lock (legacy gate)
 --   CUSTOM_MOUSE_LOCK_ENABLED = true                — enables LeftAlt custom mouse-lock toggle
---   CUSTOM_MOUSE_LOCK_TOGGLE_KEY = Enum.KeyCode.LeftAlt — toggle key (default: LeftAlt)
+--   CUSTOM_MOUSE_LOCK_TOGGLE_KEY = Enum.KeyCode.LeftControl — toggle key (changed to LeftControl in Stage 2K)
 --   CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY = true      — strafe gate reads customMouseLocked (not native ShiftLock)
 --   CUSTOM_MOUSE_LOCK_DEBUG = true                  — logs mouse-lock toggle events to Output
 --   DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK = true        — calls DevEnableMouseLock=false on Start/respawn
@@ -123,15 +130,22 @@
 --   MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER = 1.15   — RunForward/RunForwardLeft/Right AdjustSpeed multiplier
 --   MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER = 0.75  — Idle AdjustSpeed multiplier (Stage 2H)
 --   MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.9 — EnterCrouch/ExitCrouch AdjustSpeed multiplier (Stage 2H)
+--   MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER = 1.0 — CrouchWalk* directional tracks AdjustSpeed multiplier (Stage 2J)
 --   CROUCH_HOLD_KEY = Enum.KeyCode.C            — key held to crouch (Stage 2I)
 --   CROUCH_HOLD_BOTTOM_POSE_ENABLED = true       — enables EnterCrouch bottom-pose hold (Stage 2I)
 --   CROUCH_TRANSITION_MIN_HOLD_TIME = 0.05       — seconds from end for hold TimePosition (Stage 2I)
 --   CROUCH_BOTTOM_HOLD_TIME_POSITION_FALLBACK = 0.98 — fallback when clip.Length == 0 (Stage 2I)
 --
--- Camera rule (Stage 1 + 2A + 2C + 2D + 2E):
+-- Camera rule (Stage 1 + 2A + 2C + 2D + 2E + 2K):
 --   Reads workspace.CurrentCamera.CFrame for direction detection and camera yaw facing.
 --   Writes UserInputService.MouseBehavior (LockCenter / Default) for custom mouse-lock toggle.
---   Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
+--   Writes Players.LocalPlayer.CameraMinZoomDistance and CameraMaxZoomDistance (Stage 2K):
+--     Normal third-person: min=4, max=14 studs. Custom mouse lock: min=max=8 studs (locked).
+--   Writes Humanoid.CameraOffset (Stage 2K):
+--     Custom mouse lock ON:  Vector3.new(1.75, 0, 0) — right-shoulder over-the-shoulder offset.
+--     Custom mouse lock OFF: Vector3.zero — no offset.
+--   Does NOT write camera.CFrame or FieldOfView.
+--   Does NOT set CameraType to Scriptable.
 --   Does NOT add camera bob, sway, landing dip, tilt, ADS zoom, or viewmodel effects.
 --   Does NOT implement a full custom camera controller — camera rotation uses Roblox default.
 --
@@ -160,15 +174,23 @@
 --     Idle plays when standing still in ACTIVE (both Unarmed and AR15 sets).
 --     EnterCrouch plays when C is held; ExitCrouch plays when C is released (both sets).
 --     crouchTransitionPlaying gates updateMovementAnimation during one-shot clips.
---   Stage 2I (2026-05-20): Hold-to-crouch + crouch bottom-pose hold + optional CrouchWalk:
+--   Stage 2I (2026-05-20): Hold-to-crouch + crouch bottom-pose hold:
 --     C is now hold-to-crouch. Holding C: isCrouching=true + EnterCrouch. Releasing C: ExitCrouch.
 --     After EnterCrouch finishes: holdCrouchBottomPose() pauses the clip at its final frame
 --       (track:Play(0) + TimePosition + AdjustSpeed(0)) to keep the character visually crouched.
 --     CrouchWalk plays while isCrouching=true + isMoving=true IF the animation ID exists;
 --       otherwise the bottom-pose hold is preserved while the character moves at CROUCH_SPEED.
---     No dedicated CrouchWalk IDs were added in Stage 2I — the path activates only if
---       Constants.MOVEMENT_ANIMATION_IDS.R6.<Set>.CrouchWalk is populated in a future stage.
---   No reload, fire, or ADS animations in Stage 2A/2C/2D/2E/2F/2G/2H/2I.
+--   Stage 2J (2026-05-20): Unarmed 8-directional crouch-walk animations:
+--     Nine Unarmed CrouchWalk* IDs added to Constants (CrouchWalk, CrouchWalkForward,
+--       CrouchWalkBackward, CrouchWalkLeft/Right, CrouchWalkForwardLeft/Right, CrouchWalkBackwardLeft/Right).
+--     All nine tracks are pre-loaded at spawn alongside the other Unarmed tracks.
+--     CrouchWalkForward and CrouchWalk share the same asset ID (forward is the canonical clip).
+--     Direction selection while crouching+moving:
+--       customMouseLocked OFF → CrouchWalkForward fallback (no directional strafe).
+--       customMouseLocked ON  → per-direction selection (mirrors walking direction logic).
+--     AR15 set: no CrouchWalk IDs — falls back to bottom-pose hold (same as Stage 2I).
+--     New constant: MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER = 1.0 (all CrouchWalk* names).
+--   No reload, fire, or ADS animations in Stage 2A/2C/2D/2E/2F/2G/2H/2I/2J.
 --   No lower-body/upper-body animation split.
 --   Non-R6 characters: animation loading skipped; getRigDebugSummary logged; Stage 1 speed logic remains active.
 --
@@ -275,8 +297,8 @@ local lastAnimationSet: string = ""
 -- Reset to false on each character load and in destroy().
 local lastStrafeBlockedState: boolean = false
 
--- Custom mouse-lock state (Stage 2D).
--- true  = LeftAlt has toggled mouse lock on; UserInputService.MouseBehavior == LockCenter.
+-- Custom mouse-lock state (Stage 2D — key changed to LeftControl in Stage 2K).
+-- true  = LeftControl has toggled mouse lock on; UserInputService.MouseBehavior == LockCenter.
 -- false = mouse lock off; UserInputService.MouseBehavior == Default.
 -- Toggled by the ContextActionService handler (Start()) and by SetCustomMouseLocked().
 -- Reset to false on respawn (loadMovementAnimations) and in destroy().
@@ -303,6 +325,15 @@ local originalAutoRotate: boolean? = nil
 -- Last reason applyCharacterFacing() was skipped, used to deduplicate debug logs.
 -- Reset to "" on each character load.
 local lastFacingSkippedReason: string = ""
+
+-- Stage 2K: third-person camera state ────────────────────────────────────────────
+-- Cached once on first Start() call before any zoom overrides are applied.
+-- Kept nil until cacheDefaultCameraSettings() runs so we only cache the true defaults.
+-- These are not used for restoration (we always restore to THIRD_PERSON limits, not the
+-- original Roblox defaults which are very wide), but are retained for diagnostics / future use.
+local defaultCameraMinZoomDistance: number? = nil
+local defaultCameraMaxZoomDistance: number? = nil
+local defaultCameraOffset: Vector3? = nil
 
 -- Stage 2H: crouch transition state ──────────────────────────────────────────
 
@@ -510,6 +541,81 @@ local function applyCharacterFacing()
 end
 
 -- ============================================================
+-- Private helpers — Stage 2K: third-person camera zoom limits + mouse-lock camera
+-- ============================================================
+
+-- Caches the player's default camera zoom distances and humanoid CameraOffset on first call.
+-- Idempotent — only writes each slot if it is still nil (does not overwrite on re-call).
+-- Called at Start() (before any zoom overrides) and on CharacterAdded (to capture new humanoid offset).
+-- Safe to call when humanoid is nil — skips the CameraOffset slot in that case.
+local function cacheDefaultCameraSettings()
+    local localPlayer = Players.LocalPlayer
+    if defaultCameraMinZoomDistance == nil then
+        defaultCameraMinZoomDistance = localPlayer.CameraMinZoomDistance
+    end
+    if defaultCameraMaxZoomDistance == nil then
+        defaultCameraMaxZoomDistance = localPlayer.CameraMaxZoomDistance
+    end
+    if humanoid ~= nil and defaultCameraOffset == nil then
+        defaultCameraOffset = humanoid.CameraOffset
+    end
+end
+
+-- Sets Players.LocalPlayer zoom limits to the controlled third-person range.
+-- Called on Start() and whenever custom mouse lock is disabled.
+-- Does NOT write camera.CFrame, FieldOfView, or CameraType.
+local function applyThirdPersonZoomLimits()
+    local localPlayer = Players.LocalPlayer
+    localPlayer.CameraMinZoomDistance = Constants.THIRD_PERSON_MIN_ZOOM_DISTANCE
+    localPlayer.CameraMaxZoomDistance = Constants.THIRD_PERSON_MAX_ZOOM_DISTANCE
+end
+
+-- Applies the custom mouse-lock camera distance (locked zoom) and CameraOffset.
+-- Called when custom mouse lock is enabled (from applyCustomMouseLock / SetCustomMouseLocked).
+-- Immediately pins CameraMin = CameraMax = CUSTOM_MOUSE_LOCK_CAMERA_DISTANCE so the
+-- Roblox camera sits at exactly that distance (shift-lock / over-the-shoulder style).
+-- Sets Humanoid.CameraOffset to provide the right-shoulder lateral offset.
+-- Does NOT write camera.CFrame, FieldOfView, or CameraType.
+-- Does NOT set CameraType to Scriptable.
+local function applyCustomMouseLockCamera()
+    if Constants.CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_DISTANCE then
+        local localPlayer = Players.LocalPlayer
+        localPlayer.CameraMinZoomDistance = Constants.CUSTOM_MOUSE_LOCK_CAMERA_DISTANCE
+        localPlayer.CameraMaxZoomDistance = Constants.CUSTOM_MOUSE_LOCK_CAMERA_DISTANCE
+    end
+    if Constants.CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_OFFSET then
+        -- Fallback: if the module-level humanoid variable is nil (e.g. called before
+        -- setupCharacter runs, or during MCP execute_luau tests), look it up directly
+        -- from the character. Avoids silently skipping the CameraOffset write. (Stage 2K)
+        local hum = humanoid
+            or (Players.LocalPlayer.Character
+                and Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid"))
+        if hum then
+            hum.CameraOffset = Constants.CUSTOM_MOUSE_LOCK_CAMERA_OFFSET
+        end
+    end
+end
+
+-- Restores zoom limits to the normal third-person range and clears CameraOffset.
+-- Called when custom mouse lock is disabled, on CharacterAdded, and in destroy().
+-- Does NOT restore to the original Roblox default zoom range (which is very wide).
+-- Always restores to THIRD_PERSON_MIN/MAX_ZOOM_DISTANCE so the player stays in the
+-- controlled range regardless of whether mouse lock was previously on.
+-- Does NOT write camera.CFrame, FieldOfView, or CameraType.
+local function restoreNormalThirdPersonCamera()
+    local localPlayer = Players.LocalPlayer
+    localPlayer.CameraMinZoomDistance = Constants.THIRD_PERSON_MIN_ZOOM_DISTANCE
+    localPlayer.CameraMaxZoomDistance = Constants.THIRD_PERSON_MAX_ZOOM_DISTANCE
+    -- Fallback: look up Humanoid directly when the module-level variable is nil. (Stage 2K)
+    local hum = humanoid
+        or (Players.LocalPlayer.Character
+            and Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid"))
+    if hum then
+        hum.CameraOffset = Constants.CUSTOM_MOUSE_LOCK_RESTORE_CAMERA_OFFSET
+    end
+end
+
+-- ============================================================
 -- Private helpers — Stage 2D: custom mouse lock
 -- ============================================================
 
@@ -525,11 +631,15 @@ local function applyCustomMouseLock()
         -- Stage 2E: restore AutoRotate if it was disabled before the master switch was turned off.
         restoreCharacterAutoRotate()
         originalAutoRotate = nil
+        -- Stage 2K: restore normal third-person camera when the master switch is turned off.
+        restoreNormalThirdPersonCamera()
         return
     end
 
     if customMouseLocked then
         UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+        -- Stage 2K: apply closer shift-lock-style camera distance and shoulder offset.
+        applyCustomMouseLockCamera()
 
         -- Stage 2E: disable AutoRotate once per lock session and apply initial facing.
         if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW then
@@ -548,6 +658,8 @@ local function applyCustomMouseLock()
         end
     else
         UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        -- Stage 2K: restore normal third-person zoom range and clear CameraOffset.
+        restoreNormalThirdPersonCamera()
 
         -- Stage 2E: restore AutoRotate when the lock is toggled off.
         if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW then
@@ -753,6 +865,7 @@ end
 -- animationName must be the short name portion (e.g. "WalkForward", not "Unarmed_WalkForward").
 -- Used by playMovementAnimation() to call AnimationTrack:AdjustSpeed() on play.
 -- Does not affect Humanoid.WalkSpeed or any movement speed constant.
+-- Stage 2J: any name beginning with "CrouchWalk" → MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER.
 local function getAnimationSpeedMultiplier(animationName: string): number
     assert(animationName ~= nil, "[MovementController] getAnimationSpeedMultiplier: animationName is required")
     if animationName == "WalkForward"
@@ -774,6 +887,10 @@ local function getAnimationSpeedMultiplier(animationName: string): number
         return Constants.MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER
     elseif animationName == "EnterCrouch" or animationName == "ExitCrouch" then
         return Constants.MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER
+    elseif animationName:sub(1, 10) == "CrouchWalk" then
+        -- Covers CrouchWalk, CrouchWalkForward, CrouchWalkBackward, CrouchWalkLeft/Right,
+        -- CrouchWalkForwardLeft/Right, CrouchWalkBackwardLeft/Right (Stage 2J).
+        return Constants.MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER
     end
     return 1.0
 end
@@ -987,12 +1104,24 @@ local function playCrouchTransition(entering: boolean)
             -- EnterCrouch finished. If still crouching, establish the visual pose.
             if movementState.isCrouching then
                 if movementState.isMoving then
-                    -- Try CrouchWalk first; fall back to bottom-pose hold.
-                    local cwKey = getAnimationSetName() .. "_CrouchWalk"
-                    if animationTracks[cwKey] ~= nil then
-                        playMovementAnimation(cwKey)
+                    -- Start a suitable crouch-walk immediately to avoid a blank frame.
+                    -- updateMovementAnimation() refines the direction on the next Heartbeat.
+                    -- Priority: CrouchWalkForward (canonical forward) → CrouchWalk alias → hold pose.
+                    local setName2  = getAnimationSetName()
+                    local fwdKey    = setName2 .. "_CrouchWalkForward"
+                    local aliasKey  = setName2 .. "_CrouchWalk"
+                    if animationTracks[fwdKey] ~= nil then
+                        playMovementAnimation(fwdKey)
                         if Constants.MOVEMENT_ANIMATION_DEBUG then
-                            Logger.debug("[MovementController] crouch: EnterCrouch done → CrouchWalk")
+                            Logger.debug(
+                                "[MovementController] crouch: EnterCrouch done → " .. fwdKey
+                                .. " (direction refined next Heartbeat)"
+                            )
+                        end
+                    elseif animationTracks[aliasKey] ~= nil then
+                        playMovementAnimation(aliasKey)
+                        if Constants.MOVEMENT_ANIMATION_DEBUG then
+                            Logger.debug("[MovementController] crouch: EnterCrouch done → " .. aliasKey)
                         end
                     else
                         holdCrouchBottomPose()
@@ -1106,11 +1235,26 @@ local function loadMovementAnimations(character: Model)
         ["AR15_ExitCrouch"]           = r6.AR15.ExitCrouch,           -- AR15 exit-crouch one-shot (Stage 2H)
     }
 
-    -- CrouchWalk tracks are optional (Stage 2I). Only loaded if IDs exist in Constants.
-    -- No IDs were added in Stage 2I — these entries remain inactive until IDs are provided.
-    -- CrouchWalk plays (looped) while isCrouching == true and isMoving == true.
-    if r6.Unarmed.CrouchWalk then
-        toLoad["Unarmed_CrouchWalk"] = r6.Unarmed.CrouchWalk
+    -- CrouchWalk tracks are optional. Only loaded if IDs exist in Constants.
+    -- Stage 2J: nine Unarmed directional CrouchWalk* IDs added. All looped.
+    -- CrouchWalk and CrouchWalkForward share the same asset ID (forward is the canonical fallback).
+    -- AR15: no CrouchWalk IDs in Stage 2J — added conditionally if populated in a future stage.
+    local unarmedCrouchWalkNames: { string } = {
+        "CrouchWalk",
+        "CrouchWalkForward",
+        "CrouchWalkBackward",
+        "CrouchWalkLeft",
+        "CrouchWalkRight",
+        "CrouchWalkForwardLeft",
+        "CrouchWalkForwardRight",
+        "CrouchWalkBackwardLeft",
+        "CrouchWalkBackwardRight",
+    }
+    for _, cwName in ipairs(unarmedCrouchWalkNames) do
+        local assetId: string? = (r6.Unarmed :: any)[cwName]
+        if assetId ~= nil and assetId ~= "" then
+            toLoad["Unarmed_" .. cwName] = assetId
+        end
     end
     if r6.AR15.CrouchWalk then
         toLoad["AR15_CrouchWalk"] = r6.AR15.CrouchWalk
@@ -1147,7 +1291,7 @@ end
 -- Skipped if CUSTOM_MOVEMENT_ANIMATIONS_ENABLED is false.
 -- currentAnimationName guard inside playMovementAnimation prevents track restarts.
 --
--- Stage 2A + 2C + 2F + 2G + 2H + 2I scope:
+-- Stage 2A + 2C + 2F + 2G + 2H + 2I + 2J scope:
 --   WalkLeft/WalkRight only play when canUseStrafeAnimations is true (mouse lock active).
 --   WalkBackward plays for Backward regardless of mouse-lock state (Unarmed set only).
 --   WalkForwardLeft/Right and WalkBackwardLeft/Right play for diagonals regardless of mouse lock (Unarmed only).
@@ -1155,11 +1299,13 @@ end
 --   Sprint + mouse lock off, or AR15/other sets: RunForward for all sprint directions.
 --   Not moving (standing): plays Idle (looped) when the track is loaded; stops otherwise.
 --   Skips entirely while crouchTransitionPlaying is true (transition clips run uninterrupted).
---   Stage 2I crouch branch:
---     isCrouching + isMoving + CrouchWalk exists → play CrouchWalk (looped).
---     isCrouching + isMoving + no CrouchWalk → hold/establish crouch bottom pose; no standing anim.
---     isCrouching + not moving → hold/establish crouch bottom pose; stop CrouchWalk if playing.
---     CrouchWalk plays at 1.0× (getAnimationSpeedMultiplier default); tune with a dedicated const if needed.
+--   Stage 2I+2J crouch branch (returns early before standing/sprint logic):
+--     isCrouching + not moving → hold/establish crouch bottom pose; stop any CrouchWalk* if playing.
+--     isCrouching + moving + Unarmed:
+--       customMouseLocked OFF → CrouchWalkForward (fallback) or CrouchWalk or hold bottom pose.
+--       customMouseLocked ON  → per-direction selection (8 directions, mirrors walk selection).
+--     isCrouching + moving + non-Unarmed set → generic <Set>_CrouchWalk or hold bottom pose.
+--     All CrouchWalk* tracks play at MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER (1.0×).
 local function updateMovementAnimation()
     if not Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED then return end
     if next(animationTracks) == nil then return end
@@ -1169,29 +1315,175 @@ local function updateMovementAnimation()
 
     local setName = getAnimationSetName()   -- "Unarmed" (default) or "AR15" (when weapon equipped)
 
-    -- ── Crouching branch (Stage 2I) ───────────────────────────────────────────
+    -- ── Crouching branch (Stage 2I + 2J) ─────────────────────────────────────
     if movementState.isCrouching then
-        local crouchWalkKey = setName .. "_CrouchWalk"
-
         if movementState.isMoving then
-            if animationTracks[crouchWalkKey] ~= nil then
-                -- CrouchWalk available: release hold pose and play it.
+            -- ── Determine target crouch-walk animation key ────────────────
+            local targetCrouchKey: string? = nil
+
+            if setName == Constants.MOVEMENT_ANIMATION_SET_UNARMED then
+                if customMouseLocked then
+                    -- Mouse lock ON: full 8-directional selection (Stage 2J).
+                    local dir = movementState.directionName
+                    if dir == "Forward" then
+                        -- Forward: CrouchWalkForward → CrouchWalk → nil.
+                        local k = "Unarmed_CrouchWalkForward"
+                        if animationTracks[k] ~= nil then
+                            targetCrouchKey = k
+                        elseif animationTracks["Unarmed_CrouchWalk"] ~= nil then
+                            targetCrouchKey = "Unarmed_CrouchWalk"
+                        end
+
+                    elseif dir == "Backward" then
+                        -- Backward: CrouchWalkBackward → CrouchWalkForward → CrouchWalk → nil.
+                        local k = "Unarmed_CrouchWalkBackward"
+                        local fwd = "Unarmed_CrouchWalkForward"
+                        if animationTracks[k] ~= nil then
+                            targetCrouchKey = k
+                        elseif animationTracks[fwd] ~= nil then
+                            targetCrouchKey = fwd
+                        elseif animationTracks["Unarmed_CrouchWalk"] ~= nil then
+                            targetCrouchKey = "Unarmed_CrouchWalk"
+                        end
+
+                    elseif dir == "Left" then
+                        -- Left strafe: CrouchWalkLeft → CrouchWalkForward → CrouchWalk → nil.
+                        local k = "Unarmed_CrouchWalkLeft"
+                        local fwd = "Unarmed_CrouchWalkForward"
+                        if animationTracks[k] ~= nil then
+                            targetCrouchKey = k
+                        elseif animationTracks[fwd] ~= nil then
+                            targetCrouchKey = fwd
+                        elseif animationTracks["Unarmed_CrouchWalk"] ~= nil then
+                            targetCrouchKey = "Unarmed_CrouchWalk"
+                        end
+
+                    elseif dir == "Right" then
+                        -- Right strafe: CrouchWalkRight → CrouchWalkForward → CrouchWalk → nil.
+                        local k = "Unarmed_CrouchWalkRight"
+                        local fwd = "Unarmed_CrouchWalkForward"
+                        if animationTracks[k] ~= nil then
+                            targetCrouchKey = k
+                        elseif animationTracks[fwd] ~= nil then
+                            targetCrouchKey = fwd
+                        elseif animationTracks["Unarmed_CrouchWalk"] ~= nil then
+                            targetCrouchKey = "Unarmed_CrouchWalk"
+                        end
+
+                    elseif dir == "ForwardLeft" then
+                        -- Forward-left diagonal: CrouchWalkForwardLeft → CrouchWalkLeft → CrouchWalkForward → CrouchWalk → nil.
+                        local k   = "Unarmed_CrouchWalkForwardLeft"
+                        local l   = "Unarmed_CrouchWalkLeft"
+                        local fwd = "Unarmed_CrouchWalkForward"
+                        if animationTracks[k] ~= nil then
+                            targetCrouchKey = k
+                        elseif animationTracks[l] ~= nil then
+                            targetCrouchKey = l
+                        elseif animationTracks[fwd] ~= nil then
+                            targetCrouchKey = fwd
+                        elseif animationTracks["Unarmed_CrouchWalk"] ~= nil then
+                            targetCrouchKey = "Unarmed_CrouchWalk"
+                        end
+
+                    elseif dir == "ForwardRight" then
+                        -- Forward-right diagonal: CrouchWalkForwardRight → CrouchWalkRight → CrouchWalkForward → CrouchWalk → nil.
+                        local k   = "Unarmed_CrouchWalkForwardRight"
+                        local r   = "Unarmed_CrouchWalkRight"
+                        local fwd = "Unarmed_CrouchWalkForward"
+                        if animationTracks[k] ~= nil then
+                            targetCrouchKey = k
+                        elseif animationTracks[r] ~= nil then
+                            targetCrouchKey = r
+                        elseif animationTracks[fwd] ~= nil then
+                            targetCrouchKey = fwd
+                        elseif animationTracks["Unarmed_CrouchWalk"] ~= nil then
+                            targetCrouchKey = "Unarmed_CrouchWalk"
+                        end
+
+                    elseif dir == "BackwardLeft" then
+                        -- Backward-left diagonal: CrouchWalkBackwardLeft → CrouchWalkLeft → CrouchWalkBackward → CrouchWalkForward → CrouchWalk → nil.
+                        local k   = "Unarmed_CrouchWalkBackwardLeft"
+                        local l   = "Unarmed_CrouchWalkLeft"
+                        local bwd = "Unarmed_CrouchWalkBackward"
+                        local fwd = "Unarmed_CrouchWalkForward"
+                        if animationTracks[k] ~= nil then
+                            targetCrouchKey = k
+                        elseif animationTracks[l] ~= nil then
+                            targetCrouchKey = l
+                        elseif animationTracks[bwd] ~= nil then
+                            targetCrouchKey = bwd
+                        elseif animationTracks[fwd] ~= nil then
+                            targetCrouchKey = fwd
+                        elseif animationTracks["Unarmed_CrouchWalk"] ~= nil then
+                            targetCrouchKey = "Unarmed_CrouchWalk"
+                        end
+
+                    elseif dir == "BackwardRight" then
+                        -- Backward-right diagonal: CrouchWalkBackwardRight → CrouchWalkRight → CrouchWalkBackward → CrouchWalkForward → CrouchWalk → nil.
+                        local k   = "Unarmed_CrouchWalkBackwardRight"
+                        local r   = "Unarmed_CrouchWalkRight"
+                        local bwd = "Unarmed_CrouchWalkBackward"
+                        local fwd = "Unarmed_CrouchWalkForward"
+                        if animationTracks[k] ~= nil then
+                            targetCrouchKey = k
+                        elseif animationTracks[r] ~= nil then
+                            targetCrouchKey = r
+                        elseif animationTracks[bwd] ~= nil then
+                            targetCrouchKey = bwd
+                        elseif animationTracks[fwd] ~= nil then
+                            targetCrouchKey = fwd
+                        elseif animationTracks["Unarmed_CrouchWalk"] ~= nil then
+                            targetCrouchKey = "Unarmed_CrouchWalk"
+                        end
+
+                    else
+                        -- "Idle" or unclassified while isCrouching+isMoving — use forward fallback.
+                        local fwd = "Unarmed_CrouchWalkForward"
+                        if animationTracks[fwd] ~= nil then
+                            targetCrouchKey = fwd
+                        elseif animationTracks["Unarmed_CrouchWalk"] ~= nil then
+                            targetCrouchKey = "Unarmed_CrouchWalk"
+                        end
+                    end
+
+                else
+                    -- Mouse lock OFF: CrouchWalkForward fallback only (no directional strafe).
+                    local fwd = "Unarmed_CrouchWalkForward"
+                    if animationTracks[fwd] ~= nil then
+                        targetCrouchKey = fwd
+                    elseif animationTracks["Unarmed_CrouchWalk"] ~= nil then
+                        targetCrouchKey = "Unarmed_CrouchWalk"
+                    end
+                end
+
+            else
+                -- Non-Unarmed set (e.g. AR15): generic CrouchWalk only if the ID exists.
+                local k = setName .. "_CrouchWalk"
+                if animationTracks[k] ~= nil then
+                    targetCrouchKey = k
+                end
+            end
+
+            -- ── Play or hold based on resolution ─────────────────────────
+            if targetCrouchKey ~= nil then
+                -- A crouch-walk track was resolved: release the bottom-hold and play it.
                 if isHoldingCrouchBottomPose then
                     clearCrouchBottomHold()
                 end
-                playMovementAnimation(crouchWalkKey)
+                playMovementAnimation(targetCrouchKey)
             else
-                -- No CrouchWalk: hold the bottom pose while the player slides around.
-                -- Ensure no standing locomotion track is playing (fast path when name == "").
+                -- No crouch-walk available for this set/direction: hold the bottom pose.
+                -- Ensure no standing locomotion track is playing.
                 stopCurrentMovementAnimation()
                 if not isHoldingCrouchBottomPose then
                     holdCrouchBottomPose()
                 end
             end
+
         else
-            -- Crouching and not moving: hold the bottom pose.
-            -- Stop CrouchWalk if it was playing.
-            if currentAnimationName == crouchWalkKey then
+            -- ── Crouching and not moving: hold the bottom pose ────────────
+            -- Stop any CrouchWalk* animation that was playing (string pattern check).
+            if currentAnimationName ~= "" and currentAnimationName:find("_CrouchWalk") then
                 stopCurrentMovementAnimation()
             end
             if not isHoldingCrouchBottomPose then
@@ -1236,7 +1528,7 @@ local function updateMovementAnimation()
         if strafeBlocked ~= lastStrafeBlockedState then
             lastStrafeBlockedState = strafeBlocked
             if strafeBlocked then
-                Logger.debug("[MovementController] strafe animations blocked: custom mouse lock not active (press LeftAlt to enable)")
+                Logger.debug("[MovementController] strafe animations blocked: custom mouse lock not active (press LeftControl to enable)")
             else
                 Logger.debug("[MovementController] strafe animations enabled: custom mouse lock active")
             end
@@ -1508,7 +1800,7 @@ function MovementController.SetCustomMouseLocked(enabled: boolean)
     end
 end
 
--- Returns true when the custom mouse lock is currently active (LeftAlt toggled on).
+-- Returns true when the custom mouse lock is currently active (LeftControl toggled on).
 -- Strafe animation selection (updateMovementAnimation) reads this via isMouseLockedForStrafeAnimations().
 function MovementController.IsCustomMouseLocked(): boolean
     return customMouseLocked
@@ -1520,6 +1812,14 @@ end
 function MovementController:destroy()
     -- Unbind the ContextActionService mouse-lock action (not stored in _connections).
     ContextActionService:UnbindAction(MOUSE_LOCK_ACTION_NAME)
+
+    -- Stage 2K: restore normal third-person camera limits and clear CameraOffset.
+    -- Called before customMouseLocked is reset so restoreNormalThirdPersonCamera can
+    -- always write the correct zoom limits regardless of lock state.
+    restoreNormalThirdPersonCamera()
+    defaultCameraMinZoomDistance = nil
+    defaultCameraMaxZoomDistance = nil
+    defaultCameraOffset          = nil
 
     -- Stage 2H + 2I: disconnect callback, clear hold, then stop tracks.
     clearCrouchTransitionConnection()
@@ -1569,6 +1869,12 @@ end
 function MovementController:Start()
     local localPlayer = Players.LocalPlayer
 
+    -- Stage 2K: cache the player's default zoom distances before we override them,
+    -- then immediately apply the controlled third-person range.
+    -- cacheDefaultCameraSettings() is idempotent — safe if Start() is re-called.
+    cacheDefaultCameraSettings()
+    applyThirdPersonZoomLimits()
+
     -- Disable Roblox's built-in Shift Lock immediately so LeftShift is sprint-only.
     -- Also applied on every CharacterAdded below because CoreScripts may re-enable it
     -- on respawn. Gated by Constants.DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK.
@@ -1586,7 +1892,18 @@ function MovementController:Start()
     local charConn = localPlayer.CharacterAdded:Connect(function(char: Model)
         -- Re-disable Roblox Shift Lock after respawn — CoreScripts may restore it.
         disableRobloxDefaultMouseLock()
+        -- setupCharacter() sets humanoid, calls loadMovementAnimations() which resets
+        -- customMouseLocked = false, so after this call the mouse lock is always off.
         setupCharacter(char)
+        -- Stage 2K: re-cache CameraOffset for the new humanoid, then apply correct camera state.
+        -- customMouseLocked is false after respawn (reset in loadMovementAnimations), so we
+        -- always restore normal third-person limits and clear any leftover CameraOffset.
+        cacheDefaultCameraSettings()
+        if customMouseLocked then
+            applyCustomMouseLockCamera()
+        else
+            restoreNormalThirdPersonCamera()
+        end
     end)
     table.insert(_connections, charConn)
 
@@ -1683,9 +2000,10 @@ function MovementController:Start()
     )
     table.insert(_connections, sprintEndConn)
 
-    -- ── Input: Custom mouse-lock toggle (LeftAlt via ContextActionService) ──────
-    -- Priority 3000 > CoreScript default 2000 — LeftAlt is intercepted before CoreScripts
+    -- ── Input: Custom mouse-lock toggle (LeftControl via ContextActionService) ──────
+    -- Priority 3000 > CoreScript default 2000 — LeftControl is intercepted before CoreScripts
     -- can delay or consume it, eliminating the ~1-frame toggle lag seen with InputBegan.
+    -- Key changed from LeftAlt to LeftControl in Stage 2K (2026-05-20).
     -- Returns Sink on Begin so CoreScripts never see the key; returns Pass on all other
     -- states (End, Change) so those are handled normally.
     -- NOT stored in _connections — unbound by name via MOUSE_LOCK_ACTION_NAME in destroy().
@@ -1713,7 +2031,7 @@ function MovementController:Start()
         end,
         false,                                          -- createTouchButton
         Constants.CUSTOM_MOUSE_LOCK_INPUT_PRIORITY,    -- priority (3000)
-        Constants.CUSTOM_MOUSE_LOCK_TOGGLE_KEY          -- Enum.KeyCode.LeftAlt
+        Constants.CUSTOM_MOUSE_LOCK_TOGGLE_KEY          -- Enum.KeyCode.LeftControl (Stage 2K)
     )
 
     -- ── Input: Crouch (hold-to-crouch — Stage 2I) ────────────────────────────
@@ -1787,7 +2105,7 @@ function MovementController:Start()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1–2I: DevMouseLock, CAS 3000, reapply-frame, facing-yaw, Unarmed directional/diagonals, idle, hold-to-crouch, crouch-bottom-hold, optional CrouchWalk)")
+    Logger.debug("[MovementController] Ready (Stage 1–2K: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk)")
 end
 
 return MovementController

@@ -206,14 +206,17 @@ FleaMarketService / PlayerMarketplace
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I (Animate-disable, R6 detection, animation-set selection,
+MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K (Animate-disable, R6 detection, animation-set selection,
                         --   strafe gating, animation speed multipliers, shift-lock sprint fix,
-                        --   custom mouse-lock toggle on LeftAlt, character-facing camera yaw):
+                        --   custom mouse-lock toggle on LeftControl, character-facing camera yaw,
+                        --   third-person zoom limits, mouse-lock camera distance and shoulder offset):
                         --   owns local movement input (LeftShift=sprint, C=hold-to-crouch (hold=enter, release=exit),
-                        --   LeftAlt=custom mouse-lock toggle),
+                        --   LeftControl=custom mouse-lock toggle),
                         --   customMouseLocked boolean, UserInputService.MouseBehavior writes,
                         --   Humanoid.AutoRotate writes (false while locked+ACTIVE; restored on off/exit/respawn),
                         --   HumanoidRootPart.CFrame yaw writes (facing camera yaw while locked; position unchanged),
+                        --   Players.LocalPlayer.CameraMinZoomDistance and CameraMaxZoomDistance writes (Stage 2K),
+                        --   Humanoid.CameraOffset writes (Stage 2K — Vector3.new(1.75,0,0) while locked; zero when off),
                         --   movementState table, Humanoid.WalkSpeed, R6 animation playback,
                         --   character.Animate suppression (R6 characters only),
                         --   presentation-only equippedWeaponName for animation set selection, and
@@ -222,7 +225,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I (Anim
                         --   direction detection AND for camera yaw facing (Stage 2E).
                         --   Writes UserInputService.MouseBehavior (LockCenter on, Default off) for
                         --   custom mouse lock — does NOT use MouseBehavior as strafe gate source.
-                        --   Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
+                        --   Does NOT write camera.CFrame or FieldOfView.
+                        --   Does NOT set CameraType to Scriptable.
                         --   Does NOT implement a full custom camera controller.
                         --   No new remotes. No slide, vault, or camera effects.
                         --   StarterPlayer.EnableMouseLockOption = false is now set in default.project.json
@@ -230,12 +234,15 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I (Anim
                         --   LocalPlayer.DevEnableMouseLock = false is also applied client-side on Start
                         --     and on each CharacterAdded via disableRobloxDefaultMouseLock() (pcall).
                         --
-                        --   Custom mouse-lock toggle (Stage 2D — 2026-05-19):
-                        --     LeftAlt (Constants.CUSTOM_MOUSE_LOCK_TOGGLE_KEY) toggles customMouseLocked.
+                        --   Custom mouse-lock toggle (Stage 2D — 2026-05-19; key changed Stage 2K — 2026-05-20):
+                        --     LeftControl (Constants.CUSTOM_MOUSE_LOCK_TOGGLE_KEY) toggles customMouseLocked.
+                        --     Key was LeftAlt in Stage 2D; changed to LeftControl in Stage 2K to keep LeftAlt free.
                         --     LeftShift is sprint-only — no longer conflicts with Roblox Shift Lock.
                         --     customMouseLocked is the source of truth for strafe animation gating.
-                        --     SetCustomMouseLocked(true):  customMouseLocked=true,  MouseBehavior=LockCenter.
-                        --     SetCustomMouseLocked(false): customMouseLocked=false, MouseBehavior=Default.
+                        --     SetCustomMouseLocked(true):  customMouseLocked=true,  MouseBehavior=LockCenter,
+                        --       CameraMin=CameraMax=8, CameraOffset=Vector3.new(1.75,0,0). (Stage 2K)
+                        --     SetCustomMouseLocked(false): customMouseLocked=false, MouseBehavior=Default,
+                        --       CameraMin=4, CameraMax=14, CameraOffset=Vector3.zero. (Stage 2K)
                         --     Mouse lock is released to Default ONLY when:
                         --       • character respawns (loadMovementAnimations reset)
                         --       • destroy() is called
@@ -260,7 +267,7 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I (Anim
                         --       set via Rojo "Bool" syntax; replaces the previous "Manual Studio step".
                         --
                         --   Strafe animation gating (Stage 2C + 2D):
-                        --     WalkLeft/WalkRight only play when customMouseLocked == true (LeftAlt on).
+                        --     WalkLeft/WalkRight only play when customMouseLocked == true (LeftControl on).
                         --     Previously (Stage 2C): gated on UserInputService.MouseBehavior == LockCenter
                         --       (Roblox native shift-lock detection). That path is now the legacy fallback
                         --       when CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY = false.
@@ -363,6 +370,15 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I (Anim
                         --       Unarmed.Idle              = rbxassetid://132044223555193  (Stage 2H — standing idle, looped)
                         --       Unarmed.EnterCrouch       = rbxassetid://105064599119554  (Stage 2H — enter-crouch one-shot)
                         --       Unarmed.ExitCrouch        = rbxassetid://104596765238289  (Stage 2H — exit-crouch one-shot)
+                        --       Unarmed.CrouchWalk            = rbxassetid://82558685099409   (Stage 2J — crouch walk forward, canonical fallback alias)
+                        --       Unarmed.CrouchWalkForward     = rbxassetid://82558685099409   (Stage 2J — crouch walk forward)
+                        --       Unarmed.CrouchWalkBackward    = rbxassetid://131295440357763  (Stage 2J — crouch walk backward)
+                        --       Unarmed.CrouchWalkLeft        = rbxassetid://103170217015576  (Stage 2J — crouch walk strafe left)
+                        --       Unarmed.CrouchWalkRight       = rbxassetid://84961452934451   (Stage 2J — crouch walk strafe right)
+                        --       Unarmed.CrouchWalkForwardLeft  = rbxassetid://115919203745144 (Stage 2J — crouch walk forward-left diagonal)
+                        --       Unarmed.CrouchWalkForwardRight = rbxassetid://107284851359368 (Stage 2J — crouch walk forward-right diagonal)
+                        --       Unarmed.CrouchWalkBackwardLeft  = rbxassetid://118800024223445 (Stage 2J — crouch walk backward-left diagonal)
+                        --       Unarmed.CrouchWalkBackwardRight = rbxassetid://104285284019251 (Stage 2J — crouch walk backward-right diagonal)
                         --       AR15.WalkForward          = rbxassetid://138802532485746
                         --       AR15.RunForward           = rbxassetid://79735501581082
                         --       AR15.Idle                 = rbxassetid://117989834436525  (Stage 2H — standing idle, looped)
@@ -372,9 +388,10 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I (Anim
                         --       Stage 2F (2026-05-20) — 5 new Unarmed walk directional clips added;
                         --       2026-05-20 — Unarmed WalkForward + RunForward replaced with confirmed-good R6 clips;
                         --       Stage 2G (2026-05-20) — RunForwardLeft + RunForwardRight added; mouse-lock-gated sprint diagonals;
-                        --       Stage 2H (2026-05-20) — Idle + EnterCrouch/ExitCrouch added for both sets)
+                        --       Stage 2H (2026-05-20) — Idle + EnterCrouch/ExitCrouch added for both sets;
+                        --       Stage 2J (2026-05-20) — 9 Unarmed CrouchWalk* directional IDs added)
                         --     Sprint diagonal behavior (Stage 2G):
-                        --       Unarmed + customMouseLocked ON: ForwardLeft sprint → RunForwardLeft; ForwardRight sprint → RunForwardRight.
+                        --       Unarmed + customMouseLocked ON (LeftControl): ForwardLeft sprint → RunForwardLeft; ForwardRight sprint → RunForwardRight.
                         --       Unarmed + customMouseLocked OFF: all sprint directions → RunForward.
                         --       AR15/gun-equipped: all sprint directions → AR15 RunForward (no run diagonals).
                         --     Idle behavior (Stage 2H):
@@ -402,15 +419,38 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I (Anim
                         --       crouchTransitionPlaying flag gates updateMovementAnimation during in-flight one-shot.
                         --       clearCrouchTransitionConnection() (renamed from stopCrouchTransition() in Stage 2I)
                         --         disconnects the Stopped conn only; callers manage crouchTransitionPlaying explicitly.
-                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I: CrouchWalk/CrouchIdle animation IDs (no IDs added in 2I),
-                        --       lower/upper-body split, reload/fire/ADS weapon animations.
+                        --     Crouch-walk behavior (Stage 2J — 2026-05-20):
+                        --       Nine Unarmed CrouchWalk* IDs added (CrouchWalk/CrouchWalkForward share the same asset).
+                        --       All tracks looped. Speed multiplier: MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER = 1.0.
+                        --       customMouseLocked OFF → CrouchWalkForward fallback (no directional strafe while crouching).
+                        --       customMouseLocked ON  → 8-directional selection (same gate as walk strafe animations).
+                        --       AR15/gun-equipped: no CrouchWalk IDs — falls back to crouch bottom-pose hold (deferred).
+                        --       Crouch visuals: no Humanoid.HipHeight, CameraOffset, or camera.CFrame changes.
+                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I/2J: AR15 CrouchWalk IDs (deferred),
+                        --       CrouchIdle animation, lower/upper-body split, reload/fire/ADS weapon animations.
+                        --
+                        --   Stage 2K — third-person camera zoom limits + mouse-lock camera (2026-05-20):
+                        --     Normal third-person zoom: CameraMin=4, CameraMax=14 (set in Start() and on CharacterAdded).
+                        --     Custom mouse-lock ON: CameraMin=CameraMax=8 (pinned); CameraOffset=Vector3.new(1.75,0,0).
+                        --     Custom mouse-lock OFF: CameraMin=4, CameraMax=14; CameraOffset=Vector3.zero.
+                        --     destroy() restores CameraMin=4, CameraMax=14 and CameraOffset=zero.
+                        --     Camera zoom uses Players.LocalPlayer.CameraMinZoomDistance/CameraMaxZoomDistance only.
+                        --     Does NOT set CameraType to Scriptable. Does NOT write camera.CFrame or FieldOfView.
+                        --     Toggle key changed: LeftAlt → LeftControl (keeps LeftAlt free; LeftShift=sprint still).
+                        --     CameraOffset fallback: if module-level humanoid is nil, looks up from
+                        --       Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid") directly.
+                        --     New constants: THIRD_PERSON_MIN_ZOOM_DISTANCE=4, THIRD_PERSON_MAX_ZOOM_DISTANCE=14,
+                        --       CUSTOM_MOUSE_LOCK_CAMERA_DISTANCE=8, CUSTOM_MOUSE_LOCK_CAMERA_OFFSET,
+                        --       CUSTOM_MOUSE_LOCK_RESTORE_CAMERA_OFFSET, CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_DISTANCE,
+                        --       CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_OFFSET.
                         --
                         --   Exposes: GetMovementState() → table; GetMoveState() → string (GunController
                         --   compat); IsADSBlocked() → bool; GetViewmodelAddCFrame() → identity;
                         --   SetEquippedWeaponName(name: string?) → switches animation set (presentation only);
                         --   GetEquippedWeaponName() → string? (nil = Unarmed set active);
-                        --   SetCustomMouseLocked(bool) → toggles custom mouse lock; writes MouseBehavior;
-                        --   IsCustomMouseLocked() → bool (true = LeftAlt mouse lock is active);
+                        --   SetCustomMouseLocked(bool) → toggles custom mouse lock; writes MouseBehavior,
+                        --     CameraMinZoomDistance, CameraMaxZoomDistance, and CameraOffset (Stage 2K);
+                        --   IsCustomMouseLocked() → bool (true = LeftControl mouse lock is active);
                         --   Start(); destroy()
 CutsceneController      -- intro/outro sequences, triggered by RoundStateChanged
 HUD                     -- driven by HealthChanged, TeamStatusUpdate, AmmoChanged, RoundStateChanged
@@ -459,9 +499,9 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --     MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK = true — outer gate: strafe anims
              --       require some form of mouse lock. When CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY
              --       is true (default), source is customMouseLocked, not native ShiftLock.
-             --   Custom mouse-lock constants (Stage 2D — 2026-05-19):
-             --     CUSTOM_MOUSE_LOCK_ENABLED = true — enables LeftAlt custom mouse-lock toggle.
-             --     CUSTOM_MOUSE_LOCK_TOGGLE_KEY = Enum.KeyCode.LeftAlt — toggle key.
+             --   Custom mouse-lock constants (Stage 2D — 2026-05-19; updated Stage 2K — 2026-05-20):
+             --     CUSTOM_MOUSE_LOCK_ENABLED = true — enables LeftControl custom mouse-lock toggle.
+             --     CUSTOM_MOUSE_LOCK_TOGGLE_KEY = Enum.KeyCode.LeftControl — toggle key (was LeftAlt in Stage 2D).
              --     CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY = true — when true, strafe gating reads
              --       customMouseLocked (not UserInputService.MouseBehavior / Roblox ShiftLock).
              --     CUSTOM_MOUSE_LOCK_DEBUG = true — logs mouse-lock toggle events to Output.
@@ -478,6 +518,15 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --     MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER               = 1.15 (RunForward, RunForwardLeft, RunForwardRight)
              --     MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER              = 0.75 (Idle — Stage 2H)
              --     MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.9  (EnterCrouch, ExitCrouch — Stage 2H)
+             --     MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER       = 1.0  (CrouchWalk* directional — Stage 2J)
+             --   Third-person camera zoom + mouse-lock camera constants (Stage 2K — 2026-05-20):
+             --     THIRD_PERSON_MIN_ZOOM_DISTANCE = 4  — normal min zoom (studs); set on Start/CharacterAdded.
+             --     THIRD_PERSON_MAX_ZOOM_DISTANCE = 14 — normal max zoom (studs); set on Start/CharacterAdded.
+             --     CUSTOM_MOUSE_LOCK_CAMERA_DISTANCE = 8       — pinned zoom distance while mouse lock is ON.
+             --     CUSTOM_MOUSE_LOCK_CAMERA_OFFSET = Vector3.new(1.75, 0, 0) — right-shoulder lateral offset.
+             --     CUSTOM_MOUSE_LOCK_RESTORE_CAMERA_OFFSET = Vector3.zero  — offset applied when lock is OFF.
+             --     CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_DISTANCE = true — gates CameraMin/Max writes in applyCustomMouseLockCamera.
+             --     CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_OFFSET = true  — gates CameraOffset write in applyCustomMouseLockCamera.
              --   Crouch hold constants (Stage 2I — 2026-05-20):
              --     CROUCH_HOLD_KEY = Enum.KeyCode.C — key held to enter/stay crouched; release exits crouch.
              --     CROUCH_HOLD_BOTTOM_POSE_ENABLED = true — enables EnterCrouch clip frozen at final frame

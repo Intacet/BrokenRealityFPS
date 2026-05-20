@@ -114,6 +114,17 @@ Constants.MOVEMENT_ANIMATION_IDS = {
             Idle               = "rbxassetid://132044223555193",  -- no-gun standing idle (Stage 2H)
             EnterCrouch        = "rbxassetid://105064599119554",  -- no-gun enter-crouch one-shot (Stage 2H)
             ExitCrouch         = "rbxassetid://104596765238289",  -- no-gun exit-crouch one-shot (Stage 2H)
+            -- Stage 2J: Unarmed directional crouch-walk animations
+            -- CrouchWalk / CrouchWalkForward share the same ID (forward is the canonical clip).
+            CrouchWalk            = "rbxassetid://82558685099409",   -- no-gun crouch walk forward (canonical fallback alias)
+            CrouchWalkForward     = "rbxassetid://82558685099409",   -- no-gun crouch walk forward
+            CrouchWalkBackward    = "rbxassetid://131295440357763",  -- no-gun crouch walk backward
+            CrouchWalkLeft        = "rbxassetid://103170217015576",  -- no-gun crouch walk strafe left
+            CrouchWalkRight       = "rbxassetid://84961452934451",   -- no-gun crouch walk strafe right
+            CrouchWalkForwardLeft  = "rbxassetid://115919203745144", -- no-gun crouch walk forward-left diagonal
+            CrouchWalkForwardRight = "rbxassetid://107284851359368", -- no-gun crouch walk forward-right diagonal
+            CrouchWalkBackwardLeft  = "rbxassetid://118800024223445",-- no-gun crouch walk backward-left diagonal
+            CrouchWalkBackwardRight = "rbxassetid://104285284019251",-- no-gun crouch walk backward-right diagonal
         },
         AR15 = {
             WalkForward = "rbxassetid://138802532485746",
@@ -135,6 +146,7 @@ Constants.MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER            = 1.4   -- WalkL
 Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER               = 1.15  -- RunForward/RunForwardLeft/Right play at 1.15× clip speed
 Constants.MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER              = 0.75  -- Idle plays at 0.75× clip speed (Stage 2H)
 Constants.MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.9   -- EnterCrouch/ExitCrouch one-shots play at 0.9× clip speed (Stage 2H)
+Constants.MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER       = 1.0   -- CrouchWalk* directional tracks play at 1.0× clip speed (Stage 2J)
 
 -- When true, WalkLeft/WalkRight strafe animations only play while mouse lock / shift-lock
 -- style state is active (UserInputService.MouseBehavior == LockCenter).
@@ -171,8 +183,8 @@ Constants.MOVEMENT_ANIMATION_DEBUG = true
 Constants.CUSTOM_MOUSE_LOCK_ENABLED = true
 
 -- Key that toggles the custom mouse-lock state.
--- Default: LeftAlt — keeps LeftShift free for sprint-only use.
-Constants.CUSTOM_MOUSE_LOCK_TOGGLE_KEY = Enum.KeyCode.LeftAlt
+-- Default: LeftControl (changed from LeftAlt in Stage 2K — keeps LeftShift free for sprint-only use).
+Constants.CUSTOM_MOUSE_LOCK_TOGGLE_KEY = Enum.KeyCode.LeftControl
 
 -- When true, WalkLeft/WalkRight strafe animations only play when the custom mouse lock
 -- is active (customMouseLocked == true). This supersedes the Roblox-native-ShiftLock
@@ -217,6 +229,33 @@ Constants.CUSTOM_MOUSE_LOCK_REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION = true
 -- When true, MovementController logs character-facing rotation events and skip reasons to Output.
 -- Set false to silence facing-rotation diagnostics in production.
 Constants.CUSTOM_MOUSE_LOCK_ROTATION_DEBUG = true
+
+-- ============================================================
+-- Third-person camera zoom limits (Stage 2K — 2026-05-20)
+-- Applied by MovementController on Start() and on every CharacterAdded.
+-- Replaces Roblox's default wide camera zoom range with a controlled FPS prototype range.
+-- Player can scroll between MIN and MAX while in normal third-person mode.
+-- Do NOT set CameraType to Scriptable or write camera.CFrame to enforce these.
+-- Roblox's built-in camera system respects these player-property limits.
+-- ============================================================
+Constants.THIRD_PERSON_MIN_ZOOM_DISTANCE = 4    -- minimum camera zoom (studs); player can scroll in to 4 studs
+Constants.THIRD_PERSON_MAX_ZOOM_DISTANCE = 14   -- maximum camera zoom (studs); player cannot scroll out beyond 14 studs
+
+-- Custom mouse-lock camera settings (Stage 2K — 2026-05-20)
+-- Applied when custom mouse lock is enabled; restored to normal third-person limits on disable.
+-- CameraMinZoom = CameraMaxZoom = CUSTOM_MOUSE_LOCK_CAMERA_DISTANCE locks the zoom to a single
+-- over-the-shoulder distance. Roblox's default camera controller handles the actual orbit.
+Constants.CUSTOM_MOUSE_LOCK_CAMERA_DISTANCE       = 8                       -- locked zoom distance (studs) while mouse lock is on
+Constants.CUSTOM_MOUSE_LOCK_CAMERA_OFFSET         = Vector3.new(1.75, 0, 0) -- Humanoid.CameraOffset while mouse lock is on (right-shoulder)
+Constants.CUSTOM_MOUSE_LOCK_RESTORE_CAMERA_OFFSET = Vector3.zero            -- Humanoid.CameraOffset when mouse lock is off (no offset)
+
+-- When true, applyCustomMouseLockCamera() sets CameraMinZoom = CameraMaxZoom = CAMERA_DISTANCE.
+-- Set false to leave zoom scrollable while mouse lock is on.
+Constants.CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_DISTANCE = true
+
+-- When true, applyCustomMouseLockCamera() sets Humanoid.CameraOffset = CAMERA_OFFSET.
+-- Set false to leave CameraOffset unchanged while mouse lock is on.
+Constants.CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_OFFSET = true
 
 -- ============================================================
 -- Timing constants
