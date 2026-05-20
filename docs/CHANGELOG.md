@@ -7,6 +7,58 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-20] — Movement Stage 2H: Idle + enter/exit crouch transition animations (Unarmed and AR15)
+
+### Summary
+Idle (looped) and EnterCrouch/ExitCrouch (one-shot) animations added for both Unarmed and AR15 movement
+sets. Idle plays whenever the player is standing still in ACTIVE phase. Pressing C plays EnterCrouch;
+releasing C plays ExitCrouch. A `crouchTransitionPlaying` flag gates `updateMovementAnimation` for the
+duration of each one-shot clip. Two new speed multiplier constants: idle at 0.75×, crouch transitions
+at 0.9×.
+
+### Changed files
+
+- **`src/shared/Constants.lua`**:
+  - Added to `MOVEMENT_ANIMATION_IDS.R6.Unarmed`:
+    - `Idle        = "rbxassetid://132044223555193"` (looped)
+    - `EnterCrouch = "rbxassetid://105064599119554"` (one-shot)
+    - `ExitCrouch  = "rbxassetid://104596765238289"` (one-shot)
+  - Added to `MOVEMENT_ANIMATION_IDS.R6.AR15`:
+    - `Idle        = "rbxassetid://117989834436525"` (looped)
+    - `EnterCrouch = "rbxassetid://79753647497328"` (one-shot)
+    - `ExitCrouch  = "rbxassetid://91295776984408"` (one-shot)
+  - Added `MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER = 0.75`
+  - Added `MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.9`
+  - Walk/strafe/run multipliers (1.3/1.4/1.15) preserved.
+
+- **`src/client/MovementController.lua`**:
+  - Stage header updated: 2G → 2G + 2H.
+  - New private state: `crouchTransitionPlaying: boolean`, `crouchTransitionConn: RBXScriptConnection?`.
+  - New helper `stopCrouchTransition()` (no deps, defined before Stage 2A): disconnects Stopped conn, clears flag. Called before all external `track:Stop()` sequences to prevent spurious callbacks.
+  - `getAnimationSpeedMultiplier()`: `Idle` → 0.75×; `EnterCrouch`/`ExitCrouch` → 0.9×.
+  - `loadMovementAnimations()`: 6 new toLoad entries; loop now sets `track.Looped = false` for `_EnterCrouch$` and `_ExitCrouch$` keys; `stopCrouchTransition()` added to the reset block.
+  - New helper `playCrouchTransition(entering: boolean)` (after `playMovementAnimation`): plays EnterCrouch or ExitCrouch for the active weapon set; tracks key via `currentAnimationName`; sets `crouchTransitionPlaying = true`; Stopped callback clears flag and `currentAnimationName`.
+  - `updateMovementAnimation()`: `crouchTransitionPlaying` guard added; `setName` moved before isMoving check; not-moving branch plays `setName .. "_Idle"` if loaded, otherwise stops current animation.
+  - Crouch input handler: `playCrouchTransition(movementState.isCrouching)` called after `applySpeed()`.
+  - Phase exit (RoundStateChanged): `stopCrouchTransition()` before `stopCurrentMovementAnimation()`.
+  - `destroy()`: `stopCrouchTransition()` before `stopCurrentMovementAnimation()`.
+
+- **`docs/PROJECT_MAP.md`** — 6 new animation IDs and 2 new multiplier constants documented; idle and crouch transition behavior documented.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated to x13; Stage 2H update block added; remaining-gaps list updated (idle/jump split into separate entries); 3 new Stage 2H risk entries added.
+
+### What was NOT changed
+No `src/server/` files. No `default.project.json`. No other client controllers.
+No camera changes. No gun/combat changes. No new remotes. No movement speed constants changed.
+No crouch walk or crouch idle animation. No HipHeight, CameraOffset, or FieldOfView changes.
+
+### Validation
+- `rojo build` — passes.
+- MCP/Studio verification pending.
+  See DEBT-044 (x13) for test steps.
+
+---
+
 ## [2026-05-20] — Movement Stage 2G: Unarmed run-forward diagonal animations + walk multiplier tuning
 
 ### Summary

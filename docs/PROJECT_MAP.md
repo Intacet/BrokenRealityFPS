@@ -360,17 +360,31 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E (Animate-disable, R6 dete
                         --       Unarmed.WalkForwardRight  = rbxassetid://81077784555491   (Stage 2F)
                         --       Unarmed.RunForwardLeft    = rbxassetid://94337945101783   (Stage 2G — mouse-lock-gated sprint diagonal)
                         --       Unarmed.RunForwardRight   = rbxassetid://104724352837263  (Stage 2G — mouse-lock-gated sprint diagonal)
+                        --       Unarmed.Idle              = rbxassetid://132044223555193  (Stage 2H — standing idle, looped)
+                        --       Unarmed.EnterCrouch       = rbxassetid://105064599119554  (Stage 2H — enter-crouch one-shot)
+                        --       Unarmed.ExitCrouch        = rbxassetid://104596765238289  (Stage 2H — exit-crouch one-shot)
                         --       AR15.WalkForward          = rbxassetid://138802532485746
                         --       AR15.RunForward           = rbxassetid://79735501581082
+                        --       AR15.Idle                 = rbxassetid://117989834436525  (Stage 2H — standing idle, looped)
+                        --       AR15.EnterCrouch          = rbxassetid://79753647497328   (Stage 2H — enter-crouch one-shot)
+                        --       AR15.ExitCrouch           = rbxassetid://91295776984408   (Stage 2H — exit-crouch one-shot)
                         --     (IDs updated 2026-05-20 — Unarmed strafe-left/right swapped to confirmed-good R6 clips;
                         --       Stage 2F (2026-05-20) — 5 new Unarmed walk directional clips added;
                         --       2026-05-20 — Unarmed WalkForward + RunForward replaced with confirmed-good R6 clips;
-                        --       Stage 2G (2026-05-20) — RunForwardLeft + RunForwardRight added; mouse-lock-gated sprint diagonals)
+                        --       Stage 2G (2026-05-20) — RunForwardLeft + RunForwardRight added; mouse-lock-gated sprint diagonals;
+                        --       Stage 2H (2026-05-20) — Idle + EnterCrouch/ExitCrouch added for both sets)
                         --     Sprint diagonal behavior (Stage 2G):
                         --       Unarmed + customMouseLocked ON: ForwardLeft sprint → RunForwardLeft; ForwardRight sprint → RunForwardRight.
                         --       Unarmed + customMouseLocked OFF: all sprint directions → RunForward.
                         --       AR15/gun-equipped: all sprint directions → AR15 RunForward (no run diagonals).
-                        --     Not in Stage 2A/2C/2D/2F: crouch anim, lower/upper-body split, reload/fire/ADS weapon animations.
+                        --     Idle behavior (Stage 2H):
+                        --       Both sets: Idle (looped) plays when standing still in ACTIVE phase.
+                        --       Idle plays via updateMovementAnimation (not moving path) — no special gate.
+                        --     Crouch transition behavior (Stage 2H):
+                        --       C toggle ON  → EnterCrouch one-shot; C toggle OFF → ExitCrouch one-shot.
+                        --       crouchTransitionPlaying flag gates updateMovementAnimation during transition.
+                        --       Stopped callback clears flag and currentAnimationName when clip finishes.
+                        --     Not in Stage 2A/2C/2D/2F/2G/2H: crouch walk/idle, lower/upper-body split, reload/fire/ADS weapon animations.
                         --
                         --   Exposes: GetMovementState() → table; GetMoveState() → string (GunController
                         --   compat); IsADSBlocked() → bool; GetViewmodelAddCFrame() → identity;
@@ -439,10 +453,12 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --       = LockCenter every frame while customMouseLocked is true.
              --     CUSTOM_MOUSE_LOCK_INPUT_PRIORITY = 3000 — ContextActionService priority for LeftAlt
              --       bind; 3000 > CoreScript default 2000 ensures immediate response.
-             --   Movement animation playback speed multipliers (updated 2026-05-20):
-             --     MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.3  (WalkForward/Backward/diagonals)
-             --     MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.4  (WalkLeft, WalkRight)
-             --     MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15 (RunForward, RunForwardLeft, RunForwardRight)
+             --   Movement animation playback speed multipliers (updated Stage 2H 2026-05-20):
+             --     MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER              = 1.3  (WalkForward/Backward/diagonals)
+             --     MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER            = 1.4  (WalkLeft, WalkRight)
+             --     MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER               = 1.15 (RunForward, RunForwardLeft, RunForwardRight)
+             --     MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER              = 0.75 (Idle — Stage 2H)
+             --     MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.9  (EnterCrouch, ExitCrouch — Stage 2H)
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag

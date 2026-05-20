@@ -91,22 +91,30 @@ Constants.MOVEMENT_ANIMATION_IDS = {
             WalkForwardRight   = "rbxassetid://81077784555491",   -- no-gun walk forward-right diagonal
             RunForwardLeft     = "rbxassetid://94337945101783",   -- no-gun run forward-left diagonal (Stage 2G)
             RunForwardRight    = "rbxassetid://104724352837263",  -- no-gun run forward-right diagonal (Stage 2G)
+            Idle               = "rbxassetid://132044223555193",  -- no-gun standing idle (Stage 2H)
+            EnterCrouch        = "rbxassetid://105064599119554",  -- no-gun enter-crouch one-shot (Stage 2H)
+            ExitCrouch         = "rbxassetid://104596765238289",  -- no-gun exit-crouch one-shot (Stage 2H)
         },
         AR15 = {
             WalkForward = "rbxassetid://138802532485746",
             RunForward  = "rbxassetid://79735501581082",
+            Idle        = "rbxassetid://117989834436525",  -- AR15 standing idle (Stage 2H)
+            EnterCrouch = "rbxassetid://79753647497328",   -- AR15 enter-crouch one-shot (Stage 2H)
+            ExitCrouch  = "rbxassetid://91295776984408",   -- AR15 exit-crouch one-shot (Stage 2H)
         },
     },
 }
 
 Constants.MOVEMENT_ANIMATION_FADE_TIME = 0.15  -- seconds to cross-fade between movement animations
 
--- Animation playback speed multipliers (Stage 2C).
+-- Animation playback speed multipliers (Stage 2C + 2H).
 -- Applied via AnimationTrack:AdjustSpeed() when a track starts playing.
 -- Tune these to match clip cadence without changing Humanoid.WalkSpeed.
-Constants.MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.3   -- WalkForward/Backward/diagonals play at 1.3× clip speed
-Constants.MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.4   -- WalkLeft/WalkRight play at 1.4× clip speed
-Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15  -- RunForward plays at 1.15× clip speed
+Constants.MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER              = 1.3   -- WalkForward/Backward/diagonals play at 1.3× clip speed
+Constants.MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER            = 1.4   -- WalkLeft/WalkRight play at 1.4× clip speed
+Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER               = 1.15  -- RunForward/RunForwardLeft/Right play at 1.15× clip speed
+Constants.MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER              = 0.75  -- Idle plays at 0.75× clip speed (Stage 2H)
+Constants.MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.9   -- EnterCrouch/ExitCrouch one-shots play at 0.9× clip speed (Stage 2H)
 
 -- When true, WalkLeft/WalkRight strafe animations only play while mouse lock / shift-lock
 -- style state is active (UserInputService.MouseBehavior == LockCenter).

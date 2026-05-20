@@ -536,7 +536,7 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-20 (x12)
+## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-20 (x13)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
@@ -609,14 +609,34 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - New private state: `currentCharacter: Model?`, `currentRootPart: BasePart?`, `originalAutoRotate: boolean?`, `lastFacingSkippedReason: string`.
 - Three new Constants: `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW`, `CUSTOM_MOUSE_LOCK_REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION`, `CUSTOM_MOUSE_LOCK_ROTATION_DEBUG`.
 
-**Remaining gaps (not yet in Stage 2G):**
-- Crouch walk animation — not implemented; crouching uses WalkForward at CROUCH_SPEED.
+**Updated (2026-05-20 — Stage 2H: Idle + EnterCrouch/ExitCrouch transition animations):**
+- Six new animation IDs added to `Constants.MOVEMENT_ANIMATION_IDS.R6`:
+  - `Unarmed.Idle = rbxassetid://132044223555193` (standing idle, looped)
+  - `Unarmed.EnterCrouch = rbxassetid://105064599119554` (enter-crouch one-shot)
+  - `Unarmed.ExitCrouch = rbxassetid://104596765238289` (exit-crouch one-shot)
+  - `AR15.Idle = rbxassetid://117989834436525` (standing idle, looped)
+  - `AR15.EnterCrouch = rbxassetid://79753647497328` (enter-crouch one-shot)
+  - `AR15.ExitCrouch = rbxassetid://91295776984408` (exit-crouch one-shot)
+- Two new speed multiplier constants: `MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER = 0.75`, `MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.9`.
+- All 6 tracks pre-loaded at spawn in `loadMovementAnimations()`. `EnterCrouch`/`ExitCrouch` keys use `track.Looped = false`; all other tracks remain `Looped = true`.
+- New private state: `crouchTransitionPlaying: boolean`, `crouchTransitionConn: RBXScriptConnection?`.
+- New helper `stopCrouchTransition()` (no deps, defined before Stage 2A section): disconnects `crouchTransitionConn` before any `track:Stop()` call to prevent spurious Stopped callbacks.
+- New helper `playCrouchTransition(entering: boolean)` (after `playMovementAnimation`): plays EnterCrouch or ExitCrouch for the current weapon set; sets `crouchTransitionPlaying = true`; connects Stopped callback to clear the flag and `currentAnimationName`; tracks the key via `currentAnimationName` so `stopCurrentMovementAnimation()` can stop the transition track on phase exit/destroy.
+- `updateMovementAnimation()`: `crouchTransitionPlaying` guard added (early return while one-shot plays); `setName` moved before the isMoving check; idle path — when not moving, plays `setName .. "_Idle"` if the track is loaded, otherwise calls `stopCurrentMovementAnimation()`.
+- Crouch input handler: `playCrouchTransition(movementState.isCrouching)` called after `applySpeed()`.
+- Phase exit handler: `stopCrouchTransition()` called before `stopCurrentMovementAnimation()`.
+- `destroy()`: `stopCrouchTransition()` called before `stopCurrentMovementAnimation()`.
+- `loadMovementAnimations()` reset block: `stopCrouchTransition()` called before `table.clear(animationTracks)`.
+
+**Remaining gaps (not yet in Stage 2H):**
+- Crouch walk animation — not implemented; crouching while moving uses existing walk animation at CROUCH_SPEED.
+- Crouch idle animation — not implemented; crouching while standing still plays the standing Idle clip. A separate crouch-idle clip is deferred.
 - Run sprint diagonals only cover ForwardLeft and ForwardRight (Unarmed + mouse lock). Run strafe (Left/Right) and run backward are not implemented.
 - AR15 run diagonal animations — AR15 set sprinting uses RunForward for all directions; no AR15-specific run diagonals.
 - AR15 backward/diagonal walk animations — AR15 set only has WalkForward and RunForward; backward and diagonal walk directions fall back to WalkForward/strafe grouping.
 - Lower-body / upper-body animation split — not implemented; the full body plays the movement animation.
 - Reload, fire, ADS, and sprint-hold weapon animations — deferred to a weapon-anim stage.
-- Idle, jump, fall, and climb animations — suppressed along with locomotion when Animate is disabled. Custom replacements needed in a future movement stage.
+- Jump, fall, and climb animations — suppressed along with locomotion when Animate is disabled. Custom replacements needed in a future movement stage.
 - True server-owned equipment state — equippedWeaponName is presentation-only; see DEBT-050.
 - Full custom camera controller — `SetCustomMouseLocked` writes `UserInputService.MouseBehavior = LockCenter`, which locks the cursor to center and allows camera rotation via Roblox's default camera system. A full custom camera controller (Scriptable CameraType, raw mouse-delta yaw/pitch) is not built.
 
@@ -628,7 +648,10 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - `equippedWeaponName` is presentation-only. True armed/unarmed state must later come from a server-owned equipment/loadout system. `SetEquippedWeaponName` must eventually be called by a real EquipmentController or weapon equip system (see DEBT-050).
 - Sprint in all directions still uses RunForward (no directional sprint animations yet). Backward and diagonal movement uses WalkForward fallback only.
 - If `DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = false`, Animate keeps running and may override or blend with custom locomotion tracks. This constant must stay `true` for custom animations to take effect.
-- Animation speed multipliers (walk 1.3×, strafe 1.4×, run 1.15×). Walk was changed from 1.7→1.3 in Stage 2G. These values may still need tuning after Studio verification — if the clip cadence feels too fast or too slow, adjust only the Constants without touching controller logic.
+- Animation speed multipliers (walk 1.3×, strafe 1.4×, run 1.15×, idle 0.75×, crouch transition 0.9×). Walk was changed from 1.7→1.3 in Stage 2G; idle and crouch transition added in Stage 2H. These values may still need tuning after Studio verification — if the clip cadence feels too fast or too slow, adjust only the Constants without touching controller logic.
+- **Stage 2H new risk:** If `playCrouchTransition` is called while `crouchTransitionPlaying` is true (rapid double-tap of C), the second call to `stopCrouchTransition()` disconnects the first Stopped conn and then plays a fresh clip. The previous clip fades out via `stopCurrentMovementAnimation()`. This is correct behavior but may feel abrupt at low playback speeds. Tune `MOVEMENT_ANIMATION_FADE_TIME` if the interruption is visually jarring.
+- **Stage 2H new risk:** Idle plays during ANY non-moving state in ACTIVE — including while crouched. This is intentional for Stage 2H (no separate crouch-idle yet). If the standing Idle clip looks wrong while crouched, a separate crouch-idle ID and a `movementState.isCrouching` branch in `updateMovementAnimation` will be needed.
+- **Stage 2H new risk:** `playCrouchTransition` uses `currentAnimationName = key` to let `stopCurrentMovementAnimation()` stop the transition track externally. If any code path calls `stopCurrentMovementAnimation()` while `crouchTransitionPlaying` is true (e.g. a future system that force-stops all animations), the Stopped callback will fire after the disconnect — but since `stopCrouchTransition()` must be called first, the callback guard (`if currentAnimationName == key`) prevents double-clearing. Verify that all external stop paths call `stopCrouchTransition()` before `stopCurrentMovementAnimation()`.
 - `StarterPlayer.EnableMouseLockOption = false` is now set in `default.project.json` and `LocalPlayer.DevEnableMouseLock = false` is set on Start and CharacterAdded. If CoreScripts still find a path to re-enable Shift Lock, the `CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME` Heartbeat write provides a second line of defence. Verify in Studio that LeftShift never activates the Roblox native mouse-lock icon.
 - `ContextActionService:BindActionAtPriority` at priority 3000 is the new LeftAlt binding. If a future CoreScript update changes input priority behavior, the toggle lag could return. Verify in Studio that LeftAlt toggles take effect immediately (no perceptible 1-frame delay).
 - `CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME = true` re-writes `MouseBehavior = LockCenter` every Heartbeat while `customMouseLocked` is true. If an expensive UI transition reads `MouseBehavior` to detect lock state (rather than calling `IsCustomMouseLocked()`), it may be confused by the aggressive reapply. Verify in Studio that the UI does not flicker or misread lock state during phase transitions.
