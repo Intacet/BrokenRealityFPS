@@ -7,6 +7,51 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-20] — Movement Stage 2F: Unarmed backward and diagonal directional animations
+
+### Summary
+Five new confirmed-good no-gun directional animation clips added to the Unarmed movement set:
+backward, backward-left, backward-right, forward-left, and forward-right. The `updateMovementAnimation`
+selection logic is expanded for the Unarmed set so each of the eight directions plays its own clip.
+Backward and diagonal animations do not require mouse lock. Pure lateral strafe (WalkLeft/WalkRight)
+still requires LeftAlt mouse lock as before. AR15 set behavior is unchanged.
+
+### Changed files
+
+- **`src/shared/Constants.lua`**:
+  - Added to `MOVEMENT_ANIMATION_IDS.R6.Unarmed`:
+    - `WalkBackward      = "rbxassetid://107080862064563"`
+    - `WalkBackwardLeft  = "rbxassetid://107785647885776"`
+    - `WalkBackwardRight = "rbxassetid://109190640713438"`
+    - `WalkForwardLeft   = "rbxassetid://97324289156918"`
+    - `WalkForwardRight  = "rbxassetid://81077784555491"`
+  - All existing IDs, constants, and AR15 entries preserved.
+
+- **`src/client/MovementController.lua`**:
+  - Stage header updated: 2E → 2E + 2F.
+  - `getAnimationSpeedMultiplier()`: extended — WalkBackward, WalkBackwardLeft/Right, WalkForwardLeft/Right
+    return `MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER` (1.7×). WalkLeft/WalkRight and RunForward unchanged.
+  - `loadMovementAnimations()` toLoad table: 5 new Unarmed entries added (pre-loaded at spawn).
+  - `updateMovementAnimation()`: Unarmed set now uses per-direction selection for all 8 directions.
+    AR15 and other sets: left/right grouping behavior unchanged.
+
+- **`docs/PROJECT_MAP.md`** — MovementController animation IDs table updated with 5 new Unarmed entries;
+  Stage 2F noted; gating behavior for backward/diagonal clips documented.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated to x10; Stage 2F update block added; remaining-gaps
+  list revised to remove backward/diagonal (now implemented).
+
+### What was NOT changed
+No `src/server/` files. No `default.project.json`. No other client controllers.
+No camera changes. No gun/combat changes. No new remotes. No movement speed constants changed.
+
+### Validation
+- `rojo build` — passes.
+- MCP unavailable — Studio verification not performed. Needs Studio verification.
+  See DEBT-044 (x10) for test steps.
+
+---
+
 ## [2026-05-20] — asset: swap Unarmed no-gun strafe-left/right animation IDs + correct speed multipliers
 
 ### Summary

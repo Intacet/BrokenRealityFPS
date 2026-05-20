@@ -536,7 +536,7 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-044] MovementController animation system — Unarmed strafe ID swap — UPDATED 2026-05-20 (x9)
+## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-20 (x10)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
@@ -561,6 +561,24 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 - All AR15 IDs, Unarmed WalkForward/RunForward IDs, and all MovementController behavior preserved unchanged.
 - Asset swap and constant correction only — no logic changes.
 
+**Updated (2026-05-20 — Stage 2F: Unarmed backward/diagonal directional animations):**
+- Five new Unarmed animation IDs added to `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed`:
+  - `WalkBackward = rbxassetid://107080862064563`
+  - `WalkBackwardLeft = rbxassetid://107785647885776`
+  - `WalkBackwardRight = rbxassetid://109190640713438`
+  - `WalkForwardLeft = rbxassetid://97324289156918`
+  - `WalkForwardRight = rbxassetid://81077784555491`
+- Five corresponding entries added to `loadMovementAnimations()` toLoad table (all pre-loaded at spawn).
+- `getAnimationSpeedMultiplier()` extended: WalkBackward, WalkBackwardLeft/Right, WalkForwardLeft/Right → 1.7× (same as WalkForward).
+- `updateMovementAnimation()` Unarmed branch rewritten for full per-direction selection:
+  - Backward → WalkBackward → WalkForward fallback (no mouse-lock requirement).
+  - ForwardLeft → WalkForwardLeft → WalkLeft (if mouse locked) → WalkForward.
+  - ForwardRight → WalkForwardRight → WalkRight (if mouse locked) → WalkForward.
+  - BackwardLeft → WalkBackwardLeft → WalkBackward → WalkForward.
+  - BackwardRight → WalkBackwardRight → WalkBackward → WalkForward.
+  - Left/Right: unchanged — WalkLeft/WalkRight only when mouse locked.
+- AR15 and other sets: behavior unchanged (existing left/right grouping preserved).
+
 **Updated (2026-05-19 — Stage 2E: character-facing camera yaw):**
 When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (LeftAlt) now also:
 - Caches `Humanoid.AutoRotate` (once per lock session) into `originalAutoRotate` and sets `AutoRotate = false`, preventing the engine from auto-rotating the character toward its movement direction.
@@ -573,15 +591,14 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - New private state: `currentCharacter: Model?`, `currentRootPart: BasePart?`, `originalAutoRotate: boolean?`, `lastFacingSkippedReason: string`.
 - Three new Constants: `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW`, `CUSTOM_MOUSE_LOCK_REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION`, `CUSTOM_MOUSE_LOCK_ROTATION_DEBUG`.
 
-**Remaining gaps (not yet in Stage 2E):**
+**Remaining gaps (not yet in Stage 2F):**
 - Crouch walk animation — not implemented; crouching uses WalkForward at CROUCH_SPEED.
-- Backward-specific animation — Backward direction falls back to WalkForward.
-- Diagonal-specific animations — ForwardLeft/ForwardRight etc. use WalkLeft/WalkRight or WalkForward.
 - Lower-body / upper-body animation split — not implemented; the full body plays the movement animation.
 - Reload, fire, ADS, and sprint-hold weapon animations — deferred to a weapon-anim stage.
 - Idle, jump, fall, and climb animations — suppressed along with locomotion when Animate is disabled. Custom replacements needed in a future movement stage.
 - True server-owned equipment state — equippedWeaponName is presentation-only; see DEBT-050.
 - Full custom camera controller — `SetCustomMouseLocked` writes `UserInputService.MouseBehavior = LockCenter`, which locks the cursor to center and allows camera rotation via Roblox's default camera system. A full custom camera controller (Scriptable CameraType, raw mouse-delta yaw/pitch) is not built.
+- AR15 backward/diagonal animations — AR15 set only has WalkForward and RunForward; backward and diagonal directions fall back to WalkForward/strafe grouping as before.
 
 **Remaining risks:**
 - If custom animation IDs are private or not owned by the game's creator / group, Roblox may silently refuse to load them. `Logger.warn()` fires for any empty assetId; a failed `LoadAnimation()` call will produce an output error. Confirm animation ownership before shipping.

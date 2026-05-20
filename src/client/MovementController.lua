@@ -2,9 +2,9 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D + 2E (Animate-disable, R6 detection, animation-set selection,
+-- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F (Animate-disable, R6 detection, animation-set selection,
 -- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
--- character-facing camera yaw) —
+-- character-facing camera yaw, Unarmed backward/diagonal directional animations) —
 -- walk, sprint, crouch speed; 8-direction camera-relative movement state; phase gating;
 -- respawn handling; connection cleanup; R6 animation playback with Unarmed default set.
 --
@@ -115,9 +115,9 @@
 --   CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true        — rotate character to face camera yaw while locked
 --   CUSTOM_MOUSE_LOCK_REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION = true — facing only during ACTIVE phase
 --   CUSTOM_MOUSE_LOCK_ROTATION_DEBUG = true         — logs facing rotation events to Output
---   MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER = 2.0  — WalkForward AdjustSpeed multiplier
---   MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.35 — WalkLeft/WalkRight AdjustSpeed multiplier
---   MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER = 1.0   — RunForward AdjustSpeed multiplier
+--   MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER = 1.7  — WalkForward/Backward/diagonal AdjustSpeed multiplier
+--   MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.4 — WalkLeft/WalkRight AdjustSpeed multiplier
+--   MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER = 1.15  — RunForward AdjustSpeed multiplier
 --
 -- Camera rule (Stage 1 + 2A + 2C + 2D + 2E):
 --   Reads workspace.CurrentCamera.CFrame for direction detection and camera yaw facing.
@@ -135,13 +135,17 @@
 --   Defaults to Unarmed animation set when equippedWeaponName == nil (no weapon equipped).
 --   Call SetEquippedWeaponName("AR15") to switch to AR15 movement animations.
 --   True server-owned equipment state is deferred — see DEBT-050.
---   WalkLeft/WalkRight played only when customMouseLocked == true (LeftAlt toggled on).
---   Without custom mouse lock, left/right/diagonal movement falls back to WalkForward.
+--   WalkLeft/WalkRight (pure lateral strafe) only when customMouseLocked == true (LeftAlt on).
+--   Without custom mouse lock, pure Left/Right fall back to WalkForward.
+--   WalkBackward always plays for Backward direction regardless of mouse-lock state.
+--   WalkForwardLeft/Right and WalkBackwardLeft/Right always play regardless of mouse-lock state.
 --   Sprint uses RunForward in all directions regardless of customMouseLocked.
---   WalkForward: 2.0× speed. WalkLeft/WalkRight: 1.35× speed. RunForward: 1.0× speed.
+--   WalkForward/Backward/diagonals: 1.7× speed. WalkLeft/WalkRight: 1.4× speed. RunForward: 1.15× speed.
 --   Sprint works with LeftShift even while shift lock is active (TextBox check instead of gp).
---   No crouch, backward, diagonal, reload, fire, or ADS animations in Stage 2A/2C/2D.
---   No lower-body/upper-body animation split in Stage 2A/2C/2D.
+--   Stage 2F (2026-05-20): Unarmed backward/diagonal animation support added:
+--     WalkBackward, WalkBackwardLeft, WalkBackwardRight, WalkForwardLeft, WalkForwardRight.
+--   No crouch, reload, fire, or ADS animations in Stage 2A/2C/2D/2E/2F.
+--   No lower-body/upper-body animation split.
 --   Non-R6 characters: animation loading skipped; getRigDebugSummary logged; Stage 1 speed logic remains active.
 --
 -- Not in Stage 1/2A/2D: slide, vault, stamina, prone, footsteps, crouch body lowering,
@@ -683,7 +687,13 @@ end
 -- Does not affect Humanoid.WalkSpeed or any movement speed constant.
 local function getAnimationSpeedMultiplier(animationName: string): number
     assert(animationName ~= nil, "[MovementController] getAnimationSpeedMultiplier: animationName is required")
-    if animationName == "WalkForward" then
+    if animationName == "WalkForward"
+        or animationName == "WalkBackward"
+        or animationName == "WalkBackwardLeft"
+        or animationName == "WalkBackwardRight"
+        or animationName == "WalkForwardLeft"
+        or animationName == "WalkForwardRight"
+    then
         return Constants.MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER
     elseif animationName == "WalkLeft" or animationName == "WalkRight" then
         return Constants.MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER
@@ -817,13 +827,18 @@ local function loadMovementAnimations(character: Model)
     local r6 = Constants.MOVEMENT_ANIMATION_IDS.R6
     local toLoad: { [string]: string } = {
         -- Unarmed (default / no-gun) set
-        ["Unarmed_WalkForward"] = r6.Unarmed.WalkForward,
-        ["Unarmed_RunForward"]  = r6.Unarmed.RunForward,
-        ["Unarmed_WalkLeft"]    = r6.Unarmed.WalkLeft,    -- no-gun strafe left
-        ["Unarmed_WalkRight"]   = r6.Unarmed.WalkRight,   -- no-gun strafe right
+        ["Unarmed_WalkForward"]       = r6.Unarmed.WalkForward,
+        ["Unarmed_RunForward"]        = r6.Unarmed.RunForward,
+        ["Unarmed_WalkLeft"]          = r6.Unarmed.WalkLeft,          -- no-gun strafe left
+        ["Unarmed_WalkRight"]         = r6.Unarmed.WalkRight,         -- no-gun strafe right
+        ["Unarmed_WalkBackward"]      = r6.Unarmed.WalkBackward,      -- no-gun backward (Stage 2F)
+        ["Unarmed_WalkBackwardLeft"]  = r6.Unarmed.WalkBackwardLeft,  -- no-gun backward-left diagonal (Stage 2F)
+        ["Unarmed_WalkBackwardRight"] = r6.Unarmed.WalkBackwardRight, -- no-gun backward-right diagonal (Stage 2F)
+        ["Unarmed_WalkForwardLeft"]   = r6.Unarmed.WalkForwardLeft,   -- no-gun forward-left diagonal (Stage 2F)
+        ["Unarmed_WalkForwardRight"]  = r6.Unarmed.WalkForwardRight,  -- no-gun forward-right diagonal (Stage 2F)
         -- AR15 set — only plays when SetEquippedWeaponName("AR15") is called
-        ["AR15_WalkForward"]    = r6.AR15.WalkForward,
-        ["AR15_RunForward"]     = r6.AR15.RunForward,
+        ["AR15_WalkForward"]          = r6.AR15.WalkForward,
+        ["AR15_RunForward"]           = r6.AR15.RunForward,
     }
 
     for key, assetId in pairs(toLoad) do
@@ -852,11 +867,13 @@ end
 -- Skipped if CUSTOM_MOVEMENT_ANIMATIONS_ENABLED is false.
 -- currentAnimationName guard inside playMovementAnimation prevents track restarts.
 --
--- Stage 2A + 2C scope:
+-- Stage 2A + 2C + 2F scope:
 --   WalkLeft/WalkRight only play when canUseStrafeAnimations is true (mouse lock active).
---   Without mouse lock, all walking directions fall back to WalkForward.
+--   WalkBackward plays for Backward regardless of mouse-lock state (Unarmed set only).
+--   WalkForwardLeft/Right and WalkBackwardLeft/Right play for diagonals regardless of mouse lock (Unarmed only).
+--   AR15 and other sets: unchanged left/right grouping with WalkForward fallback.
 --   Sprint uses RunForward in all directions.
---   Crouch, backward-specific, and diagonal-specific animations not yet implemented.
+--   Crouch-specific animations not yet implemented.
 local function updateMovementAnimation()
     if not Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED then return end
     if next(animationTracks) == nil then return end
@@ -905,8 +922,79 @@ local function updateMovementAnimation()
         -- Sprint uses RunForward in all directions.
         animName = setName .. "_RunForward"
 
+    elseif setName == Constants.MOVEMENT_ANIMATION_SET_UNARMED then
+        -- Unarmed set: full per-direction selection (Stage 2F).
+        -- WalkBackward plays for Backward regardless of mouse-lock state.
+        -- WalkForwardLeft/Right and WalkBackwardLeft/Right play for diagonals regardless of mouse-lock.
+        -- Pure Left/Right strafe (WalkLeft/WalkRight) still require canUseStrafeAnimations.
+        if dirName == "Backward" then
+            local key = "Unarmed_WalkBackward"
+            animName = if animationTracks[key] ~= nil then key else "Unarmed_WalkForward"
+
+        elseif dirName == "ForwardLeft" then
+            local fwdLeft = "Unarmed_WalkForwardLeft"
+            local left    = "Unarmed_WalkLeft"
+            if animationTracks[fwdLeft] ~= nil then
+                animName = fwdLeft
+            elseif canUseStrafeAnimations and animationTracks[left] ~= nil then
+                animName = left
+            else
+                animName = "Unarmed_WalkForward"
+            end
+
+        elseif dirName == "ForwardRight" then
+            local fwdRight = "Unarmed_WalkForwardRight"
+            local right    = "Unarmed_WalkRight"
+            if animationTracks[fwdRight] ~= nil then
+                animName = fwdRight
+            elseif canUseStrafeAnimations and animationTracks[right] ~= nil then
+                animName = right
+            else
+                animName = "Unarmed_WalkForward"
+            end
+
+        elseif dirName == "BackwardLeft" then
+            local bwdLeft = "Unarmed_WalkBackwardLeft"
+            local bwd     = "Unarmed_WalkBackward"
+            if animationTracks[bwdLeft] ~= nil then
+                animName = bwdLeft
+            elseif animationTracks[bwd] ~= nil then
+                animName = bwd
+            else
+                animName = "Unarmed_WalkForward"
+            end
+
+        elseif dirName == "BackwardRight" then
+            local bwdRight = "Unarmed_WalkBackwardRight"
+            local bwd      = "Unarmed_WalkBackward"
+            if animationTracks[bwdRight] ~= nil then
+                animName = bwdRight
+            elseif animationTracks[bwd] ~= nil then
+                animName = bwd
+            else
+                animName = "Unarmed_WalkForward"
+            end
+
+        elseif canUseStrafeAnimations then
+            -- Left, Right, or Forward with mouse lock active.
+            if dirName == "Left" then
+                local leftKey = "Unarmed_WalkLeft"
+                animName = if animationTracks[leftKey] ~= nil then leftKey else "Unarmed_WalkForward"
+            elseif dirName == "Right" then
+                local rightKey = "Unarmed_WalkRight"
+                animName = if animationTracks[rightKey] ~= nil then rightKey else "Unarmed_WalkForward"
+            else
+                -- Forward or unclassified.
+                animName = "Unarmed_WalkForward"
+            end
+
+        else
+            -- Mouse lock not active: pure Left/Right and Forward use WalkForward.
+            animName = "Unarmed_WalkForward"
+        end
+
     elseif canUseStrafeAnimations then
-        -- Mouse lock active: attempt left/right strafe animations with WalkForward fallback.
+        -- AR15 and other sets: existing left/right grouping with WalkForward fallback.
         if dirName == "Left" or dirName == "ForwardLeft" or dirName == "BackwardLeft" then
             local leftKey   = setName .. "_WalkLeft"
             local leftTrack = animationTracks[leftKey]
@@ -1325,7 +1413,7 @@ function MovementController:Start()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1 + 2A + 2C + 2D + 2E: DevMouseLock disabled, CAS bind priority 3000, reapply-every-frame, character-facing yaw)")
+    Logger.debug("[MovementController] Ready (Stage 1 + 2A + 2C + 2D + 2E + 2F: DevMouseLock disabled, CAS bind priority 3000, reapply-every-frame, character-facing yaw, Unarmed directional anims)")
 end
 
 return MovementController

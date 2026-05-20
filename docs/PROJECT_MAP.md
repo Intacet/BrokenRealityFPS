@@ -339,23 +339,30 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E (Animate-disable, R6 dete
                         --       CUSTOM_MOUSE_LOCK_REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION,
                         --       CUSTOM_MOUSE_LOCK_ROTATION_DEBUG.
                         --
-                        --   Stage 2A + 2C + 2D animation support (R6 only):
+                        --   Stage 2A + 2C + 2D + 2F animation support (R6 only):
                         --     Loads AnimationTrack objects per character via Humanoid.Animator.
                         --     Both Unarmed and AR15 tracks pre-loaded at spawn for instant set switching.
                         --     Plays during ACTIVE phase only; stops on phase exit and when not moving.
-                        --     WalkLeft/WalkRight played only when customMouseLocked == true (LeftAlt on).
+                        --     WalkLeft/WalkRight (pure lateral strafe) only when customMouseLocked == true (LeftAlt on).
+                        --     WalkBackward plays for Backward regardless of mouse-lock (Unarmed only).
+                        --     WalkForwardLeft/Right and WalkBackwardLeft/Right play regardless of mouse-lock (Unarmed only).
+                        --     AR15 set: unchanged — left/right grouping with WalkForward fallback.
                         --     Debug: set-change and strafe-blocked-change logged once per change.
                         --     Animation IDs (Constants.MOVEMENT_ANIMATION_IDS.R6):
-                        --       Unarmed.WalkForward = rbxassetid://83352851460622
-                        --       Unarmed.RunForward  = rbxassetid://106253559282626
-                        --       Unarmed.WalkLeft    = rbxassetid://115652140967957
-                        --       Unarmed.WalkRight   = rbxassetid://82804864629403
-                        --       AR15.WalkForward    = rbxassetid://138802532485746
-                        --       AR15.RunForward     = rbxassetid://79735501581082
+                        --       Unarmed.WalkForward       = rbxassetid://83352851460622
+                        --       Unarmed.RunForward        = rbxassetid://106253559282626
+                        --       Unarmed.WalkLeft          = rbxassetid://115652140967957
+                        --       Unarmed.WalkRight         = rbxassetid://82804864629403
+                        --       Unarmed.WalkBackward      = rbxassetid://107080862064563  (Stage 2F)
+                        --       Unarmed.WalkBackwardLeft  = rbxassetid://107785647885776  (Stage 2F)
+                        --       Unarmed.WalkBackwardRight = rbxassetid://109190640713438  (Stage 2F)
+                        --       Unarmed.WalkForwardLeft   = rbxassetid://97324289156918   (Stage 2F)
+                        --       Unarmed.WalkForwardRight  = rbxassetid://81077784555491   (Stage 2F)
+                        --       AR15.WalkForward          = rbxassetid://138802532485746
+                        --       AR15.RunForward           = rbxassetid://79735501581082
                         --     (IDs updated 2026-05-20 — Unarmed strafe-left/right swapped to confirmed-good R6 clips;
-                        --       MovementController logic and AR15 IDs unchanged)
-                        --     Not in Stage 2A/2C/2D: crouch anim, backward-specific, diagonal-specific,
-                        --       lower/upper-body split, reload/fire/ADS weapon animations.
+                        --       Stage 2F (2026-05-20) — 5 new Unarmed directional clips added)
+                        --     Not in Stage 2A/2C/2D/2F: crouch anim, lower/upper-body split, reload/fire/ADS weapon animations.
                         --
                         --   Exposes: GetMovementState() → table; GetMoveState() → string (GunController
                         --   compat); IsADSBlocked() → bool; GetViewmodelAddCFrame() → identity;
