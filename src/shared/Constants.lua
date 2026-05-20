@@ -97,9 +97,9 @@ Constants.MOVEMENT_ANIMATION_FADE_TIME = 0.15  -- seconds to cross-fade between 
 -- Animation playback speed multipliers (Stage 2C).
 -- Applied via AnimationTrack:AdjustSpeed() when a track starts playing.
 -- Tune these to match clip cadence without changing Humanoid.WalkSpeed.
-Constants.MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 2.0   -- WalkForward plays at 2× clip speed
-Constants.MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.35  -- WalkLeft/WalkRight play at 1.35× clip speed
-Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.0   -- RunForward plays at original clip speed
+Constants.MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.85  -- WalkForward plays at 1.85× clip speed
+Constants.MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.6   -- WalkLeft/WalkRight play at 1.6× clip speed
+Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.3   -- RunForward plays at 1.3× clip speed
 
 -- When true, WalkLeft/WalkRight strafe animations only play while mouse lock / shift-lock
 -- style state is active (UserInputService.MouseBehavior == LockCenter).
