@@ -7,6 +7,53 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-20] — Movement Stage 2G: Unarmed run-forward diagonal animations + walk multiplier tuning
+
+### Summary
+Two confirmed-good R6 no-gun run-forward diagonal animation clips added to the Unarmed movement set.
+When custom mouse lock is enabled (LeftAlt), sprinting into ForwardLeft plays RunForwardLeft and
+ForwardRight plays RunForwardRight. Mouse lock off or AR15/other sets continue using RunForward for
+all sprint directions. Walk animation speed multiplier changed from 1.7× to 1.3×; strafe (1.4×) and
+run (1.15×) multipliers preserved.
+
+### Changed files
+
+- **`src/shared/Constants.lua`**:
+  - Added to `MOVEMENT_ANIMATION_IDS.R6.Unarmed`:
+    - `RunForwardLeft  = "rbxassetid://94337945101783"`
+    - `RunForwardRight = "rbxassetid://104724352837263"`
+  - `MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER`: `1.7` → `1.3`
+  - `MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.4` — preserved.
+  - `MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER = 1.15` — preserved.
+  - All existing Unarmed and AR15 IDs preserved.
+
+- **`src/client/MovementController.lua`**:
+  - Stage header updated: 2F → 2F + 2G.
+  - `loadMovementAnimations()`: 2 new Unarmed run diagonal entries added (pre-loaded at spawn).
+  - `getAnimationSpeedMultiplier()`: RunForwardLeft and RunForwardRight return
+    `MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER` (1.15×).
+  - `updateMovementAnimation()`: sprint block extended — Unarmed + `customMouseLocked == true`:
+    ForwardLeft → RunForwardLeft (RunForward fallback); ForwardRight → RunForwardRight (RunForward fallback).
+    All other sprint directions: unchanged RunForward. AR15/other sets: unchanged.
+
+- **`docs/PROJECT_MAP.md`** — RunForwardLeft/RunForwardRight IDs added; sprint diagonal behavior
+  documented; both speed multiplier tables updated to walk=1.3, run includes RunForwardLeft/Right.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated to x12; Stage 2G update block added; remaining-gaps
+  list updated; speed multiplier risk note corrected.
+
+### What was NOT changed
+No `src/server/` files. No `default.project.json`. No other client controllers.
+No camera changes. No gun/combat changes. No new remotes. No movement speed constants changed.
+No AR15 run diagonal animations added. No run strafe or run backward animations added.
+
+### Validation
+- `rojo build` — passes.
+- MCP/Studio verification to be performed before commit.
+  See DEBT-044 (x12) for test steps.
+
+---
+
 ## [2026-05-20] — asset: swap Unarmed no-gun walk-forward and run-forward animation IDs
 
 ### Summary

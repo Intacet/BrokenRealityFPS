@@ -281,9 +281,9 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E (Animate-disable, R6 dete
                         --   Animation playback speed multipliers (Stage 2C — 2026-05-18):
                         --     AnimationTrack:AdjustSpeed() is called on play. Speeds do NOT change
                         --     Humanoid.WalkSpeed. Values from Constants.lua:
-                        --       MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.7  (WalkForward/Backward/diagonals)
+                        --       MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.3  (WalkForward/Backward/diagonals)
                         --       MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.4  (WalkLeft, WalkRight)
-                        --       MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15 (RunForward)
+                        --       MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15 (RunForward, RunForwardLeft, RunForwardRight)
                         --
                         --   Animation set selection (added 2026-05-18):
                         --     Default animation set is Unarmed (no gun) when equippedWeaponName == nil.
@@ -358,11 +358,18 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E (Animate-disable, R6 dete
                         --       Unarmed.WalkBackwardRight = rbxassetid://109190640713438  (Stage 2F)
                         --       Unarmed.WalkForwardLeft   = rbxassetid://97324289156918   (Stage 2F)
                         --       Unarmed.WalkForwardRight  = rbxassetid://81077784555491   (Stage 2F)
+                        --       Unarmed.RunForwardLeft    = rbxassetid://94337945101783   (Stage 2G — mouse-lock-gated sprint diagonal)
+                        --       Unarmed.RunForwardRight   = rbxassetid://104724352837263  (Stage 2G — mouse-lock-gated sprint diagonal)
                         --       AR15.WalkForward          = rbxassetid://138802532485746
                         --       AR15.RunForward           = rbxassetid://79735501581082
                         --     (IDs updated 2026-05-20 — Unarmed strafe-left/right swapped to confirmed-good R6 clips;
-                        --       Stage 2F (2026-05-20) — 5 new Unarmed directional clips added;
-                        --       2026-05-20 — Unarmed WalkForward + RunForward replaced with confirmed-good R6 clips)
+                        --       Stage 2F (2026-05-20) — 5 new Unarmed walk directional clips added;
+                        --       2026-05-20 — Unarmed WalkForward + RunForward replaced with confirmed-good R6 clips;
+                        --       Stage 2G (2026-05-20) — RunForwardLeft + RunForwardRight added; mouse-lock-gated sprint diagonals)
+                        --     Sprint diagonal behavior (Stage 2G):
+                        --       Unarmed + customMouseLocked ON: ForwardLeft sprint → RunForwardLeft; ForwardRight sprint → RunForwardRight.
+                        --       Unarmed + customMouseLocked OFF: all sprint directions → RunForward.
+                        --       AR15/gun-equipped: all sprint directions → AR15 RunForward (no run diagonals).
                         --     Not in Stage 2A/2C/2D/2F: crouch anim, lower/upper-body split, reload/fire/ADS weapon animations.
                         --
                         --   Exposes: GetMovementState() → table; GetMoveState() → string (GunController
@@ -432,10 +439,10 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --       = LockCenter every frame while customMouseLocked is true.
              --     CUSTOM_MOUSE_LOCK_INPUT_PRIORITY = 3000 — ContextActionService priority for LeftAlt
              --       bind; 3000 > CoreScript default 2000 ensures immediate response.
-             --   Movement animation playback speed multipliers (corrected 2026-05-20):
-             --     MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.7  (WalkForward/Backward/diagonals)
+             --   Movement animation playback speed multipliers (updated 2026-05-20):
+             --     MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.3  (WalkForward/Backward/diagonals)
              --     MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.4  (WalkLeft, WalkRight)
-             --     MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15 (RunForward)
+             --     MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15 (RunForward, RunForwardLeft, RunForwardRight)
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag

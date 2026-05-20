@@ -80,15 +80,17 @@ Constants.MOVEMENT_DEFAULT_ANIMATION_SET = Constants.MOVEMENT_ANIMATION_SET_UNAR
 Constants.MOVEMENT_ANIMATION_IDS = {
     R6 = {
         Unarmed = {
-            WalkForward       = "rbxassetid://97200177177374",
-            RunForward        = "rbxassetid://81826691810907",
-            WalkLeft          = "rbxassetid://115652140967957",  -- no-gun strafe left
-            WalkRight         = "rbxassetid://82804864629403",   -- no-gun strafe right
-            WalkBackward      = "rbxassetid://107080862064563",  -- no-gun walk backward
-            WalkBackwardLeft  = "rbxassetid://107785647885776",  -- no-gun backward-left diagonal
-            WalkBackwardRight = "rbxassetid://109190640713438",  -- no-gun backward-right diagonal
-            WalkForwardLeft   = "rbxassetid://97324289156918",   -- no-gun forward-left diagonal
-            WalkForwardRight  = "rbxassetid://81077784555491",   -- no-gun forward-right diagonal
+            WalkForward        = "rbxassetid://97200177177374",
+            RunForward         = "rbxassetid://81826691810907",
+            WalkLeft           = "rbxassetid://115652140967957",  -- no-gun strafe left
+            WalkRight          = "rbxassetid://82804864629403",   -- no-gun strafe right
+            WalkBackward       = "rbxassetid://107080862064563",  -- no-gun walk backward
+            WalkBackwardLeft   = "rbxassetid://107785647885776",  -- no-gun backward-left diagonal
+            WalkBackwardRight  = "rbxassetid://109190640713438",  -- no-gun backward-right diagonal
+            WalkForwardLeft    = "rbxassetid://97324289156918",   -- no-gun walk forward-left diagonal
+            WalkForwardRight   = "rbxassetid://81077784555491",   -- no-gun walk forward-right diagonal
+            RunForwardLeft     = "rbxassetid://94337945101783",   -- no-gun run forward-left diagonal (Stage 2G)
+            RunForwardRight    = "rbxassetid://104724352837263",  -- no-gun run forward-right diagonal (Stage 2G)
         },
         AR15 = {
             WalkForward = "rbxassetid://138802532485746",
@@ -102,7 +104,7 @@ Constants.MOVEMENT_ANIMATION_FADE_TIME = 0.15  -- seconds to cross-fade between 
 -- Animation playback speed multipliers (Stage 2C).
 -- Applied via AnimationTrack:AdjustSpeed() when a track starts playing.
 -- Tune these to match clip cadence without changing Humanoid.WalkSpeed.
-Constants.MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.7   -- WalkForward/Backward/diagonals play at 1.7× clip speed
+Constants.MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.3   -- WalkForward/Backward/diagonals play at 1.3× clip speed
 Constants.MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.4   -- WalkLeft/WalkRight play at 1.4× clip speed
 Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15  -- RunForward plays at 1.15× clip speed
 
