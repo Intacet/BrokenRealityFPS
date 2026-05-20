@@ -536,7 +536,7 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-20 (x10)
+## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-20 (x11)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
@@ -579,6 +579,14 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
   - Left/Right: unchanged — WalkLeft/WalkRight only when mouse locked.
 - AR15 and other sets: behavior unchanged (existing left/right grouping preserved).
 
+**Updated (2026-05-20 — Unarmed WalkForward + RunForward ID swap):**
+- `Unarmed.WalkForward` replaced: `83352851460622` → `97200177177374` (confirmed-good R6 no-gun walk forward).
+- `Unarmed.RunForward` replaced: `106253559282626` → `81826691810907` (confirmed-good R6 no-gun run forward).
+- All other Unarmed IDs (WalkLeft/Right, WalkBackward, WalkBackwardLeft/Right, WalkForwardLeft/Right) preserved.
+- All AR15 IDs preserved.
+- Animation speed multipliers intentionally preserved: walk 1.7×, strafe 1.4×, run 1.15×.
+- No MovementController logic changed. No camera changes. No remotes.
+
 **Updated (2026-05-19 — Stage 2E: character-facing camera yaw):**
 When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (LeftAlt) now also:
 - Caches `Humanoid.AutoRotate` (once per lock session) into `originalAutoRotate` and sets `AutoRotate = false`, preventing the engine from auto-rotating the character toward its movement direction.
@@ -608,7 +616,7 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - `equippedWeaponName` is presentation-only. True armed/unarmed state must later come from a server-owned equipment/loadout system. `SetEquippedWeaponName` must eventually be called by a real EquipmentController or weapon equip system (see DEBT-050).
 - Sprint in all directions still uses RunForward (no directional sprint animations yet). Backward and diagonal movement uses WalkForward fallback only.
 - If `DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = false`, Animate keeps running and may override or blend with custom locomotion tracks. This constant must stay `true` for custom animations to take effect.
-- Animation speed multipliers (walk 1.7×, strafe 1.4×, run 1.15×) were corrected 2026-05-20 alongside the Unarmed strafe ID swap. These values may still need tuning after Studio verification — if the clip cadence feels too fast or too slow, adjust only the Constants without touching controller logic.
+- Animation speed multipliers (walk 1.7×, strafe 1.4×, run 1.15×) were corrected 2026-05-20 and have been preserved through all subsequent ID swaps. These values may still need tuning after Studio verification — if the clip cadence feels too fast or too slow, adjust only the Constants without touching controller logic.
 - `StarterPlayer.EnableMouseLockOption = false` is now set in `default.project.json` and `LocalPlayer.DevEnableMouseLock = false` is set on Start and CharacterAdded. If CoreScripts still find a path to re-enable Shift Lock, the `CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME` Heartbeat write provides a second line of defence. Verify in Studio that LeftShift never activates the Roblox native mouse-lock icon.
 - `ContextActionService:BindActionAtPriority` at priority 3000 is the new LeftAlt binding. If a future CoreScript update changes input priority behavior, the toggle lag could return. Verify in Studio that LeftAlt toggles take effect immediately (no perceptible 1-frame delay).
 - `CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME = true` re-writes `MouseBehavior = LockCenter` every Heartbeat while `customMouseLocked` is true. If an expensive UI transition reads `MouseBehavior` to detect lock state (rather than calling `IsCustomMouseLocked()`), it may be confused by the aggressive reapply. Verify in Studio that the UI does not flicker or misread lock state during phase transitions.

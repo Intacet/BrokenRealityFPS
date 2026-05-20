@@ -80,8 +80,8 @@ Constants.MOVEMENT_DEFAULT_ANIMATION_SET = Constants.MOVEMENT_ANIMATION_SET_UNAR
 Constants.MOVEMENT_ANIMATION_IDS = {
     R6 = {
         Unarmed = {
-            WalkForward       = "rbxassetid://83352851460622",
-            RunForward        = "rbxassetid://106253559282626",
+            WalkForward       = "rbxassetid://97200177177374",
+            RunForward        = "rbxassetid://81826691810907",
             WalkLeft          = "rbxassetid://115652140967957",  -- no-gun strafe left
             WalkRight         = "rbxassetid://82804864629403",   -- no-gun strafe right
             WalkBackward      = "rbxassetid://107080862064563",  -- no-gun walk backward
@@ -102,7 +102,7 @@ Constants.MOVEMENT_ANIMATION_FADE_TIME = 0.15  -- seconds to cross-fade between 
 -- Animation playback speed multipliers (Stage 2C).
 -- Applied via AnimationTrack:AdjustSpeed() when a track starts playing.
 -- Tune these to match clip cadence without changing Humanoid.WalkSpeed.
-Constants.MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.7   -- WalkForward plays at 1.7× clip speed
+Constants.MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.7   -- WalkForward/Backward/diagonals play at 1.7× clip speed
 Constants.MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.4   -- WalkLeft/WalkRight play at 1.4× clip speed
 Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15  -- RunForward plays at 1.15× clip speed
 

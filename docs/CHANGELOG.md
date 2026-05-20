@@ -7,6 +7,39 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-20] — asset: swap Unarmed no-gun walk-forward and run-forward animation IDs
+
+### Summary
+Confirmed-good R6 no-gun forward walk and run animation clips replace the previous placeholders.
+No MovementController logic, camera behavior, or gun/combat systems changed. Animation speed
+multipliers preserved at their confirmed values (walk 1.7×, strafe 1.4×, run 1.15×).
+
+### Changed files
+
+- **`src/shared/Constants.lua`**:
+  - `MOVEMENT_ANIMATION_IDS.R6.Unarmed.WalkForward`: `83352851460622` → `97200177177374`
+  - `MOVEMENT_ANIMATION_IDS.R6.Unarmed.RunForward`: `106253559282626` → `81826691810907`
+  - All other Unarmed IDs (WalkLeft/Right, WalkBackward, WalkBackwardLeft/Right, WalkForwardLeft/Right) preserved.
+  - All AR15 IDs preserved.
+  - Speed multipliers preserved: `MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER = 1.7`,
+    `MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.4`, `MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER = 1.15`.
+
+- **`docs/PROJECT_MAP.md`** — Unarmed WalkForward/RunForward IDs updated; stale 2.0/1.35/1.0 speed
+  multiplier table in the Constants section corrected to 1.7/1.4/1.15.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated to x11; ID swap block added.
+
+### What was NOT changed
+No `src/client/` files. No `src/server/` files. No `default.project.json`.
+No MovementController logic. No camera changes. No gun/combat changes. No new remotes.
+
+### Validation
+- `rojo build` — passes.
+- MCP unavailable — Studio verification not performed. Needs Studio verification.
+  See DEBT-044 (x11) for test steps.
+
+---
+
 ## [2026-05-20] — Movement Stage 2F: Unarmed backward and diagonal directional animations
 
 ### Summary

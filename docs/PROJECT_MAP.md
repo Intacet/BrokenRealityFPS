@@ -281,7 +281,7 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E (Animate-disable, R6 dete
                         --   Animation playback speed multipliers (Stage 2C — 2026-05-18):
                         --     AnimationTrack:AdjustSpeed() is called on play. Speeds do NOT change
                         --     Humanoid.WalkSpeed. Values from Constants.lua:
-                        --       MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.7  (WalkForward)
+                        --       MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.7  (WalkForward/Backward/diagonals)
                         --       MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.4  (WalkLeft, WalkRight)
                         --       MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15 (RunForward)
                         --
@@ -349,8 +349,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E (Animate-disable, R6 dete
                         --     AR15 set: unchanged — left/right grouping with WalkForward fallback.
                         --     Debug: set-change and strafe-blocked-change logged once per change.
                         --     Animation IDs (Constants.MOVEMENT_ANIMATION_IDS.R6):
-                        --       Unarmed.WalkForward       = rbxassetid://83352851460622
-                        --       Unarmed.RunForward        = rbxassetid://106253559282626
+                        --       Unarmed.WalkForward       = rbxassetid://97200177177374
+                        --       Unarmed.RunForward        = rbxassetid://81826691810907
                         --       Unarmed.WalkLeft          = rbxassetid://115652140967957
                         --       Unarmed.WalkRight         = rbxassetid://82804864629403
                         --       Unarmed.WalkBackward      = rbxassetid://107080862064563  (Stage 2F)
@@ -361,7 +361,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E (Animate-disable, R6 dete
                         --       AR15.WalkForward          = rbxassetid://138802532485746
                         --       AR15.RunForward           = rbxassetid://79735501581082
                         --     (IDs updated 2026-05-20 — Unarmed strafe-left/right swapped to confirmed-good R6 clips;
-                        --       Stage 2F (2026-05-20) — 5 new Unarmed directional clips added)
+                        --       Stage 2F (2026-05-20) — 5 new Unarmed directional clips added;
+                        --       2026-05-20 — Unarmed WalkForward + RunForward replaced with confirmed-good R6 clips)
                         --     Not in Stage 2A/2C/2D/2F: crouch anim, lower/upper-body split, reload/fire/ADS weapon animations.
                         --
                         --   Exposes: GetMovementState() → table; GetMoveState() → string (GunController
@@ -431,10 +432,10 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --       = LockCenter every frame while customMouseLocked is true.
              --     CUSTOM_MOUSE_LOCK_INPUT_PRIORITY = 3000 — ContextActionService priority for LeftAlt
              --       bind; 3000 > CoreScript default 2000 ensures immediate response.
-             --   Movement animation playback speed multipliers (Stage 2C):
-             --     MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 2.0  (WalkForward)
-             --     MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.35 (WalkLeft, WalkRight)
-             --     MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.0  (RunForward — unchanged)
+             --   Movement animation playback speed multipliers (corrected 2026-05-20):
+             --     MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.7  (WalkForward/Backward/diagonals)
+             --     MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.4  (WalkLeft, WalkRight)
+             --     MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15 (RunForward)
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag
