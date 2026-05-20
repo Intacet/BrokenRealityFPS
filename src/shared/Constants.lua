@@ -81,9 +81,9 @@ Constants.MOVEMENT_ANIMATION_IDS = {
     R6 = {
         Unarmed = {
             WalkForward = "rbxassetid://83352851460622",
-            RunForward  = "rbxassetid://101113310705500",
+            RunForward  = "rbxassetid://106253559282626",
             WalkLeft    = "rbxassetid://101275785187464",  -- no-gun strafe left
-            WalkRight   = "rbxassetid://72765640529019",   -- no-gun strafe right
+            WalkRight   = "rbxassetid://73888687255042",   -- no-gun strafe right
         },
         AR15 = {
             WalkForward = "rbxassetid://138802532485746",

@@ -250,9 +250,9 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E (Animate-disable, R6 dete
                         --     Debug: set-change and strafe-blocked-change logged once per change.
                         --     Animation IDs (Constants.MOVEMENT_ANIMATION_IDS.R6):
                         --       Unarmed.WalkForward = rbxassetid://83352851460622
-                        --       Unarmed.RunForward  = rbxassetid://101113310705500
+                        --       Unarmed.RunForward  = rbxassetid://106253559282626
                         --       Unarmed.WalkLeft    = rbxassetid://101275785187464
-                        --       Unarmed.WalkRight   = rbxassetid://72765640529019
+                        --       Unarmed.WalkRight   = rbxassetid://73888687255042
                         --       AR15.WalkForward    = rbxassetid://138802532485746
                         --       AR15.RunForward     = rbxassetid://79735501581082
                         --     (IDs updated 2026-05-19 — asset swap only, MovementController logic unchanged)
