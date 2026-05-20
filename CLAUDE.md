@@ -29,26 +29,49 @@ The morality should feel gray. Attackers may save the world, but their orders ca
 
 ---
 
-## Current product direction (updated 2026-05-15)
+## Current product direction (updated 2026-05-20)
 
-**Broken Reality is a persistent PvPvE broken-reality zone shooter.**
+**Broken Reality is a persistent PvPvE broken-reality zone shooter set inside a quarantined metro district.**
 
-Players spawn at a safe base, enter a quarantined zone to fight other players and monsters, collect loot and earn carried cash, spend cash in-zone at zone shops, then choose when to extract. Depositing at the base converts dangerous carried cash into secured funds used for base upgrades, stash loadouts, and higher-tier gear.
+The **metro station** is the main safe-base fantasy — a believable underground hub where players prepare, deposit earnings, visit traders, and upgrade their operation. The **zone** is the dangerous overground layer where the reality break is active: players fight other players and monsters, loot objects, earn carried cash, and choose when to push their luck and when to extract.
 
-### Main loop
+The base and zone must feel **physically connected** through trains, gates, sewers, tunnels, and checkpoint exits — not abstract menus. Walking through a checkpoint gate or boarding a departing train is the transition; there is no loading screen shortcut.
+
+### Refined core loop
 
 ```
-Spawn at base (safe area)
-  └─ Enter zone (dangerous, persistent — no round timer)
-       └─ Fight players + monsters, loot objects, earn carried cash
-            └─ Spend carried cash in-zone (zone shop: guns, ammo, consumables)
-                 └─ Respond to periodic zone events (optional pressure)
-                      └─ Choose: stay longer (more risk, more reward)
-                           or extract (reach an exit point)
-                                └─ Exit → deposit at base terminal
-                                     └─ Spend secured funds: base armory, upgrades, stash
-                                          └─ Return to zone
+Spawn in metro base (safe — no PvP or monsters)
+  └─ Enter zone through physical transition
+       (train route / gate / sewer / checkpoint exit)
+            └─ Fight players and monsters; loot objects; earn carried cash
+                 └─ (Optional) Buy emergency guns/supplies from risky in-zone shops
+                       (higher prices than base; accepts carried cash only)
+                            └─ (Optional) Accept simple faction trader missions
+                                  (kill X monsters, extract with cash, visit location)
+                                       └─ Survive or respond to periodic Reality Breakdown events
+                                             (timed pressure; optional participation)
+                                                  └─ Choose: stay for more risk/reward
+                                                       or extract through a physical exit
+                                                            └─ Return to metro base
+                                                                 └─ Deposit at base terminal
+                                                                      (carried cash → secured funds)
+                                                                           └─ Store items in stash
+                                                                                └─ Upgrade base, visit traders
+                                                                                     └─ Repeat
 ```
+
+### Core experience pillars (near-term)
+
+Build these before anything else. They define whether the game loop is fun.
+
+1. **Fast re-entry** — A player who dies should be back in the zone within a few seconds of choosing to respawn. Re-entry friction must stay near-zero.
+2. **Carried cash risk** — Every run puts your current earnings at risk. You only lock them in by extracting. Dying in the zone hurts.
+3. **Secured funds safety** — Deposited earnings are permanently safe. Players build trust in the extraction loop over time.
+4. **Physical extraction/deposit** — Value is only secured by physically reaching a deposit terminal or extraction exit. No instant banking from anywhere inside the zone.
+5. **Risky in-zone shops** — Emergency guns and supplies available inside the zone at a premium. Useful in a pinch; never a shortcut to base armory progression.
+6. **Simple faction traders/missions** — Short, optional objectives (kill X, extract with cash, reach a location). Give players direction without mandatory participation.
+7. **Periodic Reality Breakdown events** — Timed pressure events (loot surge, monster escalation, lethal zone spread). Participation is optional; safe extraction must still be possible.
+8. **Base storage and upgrades** — Locker/crate storage, armory tiers, medical supply upgrades. Visible progression that rewards consistent extraction.
 
 ### Death rule
 
@@ -56,47 +79,68 @@ On death **inside the zone**, the player loses:
 - Equipped weapon
 - All carried loot
 - All carried cash
-- Some consumables
 
 The player **keeps**:
-- Secured funds (deposited at base before death)
+- Secured funds (deposited at base terminal before death)
 - Stash contents
 - Base upgrades
-- Reputation and unlocks
 
-Death must hurt, but never make a player quit. Always preserve a weak free respawn option so players can re-enter immediately with a basic loadout at no cost.
+Death must hurt, but never make a player quit. Always preserve a weak free respawn option (free pistol or equivalent) so a player can re-enter immediately with a basic loadout at no cost.
 
 ### Money model
 
-| Currency | Earned | Lost on death | Spendable | Purpose |
+| Currency | Earned | Lost on death | Spendable at | Purpose |
 |---|---|---|---|---|
-| **Carried cash** | Kills, loot pickups, zone contracts | In full | In-zone (zone shop) or at deposit terminal | Risk currency; converted to secured at deposit |
-| **Secured funds** | Depositing carried cash at base | Never | At base (armory, upgrades, stash) | Safe progression |
+| **Carried cash** | Kills, loot pickups, missions | In full | In-zone shops; deposit terminal | Risk currency; converted to secured at deposit |
+| **Secured funds** | Depositing at base terminal | Never | Base armory, upgrades, stash | Safe progression currency |
+
+The two economies must stay **separate at all times**. Spending carried cash in-zone is a tactical choice. Spending secured funds at the base is a progression choice. A server bug that accidentally secures undeposited cash violates the core loop.
 
 ### Base / zone distinction
 
-| | **Base** | **Zone** |
+| | **Metro base** | **Zone** |
 |---|---|---|
 | Safety | Safe — no PvP or monsters | Dangerous — full PvP + monsters |
 | Currency accepted | Secured funds | Carried cash |
-| Activities | Stash, armory, upgrades, preparation | Looting, fighting, shops, events, death drops |
+| Key activities | Stash, armory, upgrades, traders, deposit, preparation | Looting, fighting, in-zone shops, missions, events, death drops |
+| Physical access | Via train, checkpoint gate, sewer exit from zone | Via train, checkpoint gate, sewer entry from base |
 | On death | N/A | Lose weapon, carried cash, carried loot |
 
-### Early prototype scope
+### First playable scope
 
-Build the smallest playable version first:
+Build the smallest loop that proves the core works:
 
-- One persistent suburban quarantine zone (no round timer; re-entry always open)
-- Safe base area with one deposit terminal and one base armory
-- One or two zone entrances; one or two extraction exit points
-- Basic carried cash earned from kills and loot pickups
-- Basic secured funds deposited at the base terminal
-- One zone shop (consumables and basic guns) — base armory with full weapon tiers added later
-- Simple loot objects scattered in the zone (cash pickups, small drops)
-- On death: drop equipped weapon and carried cash at the death location as a droppable bag
-- One simple periodic zone event (e.g. high-value loot spawn or timed cash bonus) — added later
+- One persistent quarantine zone (no round timer; re-entry always open)
+- One physical zone entrance (gate, train stop, or sewer)
+- One physical extraction/deposit exit (gate or checkpoint)
+- Metro base safe area with one deposit terminal and one base armory
+- Carried cash earned from kills and loot pickups
+- Secured funds deposited at the base terminal
+- One risky in-zone shop (emergency guns/ammo at elevated prices)
+- Simple loot objects (cash pickups, small drops) scattered in the zone
+- On death: drop carried cash and equipped weapon as a pickup bag at the death location
+- One simple Reality Breakdown event — added after the basic loop is proven
 
-Do not build the full progression system, inventory UI, crafting, faction reputation, monster wave escalation, or zone events in one step. One feature at a time.
+Do not build the full progression system, inventory UI, crafting, faction reputation, complex monster waves, or zone events until the core loop (enter → loot → extract → deposit → return) is working in Studio.
+
+---
+
+## Deferred / Do Not Build Yet
+
+The following features are **explicitly deferred** and must not be started until the core loop is stable, relevant prerequisite systems exist, and risks have been intentionally addressed.
+
+| Feature | Why deferred | Prerequisites before starting |
+|---|---|---|
+| **Player flea market / global marketplace** | Economy, stash, item ownership, anti-duplication, and moderation/abuse controls do not exist yet | Stable economy + stash + item ownership + anti-duplication system + moderation plan |
+| **Free drawing on signs / custom paintings** | Content moderation and abuse risk not yet addressed | Dedicated moderation system, abuse risk review, content policy |
+| **Advanced AI death squads** | Simple monsters and basic event pressure not yet proven | MonsterService working + zone events proven |
+| **Full gun attachment system** | Basic weapon/economy loop not yet established | Weapon inventory + shop + stash loop stable |
+| **Complex melee system** | Scope risk during FPS foundation phase | Core FPS loop + movement proven |
+| **Complex faction warfare** | Simple missions and traders not yet proven | MissionService + basic trader system working |
+| **Complex visor / enemy detection system** | High design and implementation complexity | Basic AI + combat loop proven |
+| **Full base decoration system** | Cosmetic priority too high relative to core loop | Core loop proven + storage/stash stable |
+
+> **The flea market/player marketplace is a long-term idea only. It must not be included in the first playable version, and must not be started until the economy, stash, item ownership, anti-duplication, and moderation/abuse risks are solved.**
 
 ---
 
@@ -277,11 +321,11 @@ Do not write one giant script. Use small, modular scripts — one per system.
 
 > The original milestone was a 5-round attackers vs defenders FPS on one small suburban map where attackers plant reality anchors and defenders try to stop them. That prototype was the build target for the legacy system. It is now complete enough to be treated as a foundation, not an active goal.
 
-**New first playable goal (persistent zone prototype):**
+**New first playable goal (persistent zone prototype — updated 2026-05-20):**
 
-A single persistent zone where any number of players can enter, fight each other and monsters, collect loot, earn carried cash, and extract through a zone exit to deposit at a base. Death drops the player's weapon and cash on the floor. The base has one armory (three weapons) and one deposit terminal. No round timer. Re-entry is always open.
+A metro-base-to-zone loop: players spawn in a safe metro station, enter the quarantine zone through a physical transition (gate, train, sewer), fight players and monsters, earn carried cash, optionally buy emergency supplies from a risky in-zone shop, and extract through a physical exit back to the metro base where they deposit at a terminal. Death drops carried cash and equipped weapon on the floor. The metro base has one deposit terminal and one base armory. No round timer. Re-entry is always open.
 
-Do not build the full dream game first.
+Do not build the full dream game first. The flea market, advanced AI death squads, full attachment system, and base decoration are explicitly deferred — see "Deferred / Do Not Build Yet" above.
 
 ## Build order (legacy — Milestone 0 complete)
 
@@ -299,30 +343,32 @@ Do not build the full dream game first.
 8. GunService ✓
 9. GunController ✓
 10. DamageService ✓
-11. MovementController (partial)
+11. MovementController (partial — Stages 1 + 2A–2E complete)
 12. DestructionService (not started)
 13. CorpseService (not started)
 14. MonsterService (not started)
-15. HordeService (not started)
+15. HordeService (not started — replaced by ambient zone spawn budget)
 16. CutsceneController (not started)
 
-**Milestone 1 (persistent zone — new target):**
+**Milestone 1 (persistent zone — current target):**
 
-Build one system at a time. Server before client. Do not start the next until the current is tested.
+See `docs/PERSISTENT_ZONE_ROADMAP.md` for the full staged build order. Summary:
 
-1. ZoneService — manages persistent zone state (no rounds, persistent respawns)
-2. EconomyService — owns carried cash, secured funds, deposit logic
-3. BaseService — owns safe base area, armory access, spawn selection
-4. LootService — spawns and tracks loot objects in the zone
-5. DeathDropService — creates droppable bag on death, owned by server
-6. ExtractionService — handles exit trigger, converts carried cash to secured funds
-7. ShopService — handles zone shop and base armory purchases
-8. InventoryService — tracks equipped weapon, held consumables (deferred until needed)
-9. StashService — persistent stash across sessions (deferred until needed)
-10. ProgressionService — reputation, unlocks (deferred until needed)
-11. MonsterService — AI enemies in zone (carries forward from legacy plan)
+| Stage | System | Status |
+|---|---|---|
+| 0 | Reusable FPS foundation (AR15, movement, damage/death) | ✓ Largely done via Milestone 0 |
+| 1 | Metro base + zone transition (safe area, one entrance, one exit) | Not started |
+| 2 | Economy foundation (carried cash, secured funds — server-owned) | Not started |
+| 3 | Deposit/extraction (physical transfer of carried cash → secured funds) | Not started |
+| 4 | Death loss (carried cash lost on death; death drop bag) | Not started |
+| 5 | Risky zone shop (in-zone trader/cache; carried cash only) | Not started |
+| 6 | Simple missions/traders (faction trader, short optional objectives) | Not started |
+| 7 | First event (Reality Breakdown countdown; extract or suffer) | Not started |
+| 8 | Simple monsters (basic AI; no advanced death squads) | Not started |
+| 9 | Base storage/upgrades (lockers, armory tiers, medical) | Not started |
+| 10 | Deferred polish and expansion (see "Deferred" section above) | Deferred |
 
-Each server service has a matching client controller. Build server side first.
+Build one system at a time. Server before client. Do not start the next until the current is tested in Studio. See `docs/PERSISTENT_ZONE_ROADMAP.md` for full stage specs.
 
 ## Claude behavior
 

@@ -66,6 +66,90 @@ all `src/server/` files, `WeaponData`, `default.project.json`, `CLAUDE.md`, `PRO
 
 ---
 
+## [2026-05-20] — Docs: refined persistent-zone direction — metro base, physical transitions, deferred features
+
+### Summary
+Documentation-only planning update. **No runtime code changed. No remotes added. No src/ files touched.**
+
+The persistent-zone product direction was refined and expanded across `CLAUDE.md`, `docs/PROJECT_RULES.md`,
+`docs/PROJECT_MAP.md`, `docs/PERSISTENT_ZONE_ROADMAP.md` (new file), `docs/TECHNICAL_DEBT.md`, and
+`docs/CHANGELOG.md`.
+
+### Key direction changes documented
+
+- **Metro station as safe-base fantasy** — the metro station is the primary hub. Players spawn there,
+  deposit earnings, visit traders, and upgrade their operation. It is a physical space in Workspace, not
+  a menu.
+- **Physical zone transitions** — zone entry/exit must be physical: gates, train routes, sewers, tunnels,
+  checkpoint exits. No abstract teleport menus.
+- **Carried cash and secured funds** — two-currency economy: carried cash is at risk in the zone; secured
+  funds are safe and only earned by physically depositing at the metro base terminal or extraction exit.
+- **Risky in-zone shops** — emergency guns/supplies available in the zone at elevated prices (carried cash
+  only). Never a shortcut to base armory progression.
+- **Faction traders / simple missions** — optional short objectives (kill X, extract with cash, visit
+  location) offered by a trader in the metro base. No complex faction warfare yet.
+- **Reality Breakdown-style events** — periodic timed pressure (lethal zone spread, monster escalation, or
+  loot surge). Participation is optional; safe extraction must always remain possible.
+- **Base storage and upgrades** — locker/crate storage, armory tiers, medical upgrades. Visible progression
+  funded by secured funds.
+- **Flea market / player marketplace explicitly deferred** — documented as a long-term idea only. Must not
+  be included in the first playable version. Prerequisites: stable economy, stash, item ownership,
+  anti-duplication system, and moderation/abuse plan.
+
+### Changed files
+
+- **`CLAUDE.md`** — "Current product direction" section rewritten (metro base, refined core loop, eight
+  experience pillars, updated money model / base-zone table, first playable scope). "Deferred / Do Not
+  Build Yet" table added (flea market, free drawing, advanced AI death squads, full attachments, melee,
+  faction warfare, visor detection, base decoration). "New first playable goal" updated. Build order
+  table updated to reference `PERSISTENT_ZONE_ROADMAP.md`.
+
+- **`docs/PROJECT_RULES.md`** — new "Refined persistent-zone design rules" section added:
+  - First playable version discipline (prove the loop before secondary systems).
+  - Explicit "do not build yet" rules for flea market, advanced AI, attachments, free drawing.
+  - Physical extraction/deposit rule (no instant banking from zone).
+  - Zone shop and pricing rule (higher prices than base; server-validates purchases).
+  - Base progression rule (visible but not grindy).
+  - Expanded server authority rule table for refined zone systems.
+
+- **`docs/PROJECT_MAP.md`** — added "Planned persistent-zone systems" section with the full service
+  list (ZoneService, EconomyService, ExtractionService, ShopService, LootService, DeathDropService,
+  MissionService, ZoneEventService, BaseService, StashService, MonsterService). Added metro base design
+  notes and zone entry/exit design notes. Flea market marked as "Deferred / Not first playable."
+  Legacy AI section updated with stage references.
+
+- **`docs/PERSISTENT_ZONE_ROADMAP.md`** — NEW FILE. Ten-stage build order:
+  - Stage 0: FPS foundation (largely complete)
+  - Stage 1: Metro base + zone transition
+  - Stage 2: Economy foundation (carried cash, secured funds)
+  - Stage 3: Deposit / extraction
+  - Stage 4: Death loss + death drops
+  - Stage 5: Risky zone shop + loot objects
+  - Stage 6: Simple missions / faction traders
+  - Stage 7: First event (Reality Breakdown)
+  - Stage 8: Simple monsters
+  - Stage 9: Base storage and upgrades
+  - Stage 10: Deferred polish and expansion (flea market, advanced AI, attachments, etc.)
+  Each stage lists "what is included", "what is NOT needed", and a "stage complete when" test condition.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-051 added (feature scope risk — high severity; lists deferred
+  high-risk systems; flea market note explicit). DEBT-036 updated to reference refined metro-base
+  direction (2026-05-20) and updated `PERSISTENT_ZONE_ROADMAP.md` reference.
+
+### What was NOT changed
+No `src/server/` files. No `src/client/` files. No `src/shared/` files.
+No `default.project.json`. No `docs/NAMING.md`. No `stylua.toml`, `selene.toml`.
+No remotes added. No camera changes. No gameplay logic changes. No runtime behavior changed.
+
+### Validation
+- `rojo build default.project.json` — run before commit to confirm no Rojo config changes caused errors.
+- MCP unavailable — Studio verification not performed (documentation-only task; no runtime change).
+- No markdown linter configured locally.
+- `git diff --name-only` should show only: `CLAUDE.md`, `docs/PROJECT_RULES.md`, `docs/PROJECT_MAP.md`,
+  `docs/PERSISTENT_ZONE_ROADMAP.md`, `docs/TECHNICAL_DEBT.md`, `docs/CHANGELOG.md`.
+
+---
+
 ## [2026-05-19] — Workflow: MCP verification rules strengthened — always use Studio MCP when accessible
 
 ### Summary

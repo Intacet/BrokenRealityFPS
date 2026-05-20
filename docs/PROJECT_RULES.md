@@ -234,6 +234,68 @@ The same server-owns-authoritative-state rule applies to all new systems. The cl
 
 ---
 
+---
+
+## Refined persistent-zone design rules (added 2026-05-20)
+
+These rules define what gets built and in what order for the metro-base persistent-zone direction. They complement the existing persistent zone design rules above.
+
+### First playable version discipline
+
+- The first playable version must prove the **zone money/extraction loop** before adding large secondary systems. The loop is: enter zone → earn carried cash → extract → deposit → return. Nothing else is required to validate this.
+- Do not build a **player-to-player marketplace or flea market** until the economy, stash, item ownership, and anti-duplication systems are stable and the moderation/abuse risks have been intentionally addressed.
+- Do not build **advanced AI death squads** before simple monsters and basic event pressure are proven in Studio.
+- Do not build **full gun attachments** before the basic weapon/shop/economy loop works.
+- Do not build **free drawing or custom signage** until content moderation and abuse risks are intentionally addressed with a plan.
+- Do not build **complex melee**, **complex faction warfare**, or **full base decoration** during the FPS foundation phase.
+
+### Physical extraction/deposit rule
+
+- Physical extraction and deposit must **matter**. Do not allow instant banking from anywhere in the zone. Value is only secured by physically reaching a deposit terminal (in the metro base) or an extraction exit (a physical point in the zone). There is no "deposit remotely" path.
+- Zone entrance and exit must be **physical transitions** — gate, train route, sewer, tunnel, or checkpoint. Not a menu or teleport button.
+- Multiple extraction exits should exist eventually to reduce camping. Until then, the single exit must be well-placed.
+
+### Zone shop and pricing rule
+
+- Zone shops **may** sell emergency guns, ammo, and consumables to players who have lost their gear in the zone, at prices **higher than the base armory**. This is the trade-off: convenience in-zone costs more.
+- Zone shops must not replace base armory progression. A player should still want to extract, deposit, and buy from the base armory for better gear. In-zone shops are a fallback, not the primary gear source.
+- Zone shop prices are server-validated. The client requests a purchase; the server checks price, deducts carried cash, and fulfills the item. The client never decides the price.
+
+### Base progression rule
+
+- Base progression (armory tiers, storage upgrades, medical supplies) should be **visible and rewarding** but not grindy. A new player should reach first-tier upgrades within a few successful extractions.
+- Base upgrades are server-owned. The client displays upgrade state and requests purchases. The server validates secured funds, deducts, and applies the upgrade.
+
+### Server authority — refined zone systems
+
+In addition to the existing server authority rules above, the following rules apply to all new persistent-zone systems:
+
+**Server owns:**
+- Carried cash balance per player
+- Secured funds balance per player
+- Loot object spawn positions and remaining contents
+- Shop purchase validation and item fulfillment (both zone shops and base armory)
+- Death drop bag creation, position, and contents
+- Extraction trigger validation (a player cannot declare their own extraction valid)
+- Base upgrade state and purchase validation
+- Mission progress and completion validation
+- Zone event state (timers, loot surge triggers, monster escalation)
+
+**Client may:**
+- Display carried cash, secured funds, and stash state as sent by the server
+- Fire RemoteEvents to request zone entry, extraction, shop purchase, loot pickup, mission accept, respawn, or deposit
+- Show local-only visual prediction (e.g. wallet counter ticking up), but always treat the server's next broadcast as authoritative
+
+**Never trust the client with:**
+- Cash amounts (carried or secured)
+- Inventory state or stash contents
+- Extraction success
+- Death drop spawning or contents
+- Shop prices or purchase results
+- Mission state
+
+---
+
 ## Character rig target
 
 **All new code targets R6.**

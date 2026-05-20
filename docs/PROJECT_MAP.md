@@ -89,7 +89,7 @@ CorpseService (server)
   │  owns: corpse models in Workspace/CorpseFolder
   │  persists corpses across rounds, clears on match end
   │
-ZoneService (server)
+ZoneService (server)   [LEGACY NAME — will be repurposed for persistent zone entry/exit state]
   │  owns: per-map physics overrides (gravity, walkspeed, fog density)
   └─ fires: ZoneEffectApplied → all clients (visual overlay trigger)
 ```
@@ -100,11 +100,108 @@ ZoneService (server)
 MonsterService (server)
   │  owns: individual monster agents, pathfinding, attack logic
   │  targets: all players (no team distinction in persistent zone mode)
+  │  Stage 8 on the persistent zone roadmap — built after shops, missions, and events
   │
-HordeService (server)   [LEGACY PLAN — replaces with zone ambient spawn budget]
+HordeService (server)   [LEGACY PLAN — replaced by ambient zone spawn budget in persistent zone]
   │  owns: wave timing, spawn budget, escalation across rounds
   └─ calls: MonsterService:SpawnMonster()
 ```
+
+---
+
+### Planned persistent-zone systems (not yet built — see docs/PERSISTENT_ZONE_ROADMAP.md)
+
+The systems below are the target architecture for Milestone 1 (persistent zone). None are started yet. Build order and stage specs are in `docs/PERSISTENT_ZONE_ROADMAP.md`.
+
+```
+ZoneService (server) [Stage 1 — repurposed from legacy name above]
+  │  owns: persistent zone state (no round timer; re-entry always open)
+  │  owns: zone entry/exit gate state
+  │  owns: player-in-zone tracking
+  └─ fires: ZoneStateChanged → all clients
+
+EconomyService (server) [Stage 2]
+  │  owns: carried cash balance per player (server-authoritative; never trust client)
+  │  owns: secured funds balance per player (never lost on death)
+  │  owns: deposit logic (carried cash → secured funds via physical terminal)
+  └─ fires: EconomyChanged → affected client (display only)
+
+ExtractionService (server) [Stage 3]
+  │  owns: extraction trigger validation (player physically reached exit)
+  │  owns: carried cash → secured funds credit on successful extraction
+  └─ fires: ExtractionSuccess → affected client
+
+DeathDropService (server) [Stage 4]
+  │  owns: death drop bag creation (position, contents)
+  │  owns: drop pickup validation
+  └─ fires: DeathDropSpawned / DeathDropPickedUp → all clients (in range)
+
+ShopService (server) [Stage 5]
+  │  owns: zone shop and base armory purchase validation
+  │  owns: price table (server-authoritative; client never decides price)
+  │  deducts carried cash (zone shop) or secured funds (base armory)
+  └─ fires: PurchaseResult → purchasing client
+
+LootService (server) [Stage 5]
+  │  owns: loot object spawn positions and remaining contents
+  │  owns: loot pickup validation
+  └─ fires: LootSpawned / LootPickedUp → all clients (in range)
+
+MissionService (server) [Stage 6]
+  │  owns: faction trader mission state per player
+  │  owns: mission accept, progress, and completion validation
+  └─ fires: MissionUpdated / MissionComplete → affected client
+
+ZoneEventService (server) [Stage 7]
+  │  owns: Reality Breakdown event timers and state
+  │  owns: loot surge, monster escalation, zone spread logic
+  └─ fires: ZoneEventStarted / ZoneEventEnded → all clients
+
+BaseService (server) [Stage 9]
+  │  owns: safe metro base area (no PvP, no monsters)
+  │  owns: base upgrade state (armory tier, storage tier, medical tier)
+  │  owns: upgrade purchase validation (secured funds only)
+  └─ fires: BaseStateChanged → affected client
+
+StashService (server) [Stage 9]
+  │  owns: per-player persistent stash contents
+  │  owns: stash deposit/withdraw validation
+  └─ fires: StashChanged → affected client
+
+MonsterService (server) [Stage 8]
+  │  owns: ambient zone monster agents, pathfinding, attack logic
+  │  (see AI section above)
+```
+
+**NOT planned for first playable version — explicitly deferred:**
+
+```
+FleaMarketService / PlayerMarketplace
+  │  DEFERRED — do not build until economy, stash, item ownership, anti-duplication,
+  │  and moderation/abuse controls are stable and intentionally addressed.
+  │  "Player-to-player marketplace" is a long-term feature, not a first-playable feature.
+```
+
+---
+
+### Metro base design notes
+
+- The **metro station** is the primary safe-base fantasy. Players spawn here, deposit earnings, visit traders, upgrade their operation, and re-enter the zone.
+- The metro base is a **physical space** in Workspace, not an abstract menu. Players walk to the deposit terminal, walk to the armory, walk to traders.
+- **Future storage and back-room upgrades** happen here — lockers, crates, expanded armory, medical bay. These are Stage 9.
+- **Train arrival/departure sequences** are atmospheric polish. They are desirable but must be skippable. Do not build train cinematics until the core loop is proven. If implemented, always provide an instant-skip option (tap to skip, or just a collider trigger).
+- The metro base currency is **secured funds only**. Carried cash is not spendable at the base — only at zone shops or at the deposit terminal (which converts it to secured funds).
+
+---
+
+### Zone entry/exit design notes
+
+- Zone transitions must be **physical** — gates, train routes, sewer tunnels, and checkpoint exits are valid. No abstract teleport menu or instant loading screen.
+- **Multiple exits** should exist eventually to prevent extraction camping at a single point. The first playable version may have one exit; add more when the extraction loop is proven.
+- **Multiple entrances** can be added later to spread player spawn distribution in the zone.
+- Valid transition types: checkpoint gate (walk through), train stop (board/exit), sewer hatch, tunnel, surface checkpoint.
+- ZoneService owns gate state (open/locked/destroyed) and validates that a player physically reached an exit before extraction is credited.
+- ExtractionService fires `ExtractionSuccess` to EconomyService for the carried-cash → secured-funds credit. The client cannot trigger this unilaterally.
 
 ### Presentation (client only, no server impact)
 

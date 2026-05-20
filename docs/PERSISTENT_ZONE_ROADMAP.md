@@ -1,552 +1,297 @@
 # PERSISTENT_ZONE_ROADMAP.md
 
-Staged implementation plan for Broken Reality's persistent PvPvE zone shooter direction.
+Staged build order for the persistent-zone metro shooter (Milestone 1).
+This is a planning document. It does not resolve any runtime debt entries.
+Runtime behavior is only verified in Roblox Studio via MCP.
 
-**This document is planning-only.** No stage represents completed work unless explicitly noted. Build one stage at a time. Do not start the next stage until the current stage passes Studio play-mode verification with MCP available. Each stage lists what is **not** allowed so scope does not creep forward.
-
-Reference: `docs/PROJECT_MAP.md` — New Target Architecture section for the full service list.
-
----
-
-## How to use this roadmap
-
-1. Read the current stage's **Goal** and **Files likely affected**.
-2. Write only what is listed. Stop at the **Not in this stage** boundary.
-3. Verify in Studio (play mode, MCP required) before moving on.
-4. Update `docs/CHANGELOG.md` and `docs/TECHNICAL_DEBT.md` when the stage is done.
-5. Do not batch multiple stages into one prompt.
+**Read this before starting any Milestone 1 system.**
+See also: `CLAUDE.md` (product direction), `docs/PROJECT_RULES.md` (design rules), `docs/PROJECT_MAP.md` (system architecture).
 
 ---
 
-## Stage 0 — Reusable FPS foundation
+## Principles
 
-**Status:** Partially complete. AR15 path built; some items below still need Studio verification.
-
-### Goal
-
-Establish a reliable single-weapon FPS foundation that the persistent zone systems can build on. Every subsequent stage depends on this being stable.
-
-### Checklist
-
-- [ ] AR15 identity uses `Constants.DEFAULT_WEAPON` on both server and client (done — see CHANGELOG 2026-05-15)
-- [ ] AmmoChanged payload includes `weaponName` and HUD displays it (done — see CHANGELOG 2026-05-15)
-- [ ] Ammo, reload, and HUD sync verified in Studio play mode (needs Studio verification)
-- [ ] Server damage and death flow verified: shot lands → health decrements → ragdoll → kill feed (needs Studio verification)
-- [ ] Basic viewmodel stable: model appears, fire animation plays, muzzle flash shows (needs Studio verification)
-- [ ] Friendly-fire guard verified: same-team shots blocked, cross-team shots land (needs Studio verification)
-- [ ] Shot origin/direction validation verified: fake origins rejected, normal shots pass (needs Studio verification)
-
-### Files likely affected later
-
-| File | Why |
-|---|---|
-| `src/server/GunService.server.lua` | clientTick validation (DEBT-014) when combat is stable |
-| `src/client/MovementController.lua` | Stage 1 movement only after this stage passes |
-| `src/server/DamageService.lua` | No changes expected |
-
-### Not in this stage
-
-- Recoil, spread, ADS, or weapon sway
-- Slide, vault, or advanced movement
-- Multiple weapons
-- Animations beyond the fire snap
-- Any persistent zone systems
-
-### Studio / MCP verification required
-
-Yes — every checklist item above must pass in live play mode before Stage 1 begins.
-
-### Maintenance risks
-
-- `SHOT_ORIGIN_MAX_DISTANCE = 12` studs may produce false rejections at high ping or during jump landings. Tune the value in Studio with simulated latency before locking it in.
-- The `getTeamName()` fallback to `Player.Team.Name` protects late-joiners but has never been tested with a real late-join scenario. Include a mid-round join test in Stage 0 verification.
+- Build one stage at a time. Server before client. Do not start the next stage until the current is verified in Studio.
+- Each stage produces a playable, testable result — not just scaffolding.
+- No stage should add multiple large systems simultaneously unless they are trivially coupled.
+- If a stage is blocked waiting for a dependency, document it here and work on something else rather than combining stages.
+- Deferred systems (flea market, advanced AI, attachments, base decoration) must not be started until their prerequisites are explicitly met. See Stage 10.
 
 ---
 
-## Stage 1 — Zone / base state foundation
+## Stage 0 — Reusable FPS Foundation
 
-**Status:** Not started.
+**Status:** Largely complete via Milestone 0 legacy systems.
 
-### Goal
+**Goal:** Confirm that the FPS basics work before building the persistent zone on top.
 
-Introduce the fundamental zone/base distinction. The server must know whether each player is in the safe base area or in the dangerous zone. This state gates everything in later stages — economy, death loss, shops, events all depend on knowing where the player is.
+**What is included:**
+- AR15 weapon with GunService/GunController, shot validation, ammo system
+- Basic damage/death/ragdoll flow (DamageService, RagdollService)
+- R6 movement foundation (MovementController Stages 1 + 2A–2E)
+- HUD (health, ammo, kill feed)
+- First-person viewmodel (ViewModelController, FORCE_FIRST_PERSON = true before shipping)
 
-### Checklist
-
-- [ ] `ZoneService` created (`src/server/ZoneService.lua`)
-- [ ] Server tracks `playerZone: { [Player]: "Base" | "Zone" }` table
-- [ ] Zone entrance trigger sets player to "Zone"
-- [ ] Base entrance trigger (or extraction exit) sets player to "Base"
-- [ ] Safe base spawn works (no damage, no PvP) — server enforces, not just client label
-- [ ] Zone entrance spawn works
-- [ ] Client controller (`ZoneController.lua`) displays current zone to player (optional HUD badge)
-- [ ] `ZoneStateChanged` remote registered in `docs/PROJECT_MAP.md` before firing it
-- [ ] Stage 0 still passes after Stage 1 is added
-
-### Files likely affected later
-
-| File | Why |
-|---|---|
-| `src/server/ZoneService.lua` | New file |
-| `src/client/ZoneController.lua` | New file |
-| `src/server/RemoteSetup.server.lua` | New `ZoneStateChanged` remote |
-| `docs/PROJECT_MAP.md` | Remote registry row |
-| `src/shared/Constants.lua` | Zone state constants |
-
-### Not in this stage
-
-- Carried cash or secured funds
-- Economy of any kind
-- Shops
-- Death drops
+**What is NOT needed at this stage:**
+- Round-based MatchService/TeamService/ObjectiveService expansion
+- Train cinematics
 - Zone events
-- Monsters
-- Inventory
+- Monster AI
 
-### Studio / MCP verification required
-
-Yes — zone transition triggers, safe base enforcement, and spawn selection must be verified in live play mode.
-
-### Maintenance risks
-
-- Zone entry/exit detection will use `BasePart.Touched`/`TouchEnded` or a region check. `Touched`/`TouchEnded` can fire multiple times per frame; debounce carefully.
-- The "Base" state must be server-authoritative — a client that spoofs being in Base to avoid death-loss checks in Stage 2 is the primary attack vector. Never trust the client's claimed zone.
+**Stage complete when:** A player can spawn, move, shoot another player, die, and respawn cleanly in Studio with no unexpected errors in Output.
 
 ---
 
-## Stage 2 — Economy foundation
+## Stage 1 — Metro Base + Zone Transition Foundation
 
 **Status:** Not started.
 
-### Goal
+**Goal:** Establish the physical metro base hub and one working zone entrance/exit so the spatial layout of the loop exists before economy systems are added.
 
-Introduce carried cash and secured funds as two separate server-authoritative currency tables. No spending yet — just earning, tracking, displaying, and the hard invariant that carried cash is at risk while secured funds are safe.
+**What is included:**
+- Safe metro base area in Workspace (a physical space — not a menu)
+  - No PvP, no monsters inside the metro base boundary
+  - Deposit terminal placeholder (non-functional until Stage 3)
+  - Base armory placeholder (non-functional until Stage 9)
+- One physical zone entrance (gate, train stop, or sewer entry)
+  - Collider trigger that updates the player's zone-state (in-zone vs. in-base)
+  - ZoneService owns zone-state tracking per player
+- One physical extraction/deposit exit (a different point from the entrance if possible)
+  - Non-functional for economy until Stage 3 (ExtractionService); for now just a physical marker
+- ZoneStateChanged RemoteEvent fired to client on entry/exit (client displays "IN ZONE" / "IN BASE" status only)
 
-### Checklist
+**What is NOT needed at this stage:**
+- Train cinematics or animated transitions (a simple collider trigger is sufficient)
+- Multiple entrances or exits
+- Economy logic (no cash yet)
+- Shops, missions, events
 
-- [ ] `EconomyService` created (`src/server/EconomyService.lua`)
-- [ ] `carriedCash: { [Player]: number }` table on server
-- [ ] `securedFunds: { [Player]: number }` table on server
-- [ ] Kills in zone grant carried cash (amount in `Constants.lua`)
-- [ ] Loot pickups grant carried cash (amount in `Constants.lua`)
-- [ ] HUD displays carried cash and secured funds (server-sent values only)
-- [ ] Both tables cleared properly on `PlayerRemoving`
-- [ ] Stage 0–1 still pass after Stage 2 is added
+**Stage complete when:** A player can walk from the metro base into the zone through the entrance collider. ZoneService correctly tracks them as in-zone. Walking back through the exit collider correctly marks them as in-base. No errors in Output.
 
-### Files likely affected later
+---
 
-| File | Why |
-|---|---|
-| `src/server/EconomyService.lua` | New file |
-| `src/client/EconomyController.lua` | New file (HUD display) |
-| `src/server/DamageService.lua` | Call `EconomyService:OnKill()` on kill for cash reward |
-| `src/shared/Constants.lua` | Cash reward amounts |
-| `docs/PROJECT_MAP.md` | New remotes (CashChanged) |
+## Stage 2 — Economy Foundation
 
-### Not in this stage
+**Status:** Not started.
 
-- Depositing or extracting (Stage 3)
-- Spending carried cash (Stage 5)
+**Goal:** Establish server-authoritative carried cash and secured funds balances. No spending or loss yet — just earning and display.
+
+**What is included:**
+- EconomyService (server) owns:
+  - `carriedCash[player]` — starts at 0; never trusted from client
+  - `securedFunds[player]` — starts at 0
+  - `addCarriedCash(player, amount)` — called by kill credit, loot pickup
+  - `getCarriedCash(player)` / `getSecuredFunds(player)` — read by other services
+- EconomyChanged RemoteEvent fires to the affected client with `{ carriedCash, securedFunds }`
+- HUD updated to display carried cash (wallet counter) and secured funds
+- Basic kill credit: killing a player in the zone adds a small amount of carried cash (tunable constant)
+
+**What is NOT needed at this stage:**
+- Deposit logic (Stage 3)
 - Death loss (Stage 4)
-- Shops
-- Inventory
+- Shop purchases (Stage 5)
+- Player-to-player transfers (deferred indefinitely — see Stage 10)
 
-### Studio / MCP verification required
-
-Yes — cash values must be verified to update correctly after kills and loot pickups. HUD display must update without lag.
-
-### Maintenance risks
-
-- `EconomyService` will need to be called from `DamageService` (on kill). This is a new cross-service dependency. If both are ModuleScripts, the call direction must be one-way only. If there is a circular-require risk, use `MatchEvents`-style BindableEvents instead.
-- Cash amounts in `Constants.lua` must be tuned in Studio. Placeholder values that feel wrong at first play will be hard to tune later if they are buried in logic rather than Constants.
+**Stage complete when:** Killing a player in the zone increases the killer's carried cash display in the HUD. EconomyService logs the change to Output. No client-side cash manipulation is possible.
 
 ---
 
-## Stage 3 — Deposit / extraction point
+## Stage 3 — Deposit / Extraction
 
 **Status:** Not started.
 
-### Goal
+**Goal:** Prove the core risk loop. A player can physically extract from the zone and convert carried cash to secured funds.
 
-Add one extraction/deposit trigger in the zone. When a player reaches it, their carried cash is transferred to secured funds. This is the first moment the core loop closes: earn → extract → secure.
+**What is included:**
+- ExtractionService (server) owns:
+  - Extraction trigger validation: player must physically reach the exit collider in Workspace
+  - On successful extraction: calls `EconomyService:depositCarriedCash(player)`
+  - ExtractionSuccess RemoteEvent fires to the client with final balances
+- `depositCarriedCash(player)` in EconomyService: moves carriedCash → securedFunds, fires EconomyChanged
+- Deposit terminal (in metro base) as an alternative deposit path:
+  - Player walks up to the terminal in the metro base (not the zone)
+  - Server validates player is in metro base (ZoneService: not in-zone)
+  - Moves carriedCash → securedFunds; fires EconomyChanged
 
-### Checklist
+**What is NOT needed at this stage:**
+- Instant banking from inside the zone (explicitly forbidden — see PROJECT_RULES.md)
+- Multiple extraction exits (one is sufficient to prove the loop)
 
-- [ ] `ExtractionService` created (`src/server/ExtractionService.lua`)
-- [ ] One extraction trigger part in Workspace (e.g. `Workspace/Exits/ExitA`)
-- [ ] On trigger, `EconomyService:Deposit(player)` transfers carried cash → secured funds
-- [ ] Transfer is atomic (no partial credit on disconnect mid-transfer)
-- [ ] Client receives confirmation and HUD updates
-- [ ] Extraction is server-validated — client cannot claim extraction without touching the trigger
-- [ ] Stage 0–2 still pass after Stage 3 is added
-
-### Files likely affected later
-
-| File | Why |
-|---|---|
-| `src/server/ExtractionService.lua` | New file |
-| `src/server/EconomyService.lua` | New `Deposit()` method |
-| `docs/PROJECT_MAP.md` | New remote if extraction triggers a client notification |
-| `src/shared/Constants.lua` | Extraction trigger cooldown |
-
-### Not in this stage
-
-- Multiple extraction points
-- Extraction camping countermeasures (note map layout instead)
-- Extraction timers or countdowns
-- Death loss (Stage 4)
-- Zone events
-
-### Studio / MCP verification required
-
-Yes — extraction trigger, cash-to-secured transfer, and HUD confirmation must all be verified in live play mode with multiple players.
-
-### Maintenance risks
-
-- Extraction trigger uses `BasePart.Touched`. If two players touch it at the same moment, both deposits must be processed independently without race conditions.
-- The atomicity requirement (no partial credit on disconnect) is difficult to guarantee without a transaction model. For the prototype, accept the risk and document it as DEBT when built.
+**Stage complete when:** A player enters the zone, earns carried cash from a kill, extracts through the physical exit, and sees their secured funds increase in the HUD. A player can also walk to the metro base deposit terminal and manually deposit. Both paths transfer correctly. Firing the extraction remote from inside the zone without reaching the exit is rejected.
 
 ---
 
-## Stage 4 — Death loss
+## Stage 4 — Death Loss
 
 **Status:** Not started.
 
-### Goal
+**Goal:** Make the risk real. Death in the zone costs the player their carried cash.
 
-On death inside the zone, the player loses their carried cash. Secured funds are never touched. This closes the risk loop — earning cash in the zone now has real consequence.
+**What is included:**
+- On player death inside the zone (confirmed by DamageService / RagdollService + ZoneService zone-check):
+  - EconomyService zeros `carriedCash[player]`
+  - DeathDropService spawns a pickup bag (Part/Model) at the death location containing the lost cash amount
+  - EconomyChanged fires to the dead player showing 0 carried cash
+- DeathDropService (server) owns:
+  - Bag creation at death position
+  - Bag contents (cash amount — weapon drop is future scope; cash drop is Stage 4)
+  - Bag pickup validation (another player touches bag; server validates proximity and awards carried cash)
+  - Bags persist until picked up or until session end
+- Death screen updated to show "Carried cash lost: X"
 
-### Checklist
+**What is NOT needed at this stage:**
+- Weapon drops (complex to drop and recover — defer)
+- Multiple bag types or bag timers
 
-- [ ] On `RagdollApplied` (or kill signal), if player is in Zone: `EconomyService:LoseCarriedCash(player)` zeroes the carried cash table
-- [ ] Secured funds are unchanged on death
-- [ ] Client HUD reflects the loss immediately (server-sent update)
-- [ ] Free respawn is available: player can re-enter with a basic free loadout
-- [ ] Re-entry is fast (no waiting screen longer than a few seconds)
-- [ ] Stage 0–3 still pass after Stage 4 is added
-
-### Files likely affected later
-
-| File | Why |
-|---|---|
-| `src/server/EconomyService.lua` | New `LoseCarriedCash()` method |
-| `src/server/DamageService.lua` | Call EconomyService on kill |
-| `src/client/UI/DeathScreen.lua` | Adapt to show cash lost and respawn option (legacy PREP cleanup path may need adjustment — see DEBT-036) |
-| `src/shared/Constants.lua` | Free respawn loadout definition |
-
-### Not in this stage
-
-- Death drops (Stage 6) — cash simply vanishes for now
-- Consumable loss
-- Weapon drop on death (Stage 6)
-
-### Studio / MCP verification required
-
-Yes — death loss must be verified: die in zone, confirm carried cash zeroed; die at base, confirm carried cash unchanged; secured funds unchanged in both cases.
-
-### Maintenance risks
-
-- `DeathScreen.lua` currently uses `RoundStateChanged` (PREP phase) for cleanup. In the persistent zone there is no PREP phase — the cleanup path must be replaced or patched. This is the DEBT-036 DeathScreen incompatibility.
-- Free respawn must be guaranteed at all times. If `BaseService` fails to load, players must still be able to respawn. Add a fallback.
+**Stage complete when:** Dying in the zone zeros the player's carried cash display and spawns a bag at the death location. Another player can pick up the bag and receive the cash. Dying in the metro base does NOT lose carried cash (zone-check in DeathDropService).
 
 ---
 
-## Stage 5 — Zone shop
+## Stage 5 — Risky Zone Shop + Loot Objects
 
 **Status:** Not started.
 
-### Goal
+**Goal:** Give players something to spend carried cash on inside the zone, and something to pick up from the environment.
 
-Add one in-zone shop that accepts carried cash. Players can buy starter items or basic combat supplies without leaving the zone. This creates an incentive to stay and spend rather than always extracting.
+**What is included:**
+- ShopService (server):
+  - One in-zone trader/cache (a Part or NPC marker in Workspace)
+  - Sells 1–3 items: emergency basic pistol, ammo pack, heal item
+  - Prices are higher than base armory equivalents (tunable constants)
+  - Accepts carried cash only (no secured funds in zone)
+  - Server validates: player is in zone, sufficient carriedCash, item is in stock
+  - On success: deducts carriedCash, gives item, fires PurchaseResult to client
+- LootService (server):
+  - Loot objects (cash bags, ammo drops) at fixed spawn positions in the zone
+  - Server owns spawn state and remaining contents
+  - On pickup: server validates proximity, awards carried cash, fires LootPickedUp
+- Client proximity prompts and purchase/pickup requests (ShopController / LootController)
 
-### Checklist
-
-- [ ] `ShopService` created (`src/server/ShopService.lua`)
-- [ ] One shop trigger in the zone (e.g. a part or NPC marker)
-- [ ] Shop inventory defined in a data module (not hardcoded in ShopService)
-- [ ] Purchases deduct carried cash on the server — client never decides the price
-- [ ] Purchased items are server-granted (ammo refill, health pack, simple weapon)
-- [ ] Shop UI (client) displays available items and current carried cash balance
-- [ ] Server rejects purchases if player does not have enough carried cash
-- [ ] Stage 0–4 still pass after Stage 5 is added
-
-### Files likely affected later
-
-| File | Why |
-|---|---|
-| `src/server/ShopService.lua` | New file |
-| `src/client/ShopController.lua` | New file |
-| `src/shared/ShopData.lua` | New data module: item names, prices, effects |
-| `src/server/EconomyService.lua` | Deduct carried cash on purchase |
-| `docs/PROJECT_MAP.md` | New remotes (ShopPurchase, ShopOpened) |
-
-### Not in this stage
-
-- Base armory purchases (separate system, uses secured funds)
-- Weapon attachments
-- Full inventory UI
+**What is NOT needed at this stage:**
 - Multiple shop locations
+- Dynamic pricing or rotating stock
+- Full inventory UI
+- Player-to-player item transfer (deferred — see Stage 10)
 
-### Studio / MCP verification required
-
-Yes — purchase flow, cash deduction, item grant, and rejection on insufficient funds all require live play-mode testing with multiple concurrent buyers.
-
-### Maintenance risks
-
-- Shop data must be in `ShopData.lua`, not `ShopService.lua`. If prices are hardcoded in service logic, tuning requires reading service code.
-- Two concurrent purchase requests from the same player must not double-deduct. Use a per-player purchase lock or validate balance before and after.
+**Stage complete when:** A player can pick up a loot bag in the zone (earning carried cash). A player can approach the zone shop and buy an emergency pistol for carried cash. ShopService rejects purchases with insufficient cash. All transactions visible in Output logs.
 
 ---
 
-## Stage 6 — Simple death drops
+## Stage 6 — Simple Missions / Faction Traders
 
 **Status:** Not started.
 
-### Goal
+**Goal:** Give players short optional objectives that add direction to a run without mandatory participation.
 
-When a player dies in the zone with carried cash, drop a loot bag at the death location. Other players can pick it up. This makes death meaningful for nearby players and creates hot-drop scenarios.
+**What is included:**
+- MissionService (server):
+  - One faction trader in the metro base (NPC marker or Part)
+  - 1–3 mission types: kill N monsters, extract with at least X carried cash, visit a zone location
+  - Player accepts a mission (one active at a time)
+  - Server tracks progress and validates completion
+  - On completion: awards carried cash bonus
+  - MissionUpdated / MissionComplete RemoteEvents fire to the client
+- MissionUI: active mission + progress display in HUD
 
-### Checklist
+**What is NOT needed at this stage:**
+- Complex multi-step missions
+- Faction reputation / standing system
+- Multiple traders
+- Player-to-player mission sharing
 
-- [ ] `DeathDropService` created (`src/server/DeathDropService.lua`)
-- [ ] On death in zone with `carriedCash > 0`: spawn a `DropBag` part at death position
-- [ ] `DropBag` stores cash value on the server (not visible in the bag's properties to the client)
-- [ ] Player walking over the bag picks it up — server grants carried cash, removes bag
-- [ ] Bags have a decay timer (removed after N seconds if uncollected) — `Constants.DROP_DECAY_TIME`
-- [ ] Bags are cleaned up on match/session end to avoid Workspace clutter
-- [ ] Stage 0–5 still pass after Stage 6 is added
-
-### Files likely affected later
-
-| File | Why |
-|---|---|
-| `src/server/DeathDropService.lua` | New file |
-| `src/server/EconomyService.lua` | Called on bag pickup to grant cash |
-| `src/server/DamageService.lua` | Call DeathDropService on kill |
-| `src/shared/Constants.lua` | `DROP_DECAY_TIME` |
-| `docs/PROJECT_MAP.md` | New remote if bag pickup triggers client notification |
-
-### Not in this stage
-
-- Weapon drops (requires InventoryService)
-- Full loot system (LootService is separate)
-- Multiple drop types
-
-### Studio / MCP verification required
-
-Yes — bag spawn, pickup, decay cleanup, and concurrent multi-player pickup (two players race for the same bag) must be verified.
-
-### Maintenance risks
-
-- `Instance.new("Part")` per drop is acceptable at prototype scale. If the zone fills with deaths, pooling becomes necessary — add `ObjectPool.lua` when a second pooled object type is needed (per CLAUDE.md pooling rule).
-- Bag decay uses `task.delay()`. If the server restarts or the bag's owning script errors, the delay is lost and bags accumulate. Consider a heartbeat cleanup sweep as a fallback.
+**Stage complete when:** A player accepts a mission from the trader, completes it in the zone, and receives the cash reward. Mission progress is visible in the HUD.
 
 ---
 
-## Stage 7 — First zone event: Reality Collapse
+## Stage 7 — First Zone Event (Reality Breakdown)
 
 **Status:** Not started.
 
-### Goal
+**Goal:** Add periodic pressure that creates urgency without locking players into mandatory participation.
 
-Add the first periodic zone event: Reality Collapse. A countdown begins; players must extract/deposit or leave the zone before it ends, or they take lethal damage. After the collapse, simple loot refreshes. This creates a natural extraction deadline without a round timer.
+**What is included:**
+- ZoneEventService (server):
+  - Reality Breakdown countdown: recurring timer (e.g. every 10–15 minutes, tunable constant)
+  - On event start: fires ZoneEventStarted → all clients (client shows warning countdown)
+  - During event: one of — lethal zone spread, monster escalation, or loot surge (choose one)
+  - Safe extraction must remain possible during the event
+  - On event end: zone resets; fires ZoneEventEnded → all clients
+- ZoneEventUI (client): countdown timer, event name, extract prompt
 
-### Checklist
-
-- [ ] `ZoneEventService` created (`src/server/ZoneEventService.lua`)
-- [ ] Collapse countdown fires a `ZoneEventStarted` remote to all clients (registered in PROJECT_MAP.md first)
-- [ ] HUD shows countdown timer
-- [ ] At T=0: all players still in zone take lethal damage (server-side, via `DamageService:Apply()`)
-- [ ] Simple loot objects refresh in zone after collapse
-- [ ] Collapse interval is a constant in `Constants.lua` (not hardcoded in ZoneEventService)
-- [ ] Event does not block extraction — players can still reach exits during the countdown
-- [ ] Stage 0–6 still pass after Stage 7 is added
-
-### Files likely affected later
-
-| File | Why |
-|---|---|
-| `src/server/ZoneEventService.lua` | New file |
-| `src/client/ZoneEventController.lua` | New file (countdown UI) |
-| `src/server/DamageService.lua` | Used to apply collapse lethal damage |
-| `src/server/LootService.lua` | Called to refresh loot after collapse |
-| `src/shared/Constants.lua` | `COLLAPSE_INTERVAL`, `COLLAPSE_WARNING_TIME` |
-| `docs/PROJECT_MAP.md` | New remotes (`ZoneEventStarted`, `ZoneEventEnded`) |
-
-### Not in this stage
-
-- Complex monster AI
+**What is NOT needed at this stage:**
 - Multiple event types
-- Event rewards beyond loot refresh
-- Faction-specific event outcomes
+- Event-locked zones (a player who ignores the event must still be able to extract)
 
-### Studio / MCP verification required
-
-Yes — countdown display, lethal damage on T=0, loot refresh, and extraction during countdown must all be tested in live play mode.
-
-### Maintenance risks
-
-- The collapse kills all players in zone simultaneously. If `DamageService:Apply()` is called in a loop, the kill feed may flood. Batch the kill messages or add a "zone collapse" special kill type.
-- Loot refresh calls `LootService` from `ZoneEventService`. Confirm no circular-require risk before implementing.
+**Stage complete when:** Breakdown countdown fires on schedule, client shows the warning timer, the event effect is visible, and the event ends cleanly. A player who reaches the extraction exit during the event is successfully extracted.
 
 ---
 
-## Stage 8 — Simple monsters
+## Stage 8 — Simple Monsters
 
 **Status:** Not started.
 
-### Goal
+**Goal:** Add ambient monster AI to the zone to create PvE pressure alongside PvP.
 
-Add basic monster spawns in the zone. Monsters are dumb, slow, and easy to kill individually — they exist to create ambient pressure and provide an additional cash/loot source. No pathfinding AI beyond basic follow-and-attack.
+**What is included:**
+- MonsterService (server):
+  - Basic monster agents at fixed spawn nodes in the zone
+  - Simple pathfinding and attack logic (approach + melee or ranged)
+  - Targets all players equally (no team distinction)
+  - Drops small carried cash bonus on kill (via EconomyService:addCarriedCash)
+  - Respawns on a timer
 
-### Checklist
+**What is NOT needed at this stage:**
+- Advanced AI death squads (deferred — see Stage 10)
+- Monster faction allegiance, aggro radius tuning, or special abilities
+- Monster loot drops beyond basic cash
 
-- [ ] `MonsterService` created (`src/server/MonsterService.lua`)
-- [ ] Monster spawns defined in `Workspace/MonsterSpawns` (already exists)
-- [ ] Monsters have a simple attack: walk toward nearest player and deal contact damage via `DamageService:Apply()`
-- [ ] Monsters have health; players can kill them
-- [ ] Killing a monster grants a small amount of carried cash (server-side)
-- [ ] Monster count is capped by a constant (`Constants.MAX_MONSTERS`)
-- [ ] Monsters are cleaned up when the zone is empty
-- [ ] Stage 0–7 still pass after Stage 8 is added
-
-### Files likely affected later
-
-| File | Why |
-|---|---|
-| `src/server/MonsterService.lua` | New file |
-| `src/shared/MonsterData.lua` | New file: monster stats (health, speed, damage, cash drop) |
-| `src/server/DamageService.lua` | Used to apply monster attack damage |
-| `src/server/EconomyService.lua` | Called on monster kill for cash reward |
-| `src/shared/Constants.lua` | `MAX_MONSTERS`, monster spawn interval |
-
-### Not in this stage
-
-- Complex pathfinding
-- Monster types beyond one base variant
-- Monster loot drops beyond flat cash
-- `HordeService` escalation
-
-### Studio / MCP verification required
-
-Yes — monster spawn, basic follow/attack, player kill reward, and cap enforcement must be verified in live play mode.
-
-### Maintenance risks
-
-- Monster AI running on `RunService.Heartbeat` per monster is expensive. Cap monster count strictly and profile frame time before increasing.
-- If monsters call `DamageService:Apply(nil, victim, amount)` (no attacker), the kill feed attacker name will be empty string. Define a convention for environment/monster kills before building the kill feed display.
+**Stage complete when:** Monsters spawn in the zone, pathfind toward players, deal damage, and die when shot. Killing a monster awards carried cash. No pathfinding errors in Output.
 
 ---
 
-## Stage 9 — Base progression
+## Stage 9 — Base Storage and Upgrades
 
 **Status:** Not started.
 
-### Goal
+**Goal:** Give players something to work toward with secured funds. Make the metro base feel like it grows.
 
-Add the first base upgrades. Players spend secured funds at the base to improve their position. Start small — only three upgrade types. Avoid complex unlock trees or grindy costs at this stage.
+**What is included:**
+- StashService (server):
+  - Per-player locker/crate storage (in-memory for prototype; persistent across sessions later)
+  - Deposit/withdraw validation (server owns contents)
+  - StashChanged RemoteEvent
+- BaseService (server):
+  - Base upgrade tiers: armory tier, storage tier, medical tier
+  - Upgrade purchase validated by server (secured funds only)
+  - BaseStateChanged RemoteEvent
+- Upgrade UI: interact with upgrade station in metro base
 
-### Checklist
+**What is NOT needed at this stage:**
+- Full base decoration (deferred — see Stage 10)
+- Train cinematic polish (deferred — see Stage 10)
+- Faction reputation or unlock trees
 
-- [ ] `BaseService` extended or `ProgressionService` created to track upgrade state
-- [ ] Three initial upgrades: Armory (unlock better guns), Storage (increase carry weight/stash slots), Medical Station (cheaper health packs in zone)
-- [ ] Upgrade state is server-owned and persists across sessions (or at minimum across the current server lifetime)
-- [ ] Upgrade costs are in `Constants.lua` or a data module — never hardcoded in service logic
-- [ ] Client displays current upgrade levels and costs
-- [ ] Purchases deduct secured funds on the server — client never decides prices
-- [ ] Stage 0–8 still pass after Stage 9 is added
+**Stage complete when:** A player spends secured funds to upgrade the base armory, sees the upgrade reflected in available weapons, and can store items in a locker.
 
-### Files likely affected later
+---
 
-| File | Why |
+## Stage 10 — Deferred Polish and Expansion
+
+These features are **explicitly deferred** and must not be started until:
+1. The core loop (Stages 1–9) is proven in Studio.
+2. The listed prerequisite systems are stable.
+3. For the flea market specifically: economy, stash, item ownership, anti-duplication, and moderation/abuse risks have been **intentionally designed and addressed** — not just considered.
+
+| Feature | Prerequisite before starting |
 |---|---|
-| `src/server/BaseService.lua` | New or extended file |
-| `src/server/ProgressionService.lua` | New file if separate from BaseService |
-| `src/shared/UpgradeData.lua` | New file: upgrade names, costs, effects |
-| `src/server/EconomyService.lua` | Deduct secured funds on upgrade purchase |
-| `docs/PROJECT_MAP.md` | New remotes (UpgradePurchased, BaseStateChanged) |
+| **Player flea market / global marketplace** | Stable economy + stash + item ownership + anti-duplication system + moderation/abuse plan. **Long-term only. Do not include in any first playable version.** |
+| **Advanced AI death squads** | MonsterService (Stage 8) + zone events (Stage 7) proven |
+| **Full gun attachment system** | Weapon inventory + shop + stash loop stable |
+| **Complex melee system** | Core FPS loop + movement proven |
+| **Complex faction warfare** | MissionService (Stage 6) proven |
+| **Complex visor / enemy detection** | Basic AI (Stage 8) + combat loop proven |
+| **Full base decoration system** | Core loop + stash (Stage 9) proven |
+| **Train arrival/departure cinematics** | Core loop proven; train transition functional; skip mechanism designed |
+| **Free drawing on signs / custom paintings** | Dedicated content moderation + abuse risk review complete |
 
-### Not in this stage
-
-- Full tech tree or unlock chains
-- Faction-specific upgrades
-- Persistent cross-session saving (datastores — deferred until StashService)
-- Crafting
-
-### Studio / MCP verification required
-
-Yes — purchase deduction, upgrade state persistence (within session), and UI display must be tested with multiple players at the same base.
-
-### Maintenance risks
-
-- Upgrade state will eventually need DataStore persistence. Building without it now creates a hard migration later. Document the absence as a debt entry when Stage 9 is built.
-- "Better guns from Armory upgrade" implies the base armory stock is dynamic. Design the armory data module to support this from the start (an array of items, some locked behind upgrade level) rather than retrofitting later.
-
----
-
-## Stage 10 — Polish systems
-
-**Status:** Not started. Only begin after Stage 0–9 are stable and fun in Studio.
-
-### Goal
-
-Layer polish on top of a working game loop. Do not start any polish item until the core loop (zone → loot/fight → extract → deposit → upgrade → zone) is verified and enjoyable.
-
-### Checklist
-
-- [ ] Recoil and spread added to GunService/GunController
-- [ ] ADS (aim-down-sights) viewmodel state
-- [ ] Camera bob and sway during movement
-- [ ] Slide and vault movement additions
-- [ ] Sound polish: footstep variation, ambient zone sounds, event sounds
-- [ ] UI redesign: cash wallet, zone map, base dashboard
-- [ ] More weapons added to WeaponData and base armory
-- [ ] More zone event types (not just Reality Collapse)
-- [ ] More monster variants
-
-### Files likely affected later
-
-| File | Why |
-|---|---|
-| `src/server/GunService.server.lua` | Recoil/spread values |
-| `src/client/GunController.lua` | ADS input, spread feel |
-| `src/client/ViewModelController.lua` | ADS animation state |
-| `src/client/MovementController.lua` | Slide/vault/camera bob |
-| `src/client/SoundController.lua` | Footstep variation, ambient |
-| `src/shared/WeaponData.lua` | New weapons |
-| `src/shared/Constants.lua` | New recoil/spread/ADS constants |
-
-### Not in this stage
-
-Nothing is blocked here — but each item should still be a separate task and verified in Studio individually.
-
-### Studio / MCP verification required
-
-Yes — every polish item must be verified in live play mode. Recoil/spread in particular changes weapon feel and must not break existing GunService shot validation.
-
-### Maintenance risks
-
-- Adding recoil client-side (visual) is safe; adding server-side spread (random miss chance) changes hit rates and balance. Decide the design intent before building.
-- Slide and vault require character controller changes that may conflict with the existing `CharacterAutoLoads` / TeamService setup (DEBT-019/DEBT-036). Resolve the legacy character spawn path before adding movement complexity.
-
----
-
-## Stage reference summary
-
-| Stage | Name | Key new system | Gate condition |
-|---|---|---|---|
-| 0 | FPS foundation | — (existing) | All checklist items pass in Studio |
-| 1 | Zone/base state | `ZoneService` | Stage 0 verified |
-| 2 | Economy foundation | `EconomyService` | Stage 1 verified |
-| 3 | Deposit / extraction | `ExtractionService` | Stage 2 verified |
-| 4 | Death loss | — (EconomyService extension) | Stage 3 verified |
-| 5 | Zone shop | `ShopService` | Stage 4 verified |
-| 6 | Death drops | `DeathDropService` | Stage 5 verified |
-| 7 | Reality Collapse event | `ZoneEventService` | Stage 6 verified |
-| 8 | Simple monsters | `MonsterService` | Stage 7 verified |
-| 9 | Base progression | `BaseService` / `ProgressionService` | Stage 8 verified |
-| 10 | Polish | (many) | Stages 0–9 verified and fun |
-
----
-
-*Last updated: 2026-05-15. Update this file when a stage is verified or its scope changes.*
+> **Flea market / player marketplace:** Deferred until after stable economy, stash, item ownership, anti-duplication, and moderation/abuse controls exist. Do not prototype, scaffold, or begin design work on the marketplace until all prerequisites are confirmed stable in Studio and a moderation plan is in place.

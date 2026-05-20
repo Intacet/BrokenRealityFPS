@@ -18,12 +18,37 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-036] Round-based architecture no longer matches target persistent-zone design — ADDED 2026-05-15
+## [DEBT-051] Feature scope risk — persistent-zone design contains many long-term systems that must be staged — ADDED 2026-05-20
+
+**Files:** `CLAUDE.md`, `docs/PROJECT_RULES.md`, `docs/PERSISTENT_ZONE_ROADMAP.md`
+**Severity:** High
+**Studio verification required:** Not applicable (design/planning debt, not a runtime bug)
+**Risk:** The refined persistent-zone direction (metro base, physical zone transitions, carried cash, secured funds, risky in-zone shops, faction traders, missions, Reality Breakdown events, base storage and upgrades) is a large feature surface. If multiple systems are attempted in one prompt or one sprint without per-stage Studio verification, the result will be untestable scaffolding rather than a working loop. Historically this kind of scope ambiguity leads to half-implemented systems that block each other and debt that cannot be verified.
+
+**Specific high-risk deferred systems that must not be started prematurely:**
+- **Player flea market / global marketplace** — requires stable economy, stash, item ownership, anti-duplication system, and moderation/abuse controls. None of these exist yet. Starting the marketplace before these are in place creates an exploitable, unstable economy with no rollback path.
+- **Free drawing on signs / custom sign painting** — content moderation and abuse risk have not been addressed. Building this system before a moderation plan exists creates a content abuse vector with no response capability.
+- **Advanced AI death squads** — requires basic MonsterService (Stage 8) and zone events (Stage 7) to be proven first. Jumping to advanced AI before the simple version is stable adds unverifiable complexity.
+- **Full gun attachment system** — requires weapon inventory, shop, and stash to be stable before attachment items can be stored, sold, or equipped. Building attachments before the item system exists creates orphaned data.
+- **Complex visor / enemy detection system** — high design and implementation complexity; requires basic AI (Stage 8) and the combat loop to be proven first.
+- **Full base decoration system** — cosmetic priority; requires core loop + stash (Stage 9) to be stable first.
+
+**Rules:**
+- Build one persistent-zone system at a time, per `docs/PERSISTENT_ZONE_ROADMAP.md`.
+- Do not begin Stage N+1 until Stage N is verified in Studio.
+- The flea market/player marketplace must not be prototyped, scaffolded, or designed in code until economy, stash, item ownership, anti-duplication, and a moderation plan are all confirmed stable.
+- See `docs/PROJECT_RULES.md` (Refined persistent-zone design rules) for the full rule set.
+
+**Resolve when:** Each stage in `docs/PERSISTENT_ZONE_ROADMAP.md` is individually verified in Studio. This entry closes when Stages 1–9 are complete and the deferred systems have been explicitly re-evaluated against their prerequisites.
+
+---
+
+## [DEBT-036] Round-based architecture no longer matches target persistent-zone design — UPDATED 2026-05-20
 
 **Files:** `src/server/MatchService.server.lua`, `src/server/TeamService.server.lua`, `src/server/ObjectiveService.server.lua`, `src/client/UI/MatchUI.lua`, `src/client/UI/DeathScreen.lua`, `src/client/MatchController.lua`
 **Severity:** High
 **Studio verification required:** Yes
-**Risk:** The current running codebase implements a five-round attackers-vs-defenders FPS loop. The target product direction (updated 2026-05-15) is a persistent PvPvE zone shooter with carried loot, secured funds, extraction exits, shops, and base progression. The existing round-based services (`MatchService`, `TeamService`, `ObjectiveService`) and their client counterparts (`MatchController`, `MatchUI`, `DeathScreen`) encode round-start, round-end, PREP/ACTIVE/RESULTS phase transitions, team assignment, and objective completion as core concepts. None of these map directly to the persistent zone loop.
+**Risk:** The current running codebase implements a five-round attackers-vs-defenders FPS loop. The target product direction (updated 2026-05-20) is a persistent PvPvE metro-base zone shooter: players spawn in a safe metro station, enter the quarantine zone through physical transitions (gates, trains, sewers), earn carried cash, optionally buy from risky in-zone shops, complete simple faction trader missions, survive Reality Breakdown events, and extract through physical exits to deposit at the metro base terminal. The existing round-based services (`MatchService`, `TeamService`, `ObjectiveService`) and their client counterparts (`MatchController`, `MatchUI`, `DeathScreen`) encode round-start, round-end, PREP/ACTIVE/RESULTS phase transitions, team assignment, and objective completion as core concepts. None of these map directly to the persistent zone loop.
 
 **Affected legacy systems:**
 - `MatchService` — round loop, phase management; must be replaced or dormant when ZoneService is built
@@ -46,7 +71,7 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 **Resolve when:** The core persistent zone loop (zone entry → loot → extract → deposit → armory → zone) is working in Studio and the legacy round-based systems are no longer needed for active play.
 
-**Roadmap reference:** `docs/PERSISTENT_ZONE_ROADMAP.md` defines the 11-stage staged build order for the persistent zone pivot. That document is planning-only — it does not resolve this debt entry. Runtime systems must still be built and verified in Studio stage by stage before this entry can be closed.
+**Roadmap reference:** `docs/PERSISTENT_ZONE_ROADMAP.md` defines the 10-stage staged build order for the persistent zone pivot (updated 2026-05-20 with metro-base design, physical zone transitions, risky in-zone shops, faction trader missions, Reality Breakdown events, and explicit deferred-feature rules). That document is planning-only — it does not resolve this debt entry. Runtime systems must still be built and verified in Studio stage by stage before this entry can be closed.
 
 ---
 
