@@ -206,10 +206,10 @@ FleaMarketService / PlayerMarketplace
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- Stage 1 + 2A + 2C + 2D + 2E (Animate-disable, R6 detection, animation-set selection,
+MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I (Animate-disable, R6 detection, animation-set selection,
                         --   strafe gating, animation speed multipliers, shift-lock sprint fix,
                         --   custom mouse-lock toggle on LeftAlt, character-facing camera yaw):
-                        --   owns local movement input (LeftShift=sprint, C=crouch toggle,
+                        --   owns local movement input (LeftShift=sprint, C=hold-to-crouch (hold=enter, release=exit),
                         --   LeftAlt=custom mouse-lock toggle),
                         --   customMouseLocked boolean, UserInputService.MouseBehavior writes,
                         --   Humanoid.AutoRotate writes (false while locked+ACTIVE; restored on off/exit/respawn),
@@ -380,11 +380,30 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E (Animate-disable, R6 dete
                         --     Idle behavior (Stage 2H):
                         --       Both sets: Idle (looped) plays when standing still in ACTIVE phase.
                         --       Idle plays via updateMovementAnimation (not moving path) — no special gate.
+                        --     Crouch hold behavior (Stage 2I — 2026-05-20):
+                        --       C is now hold-to-crouch: InputBegan (C held) → enter crouch + EnterCrouch one-shot;
+                        --         InputEnded (C released) → exit crouch + clearCrouchBottomHold() + ExitCrouch one-shot.
+                        --       After EnterCrouch finishes (Stopped callback): if still crouching and moving and a
+                        --         CrouchWalk ID exists → play CrouchWalk; otherwise → holdCrouchBottomPose():
+                        --         plays EnterCrouch at AdjustSpeed(0) parked at (Length - CROUCH_TRANSITION_MIN_HOLD_TIME)
+                        --         so the character visually holds the bottom of the crouched pose.
+                        --       clearCrouchBottomHold(): restores AdjustSpeed then Stop(fade). Called on C-release,
+                        --         phase exit, and destroy(). On respawn, variables cleared without Stop (old Animator gone).
+                        --       crouchHoldTrack is managed independently of currentAnimationName — not stopped by
+                        --         stopCurrentMovementAnimation(), preventing standing locomotion from overwriting the pose.
+                        --       updateMovementAnimation() crouch branch (returns early, before standing logic):
+                        --         moving + CrouchWalk ID exists → CrouchWalk; moving + no CrouchWalk → hold bottom pose;
+                        --         idle → hold bottom pose.
+                        --       No HipHeight, CameraOffset, or camera.CFrame changes. CrouchWalk is optional — only plays
+                        --         if an ID already exists in Constants.MOVEMENT_ANIMATION_IDS.R6.<Set>.CrouchWalk.
+                        --       New constants: CROUCH_HOLD_KEY, CROUCH_HOLD_BOTTOM_POSE_ENABLED,
+                        --         CROUCH_TRANSITION_MIN_HOLD_TIME, CROUCH_BOTTOM_HOLD_TIME_POSITION_FALLBACK.
                         --     Crouch transition behavior (Stage 2H):
-                        --       C toggle ON  → EnterCrouch one-shot; C toggle OFF → ExitCrouch one-shot.
-                        --       crouchTransitionPlaying flag gates updateMovementAnimation during transition.
-                        --       Stopped callback clears flag and currentAnimationName when clip finishes.
-                        --     Not in Stage 2A/2C/2D/2F/2G/2H: crouch walk/idle, lower/upper-body split, reload/fire/ADS weapon animations.
+                        --       crouchTransitionPlaying flag gates updateMovementAnimation during in-flight one-shot.
+                        --       clearCrouchTransitionConnection() (renamed from stopCrouchTransition() in Stage 2I)
+                        --         disconnects the Stopped conn only; callers manage crouchTransitionPlaying explicitly.
+                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I: CrouchWalk/CrouchIdle animation IDs (no IDs added in 2I),
+                        --       lower/upper-body split, reload/fire/ADS weapon animations.
                         --
                         --   Exposes: GetMovementState() → table; GetMoveState() → string (GunController
                         --   compat); IsADSBlocked() → bool; GetViewmodelAddCFrame() → identity;
@@ -459,6 +478,13 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --     MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER               = 1.15 (RunForward, RunForwardLeft, RunForwardRight)
              --     MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER              = 0.75 (Idle — Stage 2H)
              --     MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.9  (EnterCrouch, ExitCrouch — Stage 2H)
+             --   Crouch hold constants (Stage 2I — 2026-05-20):
+             --     CROUCH_HOLD_KEY = Enum.KeyCode.C — key held to enter/stay crouched; release exits crouch.
+             --     CROUCH_HOLD_BOTTOM_POSE_ENABLED = true — enables EnterCrouch clip frozen at final frame
+             --       (AdjustSpeed(0) + TimePosition near end) after the one-shot finishes.
+             --     CROUCH_TRANSITION_MIN_HOLD_TIME = 0.05 — seconds from clip end; guards against TimePosition
+             --       snapping to frame 0 at exact Length on some Roblox versions.
+             --     CROUCH_BOTTOM_HOLD_TIME_POSITION_FALLBACK = 0.98 — used when EnterCrouch.Length == 0.
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag

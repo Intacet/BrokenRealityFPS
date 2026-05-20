@@ -7,6 +7,51 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-20] — Movement Stage 2I: Hold-to-crouch + EnterCrouch bottom-pose hold
+
+### Summary
+Crouch input changed from toggle-on-C to hold-to-crouch: holding C enters crouch, releasing C exits
+crouch. After the EnterCrouch one-shot finishes, MovementController now freezes the clip at its final
+frame (`AdjustSpeed(0)` + `TimePosition = near_end`) so the character stays visually crouched instead
+of reverting to standing idle. Four new Constants added (CROUCH_HOLD_KEY, CROUCH_HOLD_BOTTOM_POSE_ENABLED,
+CROUCH_TRANSITION_MIN_HOLD_TIME, CROUCH_BOTTOM_HOLD_TIME_POSITION_FALLBACK). CrouchWalk is supported
+if an ID already exists in Constants — no IDs added in this stage.
+
+### Changed files
+
+- **`src/shared/Constants.lua`**:
+  - Added `CROUCH_HOLD_KEY = Enum.KeyCode.C` — key held to enter crouch; release to exit.
+  - Added `CROUCH_HOLD_BOTTOM_POSE_ENABLED = true` — enables EnterCrouch bottom-pose freeze.
+  - Added `CROUCH_TRANSITION_MIN_HOLD_TIME = 0.05` — seconds from clip end for the hold TimePosition.
+  - Added `CROUCH_BOTTOM_HOLD_TIME_POSITION_FALLBACK = 0.98` — fallback if clip Length == 0.
+
+- **`src/client/MovementController.lua`**:
+  - Stage header updated: 2H → 2H + 2I.
+  - New private state: `isHoldingCrouchBottomPose`, `crouchHoldTrack`, `crouchBottomPoseWarned`.
+  - `stopCrouchTransition()` renamed to `clearCrouchTransitionConnection()` — disconnect only; callers set `crouchTransitionPlaying` explicitly.
+  - New helper `holdCrouchBottomPose()`: plays EnterCrouch at AdjustSpeed(0), parked at final frame. Track managed independently via `crouchHoldTrack`.
+  - New helper `clearCrouchBottomHold()`: restores AdjustSpeed + Stop(fade). Safe to call when idle.
+  - `playCrouchTransition()` rewritten: clears existing conn + hold + locomotion before starting. EnterCrouch Stopped callback: if still crouching and moving and CrouchWalk exists → play CrouchWalk; else → `holdCrouchBottomPose()`.
+  - `updateMovementAnimation()`: dedicated crouch branch (returns early, before standing logic). Moving + CrouchWalk → play CrouchWalk; moving + no CrouchWalk → hold bottom pose; idle → hold bottom pose.
+  - `loadMovementAnimations()`: `crouchHoldTrack = nil`, `isHoldingCrouchBottomPose = false`, `crouchBottomPoseWarned = false` in reset block (no Stop call — old Animator may be gone).
+  - Crouch input: replaced toggle `InputBegan` with hold: `InputBegan` (C down) enters crouch; `InputEnded` (C up) exits crouch + clears hold + plays ExitCrouch.
+  - Phase exit and `destroy()`: `clearCrouchTransitionConnection()` → `crouchTransitionPlaying = false` → `clearCrouchBottomHold()` → `stopCurrentMovementAnimation()`.
+
+- **`docs/PROJECT_MAP.md`** — stage header updated to 2F+2G+2H+2I; "C=crouch toggle" → "C=hold-to-crouch"; Stage 2I behavior documented; CROUCH_HOLD_* constants documented.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated (x14): Stage 2I update block added; remaining-gaps header updated; crouch walk/idle entries updated; Stage 2H risk about idle-while-crouched marked resolved; Stage 2I risks added.
+
+### What was NOT changed
+No `src/server/` files. No `default.project.json`. No other client controllers.
+No camera changes. No gun/combat changes. No new remotes.
+No new animation IDs. No HipHeight, CameraOffset, or FieldOfView changes.
+
+### Validation
+- `rojo build` — passes.
+- MCP/Studio verification pending. See DEBT-044 (x14) for test steps.
+
+---
+
 ## [2026-05-20] — Movement Stage 2H: Idle + enter/exit crouch transition animations (Unarmed and AR15)
 
 ### Summary

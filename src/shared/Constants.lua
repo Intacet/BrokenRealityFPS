@@ -38,6 +38,26 @@ Constants.RESULTS_DURATION  = 10  -- alias used by MatchService for the per-roun
 Constants.MATCHEND_DURATION = 15  -- how long the match-end screen is shown before the next lobby
 
 -- ============================================================
+-- Crouch hold behavior (Stage 2I — hold-to-crouch)
+-- ============================================================
+Constants.CROUCH_HOLD_KEY = Enum.KeyCode.C  -- key held to enter crouch; release to exit
+
+-- When true, MovementController holds the final frame of EnterCrouch while crouched
+-- and not moving (bottom-pose hold via AdjustSpeed(0) + TimePosition near clip end).
+-- When false, no visual hold is applied and the character reverts to standing idle.
+Constants.CROUCH_HOLD_BOTTOM_POSE_ENABLED = true
+
+-- Seconds from the end of the EnterCrouch clip at which the hold TimePosition is set.
+-- e.g. 0.05 means the track pauses at (clip.Length - 0.05) seconds.
+-- Guards against setting TimePosition exactly at Length which can snap to frame 0
+-- on some Roblox versions.
+Constants.CROUCH_TRANSITION_MIN_HOLD_TIME = 0.05
+
+-- Fallback TimePosition (seconds) used when EnterCrouch.Length == 0
+-- (animation not yet loaded or zero-length clip). Must be >= 0.
+Constants.CROUCH_BOTTOM_HOLD_TIME_POSITION_FALLBACK = 0.98
+
+-- ============================================================
 -- Objective settings
 -- ============================================================
 Constants.ANCHOR_PLANT_TIME = 5  -- seconds an attacker must stand on an objective to plant it
