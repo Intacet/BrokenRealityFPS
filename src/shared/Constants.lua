@@ -82,8 +82,8 @@ Constants.MOVEMENT_ANIMATION_IDS = {
         Unarmed = {
             WalkForward = "rbxassetid://83352851460622",
             RunForward  = "rbxassetid://106253559282626",
-            WalkLeft    = "rbxassetid://101275785187464",  -- no-gun strafe left
-            WalkRight   = "rbxassetid://73888687255042",   -- no-gun strafe right
+            WalkLeft    = "rbxassetid://115652140967957",  -- no-gun strafe left
+            WalkRight   = "rbxassetid://82804864629403",   -- no-gun strafe right
         },
         AR15 = {
             WalkForward = "rbxassetid://138802532485746",
@@ -97,9 +97,9 @@ Constants.MOVEMENT_ANIMATION_FADE_TIME = 0.15  -- seconds to cross-fade between 
 -- Animation playback speed multipliers (Stage 2C).
 -- Applied via AnimationTrack:AdjustSpeed() when a track starts playing.
 -- Tune these to match clip cadence without changing Humanoid.WalkSpeed.
-Constants.MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.85  -- WalkForward plays at 1.85× clip speed
-Constants.MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.6   -- WalkLeft/WalkRight play at 1.6× clip speed
-Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.3   -- RunForward plays at 1.3× clip speed
+Constants.MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.7   -- WalkForward plays at 1.7× clip speed
+Constants.MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.4   -- WalkLeft/WalkRight play at 1.4× clip speed
+Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15  -- RunForward plays at 1.15× clip speed
 
 -- When true, WalkLeft/WalkRight strafe animations only play while mouse lock / shift-lock
 -- style state is active (UserInputService.MouseBehavior == LockCenter).

@@ -536,7 +536,7 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-044] MovementController animation system — Stage 2E character-facing — UPDATED 2026-05-19 (x8)
+## [DEBT-044] MovementController animation system — Unarmed strafe ID swap — UPDATED 2026-05-20 (x9)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
@@ -553,6 +553,13 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 - **(3) WalkLeft/WalkRight strafe animations not playing:** CoreScripts or UI transitions could silently reset `UserInputService.MouseBehavior` after the LeftAlt toggle, while `customMouseLocked` remained true and the strafe gate read correctly. New constant `CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME = true` causes the Heartbeat callback to re-write `MouseBehavior = LockCenter` on every frame while `customMouseLocked` is true, preventing the lock from being stolen.
 - **Phase-exit behavior changed:** `customMouseLocked` is NO LONGER reset when leaving ACTIVE phase. Player's toggle state persists across ACTIVE → LOBBY → RESULTS → ACTIVE. Only `loadMovementAnimations()` (respawn) and `destroy()` reset it to `false`. The `SetCustomMouseLocked()` call now delegates to new private helper `applyCustomMouseLock()` instead of writing `MouseBehavior` inline.
 - Three new Constants added: `DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK`, `CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME`, `CUSTOM_MOUSE_LOCK_INPUT_PRIORITY`.
+
+**Updated (2026-05-20 — Unarmed strafe ID swap + multiplier correction):**
+- `Unarmed.WalkLeft` replaced: `101275785187464` → `115652140967957` (confirmed-good R6 no-gun strafe left).
+- `Unarmed.WalkRight` replaced: `73888687255042` → `82804864629403` (confirmed-good R6 no-gun strafe right).
+- Animation speed multipliers corrected to confirmed values: walk 1.7×, strafe 1.4×, run 1.15×.
+- All AR15 IDs, Unarmed WalkForward/RunForward IDs, and all MovementController behavior preserved unchanged.
+- Asset swap and constant correction only — no logic changes.
 
 **Updated (2026-05-19 — Stage 2E: character-facing camera yaw):**
 When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (LeftAlt) now also:
@@ -584,7 +591,7 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - `equippedWeaponName` is presentation-only. True armed/unarmed state must later come from a server-owned equipment/loadout system. `SetEquippedWeaponName` must eventually be called by a real EquipmentController or weapon equip system (see DEBT-050).
 - Sprint in all directions still uses RunForward (no directional sprint animations yet). Backward and diagonal movement uses WalkForward fallback only.
 - If `DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = false`, Animate keeps running and may override or blend with custom locomotion tracks. This constant must stay `true` for custom animations to take effect.
-- Animation speed multipliers (`MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER = 2.0`, `MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.35`) were set before Studio testing. These values may need tuning after Studio verification — if the clip cadence feels too fast or too slow, adjust only the Constants without touching controller logic.
+- Animation speed multipliers (walk 1.7×, strafe 1.4×, run 1.15×) were corrected 2026-05-20 alongside the Unarmed strafe ID swap. These values may still need tuning after Studio verification — if the clip cadence feels too fast or too slow, adjust only the Constants without touching controller logic.
 - `StarterPlayer.EnableMouseLockOption = false` is now set in `default.project.json` and `LocalPlayer.DevEnableMouseLock = false` is set on Start and CharacterAdded. If CoreScripts still find a path to re-enable Shift Lock, the `CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME` Heartbeat write provides a second line of defence. Verify in Studio that LeftShift never activates the Roblox native mouse-lock icon.
 - `ContextActionService:BindActionAtPriority` at priority 3000 is the new LeftAlt binding. If a future CoreScript update changes input priority behavior, the toggle lag could return. Verify in Studio that LeftAlt toggles take effect immediately (no perceptible 1-frame delay).
 - `CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME = true` re-writes `MouseBehavior = LockCenter` every Heartbeat while `customMouseLocked` is true. If an expensive UI transition reads `MouseBehavior` to detect lock state (rather than calling `IsCustomMouseLocked()`), it may be confused by the aggressive reapply. Verify in Studio that the UI does not flicker or misread lock state during phase transitions.

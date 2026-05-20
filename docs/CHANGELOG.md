@@ -7,6 +7,39 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-20] — asset: swap Unarmed no-gun strafe-left/right animation IDs + correct speed multipliers
+
+### Summary
+Animation ID update for the Unarmed (no-gun) movement set. Confirmed-good R6 strafe-left and
+strafe-right clips replace the previous IDs. Animation speed multipliers corrected to confirmed
+values. No MovementController logic, camera behavior, or gun/combat systems changed.
+
+### Changed files
+
+- **`src/shared/Constants.lua`**:
+  - `MOVEMENT_ANIMATION_IDS.R6.Unarmed.WalkLeft`: `101275785187464` → `115652140967957`
+  - `MOVEMENT_ANIMATION_IDS.R6.Unarmed.WalkRight`: `73888687255042` → `82804864629403`
+  - `MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER`: `1.85` → `1.7`
+  - `MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER`: `1.6` → `1.4`
+  - `MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER`: `1.3` → `1.15`
+  - All AR15 IDs, Unarmed WalkForward/RunForward IDs, and all other constants preserved.
+
+- **`docs/PROJECT_MAP.md`** — Unarmed WalkLeft/WalkRight IDs and all three speed multiplier
+  values updated to match.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated to x9; ID swap and multiplier correction noted.
+
+### What was NOT changed
+No `src/client/` files. No `src/server/` files. No `default.project.json`.
+No MovementController logic. No camera changes. No gun/combat changes. No new remotes.
+
+### Validation
+- `rojo build` — passes.
+- MCP unavailable — Studio verification not performed. Needs Studio verification.
+  See DEBT-044 (x9) for test steps.
+
+---
+
 ## [2026-05-19] — Movement Stage 2E: character-facing camera yaw (shift-lock style)
 
 ### Summary

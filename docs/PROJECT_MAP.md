@@ -281,9 +281,9 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E (Animate-disable, R6 dete
                         --   Animation playback speed multipliers (Stage 2C — 2026-05-18):
                         --     AnimationTrack:AdjustSpeed() is called on play. Speeds do NOT change
                         --     Humanoid.WalkSpeed. Values from Constants.lua:
-                        --       MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 2.0  (WalkForward)
-                        --       MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.35 (WalkLeft, WalkRight)
-                        --       MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.0  (RunForward — unchanged)
+                        --       MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.7  (WalkForward)
+                        --       MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.4  (WalkLeft, WalkRight)
+                        --       MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15 (RunForward)
                         --
                         --   Animation set selection (added 2026-05-18):
                         --     Default animation set is Unarmed (no gun) when equippedWeaponName == nil.
@@ -348,11 +348,12 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E (Animate-disable, R6 dete
                         --     Animation IDs (Constants.MOVEMENT_ANIMATION_IDS.R6):
                         --       Unarmed.WalkForward = rbxassetid://83352851460622
                         --       Unarmed.RunForward  = rbxassetid://106253559282626
-                        --       Unarmed.WalkLeft    = rbxassetid://101275785187464
-                        --       Unarmed.WalkRight   = rbxassetid://73888687255042
+                        --       Unarmed.WalkLeft    = rbxassetid://115652140967957
+                        --       Unarmed.WalkRight   = rbxassetid://82804864629403
                         --       AR15.WalkForward    = rbxassetid://138802532485746
                         --       AR15.RunForward     = rbxassetid://79735501581082
-                        --     (IDs updated 2026-05-19 — asset swap only, MovementController logic unchanged)
+                        --     (IDs updated 2026-05-20 — Unarmed strafe-left/right swapped to confirmed-good R6 clips;
+                        --       MovementController logic and AR15 IDs unchanged)
                         --     Not in Stage 2A/2C/2D: crouch anim, backward-specific, diagonal-specific,
                         --       lower/upper-body split, reload/fire/ADS weapon animations.
                         --
