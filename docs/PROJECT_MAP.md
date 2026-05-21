@@ -494,7 +494,20 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --         TACTICAL_SPRINT_MIN_FORWARD_DOT, TACTICAL_SPRINT_BLOCKS_GUN_USE,
                         --         TACTICAL_SPRINT_STOP_ANIMATION_ENABLED.
                         --
-                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I/2J/2N/2O/2P: AR15 Falling/LandingMedium IDs (deferred),
+                        --     Stage 2Q (2026-05-21): fix crouch animation contamination.
+                        --       stopCrouchTracksExcept(allowedKey: string?): stops all _Crouch-keyed
+                        --       animationTracks except allowedKey; clears currentAnimationName if
+                        --       it was a stopped crouch track. Defined after clearTacticalSprintStopConnection().
+                        --       playCrouchTransition() EnterCrouch Stopped callback (not-moving):
+                        --       prefers CrouchIdle directly over holdCrouchBottomPose() — eliminates
+                        --       frame-0 flash from track:Play(0) in the hold-pose path.
+                        --       clearCrouchBottomHold(): removed AdjustSpeed(SPEED_MULT) before Stop —
+                        --       eliminates brief resume of frozen EnterCrouch during fade-out.
+                        --       stopCrouchTracksExcept call-sites: Stopped callback (crouchIdleKey2),
+                        --       updateMovementAnimation not-moving branch (crouchIdleKey),
+                        --       CrouchWalkStart path (startKey), CrouchWalk target path (targetCrouchKey).
+                        --
+                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I/2J/2N/2O/2P/2Q: AR15 Falling/LandingMedium IDs (deferred),
                         --       AR15 CrouchWalk/CrouchIdle IDs (deferred), AR15 tactical sprint IDs (deferred),
                         --       TacticalSprintForward2 variation system (deferred),
                         --       lower/upper-body split, reload/fire/ADS weapon animations.

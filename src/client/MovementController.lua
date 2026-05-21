@@ -2,7 +2,7 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P (Animate-disable, R6 detection, animation-set selection,
+-- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q (Animate-disable, R6 detection, animation-set selection,
 -- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
 -- character-facing camera yaw, Unarmed backward/diagonal directional animations,
 -- sprint always uses RunForward (RunForwardLeft/Right deferred — Stage 2L),
@@ -12,7 +12,8 @@
 -- third-person zoom limits + custom mouse-lock camera distance/offset,
 -- CrouchIdle looped idle while crouched+still + CrouchWalkStart one-shot idle-to-walk transition,
 -- Unarmed Falling looped + LandingMedium one-shot via Humanoid.StateChanged,
--- Tactical sprint foundation: double-tap LeftShift → faster sprint with speed ramp + forward-only animation + gun block) —
+-- Tactical sprint foundation: double-tap LeftShift → faster sprint with speed ramp + forward-only animation + gun block,
+-- Fix crouch animation contamination: stopCrouchTracksExcept helper + direct CrouchIdle transition + clearCrouchBottomHold no-resume fix) —
 -- walk, sprint, crouch speed; 8-direction camera-relative movement state; phase gating;
 -- respawn handling; connection cleanup; R6 animation playback with Unarmed default set.
 --
@@ -832,6 +833,34 @@ local function clearTacticalSprintStopConnection()
     end
 end
 
+-- Stage 2Q: Stops every loaded crouch-variant AnimationTrack whose key is NOT allowedKey.
+-- Called before transitioning into CrouchIdle, CrouchWalk*, or CrouchWalkStart to ensure
+-- no stale EnterCrouch hold or other crouch blend is still active on the Animator.
+-- allowedKey may be nil to stop ALL crouch tracks (used during phase exit / full cleanup).
+-- Does NOT call clearCrouchBottomHold() — callers that need to release the hold state must
+-- do so explicitly before calling this function.
+-- Clears currentAnimationName when the currently tracked animation was one of the stopped tracks.
+local function stopCrouchTracksExcept(allowedKey: string?)
+    for key, track in pairs(animationTracks) do
+        if key:find("_Crouch") and key ~= allowedKey then
+            if track.IsPlaying then
+                track:Stop(Constants.MOVEMENT_ANIMATION_FADE_TIME)
+                if Constants.MOVEMENT_ANIMATION_DEBUG then
+                    Logger.debug("[MovementController] stopCrouchTracksExcept: stopped " .. key)
+                end
+            end
+        end
+    end
+    -- If the currently tracked animation was a crouch track that was just stopped, clear it
+    -- so stopCurrentMovementAnimation() does not try to stop it a second time.
+    if currentAnimationName ~= ""
+        and currentAnimationName:find("_Crouch")
+        and currentAnimationName ~= allowedKey
+    then
+        currentAnimationName = ""
+    end
+end
+
 -- ============================================================
 -- Private helpers — Stage 2A: animation
 -- ============================================================
@@ -1215,14 +1244,19 @@ local function holdCrouchBottomPose()
     end
 end
 
--- Releases the active crouch bottom-hold by restoring playback speed and stopping
--- the held track with a short fade. Safe to call when no hold is active (no-op).
+-- Releases the active crouch bottom-hold by stopping the held track with a short fade.
+-- Safe to call when no hold is active (no-op).
 -- Does NOT stop unrelated locomotion tracks.
+--
+-- Stage 2Q fix: AdjustSpeed restoration before Stop was removed.
+-- holdCrouchBottomPose() freezes the track via AdjustSpeed(0). Calling AdjustSpeed(normal)
+-- immediately before Stop caused the frozen EnterCrouch to briefly resume playback from its
+-- frozen-near-end position during the fade-out window, producing a visible animation flash.
+-- Stopping at speed 0 lets the track fade out silently from the frozen frame — no resume.
 local function clearCrouchBottomHold()
     local track = crouchHoldTrack
     if track then
-        -- Restore normal playback speed before Stop so the fade-out is audible/visible.
-        track:AdjustSpeed(Constants.MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER)
+        -- Stop directly at AdjustSpeed(0). Do NOT restore speed first; see comment above.
         track:Stop(Constants.MOVEMENT_ANIMATION_FADE_TIME)
     end
     crouchHoldTrack          = nil
@@ -1327,7 +1361,24 @@ local function playCrouchTransition(entering: boolean)
                         holdCrouchBottomPose()
                     end
                 else
-                    holdCrouchBottomPose()
+                    -- Stage 2Q: prefer CrouchIdle directly over holdCrouchBottomPose().
+                    -- holdCrouchBottomPose() calls track:Play(0) which restarts EnterCrouch
+                    -- from frame 0 (one-frame flash) before seeking to near-end and freezing.
+                    -- When CrouchIdle exists, transition straight into it — no hold-pose step.
+                    local setName2       = getAnimationSetName()
+                    local crouchIdleKey2 = setName2 .. "_CrouchIdle"
+                    if animationTracks[crouchIdleKey2] ~= nil then
+                        stopCrouchTracksExcept(crouchIdleKey2)
+                        playMovementAnimation(crouchIdleKey2)
+                        if Constants.MOVEMENT_ANIMATION_DEBUG then
+                            Logger.debug(
+                                "[MovementController] crouch: EnterCrouch done → "
+                                .. crouchIdleKey2 .. " (direct, no hold-pose)"
+                            )
+                        end
+                    else
+                        holdCrouchBottomPose()
+                    end
                 end
             end
             -- If isCrouching == false here: C was released during the transition;
@@ -1618,6 +1669,8 @@ local function updateMovementAnimation()
                         clearCrouchBottomHold()
                     end
                     stopCurrentMovementAnimation()  -- stops CrouchIdle if playing
+                    -- Stage 2Q: stop any remaining stale crouch tracks before the start one-shot.
+                    stopCrouchTracksExcept(startKey)
                     crouchWalkStartPlaying = true
                     playMovementAnimation(startKey)
                     local startTrack = animationTracks[startKey]
@@ -1785,6 +1838,8 @@ local function updateMovementAnimation()
                 if isHoldingCrouchBottomPose then
                     clearCrouchBottomHold()
                 end
+                -- Stage 2Q: stop any stale crouch tracks before the directional walk animation.
+                stopCrouchTracksExcept(targetCrouchKey)
                 playMovementAnimation(targetCrouchKey)
             else
                 -- No crouch-walk available for this set/direction: hold the bottom pose.
@@ -1815,6 +1870,9 @@ local function updateMovementAnimation()
                 if isHoldingCrouchBottomPose then
                     clearCrouchBottomHold()
                 end
+                -- Stage 2Q: stop any stale crouch tracks (e.g. a fading EnterCrouch) before
+                -- playing CrouchIdle so they do not bleed through during the fade-in.
+                stopCrouchTracksExcept(crouchIdleKey)
                 -- playMovementAnimation guard prevents restart if CrouchIdle is already playing.
                 playMovementAnimation(crouchIdleKey)
             else

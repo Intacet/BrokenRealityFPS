@@ -7,6 +7,48 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-21] — Movement Stage 2Q: Fix crouch animation contamination
+
+### Summary
+
+Eliminated two visual artifacts that appeared when pressing C to crouch:
+
+1. **Frame-0 flash (primary)** — `playCrouchTransition()` Stopped callback called `holdCrouchBottomPose()` unconditionally when not moving. That function calls `track:Play(0)` which restarts EnterCrouch from frame 0 before seeking to near-end and freezing, producing a one-frame flash of the old crouch animation. **Fix:** Stopped callback now checks for `CrouchIdle` first; if present, calls `stopCrouchTracksExcept(crouchIdleKey2)` + `playMovementAnimation(crouchIdleKey2)` directly, skipping the hold-pose step entirely. `holdCrouchBottomPose()` is only called when no `CrouchIdle` track exists.
+
+2. **Resume flash (secondary)** — `clearCrouchBottomHold()` called `track:AdjustSpeed(SPEED_MULTIPLIER)` before `track:Stop(fade)`. This caused the AdjustSpeed(0)-frozen EnterCrouch to briefly resume playing from its frozen position during the fade-out, producing a visible replay of the stale animation. **Fix:** `clearCrouchBottomHold()` now calls `track:Stop()` directly without restoring speed first. The track fades out silently from the frozen frame.
+
+### New helper
+
+- **`stopCrouchTracksExcept(allowedKey: string?)`** — iterates `animationTracks`, stops every `_Crouch`-keyed track except `allowedKey`, and clears `currentAnimationName` if it was one of the stopped tracks. Called at all three crouch animation transition points to prevent any stale crouch blend from bleeding through.
+
+### Files changed
+
+- **`src/client/MovementController.lua`** (Stage 2Q):
+  - Header comment updated to include Stage 2Q.
+  - Added `stopCrouchTracksExcept(allowedKey: string?)` after `clearTacticalSprintStopConnection()`.
+  - `clearCrouchBottomHold()`: removed `track:AdjustSpeed(SPEED_MULTIPLIER)` before `track:Stop()`.
+  - `playCrouchTransition()` EnterCrouch Stopped callback, not-moving branch: added CrouchIdle preference path over `holdCrouchBottomPose()`.
+  - `updateMovementAnimation()` crouching-not-moving branch: added `stopCrouchTracksExcept(crouchIdleKey)` before `playMovementAnimation(crouchIdleKey)`.
+  - `updateMovementAnimation()` CrouchWalkStart path: added `stopCrouchTracksExcept(startKey)` before `playMovementAnimation(startKey)`.
+  - `updateMovementAnimation()` CrouchWalk target path: added `stopCrouchTracksExcept(targetCrouchKey)` before `playMovementAnimation(targetCrouchKey)`.
+
+### No-change scope
+
+No new animation IDs. No Constants changes. No speed multiplier changes. No camera writes. No new remotes. No server changes. No GunController/ViewModelController/SoundController changes.
+
+### MCP verification (2026-05-21)
+
+- Studio play mode entered; module loaded cleanly (`type=table`).
+- MatchController patched to ACTIVE for phase-gate passthrough.
+- Source-level checks via `mcScript.Source`:
+  - `track:AdjustSpeed` absent from `clearCrouchBottomHold` body ✓
+  - `animationTracks[crouchIdleKey2]` guard present in Stopped callback ✓
+  - `stopCrouchTracksExcept` function definition confirmed ✓
+  - All 4 call-sites confirmed (`crouchIdleKey2`, `crouchIdleKey`, `startKey`, `targetCrouchKey`) ✓
+- **Known limitation:** C key input via MCP `user_keyboard_input` does not reach `InputBegan` handler in Studio play mode (gameProcessed gate blocks it). Full end-to-end animation flow requires manual Studio playtest. This is the same limitation documented for Stage 2P (W-key not sustaining).
+
+---
+
 ## [2026-05-21] — Movement Stage 2P: Tactical sprint foundation (double-tap LeftShift)
 
 ### Summary
