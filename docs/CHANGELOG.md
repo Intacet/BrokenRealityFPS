@@ -7,6 +7,60 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-21] — Movement Stage 2O: Unarmed Falling looped + LandingMedium one-shot via Humanoid.StateChanged
+
+### Summary
+Adds R6 no-gun falling and medium landing animations driven by `Humanoid.StateChanged`. A looped
+`Falling` clip plays when the Humanoid enters Freefall. On landing after at least 0.25 s of freefall,
+a one-shot `LandingMedium` clip plays before normal animation selection resumes. Short hops, falls
+while crouching, and falls while a crouch transition is playing all skip `LandingMedium` cleanly. AR15
+set has no Falling/LandingMedium IDs and gracefully skips both animations. All existing walk, sprint,
+crouch, idle, and strafe behavior is preserved unchanged.
+
+### Changed files
+
+- **`src/shared/Constants.lua`**:
+  - Added `Unarmed.Falling = "rbxassetid://86705296926580"` — looped falling clip (Stage 2O)
+  - Added `Unarmed.LandingMedium = "rbxassetid://135915211175953"` — one-shot landing clip (Stage 2O)
+  - Added `Constants.MOVEMENT_FALLING_ANIMATION_SPEED_MULTIPLIER = 1.0` (Stage 2O)
+  - Added `Constants.MOVEMENT_LANDING_ANIMATION_SPEED_MULTIPLIER = 1.0` (Stage 2O)
+  - Added `Constants.MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME = 0.25` — minimum freefall seconds before LandingMedium plays (Stage 2O)
+
+- **`src/client/MovementController.lua`**:
+  - New private state variables: `isFalling`, `airStartTime`, `isLandingPlaying`, `landingConn`, `stateChangedConn`.
+  - New helper `clearLandingConnection()`: disconnects `landingConn`, clears `isLandingPlaying`. Must be called before any external Stop on LandingMedium.
+  - New handler `onHumanoidStateChanged(_old, new)`: phase-gated to ACTIVE; on Freefall plays Falling looped; on Landed/Running stops Falling and plays LandingMedium if air time ≥ MIN_AIR_TIME and not crouching.
+  - `getAnimationSpeedMultiplier()`: `Falling` → `MOVEMENT_FALLING_ANIMATION_SPEED_MULTIPLIER`; `LandingMedium` → `MOVEMENT_LANDING_ANIMATION_SPEED_MULTIPLIER`.
+  - `loadMovementAnimations()`: disconnects `stateChangedConn` at top; resets `isFalling`/`airStartTime`/`clearLandingConnection()` on respawn; conditional loads for `Unarmed_Falling` and `Unarmed_LandingMedium`; `_LandingMedium$` added to `Looped = false` pattern.
+  - `updateMovementAnimation()`: `if isFalling then return end` and `if isLandingPlaying then return end` guards added after `crouchTransitionPlaying` check.
+  - `setupCharacter()`: `stateChangedConn = hum.StateChanged:Connect(onHumanoidStateChanged)` added after `loadMovementAnimations()`. NOT stored in `_connections`.
+  - Phase-exit handler (non-ACTIVE): `isFalling = false; clearLandingConnection()` added.
+  - `destroy()`: `stateChangedConn` disconnected; `isFalling`/`airStartTime` reset; `clearLandingConnection()` called.
+  - Header updated to Stage 2O. Ready log message updated.
+
+- **`docs/PROJECT_MAP.md`** — Falling/LandingMedium IDs added; falling behavior section updated.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated (x18): Stage 2O block added; "jump/fall" gap changed to "jump" and "climb" separate items (fall now implemented); four new Stage 2O risks added.
+
+### What was NOT changed
+No `src/server/` files. No `default.project.json`. No other client controllers.
+All walk/sprint/crouch/idle/strafe animation IDs and speed multipliers: unchanged.
+AR15 set: no Falling or LandingMedium tracks — gracefully skipped by `animationTracks[key] ~= nil` guard.
+No camera writes. No new RemoteEvents. No gun/combat logic touched.
+No `Humanoid.JumpPower`, `WalkSpeed`, `HipHeight`, or fall damage changes.
+
+### Validation
+- `rojo build` — passes.
+- MCP/Studio verified 2026-05-21 — fall monitor trace (50-stud drop):
+  - `t=0.13s Freefall` → Falling (`86705296926580`, `L=true`) starts, Idle fades out ✅
+  - `t=0.32s Freefall` → Falling only (Idle fully gone) ✅
+  - `t=0.73s Landed`  → LandingMedium (`135915211175953`, `L=false`) starts, Falling fades out ✅
+  - `t=0.92s Running` → LandingMedium only (Falling fully gone) ✅
+  - `t=1.65s Running` → Idle starts (LandingMedium Stopped callback fired, gate released) ✅
+  - `t=1.95s Running` → Idle only (clean return to normal loop) ✅
+
+---
+
 ## [2026-05-20] — Movement Stage 2N: CrouchIdle looped animation + CrouchWalkStart one-shot transition
 
 ### Summary

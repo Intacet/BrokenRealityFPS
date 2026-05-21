@@ -2,7 +2,7 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N (Animate-disable, R6 detection, animation-set selection,
+-- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O (Animate-disable, R6 detection, animation-set selection,
 -- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
 -- character-facing camera yaw, Unarmed backward/diagonal directional animations,
 -- sprint always uses RunForward (RunForwardLeft/Right deferred — Stage 2L),
@@ -10,7 +10,8 @@
 -- hold-to-crouch + EnterCrouch bottom-pose hold,
 -- Unarmed 8-directional crouch-walk animations + CrouchWalk speed multiplier,
 -- third-person zoom limits + custom mouse-lock camera distance/offset,
--- CrouchIdle looped idle while crouched+still + CrouchWalkStart one-shot idle-to-walk transition) —
+-- CrouchIdle looped idle while crouched+still + CrouchWalkStart one-shot idle-to-walk transition,
+-- Unarmed Falling looped + LandingMedium one-shot via Humanoid.StateChanged) —
 -- walk, sprint, crouch speed; 8-direction camera-relative movement state; phase gating;
 -- respawn handling; connection cleanup; R6 animation playback with Unarmed default set.
 --
@@ -381,6 +382,33 @@ local crouchWalkStartConn: RBXScriptConnection? = nil
 -- Reset to false in the crouch-not-moving branch and on respawn.
 local wasMovingWhileCrouching: boolean = false
 
+-- Stage 2O: falling and landing animation state ───────────────────────────────
+
+-- True while the Humanoid is in the Freefall state.
+-- Gates updateMovementAnimation from overriding the Falling looped track.
+-- Set true on Freefall; cleared to false on any landing state or on respawn/destroy.
+local isFalling: boolean = false
+
+-- os.clock() timestamp captured when Freefall begins.
+-- Used to compute air time on landing; compared against MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME.
+local airStartTime: number = 0
+
+-- True while the LandingMedium one-shot animation is playing.
+-- Gates updateMovementAnimation from overriding the landing clip.
+-- Cleared by clearLandingConnection() via the track's Stopped event.
+local isLandingPlaying: boolean = false
+
+-- Stopped-event connection for the active LandingMedium track.
+-- Disconnected by clearLandingConnection() BEFORE any external track:Stop() to prevent
+-- spurious callbacks — mirrors the clearCrouchTransitionConnection() pattern.
+local landingConn: RBXScriptConnection? = nil
+
+-- Per-character Humanoid.StateChanged connection.
+-- Connected in setupCharacter() after animation tracks are loaded.
+-- Disconnected at the top of loadMovementAnimations() (on respawn) and in destroy().
+-- NOT stored in _connections (which persists across respawns).
+local stateChangedConn: RBXScriptConnection? = nil
+
 -- ============================================================
 -- Private helpers — Stage 1
 -- ============================================================
@@ -741,6 +769,18 @@ local function clearCrouchWalkStart()
     crouchWalkStartPlaying = false
 end
 
+-- Stage 2O: Disconnects the LandingMedium Stopped callback and clears the playing flag.
+-- Must be called BEFORE any track:Stop() on the LandingMedium track to prevent spurious
+-- callbacks — mirrors the clearCrouchTransitionConnection() and clearCrouchWalkStart() patterns.
+-- Safe to call when no landing one-shot is active (no-op).
+local function clearLandingConnection()
+    if landingConn then
+        landingConn:Disconnect()
+        landingConn = nil
+    end
+    isLandingPlaying = false
+end
+
 -- ============================================================
 -- Private helpers — Stage 2A: animation
 -- ============================================================
@@ -927,6 +967,12 @@ local function getAnimationSpeedMultiplier(animationName: string): number
         -- CrouchWalkForwardLeft/Right, CrouchWalkBackwardLeft/Right (Stage 2J),
         -- CrouchIdle, CrouchIdleAlt (Stage 2N).
         return Constants.MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER
+    elseif animationName == "Falling" then
+        -- Stage 2O: looped falling clip played while Humanoid is in Freefall.
+        return Constants.MOVEMENT_FALLING_ANIMATION_SPEED_MULTIPLIER
+    elseif animationName == "LandingMedium" then
+        -- Stage 2O: one-shot landing clip played after landing from sufficient height.
+        return Constants.MOVEMENT_LANDING_ANIMATION_SPEED_MULTIPLIER
     end
     return 1.0
 end
@@ -1196,6 +1242,15 @@ local function loadMovementAnimations(character: Model)
     -- Stage 2N: disconnect CrouchWalkStart callback and clear its state (same reason).
     clearCrouchWalkStart()
     wasMovingWhileCrouching = false
+    -- Stage 2O: disconnect StateChanged and clear falling/landing state on respawn.
+    -- stateChangedConn is NOT in _connections (per-character only); disconnect here and in destroy().
+    if stateChangedConn then
+        stateChangedConn:Disconnect()
+        stateChangedConn = nil
+    end
+    isFalling    = false
+    airStartTime = 0
+    clearLandingConnection()
     -- Do NOT call clearCrouchBottomHold() here — the previous Animator may already be
     -- destroyed, making the hold track reference unsafe to Stop(). Clear state directly.
     crouchHoldTrack          = nil
@@ -1305,6 +1360,19 @@ local function loadMovementAnimations(character: Model)
         toLoad["Unarmed_CrouchWalkStart"] = r6.Unarmed.CrouchWalkStart
     end
 
+    -- Stage 2O: Falling — looped clip played while Humanoid is in Freefall.
+    -- Only loaded for Unarmed set. AR15 set has no Falling ID; the animationTracks[key] ~= nil
+    -- guard in onHumanoidStateChanged skips the animation cleanly when the key is absent.
+    if r6.Unarmed.Falling and r6.Unarmed.Falling ~= "" then
+        toLoad["Unarmed_Falling"] = r6.Unarmed.Falling
+    end
+
+    -- Stage 2O: LandingMedium — one-shot clip played on landing after MIN_AIR_TIME seconds.
+    -- Only loaded for Unarmed set (same AR15 guard applies — see above).
+    if r6.Unarmed.LandingMedium and r6.Unarmed.LandingMedium ~= "" then
+        toLoad["Unarmed_LandingMedium"] = r6.Unarmed.LandingMedium
+    end
+
     -- CrouchWalk tracks are optional. Only loaded if IDs exist in Constants.
     -- Stage 2J: nine Unarmed directional CrouchWalk* IDs added. All looped.
     -- CrouchWalk and CrouchWalkForward share the same asset ID (forward is the canonical fallback).
@@ -1343,8 +1411,11 @@ local function loadMovementAnimations(character: Model)
             animInstance.AnimationId = assetId
             animationInstances[key]  = animInstance
             local track              = animator:LoadAnimation(animInstance)
-            -- EnterCrouch, ExitCrouch, and CrouchWalkStart are one-shot clips; all others loop.
-            if key:match("_EnterCrouch$") or key:match("_ExitCrouch$") or key:match("_CrouchWalkStart$") then
+            -- One-shot clips play once and stop; all others loop.
+            -- Stage 2O: LandingMedium added to the one-shot list.
+            if key:match("_EnterCrouch$") or key:match("_ExitCrouch$")
+                or key:match("_CrouchWalkStart$") or key:match("_LandingMedium$")
+            then
                 track.Looped = false
             else
                 track.Looped = true
@@ -1382,6 +1453,9 @@ local function updateMovementAnimation()
 
     -- Do not interrupt a one-shot crouch transition clip.
     if crouchTransitionPlaying then return end
+    -- Stage 2O: do not interrupt Falling looped or LandingMedium one-shot.
+    if isFalling then return end
+    if isLandingPlaying then return end
 
     local setName = getAnimationSetName()   -- "Unarmed" (default) or "AR15" (when weapon equipped)
 
@@ -1758,6 +1832,129 @@ local function updateMovementAnimation()
 end
 
 -- ============================================================
+-- Private helpers — Stage 2O: Humanoid.StateChanged handler
+-- ============================================================
+
+-- Handles Humanoid state transitions to drive Falling (looped) and LandingMedium (one-shot).
+-- Connected in setupCharacter() after loadMovementAnimations(), stored in stateChangedConn.
+-- Disconnected at the top of loadMovementAnimations() on respawn and in destroy().
+-- NOT stored in _connections — it is per-character and must be managed separately.
+--
+-- Freefall  → isFalling = true; capture airStartTime; play Falling if the track exists.
+-- Landed / Running → isFalling = false; stop Falling; play LandingMedium if:
+--   • airTime ≥ MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME
+--   • not crouching (crouch branch owns the animation layer while isCrouching)
+--   • crouchTransitionPlaying is false (a one-shot transition owns the layer)
+--   • Falling and LandingMedium tracks exist for the current set
+--   After LandingMedium's Stopped event fires, clearLandingConnection() releases the gate
+--   and the next Heartbeat resumes normal animation selection.
+-- All other states → ignored.
+local function onHumanoidStateChanged(
+    _oldState: Enum.HumanoidStateType,
+    newState: Enum.HumanoidStateType
+)
+    if not Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED then return end
+    if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
+    if next(animationTracks) == nil then return end
+
+    local setName = getAnimationSetName()
+
+    if newState == Enum.HumanoidStateType.Freefall then
+        -- ── Entered Freefall ──────────────────────────────────────────────────
+        if isFalling then return end   -- already falling; guard against double-fire
+        isFalling    = true
+        airStartTime = os.clock()
+
+        -- Clear any in-flight LandingMedium Stopped callback (edge case: landed then jumped
+        -- again before the one-shot finished and landed a second time).
+        clearLandingConnection()
+        local landKey   = setName .. "_LandingMedium"
+        local landTrack = animationTracks[landKey]
+        if landTrack and landTrack.IsPlaying then
+            landTrack:Stop(Constants.MOVEMENT_ANIMATION_FADE_TIME)
+        end
+
+        -- Play Falling looped. Guard: track must exist (AR15 set has no Falling ID).
+        local fallingKey = setName .. "_Falling"
+        if animationTracks[fallingKey] ~= nil then
+            stopCurrentMovementAnimation()
+            playMovementAnimation(fallingKey)
+            if Constants.MOVEMENT_ANIMATION_DEBUG then
+                Logger.debug("[MovementController] Falling BEGIN (" .. fallingKey .. ")")
+            end
+        end
+
+    elseif newState == Enum.HumanoidStateType.Landed
+        or newState == Enum.HumanoidStateType.Running
+    then
+        -- ── Landed or transitioned to Running from airborne ───────────────────
+        -- Running fires when the character starts moving on the ground; Landed fires on
+        -- any ground contact. Both are treated as "landed" for animation purposes.
+        if not isFalling then return end   -- was not in a tracked Freefall; ignore
+        isFalling = false
+
+        local airTime = os.clock() - airStartTime
+
+        -- Stop the Falling looped track.
+        local fallingKey   = setName .. "_Falling"
+        local fallingTrack = animationTracks[fallingKey]
+        if fallingTrack ~= nil then
+            if currentAnimationName == fallingKey then
+                -- Let stopCurrentMovementAnimation handle the fade and name clear.
+                stopCurrentMovementAnimation()
+            elseif fallingTrack.IsPlaying then
+                fallingTrack:Stop(Constants.MOVEMENT_ANIMATION_FADE_TIME)
+            end
+        end
+
+        -- Guard: skip LandingMedium for any of these conditions:
+        --   • airTime too short (small hop or step-off — not a meaningful fall)
+        --   • player is crouching (crouch branch owns the animation layer)
+        --   • a crouch transition one-shot is in flight (it owns the layer)
+        --   • LandingMedium track was not loaded (AR15 set, or track absent)
+        local landKey   = setName .. "_LandingMedium"
+        local landTrack = animationTracks[landKey]
+        if airTime < Constants.MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME
+            or movementState.isCrouching
+            or crouchTransitionPlaying
+            or landTrack == nil
+        then
+            if Constants.MOVEMENT_ANIMATION_DEBUG then
+                Logger.debug(
+                    "[MovementController] Landing: LandingMedium skipped"
+                    .. " (airTime=" .. string.format("%.2f", airTime) .. "s"
+                    .. " crouching=" .. tostring(movementState.isCrouching)
+                    .. " transition=" .. tostring(crouchTransitionPlaying) .. ")"
+                )
+            end
+            return
+        end
+
+        -- Play LandingMedium one-shot. Gate isLandingPlaying so updateMovementAnimation
+        -- does not override it before the Stopped event fires.
+        isLandingPlaying = true
+        stopCurrentMovementAnimation()
+        playMovementAnimation(landKey)
+        if Constants.MOVEMENT_ANIMATION_DEBUG then
+            Logger.debug(
+                "[MovementController] LandingMedium BEGIN (" .. landKey
+                .. " airTime=" .. string.format("%.2f", airTime) .. "s)"
+            )
+        end
+
+        -- Stopped callback: release the gate so normal selection resumes next Heartbeat.
+        -- clearLandingConnection() BEFORE track:Stop() in any external caller — same pattern
+        -- as clearCrouchTransitionConnection() and clearCrouchWalkStart().
+        landingConn = landTrack.Stopped:Connect(function()
+            clearLandingConnection()
+            if Constants.MOVEMENT_ANIMATION_DEBUG then
+                Logger.debug("[MovementController] LandingMedium finished")
+            end
+        end)
+    end
+end
+
+-- ============================================================
 -- setupCharacter
 -- ============================================================
 
@@ -1790,6 +1987,14 @@ local function setupCharacter(char: Model)
     -- false, rig is not R6, or Animator is missing. Stage 1 speed logic is unaffected.
     -- disableDefaultAnimate() is called inside loadMovementAnimations after rig confirmation.
     loadMovementAnimations(char)
+
+    -- Stage 2O: connect StateChanged AFTER tracks are loaded so the handler can reference
+    -- animationTracks safely. stateChangedConn is disconnected at the top of
+    -- loadMovementAnimations() on the next respawn, and in destroy(). NOT in _connections.
+    local hum2 = humanoid
+    if hum2 then
+        stateChangedConn = hum2.StateChanged:Connect(onHumanoidStateChanged)
+    end
 
     Logger.debug("[MovementController] Character set up: " .. char.Name)
 end
@@ -1933,6 +2138,14 @@ function MovementController:destroy()
     -- Stage 2N: disconnect CrouchWalkStart callback and clear its state.
     clearCrouchWalkStart()
     wasMovingWhileCrouching = false
+    -- Stage 2O: disconnect StateChanged and clear falling/landing state.
+    if stateChangedConn then
+        stateChangedConn:Disconnect()
+        stateChangedConn = nil
+    end
+    isFalling    = false
+    airStartTime = 0
+    clearLandingConnection()
     clearCrouchBottomHold()
     -- Stop the active animation if still playing, then clear track references.
     stopCurrentMovementAnimation()
@@ -2031,6 +2244,9 @@ function MovementController:Start()
             crouchTransitionPlaying = false
             clearCrouchBottomHold()
             stopCurrentMovementAnimation()
+            -- Stage 2O: reset falling/landing state so re-entry to ACTIVE starts clean.
+            isFalling = false
+            clearLandingConnection()
             local hum = humanoid
             if hum then
                 hum.WalkSpeed = 0
@@ -2214,7 +2430,7 @@ function MovementController:Start()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1–2M: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals+new IDs, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→RunForward)")
+    Logger.debug("[MovementController] Ready (Stage 1–2O: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals+new IDs, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→RunForward, CrouchIdle, CrouchWalkStart, Falling+LandingMedium)")
 end
 
 return MovementController

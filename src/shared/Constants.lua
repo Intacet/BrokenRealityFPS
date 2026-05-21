@@ -131,6 +131,9 @@ Constants.MOVEMENT_ANIMATION_IDS = {
             CrouchWalkBackwardLeft  = "rbxassetid://118800024223445",-- no-gun crouch walk backward-left diagonal
             CrouchWalkBackwardRight = "rbxassetid://104285284019251",-- no-gun crouch walk backward-right diagonal
             CrouchWalkStart       = "rbxassetid://129868628706658",  -- no-gun crouch walk start one-shot transition (Stage 2N)
+            -- Stage 2O: falling and landing animations.
+            Falling               = "rbxassetid://86705296926580",   -- no-gun falling looped (Stage 2O)
+            LandingMedium         = "rbxassetid://135915211175953",  -- no-gun medium landing one-shot (Stage 2O)
         },
         AR15 = {
             WalkForward = "rbxassetid://138802532485746",
@@ -153,6 +156,13 @@ Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER               = 1.15  -- RunFo
 Constants.MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER              = 0.75  -- Idle plays at 0.75× clip speed (Stage 2H)
 Constants.MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.9   -- EnterCrouch/ExitCrouch one-shots play at 0.9× clip speed (Stage 2H)
 Constants.MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER       = 1.0   -- CrouchWalk* directional tracks play at 1.0× clip speed (Stage 2J)
+-- Stage 2O: falling and landing animation playback constants.
+Constants.MOVEMENT_FALLING_ANIMATION_SPEED_MULTIPLIER           = 1.0   -- Falling looped track AdjustSpeed multiplier (Stage 2O)
+Constants.MOVEMENT_LANDING_ANIMATION_SPEED_MULTIPLIER           = 1.0   -- LandingMedium one-shot AdjustSpeed multiplier (Stage 2O)
+-- Minimum seconds spent in Freefall before LandingMedium plays on landing.
+-- Falls shorter than this threshold skip the landing animation (small hop, fall from a step).
+-- Increase to require a longer drop before the landing clip triggers.
+Constants.MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME               = 0.25  -- seconds in Freefall required to trigger LandingMedium (Stage 2O)
 
 -- When true, WalkLeft/WalkRight strafe animations only play while mouse lock / shift-lock
 -- style state is active (UserInputService.MouseBehavior == LockCenter).

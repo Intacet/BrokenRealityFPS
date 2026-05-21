@@ -536,7 +536,7 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-20 (x17)
+## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-21 (x18)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
@@ -679,6 +679,21 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - All speed multipliers preserved: walk 1.3×, strafe 1.4×, run 1.15×, idle 0.75×, crouch transition 0.9×, crouch walk 1.0×.
 - MCP/Studio verified 2026-05-20: all 9 new IDs present in Constants source, all 8 old IDs absent, WalkForwardAlt in toLoad and speed helper, sprint block still 1 code line.
 
+**Updated (2026-05-21 — Stage 2O: Unarmed Falling looped + LandingMedium one-shot via Humanoid.StateChanged):**
+- `Falling = rbxassetid://86705296926580` added to `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed`: looped clip played while Humanoid is in Freefall. `Looped = true`. Only loaded for Unarmed set (AR15 has no Falling ID; the `animationTracks[key] ~= nil` guard in `onHumanoidStateChanged` skips it cleanly).
+- `LandingMedium = rbxassetid://135915211175953` added to `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed`: one-shot landing clip, `Looped = false`. Plays once on landing after at least `MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME` (0.25 s) of freefall. Skipped for crouch, crouch-transition, or short hops.
+- Three new Constants: `MOVEMENT_FALLING_ANIMATION_SPEED_MULTIPLIER = 1.0`, `MOVEMENT_LANDING_ANIMATION_SPEED_MULTIPLIER = 1.0`, `MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME = 0.25`.
+- New private state: `isFalling: boolean`, `airStartTime: number`, `isLandingPlaying: boolean`, `landingConn: RBXScriptConnection?`, `stateChangedConn: RBXScriptConnection?`.
+- New helper `clearLandingConnection()`: disconnects `landingConn` and clears `isLandingPlaying`. Must be called before any external Stop on LandingMedium — mirrors `clearCrouchTransitionConnection()` / `clearCrouchWalkStart()` patterns.
+- New handler `onHumanoidStateChanged(_old, new)`: phase-gated; ignores non-ACTIVE; on Freefall sets `isFalling = true`, records `airStartTime`, plays Falling; on Landed/Running stops Falling, checks air time, plays LandingMedium if all guards pass; on LandingMedium Stopped fires `clearLandingConnection()`.
+- `loadMovementAnimations()`: disconnects `stateChangedConn` at top (before `table.clear`); resets `isFalling`, `airStartTime`, `clearLandingConnection()` on respawn; conditional loads for `Unarmed_Falling` and `Unarmed_LandingMedium`; `_LandingMedium$` added to the `Looped = false` pattern.
+- `updateMovementAnimation()`: `if isFalling then return end` and `if isLandingPlaying then return end` guards added after `crouchTransitionPlaying` check — prevents Heartbeat from overriding Falling or LandingMedium.
+- `setupCharacter()`: `stateChangedConn = hum.StateChanged:Connect(onHumanoidStateChanged)` added after `loadMovementAnimations()`. NOT stored in `_connections`.
+- Phase-exit handler (non-ACTIVE branch): `isFalling = false; clearLandingConnection()` added so re-entry to ACTIVE starts clean.
+- `destroy()`: `stateChangedConn` disconnected; `isFalling`, `airStartTime` reset; `clearLandingConnection()` called.
+- `getAnimationSpeedMultiplier()`: `Falling` → `MOVEMENT_FALLING_ANIMATION_SPEED_MULTIPLIER`; `LandingMedium` → `MOVEMENT_LANDING_ANIMATION_SPEED_MULTIPLIER`.
+- MCP/Studio verified 2026-05-21: Freefall → Falling track plays (looped, `L=true`); Landed → LandingMedium plays once (`L=false`); after LandingMedium Stopped callback fires, Idle resumes normally. Full trace logged.
+
 **Updated (2026-05-20 — Stage 2N: CrouchIdle looped idle + CrouchWalkStart one-shot transition):**
 - `CrouchIdle = rbxassetid://81947601552045` added to `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed`: looped idle played while crouching + not moving. Replaces the EnterCrouch bottom-pose hold when the track is loaded. Falls back to `holdCrouchBottomPose()` when absent. `playMovementAnimation()` guard prevents restart every Heartbeat frame.
 - `CrouchIdleAlt = rbxassetid://132053404406349` added: deferred alternate clip. Loaded conditionally, never selected — no variation system built yet.
@@ -692,15 +707,17 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - All directional CrouchWalk* selection logic, sprint, AR15, and non-crouch behavior unchanged.
 - MCP/Studio verified 2026-05-20: all five Stage 2N IDs confirmed in Constants; old CrouchWalk ID (82558685099409) absent; CrouchIdle=looped=true, CrouchIdleAlt=looped=true, CrouchWalkStart=looped=false — all load without error on live character.
 
-**Remaining gaps (updated Stage 2N):**
+**Remaining gaps (updated Stage 2O):**
 - Crouch walk animation — implemented for Unarmed (9 directional IDs, Stage 2J). AR15/gun-equipped CrouchWalk IDs still deferred.
 - Directional sprint animations — all sprint directions now use RunForward (Stage 2L). RunForwardLeft/RunForwardRight IDs are in Constants but deferred.
 - AR15 run diagonal animations — AR15 set sprinting uses RunForward for all directions; no AR15-specific run diagonals.
 - AR15 backward/diagonal walk animations — AR15 set only has WalkForward and RunForward; backward and diagonal walk directions fall back to WalkForward/strafe grouping.
 - AR15 CrouchIdle / CrouchWalkStart — AR15 set has no CrouchIdle or CrouchWalkStart tracks; falls back to bottom-pose hold while crouched+still. Deferred to a future armed-crouch stage.
+- AR15 Falling / LandingMedium — AR15 set has no Falling or LandingMedium IDs; both are safely skipped by `animationTracks[key] ~= nil` guards. Deferred.
+- Jump animations — suppressed along with locomotion when Animate is disabled. Custom replacement needed in a future movement stage.
+- Climb animations — suppressed by Animate disable. Custom replacement needed.
 - Lower-body / upper-body animation split — not implemented; the full body plays the movement animation.
 - Reload, fire, ADS, and sprint-hold weapon animations — deferred to a weapon-anim stage.
-- Jump, fall, and climb animations — suppressed along with locomotion when Animate is disabled. Custom replacements needed in a future movement stage.
 - True server-owned equipment state — equippedWeaponName is presentation-only; see DEBT-050.
 - Full custom camera controller — `SetCustomMouseLocked` writes `UserInputService.MouseBehavior = LockCenter`. A full custom camera controller (Scriptable CameraType, raw mouse-delta yaw/pitch) is not built.
 - First-person integration — when `FORCE_FIRST_PERSON = true` (ViewModelController), Stage 2K zoom limits and mouse-lock distance only apply while Classic CameraMode is active. Verify when first-person is enabled (DEBT-048).
@@ -735,6 +752,10 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - **Stage 2K new risk — toggle key change:** LeftControl is now the mouse-lock toggle (was LeftAlt). LeftControl is also used by some OS-level and Roblox CoreScript shortcuts. Verify in Studio (and on each target platform) that LeftControl does not conflict with any OS shortcut or Roblox default binding. If a conflict is found, change `CUSTOM_MOUSE_LOCK_TOGGLE_KEY` to another key without touching any other code.
 - **Stage 2K new risk — CameraOffset and character size:** `CUSTOM_MOUSE_LOCK_CAMERA_OFFSET = Vector3.new(1.75, 0, 0)` is tuned for the default R6 rig dimensions. If the character is scaled (accessories, hats, or future character resizing), the right-shoulder offset may drift visually (too far right or too close to the camera). No fix needed now; revisit when character scaling is added.
 - **Stage 2K new risk — CameraOffset fallback reliability:** `applyCustomMouseLockCamera()` and `restoreNormalThirdPersonCamera()` fall back to `Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid")` when the module-level `humanoid` is nil. If `Character` itself is nil (player hasn't spawned yet or is in the death/respawn gap), the fallback returns nil and the CameraOffset write is silently skipped. The zoom distance write still succeeds (it targets `LocalPlayer`, not the humanoid). The CameraOffset will be applied correctly on the next CharacterAdded callback. This is acceptable — the camera distance still changes on toggle; only the shoulder offset is temporarily missed.
+- **Stage 2O new risk — LandingMedium while crouching:** When the player lands while crouched, `movementState.isCrouching == true` skips LandingMedium. `isFalling` is cleared and the crouch branch resumes on the next Heartbeat (CrouchIdle or bottom-pose hold). This is intentional, but if a distinct crouched-landing animation is ever wanted for the Unarmed set, a separate `CrouchLandingMedium` ID and branch will need to be added without disrupting the existing standing-landing path.
+- **Stage 2O new risk — Running fires on ground contact:** `onHumanoidStateChanged` treats `Enum.HumanoidStateType.Running` as a landing signal (alongside `Landed`) because Roblox's state machine transitions directly to Running when a moving character lands. If `Running` fires for reasons unrelated to landing (e.g. a very brief airborne frame that does not set `isFalling`), the `if not isFalling then return end` guard prevents false positives. Verify in Studio that no spurious Running handler calls produce unwanted animation interruptions during normal ground locomotion.
+- **Stage 2O new risk — short jumps skip LandingMedium:** `MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME = 0.25` s. A jump that doesn't clear 0.25 s of Freefall (step off a curb, walk off a very short ledge) will skip LandingMedium. This is intentional, but if the threshold feels too aggressive in Studio (landing animation never plays, or always plays), adjust only the constant.
+- **Stage 2O new risk — `stateChangedConn` is NOT in `_connections`:** The connection is per-character and manually managed (disconnected in `loadMovementAnimations()` top block and in `destroy()`). If any future code path calls `destroy()` before `setupCharacter()` runs on a new character, `stateChangedConn` may be nil (no-op disconnect). This is safe but must be kept in mind when extending the lifecycle flow.
 - **Stage 2K new risk — zoom distance tuning:** `THIRD_PERSON_MIN_ZOOM_DISTANCE = 4` and `THIRD_PERSON_MAX_ZOOM_DISTANCE = 14` and `CUSTOM_MOUSE_LOCK_CAMERA_DISTANCE = 8` are initial values and have not been evaluated with multiple level sizes or field-of-view settings. Adjust only these three Constants if the camera feels too close or too far in Studio — no controller logic changes needed.
 - **Stage 2M new risk — WalkForwardAlt unused track:** `Unarmed_WalkForwardAlt` is loaded into `animationTracks` at spawn and occupies an `AnimationTrack` slot. It is never selected by `updateMovementAnimation()`. If the variation system is never built, this track will keep loading unnecessarily. Either implement the alternation system or remove the ID and load entry to reclaim the slot.
 - **Stage 2L new risk — sprint direction mismatch:** All sprint directions play RunForward. Sprinting left, right, backward, or diagonally will play a forward-facing run clip regardless of character movement direction. This is a known and intentional simplification. Re-enable directional sprint selection if directional run IDs are confirmed correct and needed for polish.

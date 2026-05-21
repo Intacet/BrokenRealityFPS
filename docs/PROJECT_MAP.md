@@ -383,6 +383,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Unarmed.CrouchWalkBackwardLeft  = rbxassetid://118800024223445 (Stage 2J — crouch walk backward-left diagonal)
                         --       Unarmed.CrouchWalkBackwardRight = rbxassetid://104285284019251 (Stage 2J — crouch walk backward-right diagonal)
                         --       Unarmed.CrouchWalkStart       = rbxassetid://129868628706658  (Stage 2N — one-shot idle-to-walk transition; plays once on first move while crouched)
+                        --       Unarmed.Falling           = rbxassetid://86705296926580   (Stage 2O — looped falling clip; plays while Humanoid is in Freefall)
+                        --       Unarmed.LandingMedium     = rbxassetid://135915211175953  (Stage 2O — one-shot landing clip; plays after ≥0.25s freefall, not while crouching)
                         --       AR15.WalkForward          = rbxassetid://138802532485746
                         --       AR15.RunForward           = rbxassetid://79735501581082
                         --       AR15.Idle                 = rbxassetid://117989834436525  (Stage 2H — standing idle, looped)
@@ -395,7 +397,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Stage 2G (2026-05-20) — RunForwardLeft + RunForwardRight IDs added (retained in Constants; deferred since Stage 2L);
                         --       Stage 2H (2026-05-20) — Idle + EnterCrouch/ExitCrouch added for both sets;
                         --       Stage 2J (2026-05-20) — 9 Unarmed CrouchWalk* directional IDs added;
-                        --       Stage 2N (2026-05-20) — CrouchIdle, CrouchIdleAlt, CrouchWalkStart added; CrouchWalk/CrouchWalkForward IDs updated)
+                        --       Stage 2N (2026-05-20) — CrouchIdle, CrouchIdleAlt, CrouchWalkStart added; CrouchWalk/CrouchWalkForward IDs updated;
+                        --       Stage 2O (2026-05-21) — Falling, LandingMedium added; 3 speed/timing constants added)
                         --     Sprint behavior (Stage 2L — 2026-05-20):
                         --       All sprint directions (Forward/Backward/Left/Right/diagonals), all sets, mouse lock on or off → RunForward.
                         --       RunForwardLeft/RunForwardRight IDs remain in Constants but are not selected (deferred).
@@ -444,7 +447,23 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --         before any external Stop to prevent spurious callbacks.
                         --       Speed multiplier for CrouchIdle/CrouchIdleAlt: MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER (1.0×).
                         --       AR15/non-Unarmed: no CrouchIdle or CrouchWalkStart tracks — bottom-pose hold fallback unchanged.
-                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I/2J/2N: AR15 CrouchWalk/CrouchIdle IDs (deferred),
+                        --     Falling + landing behavior (Stage 2O — 2026-05-21):
+                        --       Humanoid.StateChanged connected per-character in setupCharacter() (stateChangedConn).
+                        --       Freefall → isFalling = true; airStartTime captured; Falling looped clip plays.
+                        --         updateMovementAnimation() gated: isFalling → return early (Heartbeat cannot override).
+                        --         Falling track only for Unarmed set; AR15 gracefully skips (animationTracks[key] ~= nil guard).
+                        --       Landed / Running → isFalling = false; Falling stops; LandingMedium plays if:
+                        --         airTime ≥ MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME (0.25s) AND not crouching
+                        --         AND not crouchTransitionPlaying AND LandingMedium track exists.
+                        --         isLandingPlaying gates updateMovementAnimation until LandingMedium Stopped fires.
+                        --         After LandingMedium Stopped: clearLandingConnection() releases gate; Idle resumes next Heartbeat.
+                        --       Short hops (< 0.25s freefall), crouched landing, and in-flight transitions: LandingMedium skipped.
+                        --       New constants: MOVEMENT_FALLING_ANIMATION_SPEED_MULTIPLIER=1.0,
+                        --         MOVEMENT_LANDING_ANIMATION_SPEED_MULTIPLIER=1.0, MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME=0.25.
+                        --       clearLandingConnection() mirrors clearCrouchTransitionConnection() / clearCrouchWalkStart() patterns.
+                        --       stateChangedConn is NOT in _connections — disconnected in loadMovementAnimations() top + destroy().
+                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I/2J/2N/2O: AR15 Falling/LandingMedium IDs (deferred),
+                        --       AR15 CrouchWalk/CrouchIdle IDs (deferred),
                         --       lower/upper-body split, reload/fire/ADS weapon animations.
                         --
                         --   Stage 2K — third-person camera zoom limits + mouse-lock camera (2026-05-20):
