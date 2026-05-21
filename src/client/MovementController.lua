@@ -2,7 +2,7 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L (Animate-disable, R6 detection, animation-set selection,
+-- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M (Animate-disable, R6 detection, animation-set selection,
 -- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
 -- character-facing camera yaw, Unarmed backward/diagonal directional animations,
 -- sprint always uses RunForward (RunForwardLeft/Right deferred — Stage 2L),
@@ -869,6 +869,7 @@ end
 local function getAnimationSpeedMultiplier(animationName: string): number
     assert(animationName ~= nil, "[MovementController] getAnimationSpeedMultiplier: animationName is required")
     if animationName == "WalkForward"
+        or animationName == "WalkForwardAlt"   -- Stage 2M: alternate forward walk (loaded but not yet selected)
         or animationName == "WalkBackward"
         or animationName == "WalkBackwardLeft"
         or animationName == "WalkBackwardRight"
@@ -1222,8 +1223,8 @@ local function loadMovementAnimations(character: Model)
         ["Unarmed_WalkBackwardRight"] = r6.Unarmed.WalkBackwardRight, -- no-gun backward-right diagonal (Stage 2F)
         ["Unarmed_WalkForwardLeft"]   = r6.Unarmed.WalkForwardLeft,   -- no-gun walk forward-left diagonal (Stage 2F)
         ["Unarmed_WalkForwardRight"]  = r6.Unarmed.WalkForwardRight,  -- no-gun walk forward-right diagonal (Stage 2F)
-        ["Unarmed_RunForwardLeft"]    = r6.Unarmed.RunForwardLeft,    -- no-gun run forward-left diagonal (Stage 2G)
-        ["Unarmed_RunForwardRight"]   = r6.Unarmed.RunForwardRight,   -- no-gun run forward-right diagonal (Stage 2G)
+        ["Unarmed_RunForwardLeft"]    = r6.Unarmed.RunForwardLeft,    -- no-gun run forward-left diagonal (Stage 2G — deferred)
+        ["Unarmed_RunForwardRight"]   = r6.Unarmed.RunForwardRight,   -- no-gun run forward-right diagonal (Stage 2G — deferred)
         ["Unarmed_Idle"]              = r6.Unarmed.Idle,              -- no-gun standing idle (Stage 2H)
         ["Unarmed_EnterCrouch"]       = r6.Unarmed.EnterCrouch,       -- no-gun enter-crouch one-shot (Stage 2H)
         ["Unarmed_ExitCrouch"]        = r6.Unarmed.ExitCrouch,        -- no-gun exit-crouch one-shot (Stage 2H)
@@ -1234,6 +1235,14 @@ local function loadMovementAnimations(character: Model)
         ["AR15_EnterCrouch"]          = r6.AR15.EnterCrouch,          -- AR15 enter-crouch one-shot (Stage 2H)
         ["AR15_ExitCrouch"]           = r6.AR15.ExitCrouch,           -- AR15 exit-crouch one-shot (Stage 2H)
     }
+
+    -- WalkForwardAlt is an optional alternate forward walk clip (Stage 2M).
+    -- Loaded if the ID exists in Constants; not selected yet — no variation system built.
+    -- When a safe alternation system is added later, select between Unarmed_WalkForward
+    -- and Unarmed_WalkForwardAlt without touching any other logic paths.
+    if r6.Unarmed.WalkForwardAlt and r6.Unarmed.WalkForwardAlt ~= "" then
+        toLoad["Unarmed_WalkForwardAlt"] = r6.Unarmed.WalkForwardAlt
+    end
 
     -- CrouchWalk tracks are optional. Only loaded if IDs exist in Constants.
     -- Stage 2J: nine Unarmed directional CrouchWalk* IDs added. All looped.
@@ -2093,7 +2102,7 @@ function MovementController:Start()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1–2L: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→RunForward)")
+    Logger.debug("[MovementController] Ready (Stage 1–2M: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals+new IDs, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→RunForward)")
 end
 
 return MovementController

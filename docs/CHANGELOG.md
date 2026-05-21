@@ -7,6 +7,51 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-20] — Movement Stage 2M: Unarmed walking animation ID replacement
+
+### Summary
+All 8 Unarmed R6 walking animation IDs replaced with new confirmed-good clips covering all
+walk directions. A new `WalkForwardAlt` clip is added and pre-loaded for a future variation
+system, but is not yet selected. All selection logic, speed multipliers, sprint, crouch, idle,
+and AR15 behavior are unchanged.
+
+### Changed files
+
+- **`src/shared/Constants.lua`**:
+  - `Unarmed.WalkForward`:     `71329939839948` → `81276554788940`
+  - Added `Unarmed.WalkForwardAlt = "rbxassetid://97919904114609"` (loaded, not selected)
+  - `Unarmed.WalkLeft`:        `115652140967957` → `127934481756733`
+  - `Unarmed.WalkRight`:       `82804864629403`  → `122034548466839`
+  - `Unarmed.WalkBackward`:    `107080862064563` → `140436478515683`
+  - `Unarmed.WalkBackwardLeft`:  `107785647885776` → `137714892165355`
+  - `Unarmed.WalkBackwardRight`: `109190640713438` → `83443564844340`
+  - `Unarmed.WalkForwardLeft`:   `97324289156918`  → `137297382056770`
+  - `Unarmed.WalkForwardRight`:  `81077784555491`  → `133633696854516`
+  - `RunForward`, all CrouchWalk* IDs, and all AR15 IDs unchanged.
+
+- **`src/client/MovementController.lua`**:
+  - `loadMovementAnimations()`: conditional load of `Unarmed_WalkForwardAlt` added (only if ID is non-empty).
+  - `getAnimationSpeedMultiplier()`: `WalkForwardAlt` added to the walk-multiplier branch (1.3×).
+  - Stage header updated: 2L → 2L + 2M. Ready log updated.
+  - No selection-logic changes. Sprint, crouch, idle, and walk directional behavior unchanged.
+
+- **`docs/PROJECT_MAP.md`** — all 8 walk IDs updated; `WalkForwardAlt` entry added with deferred note; ID history updated.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated (x16): Stage 2M block added; `WalkForwardAlt` unused-track risk entry added.
+
+### What was NOT changed
+No `src/server/` files. No `default.project.json`. No other client controllers.
+`RunForward`, `RunForwardLeft`, `RunForwardRight`, all CrouchWalk* IDs, all AR15 IDs: unchanged.
+No selection logic changed in `updateMovementAnimation()`.
+No speed multiplier values changed.
+No camera, mouse-lock, or combat behavior changed.
+
+### Validation
+- `rojo build` — passes.
+- MCP/Studio verified 2026-05-20: all 9 new IDs present, all 8 old IDs absent, WalkForwardAlt in toLoad + speed helper, sprint block = 1 code line.
+
+---
+
 ## [2026-05-20] — Movement Stage 2L: Unarmed forward animation ID swap + sprint simplification
 
 ### Summary

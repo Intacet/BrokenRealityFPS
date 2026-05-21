@@ -356,15 +356,16 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --     AR15 set: unchanged — left/right grouping with WalkForward fallback.
                         --     Debug: set-change and strafe-blocked-change logged once per change.
                         --     Animation IDs (Constants.MOVEMENT_ANIMATION_IDS.R6):
-                        --       Unarmed.WalkForward       = rbxassetid://71329939839948   (Stage 2L — confirmed-good R6 no-gun walk forward)
+                        --       Unarmed.WalkForward       = rbxassetid://81276554788940   (Stage 2M — confirmed-good R6 no-gun walk forward)
+                        --       Unarmed.WalkForwardAlt    = rbxassetid://97919904114609   (Stage 2M — alternate forward walk; loaded but not yet selected — no variation system)
                         --       Unarmed.RunForward        = rbxassetid://79045069356901   (Stage 2L — confirmed-good R6 no-gun run forward)
-                        --       Unarmed.WalkLeft          = rbxassetid://115652140967957
-                        --       Unarmed.WalkRight         = rbxassetid://82804864629403
-                        --       Unarmed.WalkBackward      = rbxassetid://107080862064563  (Stage 2F)
-                        --       Unarmed.WalkBackwardLeft  = rbxassetid://107785647885776  (Stage 2F)
-                        --       Unarmed.WalkBackwardRight = rbxassetid://109190640713438  (Stage 2F)
-                        --       Unarmed.WalkForwardLeft   = rbxassetid://97324289156918   (Stage 2F)
-                        --       Unarmed.WalkForwardRight  = rbxassetid://81077784555491   (Stage 2F)
+                        --       Unarmed.WalkLeft          = rbxassetid://127934481756733  (Stage 2M)
+                        --       Unarmed.WalkRight         = rbxassetid://122034548466839  (Stage 2M)
+                        --       Unarmed.WalkBackward      = rbxassetid://140436478515683  (Stage 2M)
+                        --       Unarmed.WalkBackwardLeft  = rbxassetid://137714892165355  (Stage 2M)
+                        --       Unarmed.WalkBackwardRight = rbxassetid://83443564844340   (Stage 2M)
+                        --       Unarmed.WalkForwardLeft   = rbxassetid://137297382056770  (Stage 2M)
+                        --       Unarmed.WalkForwardRight  = rbxassetid://133633696854516  (Stage 2M)
                         --       Unarmed.RunForwardLeft    = rbxassetid://94337945101783   (Stage 2G — deferred/unused; sprint always uses RunForward since Stage 2L)
                         --       Unarmed.RunForwardRight   = rbxassetid://104724352837263  (Stage 2G — deferred/unused; sprint always uses RunForward since Stage 2L)
                         --       Unarmed.Idle              = rbxassetid://132044223555193  (Stage 2H — standing idle, looped)
@@ -386,7 +387,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       AR15.ExitCrouch           = rbxassetid://91295776984408   (Stage 2H — exit-crouch one-shot)
                         --     (IDs updated 2026-05-20 — Unarmed strafe-left/right swapped to confirmed-good R6 clips;
                         --       Stage 2F (2026-05-20) — 5 new Unarmed walk directional clips added;
-                        --       Stage 2L (2026-05-20) — Unarmed WalkForward replaced (71329939839948) + RunForward replaced (79045069356901); sprint simplified to always use RunForward;
+                        --       Stage 2L (2026-05-20) — Unarmed WalkForward/RunForward replaced; sprint simplified to always use RunForward;
+                        --       Stage 2M (2026-05-20) — All 8 Unarmed walk IDs replaced + WalkForwardAlt added (loaded, not yet selected);
                         --       Stage 2G (2026-05-20) — RunForwardLeft + RunForwardRight IDs added (retained in Constants; deferred since Stage 2L);
                         --       Stage 2H (2026-05-20) — Idle + EnterCrouch/ExitCrouch added for both sets;
                         --       Stage 2J (2026-05-20) — 9 Unarmed CrouchWalk* directional IDs added)
