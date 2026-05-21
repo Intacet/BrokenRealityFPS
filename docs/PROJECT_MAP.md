@@ -383,8 +383,11 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Unarmed.CrouchWalkBackwardLeft  = rbxassetid://118800024223445 (Stage 2J — crouch walk backward-left diagonal)
                         --       Unarmed.CrouchWalkBackwardRight = rbxassetid://104285284019251 (Stage 2J — crouch walk backward-right diagonal)
                         --       Unarmed.CrouchWalkStart       = rbxassetid://129868628706658  (Stage 2N — one-shot idle-to-walk transition; plays once on first move while crouched)
-                        --       Unarmed.Falling           = rbxassetid://86705296926580   (Stage 2O — looped falling clip; plays while Humanoid is in Freefall)
-                        --       Unarmed.LandingMedium     = rbxassetid://135915211175953  (Stage 2O — one-shot landing clip; plays after ≥0.25s freefall, not while crouching)
+                        --       Unarmed.Falling               = rbxassetid://86705296926580   (Stage 2O — looped falling clip; plays while Humanoid is in Freefall)
+                        --       Unarmed.LandingMedium         = rbxassetid://135915211175953  (Stage 2O — one-shot landing clip; plays after ≥0.25s freefall, not while crouching)
+                        --       Unarmed.TacticalSprintForward1 = rbxassetid://135119369971434 (Stage 2P — looped tactical sprint forward, primary clip)
+                        --       Unarmed.TacticalSprintForward2 = rbxassetid://110008857265859 (Stage 2P — alternate forward clip; loaded, not yet selected — no variation system)
+                        --       Unarmed.TacticalSprintStop     = rbxassetid://81946205769343  (Stage 2P — one-shot stop clip; plays when tactical sprint ends)
                         --       AR15.WalkForward          = rbxassetid://138802532485746
                         --       AR15.RunForward           = rbxassetid://79735501581082
                         --       AR15.Idle                 = rbxassetid://117989834436525  (Stage 2H — standing idle, looped)
@@ -398,7 +401,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Stage 2H (2026-05-20) — Idle + EnterCrouch/ExitCrouch added for both sets;
                         --       Stage 2J (2026-05-20) — 9 Unarmed CrouchWalk* directional IDs added;
                         --       Stage 2N (2026-05-20) — CrouchIdle, CrouchIdleAlt, CrouchWalkStart added; CrouchWalk/CrouchWalkForward IDs updated;
-                        --       Stage 2O (2026-05-21) — Falling, LandingMedium added; 3 speed/timing constants added)
+                        --       Stage 2O (2026-05-21) — Falling, LandingMedium added; 3 speed/timing constants added;
+                        --       Stage 2P (2026-05-21) — TacticalSprintForward1, TacticalSprintForward2, TacticalSprintStop added)
                         --     Sprint behavior (Stage 2L — 2026-05-20):
                         --       All sprint directions (Forward/Backward/Left/Right/diagonals), all sets, mouse lock on or off → RunForward.
                         --       RunForwardLeft/RunForwardRight IDs remain in Constants but are not selected (deferred).
@@ -462,8 +466,37 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --         MOVEMENT_LANDING_ANIMATION_SPEED_MULTIPLIER=1.0, MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME=0.25.
                         --       clearLandingConnection() mirrors clearCrouchTransitionConnection() / clearCrouchWalkStart() patterns.
                         --       stateChangedConn is NOT in _connections — disconnected in loadMovementAnimations() top + destroy().
-                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I/2J/2N/2O: AR15 Falling/LandingMedium IDs (deferred),
-                        --       AR15 CrouchWalk/CrouchIdle IDs (deferred),
+                        --     Tactical sprint behavior (Stage 2P — 2026-05-21):
+                        --       Double-tap LeftShift while moving forward in ACTIVE phase starts tactical sprint.
+                        --       Double-tap window: TACTICAL_SPRINT_DOUBLE_TAP_WINDOW = 0.3s.
+                        --       Forward check: MoveDirection·camera-flat-forward ≥ TACTICAL_SPRINT_MIN_FORWARD_DOT (0.35).
+                        --       Speed ramp: WalkSpeed lerps from SPRINT_SPEED (22) to TACTICAL_SPRINT_SPEED (30)
+                        --         over TACTICAL_SPRINT_ACCELERATION_TIME (1.0s) each frame in applySpeed().
+                        --       Animation: TacticalSprintForward1 (looped) plays via updateMovementAnimation() sprint branch.
+                        --         TacticalSprintForward2 is loaded but never selected (no variation system yet).
+                        --       Ends when: LeftShift released, C (crouch) pressed, player stops moving,
+                        --         forward-dot drops below MIN_FORWARD_DOT, or phase leaves ACTIVE.
+                        --       Stop animation: TacticalSprintStop (one-shot) plays when tactical sprint ends
+                        --         (gated by TACTICAL_SPRINT_STOP_ANIMATION_ENABLED = true).
+                        --         tacticalSprintStopConn gate in updateMovementAnimation() prevents Heartbeat
+                        --         overriding the one-shot (mirrors landingConn / crouchWalkStartConn pattern).
+                        --       Phase exit (non-ACTIVE): directly clears state WITHOUT playing TacticalSprintStop
+                        --         (no visible effect during phase transitions).
+                        --       stopTacticalSprint() has 4 call sites: LeftShift InputEnded, crouch InputBegan,
+                        --         Heartbeat isMoving=false, Heartbeat fwdDot < MIN_FORWARD_DOT.
+                        --       Gun block: TACTICAL_SPRINT_BLOCKS_GUN_USE = true → GunController blocks
+                        --         WeaponFired and ReloadRequest while IsTacticalSprinting() returns true.
+                        --       IsTacticalSprinting() is a public boolean method read by GunController.
+                        --       AR15 set: no TacticalSprint IDs — tactical sprint plays TacticalSprintForward1
+                        --         only for Unarmed. (AR15 tactical sprint IDs deferred.)
+                        --       New constants: TACTICAL_SPRINT_ENABLED, TACTICAL_SPRINT_DOUBLE_TAP_WINDOW,
+                        --         TACTICAL_SPRINT_SPEED, TACTICAL_SPRINT_ACCELERATION_TIME,
+                        --         TACTICAL_SPRINT_MIN_FORWARD_DOT, TACTICAL_SPRINT_BLOCKS_GUN_USE,
+                        --         TACTICAL_SPRINT_STOP_ANIMATION_ENABLED.
+                        --
+                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I/2J/2N/2O/2P: AR15 Falling/LandingMedium IDs (deferred),
+                        --       AR15 CrouchWalk/CrouchIdle IDs (deferred), AR15 tactical sprint IDs (deferred),
+                        --       TacticalSprintForward2 variation system (deferred),
                         --       lower/upper-body split, reload/fire/ADS weapon animations.
                         --
                         --   Stage 2K — third-person camera zoom limits + mouse-lock camera (2026-05-20):
@@ -488,6 +521,7 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --   SetCustomMouseLocked(bool) → toggles custom mouse lock; writes MouseBehavior,
                         --     CameraMinZoomDistance, CameraMaxZoomDistance, and CameraOffset (Stage 2K);
                         --   IsCustomMouseLocked() → bool (true = LeftControl mouse lock is active);
+                        --   IsTacticalSprinting() → bool (true while double-tap tactical sprint is active) (Stage 2P);
                         --   Start(); destroy()
 CutsceneController      -- intro/outro sequences, triggered by RoundStateChanged
 HUD                     -- driven by HealthChanged, TeamStatusUpdate, AmmoChanged, RoundStateChanged

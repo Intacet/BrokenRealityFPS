@@ -134,6 +134,10 @@ Constants.MOVEMENT_ANIMATION_IDS = {
             -- Stage 2O: falling and landing animations.
             Falling               = "rbxassetid://86705296926580",   -- no-gun falling looped (Stage 2O)
             LandingMedium         = "rbxassetid://135915211175953",  -- no-gun medium landing one-shot (Stage 2O)
+            -- Stage 2P: tactical sprint animations (Unarmed only; no AR15 tactical sprint yet).
+            TacticalSprintForward1 = "rbxassetid://135119369971434", -- tactical sprint forward primary (looped) (Stage 2P)
+            TacticalSprintForward2 = "rbxassetid://110008857265859", -- tactical sprint forward alternate; loaded, not yet selected (Stage 2P)
+            TacticalSprintStop     = "rbxassetid://81946205769343",  -- tactical sprint stop one-shot; plays when tactical sprint ends (Stage 2P)
         },
         AR15 = {
             WalkForward = "rbxassetid://138802532485746",
@@ -163,6 +167,39 @@ Constants.MOVEMENT_LANDING_ANIMATION_SPEED_MULTIPLIER           = 1.0   -- Landi
 -- Falls shorter than this threshold skip the landing animation (small hop, fall from a step).
 -- Increase to require a longer drop before the landing clip triggers.
 Constants.MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME               = 0.25  -- seconds in Freefall required to trigger LandingMedium (Stage 2O)
+
+-- ============================================================
+-- Tactical sprint (Movement Stage 2P — double-tap LeftShift)
+-- ============================================================
+
+-- Master switch: when false, the entire tactical sprint system is disabled and
+-- double-tap LeftShift behaves the same as a normal sprint start.
+Constants.TACTICAL_SPRINT_ENABLED = true
+
+-- Seconds between two LeftShift presses that counts as a double-tap.
+-- A second press within this window after the first starts tactical sprint.
+Constants.TACTICAL_SPRINT_DOUBLE_TAP_WINDOW = 0.3
+
+-- WalkSpeed target at full tactical sprint (studs/s).
+-- Speed ramps from SPRINT_SPEED to this value over TACTICAL_SPRINT_ACCELERATION_TIME.
+Constants.TACTICAL_SPRINT_SPEED = 30
+
+-- Seconds to linearly ramp from SPRINT_SPEED to TACTICAL_SPRINT_SPEED after tactical sprint starts.
+Constants.TACTICAL_SPRINT_ACCELERATION_TIME = 1.0
+
+-- Minimum dot product of Humanoid.MoveDirection against the camera flat-forward vector
+-- required to sustain tactical sprint each Heartbeat. Falls below this → tactical sprint ends.
+-- 0.35 ≈ 70° off-forward; values above this require the player to face roughly forward.
+Constants.TACTICAL_SPRINT_MIN_FORWARD_DOT = 0.35
+
+-- When true, GunController blocks firing and reloading while tactical sprint is active.
+-- The client does not send WeaponFired or ReloadRequest during tactical sprint.
+Constants.TACTICAL_SPRINT_BLOCKS_GUN_USE = true
+
+-- When true, the TacticalSprintStop one-shot animation plays when tactical sprint ends
+-- (Shift released, direction changed, crouch pressed, or phase exit while sprinting).
+-- When false, tactical sprint ends silently and normal animation selection resumes immediately.
+Constants.TACTICAL_SPRINT_STOP_ANIMATION_ENABLED = true
 
 -- When true, WalkLeft/WalkRight strafe animations only play while mouse lock / shift-lock
 -- style state is active (UserInputService.MouseBehavior == LockCenter).

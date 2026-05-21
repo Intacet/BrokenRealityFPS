@@ -2,7 +2,7 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O (Animate-disable, R6 detection, animation-set selection,
+-- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P (Animate-disable, R6 detection, animation-set selection,
 -- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
 -- character-facing camera yaw, Unarmed backward/diagonal directional animations,
 -- sprint always uses RunForward (RunForwardLeft/Right deferred — Stage 2L),
@@ -11,7 +11,8 @@
 -- Unarmed 8-directional crouch-walk animations + CrouchWalk speed multiplier,
 -- third-person zoom limits + custom mouse-lock camera distance/offset,
 -- CrouchIdle looped idle while crouched+still + CrouchWalkStart one-shot idle-to-walk transition,
--- Unarmed Falling looped + LandingMedium one-shot via Humanoid.StateChanged) —
+-- Unarmed Falling looped + LandingMedium one-shot via Humanoid.StateChanged,
+-- Tactical sprint foundation: double-tap LeftShift → faster sprint with speed ramp + forward-only animation + gun block) —
 -- walk, sprint, crouch speed; 8-direction camera-relative movement state; phase gating;
 -- respawn handling; connection cleanup; R6 animation playback with Unarmed default set.
 --
@@ -246,11 +247,12 @@ local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEve
 -- ============================================================
 
 local movementState = {
-    isMoving      = false,          -- true when MoveDirection.Magnitude > MOVEMENT_DIRECTION_DEADZONE
-    isSprinting   = false,          -- true while LeftShift is held during ACTIVE
-    isCrouching   = false,          -- true while crouched (toggled by C during ACTIVE)
-    directionName = "Idle",         -- one of 9 direction strings (see classifyDirection)
-    moveVector    = Vector3.zero,   -- raw Humanoid.MoveDirection each Heartbeat
+    isMoving            = false,          -- true when MoveDirection.Magnitude > MOVEMENT_DIRECTION_DEADZONE
+    isSprinting         = false,          -- true while LeftShift is held during ACTIVE
+    isCrouching         = false,          -- true while crouched (toggled by C during ACTIVE)
+    directionName       = "Idle",         -- one of 9 direction strings (see classifyDirection)
+    moveVector          = Vector3.zero,   -- raw Humanoid.MoveDirection each Heartbeat
+    isTacticalSprinting = false,          -- true while tactical sprint is active (Stage 2P)
 }
 
 -- ============================================================
@@ -409,6 +411,30 @@ local landingConn: RBXScriptConnection? = nil
 -- NOT stored in _connections (which persists across respawns).
 local stateChangedConn: RBXScriptConnection? = nil
 
+-- Stage 2P: tactical sprint state ──────────────────────────────────────────
+
+-- True while a tactical sprint is active (double-tap LeftShift detected).
+-- Cleared on Shift release, movement stops, forward-dot failure, crouch, phase exit, or respawn.
+-- Mirrors movementState.isTacticalSprinting for GunController and other callers.
+local isTacticalSprinting: boolean = false
+
+-- os.clock() captured when tactical sprint began. Used to compute the speed ramp in applySpeed().
+-- Reset to 0 when tactical sprint ends.
+local tacticalSprintStartTime: number = 0
+
+-- os.clock() of the most recent valid LeftShift InputBegan event during ACTIVE phase.
+-- Used by double-tap detection: if the next LeftShift press arrives within
+-- TACTICAL_SPRINT_DOUBLE_TAP_WINDOW seconds of this value, tactical sprint starts.
+-- Initialized to 0 so the very first LeftShift press never triggers tactical sprint alone.
+local lastShiftPressTime: number = 0
+
+-- Stopped-event connection for the active TacticalSprintStop one-shot track.
+-- Connected when stopTacticalSprint() plays TacticalSprintStop; disconnected by
+-- clearTacticalSprintStopConnection() when the track finishes.
+-- Also used as an "is-playing" gate in updateMovementAnimation() — when non-nil,
+-- the one-shot is still running and Heartbeat must not override it.
+local tacticalSprintStopConn: RBXScriptConnection? = nil
+
 -- ============================================================
 -- Private helpers — Stage 1
 -- ============================================================
@@ -416,11 +442,12 @@ local stateChangedConn: RBXScriptConnection? = nil
 -- Resets all movementState fields to initial (idle) values.
 -- Does NOT apply WalkSpeed — callers must call applySpeed() or set it directly after.
 local function resetState()
-    movementState.isMoving      = false
-    movementState.isSprinting   = false
-    movementState.isCrouching   = false
-    movementState.directionName = "Idle"
-    movementState.moveVector    = Vector3.zero
+    movementState.isMoving            = false
+    movementState.isSprinting         = false
+    movementState.isCrouching         = false
+    movementState.directionName       = "Idle"
+    movementState.moveVector          = Vector3.zero
+    movementState.isTacticalSprinting = false  -- Stage 2P
 end
 
 -- Sets Humanoid.WalkSpeed according to the current phase and movementState.
@@ -433,6 +460,17 @@ local function applySpeed()
 
     if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then
         hum.WalkSpeed = 0
+        return
+    end
+
+    -- Stage 2P: tactical sprint speed ramp — lerp from SPRINT_SPEED to TACTICAL_SPRINT_SPEED
+    -- over TACTICAL_SPRINT_ACCELERATION_TIME. Runs before the regular speed checks so it
+    -- takes priority while tactical sprint is active (overrides the normal sprint path).
+    if isTacticalSprinting then
+        local elapsed = os.clock() - tacticalSprintStartTime
+        local t = math.clamp(elapsed / Constants.TACTICAL_SPRINT_ACCELERATION_TIME, 0, 1)
+        hum.WalkSpeed = Constants.SPRINT_SPEED
+            + (Constants.TACTICAL_SPRINT_SPEED - Constants.SPRINT_SPEED) * t
         return
     end
 
@@ -781,6 +819,19 @@ local function clearLandingConnection()
     isLandingPlaying = false
 end
 
+-- Stage 2P: Disconnects the TacticalSprintStop Stopped callback.
+-- Must be called BEFORE any track:Stop() on the TacticalSprintStop track to prevent
+-- spurious callbacks — mirrors the clearLandingConnection() pattern.
+-- Also used as the "is-playing" indicator in updateMovementAnimation(): when
+-- tacticalSprintStopConn is non-nil, the one-shot is still running.
+-- Safe to call when no stop one-shot is active (no-op).
+local function clearTacticalSprintStopConnection()
+    if tacticalSprintStopConn then
+        tacticalSprintStopConn:Disconnect()
+        tacticalSprintStopConn = nil
+    end
+end
+
 -- ============================================================
 -- Private helpers — Stage 2A: animation
 -- ============================================================
@@ -973,6 +1024,14 @@ local function getAnimationSpeedMultiplier(animationName: string): number
     elseif animationName == "LandingMedium" then
         -- Stage 2O: one-shot landing clip played after landing from sufficient height.
         return Constants.MOVEMENT_LANDING_ANIMATION_SPEED_MULTIPLIER
+    elseif animationName == "TacticalSprintForward1"
+        or animationName == "TacticalSprintForward2"
+    then
+        -- Stage 2P: tactical sprint forward clips play at the run animation speed.
+        return Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER
+    elseif animationName == "TacticalSprintStop" then
+        -- Stage 2P: tactical sprint stop one-shot plays at 1.0× (no speed adjustment needed).
+        return 1.0
     end
     return 1.0
 end
@@ -1034,6 +1093,61 @@ local function playMovementAnimation(animationName: string)
     track:Play(Constants.MOVEMENT_ANIMATION_FADE_TIME)
     track:AdjustSpeed(speedMult)
     currentAnimationName = animationName
+end
+
+-- ============================================================
+-- Private helpers — Stage 2P: tactical sprint
+-- ============================================================
+
+-- Ends tactical sprint, resets speed/state, and plays the TacticalSprintStop
+-- one-shot if enabled and the track is loaded.
+-- • Clears isTacticalSprinting and movementState.isTacticalSprinting immediately.
+-- • Stops the current movement animation (TacticalSprintForward1).
+-- • Plays TacticalSprintStop (one-shot) if TACTICAL_SPRINT_STOP_ANIMATION_ENABLED and present.
+--   The Stopped callback clears tacticalSprintStopConn when the one-shot finishes.
+-- • updateMovementAnimation() gates on tacticalSprintStopConn ~= nil while the one-shot runs.
+-- No-op if not currently tactical sprinting or if animation tracks are not loaded.
+-- Does NOT modify movementState.isSprinting — callers manage that flag based on LeftShift state.
+-- Defined here (after playMovementAnimation) so all helpers it calls are already in scope.
+local function stopTacticalSprint()
+    if not isTacticalSprinting then return end
+    isTacticalSprinting               = false
+    movementState.isTacticalSprinting = false
+    tacticalSprintStartTime           = 0
+
+    -- Disconnect any existing TacticalSprintStop Stopped callback first.
+    clearTacticalSprintStopConnection()
+
+    -- If tracks are not loaded (respawn edge case), just clear state and return.
+    if next(animationTracks) == nil then return end
+
+    -- Stop TacticalSprintForward1 (or whatever track is currently playing).
+    stopCurrentMovementAnimation()
+
+    -- Play TacticalSprintStop one-shot if enabled and present.
+    if Constants.TACTICAL_SPRINT_STOP_ANIMATION_ENABLED then
+        local setName = getAnimationSetName()
+        local stopKey = setName .. "_TacticalSprintStop"
+        if animationTracks[stopKey] ~= nil then
+            playMovementAnimation(stopKey)
+            local stopTrack = animationTracks[stopKey]
+            if stopTrack then
+                tacticalSprintStopConn = stopTrack.Stopped:Connect(function()
+                    clearTacticalSprintStopConnection()
+                    if Constants.MOVEMENT_ANIMATION_DEBUG then
+                        Logger.debug("[MovementController] TacticalSprintStop finished")
+                    end
+                end)
+            end
+            if Constants.MOVEMENT_ANIMATION_DEBUG then
+                Logger.debug("[MovementController] TacticalSprintStop BEGIN (" .. stopKey .. ")")
+            end
+        end
+    end
+
+    if Constants.MOVEMENT_ANIMATION_DEBUG then
+        Logger.debug("[MovementController] Tactical sprint END")
+    end
 end
 
 -- ============================================================
@@ -1251,6 +1365,13 @@ local function loadMovementAnimations(character: Model)
     isFalling    = false
     airStartTime = 0
     clearLandingConnection()
+    -- Stage 2P: clear tactical sprint state on respawn — do NOT play TacticalSprintStop here
+    -- because the previous Animator may already be destroyed (same reason as crouchHoldTrack).
+    isTacticalSprinting               = false
+    movementState.isTacticalSprinting = false
+    tacticalSprintStartTime           = 0
+    lastShiftPressTime                = 0
+    clearTacticalSprintStopConnection()
     -- Do NOT call clearCrouchBottomHold() here — the previous Animator may already be
     -- destroyed, making the hold track reference unsafe to Stop(). Clear state directly.
     crouchHoldTrack          = nil
@@ -1373,6 +1494,22 @@ local function loadMovementAnimations(character: Model)
         toLoad["Unarmed_LandingMedium"] = r6.Unarmed.LandingMedium
     end
 
+    -- Stage 2P: Tactical sprint animations — Unarmed set only.
+    -- TacticalSprintForward1: primary forward clip (looped); selected when isTacticalSprinting.
+    -- TacticalSprintForward2: alternate forward clip; loaded but not yet selected — deferred.
+    -- TacticalSprintStop: one-shot stop clip; plays when tactical sprint ends.
+    -- AR15 set has no tactical sprint IDs; the animationTracks[key] ~= nil guard in
+    -- updateMovementAnimation() falls back to RunForward cleanly when the key is absent.
+    if r6.Unarmed.TacticalSprintForward1 and r6.Unarmed.TacticalSprintForward1 ~= "" then
+        toLoad["Unarmed_TacticalSprintForward1"] = r6.Unarmed.TacticalSprintForward1
+    end
+    if r6.Unarmed.TacticalSprintForward2 and r6.Unarmed.TacticalSprintForward2 ~= "" then
+        toLoad["Unarmed_TacticalSprintForward2"] = r6.Unarmed.TacticalSprintForward2
+    end
+    if r6.Unarmed.TacticalSprintStop and r6.Unarmed.TacticalSprintStop ~= "" then
+        toLoad["Unarmed_TacticalSprintStop"] = r6.Unarmed.TacticalSprintStop
+    end
+
     -- CrouchWalk tracks are optional. Only loaded if IDs exist in Constants.
     -- Stage 2J: nine Unarmed directional CrouchWalk* IDs added. All looped.
     -- CrouchWalk and CrouchWalkForward share the same asset ID (forward is the canonical fallback).
@@ -1413,8 +1550,10 @@ local function loadMovementAnimations(character: Model)
             local track              = animator:LoadAnimation(animInstance)
             -- One-shot clips play once and stop; all others loop.
             -- Stage 2O: LandingMedium added to the one-shot list.
+            -- Stage 2P: TacticalSprintStop added to the one-shot list.
             if key:match("_EnterCrouch$") or key:match("_ExitCrouch$")
                 or key:match("_CrouchWalkStart$") or key:match("_LandingMedium$")
+                or key:match("_TacticalSprintStop$")
             then
                 track.Looped = false
             else
@@ -1456,6 +1595,9 @@ local function updateMovementAnimation()
     -- Stage 2O: do not interrupt Falling looped or LandingMedium one-shot.
     if isFalling then return end
     if isLandingPlaying then return end
+    -- Stage 2P: do not interrupt TacticalSprintStop one-shot (tacticalSprintStopConn is non-nil
+    -- only while the stop animation is playing — mirrors the landingConn "is-playing" pattern).
+    if tacticalSprintStopConn ~= nil then return end
 
     local setName = getAnimationSetName()   -- "Unarmed" (default) or "AR15" (when weapon equipped)
 
@@ -1731,8 +1873,23 @@ local function updateMovementAnimation()
     local animName: string
 
     if movementState.isSprinting then
-        -- Sprint: always use RunForward for the current animation set, regardless of direction
-        -- or customMouseLocked state. RunForwardLeft/RunForwardRight IDs are deferred. (Stage 2L)
+        -- Stage 2P: tactical sprint uses TacticalSprintForward1 exclusively.
+        -- No directional selection; the character always plays the forward clip.
+        -- Falls back to RunForward if the tactical sprint track is not loaded
+        -- (e.g. AR15 set has no TacticalSprintForward1).
+        if isTacticalSprinting then
+            local tsKey = setName .. "_TacticalSprintForward1"
+            if animationTracks[tsKey] ~= nil then
+                playMovementAnimation(tsKey)
+            else
+                playMovementAnimation(setName .. "_RunForward")
+            end
+            return  -- no further direction selection while tactical sprinting
+        end
+
+        -- Normal sprint: always use RunForward for the current animation set,
+        -- regardless of direction or customMouseLocked state.
+        -- RunForwardLeft/RunForwardRight IDs are deferred. (Stage 2L)
         animName = setName .. "_RunForward"
 
     elseif setName == Constants.MOVEMENT_ANIMATION_SET_UNARMED then
@@ -2117,6 +2274,15 @@ function MovementController.IsCustomMouseLocked(): boolean
     return customMouseLocked
 end
 
+-- ── Tactical sprint (Stage 2P) ─────────────────────────────────────────────────
+
+-- Returns true while a tactical sprint is active (double-tap LeftShift detected).
+-- GunController reads this to block firing and reloading when TACTICAL_SPRINT_BLOCKS_GUN_USE
+-- is true. Returns false after Shift release, direction change, crouch, or phase exit.
+function MovementController.IsTacticalSprinting(): boolean
+    return isTacticalSprinting
+end
+
 -- Disconnects all event connections, stops all animation tracks, destroys Animation
 -- instances, and resets all state.
 -- Safe to call even if Start() was never called (iterates empty tables).
@@ -2146,6 +2312,12 @@ function MovementController:destroy()
     isFalling    = false
     airStartTime = 0
     clearLandingConnection()
+    -- Stage 2P: clear tactical sprint state without playing TacticalSprintStop (destroy path).
+    isTacticalSprinting               = false
+    movementState.isTacticalSprinting = false
+    tacticalSprintStartTime           = 0
+    lastShiftPressTime                = 0
+    clearTacticalSprintStopConnection()
     clearCrouchBottomHold()
     -- Stop the active animation if still playing, then clear track references.
     stopCurrentMovementAnimation()
@@ -2247,6 +2419,17 @@ function MovementController:Start()
             -- Stage 2O: reset falling/landing state so re-entry to ACTIVE starts clean.
             isFalling = false
             clearLandingConnection()
+            -- Stage 2P: clear tactical sprint state on phase exit.
+            -- Do NOT call stopTacticalSprint() here — it would try to play TacticalSprintStop
+            -- while the phase is leaving ACTIVE (the animation would have no visible effect and
+            -- the character is about to freeze). Clear state directly instead.
+            if isTacticalSprinting then
+                isTacticalSprinting               = false
+                movementState.isTacticalSprinting = false
+                tacticalSprintStartTime           = 0
+                clearTacticalSprintStopConnection()
+                stopCurrentMovementAnimation()
+            end
             local hum = humanoid
             if hum then
                 hum.WalkSpeed = 0
@@ -2309,6 +2492,43 @@ function MovementController:Start()
             if UserInputService:GetFocusedTextBox() ~= nil then return end
             if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
             if movementState.isCrouching then return end
+
+            -- Stage 2P: double-tap LeftShift detection.
+            -- Compare this press against the previous one. If within the double-tap window
+            -- and the player is already moving forward, start tactical sprint.
+            local now = os.clock()
+            if Constants.TACTICAL_SPRINT_ENABLED
+                and not isTacticalSprinting
+                and movementState.isMoving
+                and (now - lastShiftPressTime) <= Constants.TACTICAL_SPRINT_DOUBLE_TAP_WINDOW
+            then
+                -- Forward dot check: MoveDirection must point sufficiently toward camera forward.
+                local hum2 = humanoid
+                if hum2 then
+                    local cam     = workspace.CurrentCamera
+                    local look    = cam.CFrame.LookVector
+                    local flat    = Vector3.new(look.X, 0, look.Z)
+                    local fwdDot: number = 0
+                    if flat.Magnitude > 0.01 then
+                        fwdDot = hum2.MoveDirection:Dot(flat.Unit)
+                    end
+                    if fwdDot >= Constants.TACTICAL_SPRINT_MIN_FORWARD_DOT then
+                        isTacticalSprinting               = true
+                        movementState.isTacticalSprinting = true
+                        tacticalSprintStartTime           = os.clock()
+                        if Constants.MOVEMENT_ANIMATION_DEBUG then
+                            Logger.debug(
+                                "[MovementController] Tactical sprint START"
+                                .. " (fwdDot=" .. string.format("%.2f", fwdDot) .. ")"
+                            )
+                        end
+                    end
+                end
+            end
+            -- Always update lastShiftPressTime AFTER the check so this press becomes
+            -- the "previous press" for the next InputBegan event.
+            lastShiftPressTime = now
+
             movementState.isSprinting = true
             applySpeed()
         end
@@ -2319,6 +2539,10 @@ function MovementController:Start()
         function(input: InputObject, _gp: boolean)
             if input.KeyCode ~= Enum.KeyCode.LeftShift then return end
             if not movementState.isSprinting then return end
+            -- Stage 2P: Shift release ends tactical sprint (plays TacticalSprintStop one-shot).
+            if isTacticalSprinting then
+                stopTacticalSprint()
+            end
             movementState.isSprinting = false
             applySpeed()
         end
@@ -2370,6 +2594,10 @@ function MovementController:Start()
             if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
             if movementState.isCrouching then return end  -- already crouching; ignore repeat
 
+            -- Stage 2P: crouch cancels tactical sprint (plays TacticalSprintStop one-shot).
+            if isTacticalSprinting then
+                stopTacticalSprint()
+            end
             movementState.isCrouching = true
             movementState.isSprinting = false
             applySpeed()
@@ -2425,12 +2653,35 @@ function MovementController:Start()
 
         applySpeed()
 
+        -- Stage 2P: sustain or end tactical sprint based on movement direction each frame.
+        -- If the player stops moving or drifts off-forward, tactical sprint ends automatically.
+        -- applySpeed() is called again after the state change so WalkSpeed reflects the
+        -- new non-tactical-sprint mode immediately (no one-frame speed overshoot).
+        if isTacticalSprinting then
+            if not movementState.isMoving then
+                stopTacticalSprint()
+                applySpeed()
+            else
+                local cam    = workspace.CurrentCamera
+                local look   = cam.CFrame.LookVector
+                local flat   = Vector3.new(look.X, 0, look.Z)
+                local fwdDot: number = 0
+                if flat.Magnitude > 0.01 then
+                    fwdDot = moveDir:Dot(flat.Unit)
+                end
+                if fwdDot < Constants.TACTICAL_SPRINT_MIN_FORWARD_DOT then
+                    stopTacticalSprint()
+                    applySpeed()
+                end
+            end
+        end
+
         -- Stage 2A: select and play the correct walk/run animation.
         updateMovementAnimation()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1–2O: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals+new IDs, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→RunForward, CrouchIdle, CrouchWalkStart, Falling+LandingMedium)")
+    Logger.debug("[MovementController] Ready (Stage 1–2P: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals+new IDs, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→RunForward, CrouchIdle, CrouchWalkStart, Falling+LandingMedium, TacticalSprint double-tap+ramp+stop)")
 end
 
 return MovementController

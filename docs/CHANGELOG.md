@@ -7,6 +7,79 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-21] — Movement Stage 2P: Tactical sprint foundation (double-tap LeftShift)
+
+### Summary
+Adds a tactical sprint mode triggered by double-tapping LeftShift while moving forward in the ACTIVE
+phase. Tactical sprint ramps `Humanoid.WalkSpeed` from `SPRINT_SPEED` (22) to `TACTICAL_SPRINT_SPEED`
+(30) over `TACTICAL_SPRINT_ACCELERATION_TIME` (1.0 s). A looped `TacticalSprintForward1` animation
+plays while active (forward direction only; no variation alternation yet). A one-shot `TacticalSprintStop`
+clip fires when tactical sprint ends (configurable). Firing and reloading are blocked while tactical
+sprint is active when `TACTICAL_SPRINT_BLOCKS_GUN_USE = true`. All existing walk, sprint, crouch,
+idle, falling, and landing behavior is preserved unchanged.
+
+### Changed files
+
+- **`src/shared/Constants.lua`**:
+  - Added `Unarmed.TacticalSprintForward1 = "rbxassetid://135119369971434"` — looped forward clip (Stage 2P)
+  - Added `Unarmed.TacticalSprintForward2 = "rbxassetid://110008857265859"` — alternate clip; loaded, not yet selected (Stage 2P)
+  - Added `Unarmed.TacticalSprintStop = "rbxassetid://81946205769343"` — one-shot stop clip (Stage 2P)
+  - Added `Constants.TACTICAL_SPRINT_ENABLED = true`
+  - Added `Constants.TACTICAL_SPRINT_DOUBLE_TAP_WINDOW = 0.3` — seconds between two LeftShift presses to trigger
+  - Added `Constants.TACTICAL_SPRINT_SPEED = 30` — top speed when tactical sprint is fully ramped
+  - Added `Constants.TACTICAL_SPRINT_ACCELERATION_TIME = 1.0` — seconds to ramp from SPRINT_SPEED to TACTICAL_SPRINT_SPEED
+  - Added `Constants.TACTICAL_SPRINT_MIN_FORWARD_DOT = 0.35` — minimum MoveDirection·camera-forward dot product to start/sustain
+  - Added `Constants.TACTICAL_SPRINT_BLOCKS_GUN_USE = true` — blocks WeaponFired and ReloadRequest while active
+  - Added `Constants.TACTICAL_SPRINT_STOP_ANIMATION_ENABLED = true` — plays TacticalSprintStop one-shot on end
+
+- **`src/client/MovementController.lua`**:
+  - New `movementState.isTacticalSprinting` boolean (mirrors private `isTacticalSprinting`; read by external systems).
+  - New private state: `isTacticalSprinting`, `tacticalSprintStartTime`, `lastShiftPressTime`, `tacticalSprintStopConn`.
+  - New helper `clearTacticalSprintStopConnection()`: disconnects `tacticalSprintStopConn`; placed after `clearLandingConnection()`.
+  - New function `stopTacticalSprint()`: clears `isTacticalSprinting`, plays `TacticalSprintStop` one-shot (if enabled and loaded), connects `Stopped` callback via `tacticalSprintStopConn`. Defined AFTER `playMovementAnimation()` to avoid Lua scoping issues.
+  - `applySpeed()`: tactical sprint ramp inserted as first check (before isCrouching): `WalkSpeed = SPRINT_SPEED + (TACTICAL_SPRINT_SPEED - SPRINT_SPEED) * t` where `t = clamp(elapsed/ACCELERATION_TIME, 0, 1)`.
+  - `getAnimationSpeedMultiplier()`: `TacticalSprintForward1` and `TacticalSprintForward2` → `MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER`; `TacticalSprintStop` → 1.0.
+  - `loadMovementAnimations()`: resets all tactical sprint state on respawn; conditionally loads `Unarmed_TacticalSprintForward1`, `Unarmed_TacticalSprintForward2`, `Unarmed_TacticalSprintStop`; `_TacticalSprintStop$` added to `Looped = false` pattern.
+  - `updateMovementAnimation()`: `if tacticalSprintStopConn ~= nil then return end` gate added (prevents Heartbeat overriding the stop one-shot, mirrors `landingConn` pattern); inside sprint branch, `if isTacticalSprinting then` plays `TacticalSprintForward1` (falling back to `RunForward`) and returns early.
+  - LeftShift `InputBegan`: double-tap detection — `(now - lastShiftPressTime) <= DOUBLE_TAP_WINDOW` within ACTIVE, `isMoving`, forward-dot ≥ `MIN_FORWARD_DOT`; sets `isTacticalSprinting = true` and captures `tacticalSprintStartTime`. `lastShiftPressTime` updated after each check.
+  - LeftShift `InputEnded`: calls `stopTacticalSprint()` if active.
+  - Crouch `InputBegan`: calls `stopTacticalSprint()` before entering crouch.
+  - Heartbeat: after `applySpeed()`, if `isTacticalSprinting` and not moving or `fwdDot < MIN_FORWARD_DOT` → `stopTacticalSprint()` + `applySpeed()`.
+  - Phase-exit (non-ACTIVE): directly clears `isTacticalSprinting` / `tacticalSprintStartTime` / `clearTacticalSprintStopConnection()` + `stopCurrentMovementAnimation()` WITHOUT calling `stopTacticalSprint()` (no visible effect during phase exit).
+  - `resetState()`: `movementState.isTacticalSprinting = false` added.
+  - `destroy()`: full tactical sprint state cleanup.
+  - New public method `IsTacticalSprinting(): boolean` — read by `GunController`.
+
+- **`src/client/GunController.lua`**:
+  - Fire handler: block before `WeaponFired:FireServer` when `TACTICAL_SPRINT_BLOCKS_GUN_USE and MovementController.IsTacticalSprinting()`.
+  - Reload handler: same block before `ReloadRequest:FireServer`.
+
+- **`docs/PROJECT_MAP.md`** — Stage 2P tactical sprint IDs, behavior, and `IsTacticalSprinting()` method added.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated (x19): Stage 2P block added; new risks documented.
+
+### What was NOT changed
+No `src/server/` files. No `default.project.json`. No `ViewModelController`, `SoundController`, or UI files.
+All walk/crouch/idle/falling/landing IDs, speed multipliers, and AR15 behavior: unchanged.
+No camera writes. No new RemoteEvents. No new `Humanoid.JumpPower` or fall damage changes.
+No slide, vault, or prone.
+
+### Validation
+- `rojo build` — passes.
+- MCP/Studio verified 2026-05-21:
+  - All 7 new Constants runtime values correct: `TACTICAL_SPRINT_ENABLED=true`, `SPEED=30`, `ACCELERATION_TIME=1.0`, `MIN_FORWARD_DOT=0.35`, `BLOCKS_GUN_USE=true`, `DOUBLE_TAP_WINDOW=0.3`, `STOP_ANIMATION_ENABLED=true` ✅
+  - All 3 animation IDs load on live character: `TacticalSprintForward1` (looped=true), `TacticalSprintForward2` (looped=true), `TacticalSprintStop` (looped=false) ✅
+  - `IsTacticalSprinting()` returns false at rest ✅
+  - WalkSpeed ramped to 30 (TACTICAL_SPRINT_SPEED) during double-tap test run — confirmed by live WalkSpeed=30 reading ✅
+  - Gun fire guard: `BLOCKS_GUN_USE=true + IsTacticalSprinting()=true → BLOCKED`; `IsTacticalSprinting()=false → FIRED` ✅
+  - 4 stopTacticalSprint() call sites confirmed in running module source ✅
+  - `tacticalSprintStopConn ~= nil` gate in `updateMovementAnimation` confirmed ✅
+  - Note: full live double-tap → animation → stop sequence was limited by MCP keyboard input not
+    registering sustained W key in Studio. All static patterns, load-time state, and guard logic
+    verified programmatically. Speed ramp confirmed via observed WalkSpeed=30 reading.
+
+---
+
 ## [2026-05-21] — Movement Stage 2O: Unarmed Falling looped + LandingMedium one-shot via Humanoid.StateChanged
 
 ### Summary

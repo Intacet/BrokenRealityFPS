@@ -222,6 +222,14 @@ function GunController:Start()
             isADS = false
         end
 
+        -- Stage 2P: block firing while tactical sprint is active.
+        -- Client-side presentation block only — no server state change.
+        if Constants.TACTICAL_SPRINT_BLOCKS_GUN_USE
+            and MovementController.IsTacticalSprinting()
+        then
+            return
+        end
+
         local character = LocalPlayer.Character
         if not character then return end
 
@@ -305,6 +313,12 @@ function GunController:Start()
         if gameProcessed then return end
         if input.KeyCode ~= Enum.KeyCode.R then return end
         if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
+        -- Stage 2P: block reload while tactical sprint is active.
+        if Constants.TACTICAL_SPRINT_BLOCKS_GUN_USE
+            and MovementController.IsTacticalSprinting()
+        then
+            return
+        end
         ReloadRequest:FireServer()
         SoundController:PlayReload()
         Logger.debug("[GunController] Reload requested")
