@@ -7,6 +7,58 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-20] — Movement Stage 2N: CrouchIdle looped animation + CrouchWalkStart one-shot transition
+
+### Summary
+Adds two new Unarmed crouch animation behaviors: `CrouchIdle` (looped idle played while crouching
+and not moving, replacing the EnterCrouch bottom-pose hold when available) and `CrouchWalkStart`
+(one-shot transition played exactly once when the player begins moving while crouched). A deferred
+alternate `CrouchIdleAlt` clip is loaded but not selected. `CrouchWalk` and `CrouchWalkForward` IDs
+are updated to a new confirmed-good clip. All directional crouch-walk, sprint, idle, and AR15 behavior
+are unchanged.
+
+### Changed files
+
+- **`src/shared/Constants.lua`**:
+  - Added `Unarmed.CrouchIdle = "rbxassetid://81947601552045"` — looped idle while crouched+still (Stage 2N)
+  - Added `Unarmed.CrouchIdleAlt = "rbxassetid://132053404406349"` — deferred alternate; loaded, not selected (Stage 2N)
+  - `Unarmed.CrouchWalk`:        `82558685099409` → `70428646705219` (Stage 2N)
+  - `Unarmed.CrouchWalkForward`: `82558685099409` → `70428646705219` (Stage 2N)
+  - Added `Unarmed.CrouchWalkStart = "rbxassetid://129868628706658"` — one-shot idle-to-walk transition (Stage 2N)
+  - All other CrouchWalk* directional IDs, all walk/run/idle IDs, and all AR15 IDs unchanged.
+
+- **`src/client/MovementController.lua`**:
+  - New private state variables: `crouchWalkStartPlaying`, `crouchWalkStartConn`, `wasMovingWhileCrouching`.
+  - New helper `clearCrouchWalkStart()` — disconnects the CrouchWalkStart Stopped callback and clears the playing flag. Mirrors the `clearCrouchTransitionConnection()` pattern; must be called before any external Stop.
+  - `loadMovementAnimations()`: conditional loads for `Unarmed_CrouchIdle`, `Unarmed_CrouchIdleAlt`, `Unarmed_CrouchWalkStart`; Looped=false pattern extended to include `_CrouchWalkStart$`; respawn resets for all three new state variables.
+  - `getAnimationSpeedMultiplier()`: `CrouchIdle` and `CrouchIdleAlt` added to the `MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER` (1.0×) branch.
+  - `playCrouchTransition()` EnterCrouch Stopped callback: sets `wasMovingWhileCrouching = true` when still crouching and already moving at transition end, to skip CrouchWalkStart.
+  - `updateMovementAnimation()` crouch-moving branch: detects start-of-movement via `wasMovingWhileCrouching` flag; plays `CrouchWalkStart` once if present; returns early while one-shot runs; directional selection resumes after it finishes.
+  - `updateMovementAnimation()` crouch-not-moving branch: resets `wasMovingWhileCrouching`; clears any active CrouchWalkStart; prefers `CrouchIdle` over `holdCrouchBottomPose()` when track is present; falls back to bottom-pose hold when absent. The `playMovementAnimation()` guard prevents CrouchIdle from restarting every frame.
+  - `destroy()`: calls `clearCrouchWalkStart()` and resets `wasMovingWhileCrouching`.
+  - Header, stage list, and scope comments updated to Stage 2N.
+
+- **`docs/PROJECT_MAP.md`** — CrouchIdle/CrouchIdleAlt/CrouchWalkStart entries added; CrouchWalk/CrouchWalkForward IDs updated; crouch behavior section updated.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated (x17): Stage 2N block added; CrouchIdleAlt unused-track risk entry added; CrouchWalkStart edge-case notes.
+
+### What was NOT changed
+No `src/server/` files. No `default.project.json`. No other client controllers.
+All directional crouch-walk IDs (CrouchWalkBackward, Left, Right, and all four diagonals): unchanged.
+All walk/run/idle/EnterCrouch/ExitCrouch IDs: unchanged. All AR15 IDs: unchanged.
+No `updateMovementAnimation()` directional selection logic changed.
+No speed multiplier values changed. No camera, mouse-lock, or combat behavior changed.
+AR15 set: no CrouchIdle or CrouchWalkStart tracks — falls back to existing bottom-pose hold as before.
+
+### Validation
+- `rojo build` — passes.
+- MCP/Studio verified 2026-05-20:
+  - Constants: all five Stage 2N IDs confirmed correct; old CrouchWalk ID (82558685099409) absent.
+  - Animation load test: CrouchIdle `looped=true`, CrouchIdleAlt `looped=true`, CrouchWalkStart `looped=false` — all load without error on a live character.
+  - Idle track playing (rbxassetid://132044223555193) confirms ACTIVE phase + animation system live.
+
+---
+
 ## [2026-05-20] — Movement Stage 2M: Unarmed walking animation ID replacement
 
 ### Summary

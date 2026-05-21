@@ -2,14 +2,15 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M (Animate-disable, R6 detection, animation-set selection,
+-- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N (Animate-disable, R6 detection, animation-set selection,
 -- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
 -- character-facing camera yaw, Unarmed backward/diagonal directional animations,
 -- sprint always uses RunForward (RunForwardLeft/Right deferred — Stage 2L),
 -- standing idle + enter/exit crouch one-shot transition animations,
 -- hold-to-crouch + EnterCrouch bottom-pose hold,
 -- Unarmed 8-directional crouch-walk animations + CrouchWalk speed multiplier,
--- third-person zoom limits + custom mouse-lock camera distance/offset) —
+-- third-person zoom limits + custom mouse-lock camera distance/offset,
+-- CrouchIdle looped idle while crouched+still + CrouchWalkStart one-shot idle-to-walk transition) —
 -- walk, sprint, crouch speed; 8-direction camera-relative movement state; phase gating;
 -- respawn handling; connection cleanup; R6 animation playback with Unarmed default set.
 --
@@ -362,6 +363,24 @@ local crouchHoldTrack: AnimationTrack? = nil
 -- when the EnterCrouch track is absent. Reset to false on each respawn.
 local crouchBottomPoseWarned: boolean = false
 
+-- Stage 2N: CrouchWalkStart one-shot transition state ────────────────────────
+-- True while the CrouchWalkStart one-shot clip is playing.
+-- Guards updateMovementAnimation from interrupting or re-selecting animations until
+-- the clip finishes. Cleared by clearCrouchWalkStart() via the track's Stopped event.
+local crouchWalkStartPlaying: boolean = false
+
+-- Stopped-event connection for the active CrouchWalkStart track.
+-- Disconnected by clearCrouchWalkStart() BEFORE any external track:Stop() to prevent
+-- spurious callbacks — mirrors the clearCrouchTransitionConnection() pattern.
+local crouchWalkStartConn: RBXScriptConnection? = nil
+
+-- True while the player is crouching and has already started moving during this crouch session.
+-- Set to true in the crouch-moving branch when movement begins (so CrouchWalkStart plays).
+-- Also set to true in the EnterCrouch Stopped callback when the player is already moving
+-- (to skip CrouchWalkStart — the player was moving before the transition finished).
+-- Reset to false in the crouch-not-moving branch and on respawn.
+local wasMovingWhileCrouching: boolean = false
+
 -- ============================================================
 -- Private helpers — Stage 1
 -- ============================================================
@@ -710,6 +729,18 @@ local function clearCrouchTransitionConnection()
     end
 end
 
+-- Stage 2N: Disconnects the CrouchWalkStart Stopped callback and clears the playing flag.
+-- Must be called BEFORE any track:Stop() on the CrouchWalkStart track — same pattern as
+-- clearCrouchTransitionConnection() — to prevent spurious callbacks on external stops.
+-- Safe to call when no CrouchWalkStart is active (no-op).
+local function clearCrouchWalkStart()
+    if crouchWalkStartConn then
+        crouchWalkStartConn:Disconnect()
+        crouchWalkStartConn = nil
+    end
+    crouchWalkStartPlaying = false
+end
+
 -- ============================================================
 -- Private helpers — Stage 2A: animation
 -- ============================================================
@@ -888,9 +919,13 @@ local function getAnimationSpeedMultiplier(animationName: string): number
         return Constants.MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER
     elseif animationName == "EnterCrouch" or animationName == "ExitCrouch" then
         return Constants.MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER
-    elseif animationName:sub(1, 10) == "CrouchWalk" then
+    elseif animationName:sub(1, 10) == "CrouchWalk"
+        or animationName == "CrouchIdle"
+        or animationName == "CrouchIdleAlt"
+    then
         -- Covers CrouchWalk, CrouchWalkForward, CrouchWalkBackward, CrouchWalkLeft/Right,
-        -- CrouchWalkForwardLeft/Right, CrouchWalkBackwardLeft/Right (Stage 2J).
+        -- CrouchWalkForwardLeft/Right, CrouchWalkBackwardLeft/Right (Stage 2J),
+        -- CrouchIdle, CrouchIdleAlt (Stage 2N).
         return Constants.MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER
     end
     return 1.0
@@ -1105,6 +1140,10 @@ local function playCrouchTransition(entering: boolean)
             -- EnterCrouch finished. If still crouching, establish the visual pose.
             if movementState.isCrouching then
                 if movementState.isMoving then
+                    -- Stage 2N: mark that we are already moving when EnterCrouch finishes.
+                    -- This prevents CrouchWalkStart from playing on the next Heartbeat — the
+                    -- player was already in motion so the start-of-movement transition is moot.
+                    wasMovingWhileCrouching = true
                     -- Start a suitable crouch-walk immediately to avoid a blank frame.
                     -- updateMovementAnimation() refines the direction on the next Heartbeat.
                     -- Priority: CrouchWalkForward (canonical forward) → CrouchWalk alias → hold pose.
@@ -1154,6 +1193,9 @@ local function loadMovementAnimations(character: Model)
     -- track that no longer exists in the new table.
     clearCrouchTransitionConnection()
     crouchTransitionPlaying = false
+    -- Stage 2N: disconnect CrouchWalkStart callback and clear its state (same reason).
+    clearCrouchWalkStart()
+    wasMovingWhileCrouching = false
     -- Do NOT call clearCrouchBottomHold() here — the previous Animator may already be
     -- destroyed, making the hold track reference unsafe to Stop(). Clear state directly.
     crouchHoldTrack          = nil
@@ -1244,6 +1286,25 @@ local function loadMovementAnimations(character: Model)
         toLoad["Unarmed_WalkForwardAlt"] = r6.Unarmed.WalkForwardAlt
     end
 
+    -- Stage 2N: CrouchIdle (looped idle while crouched+still) — preferred over the
+    -- EnterCrouch bottom-pose hold when the player is crouched and not moving.
+    -- Falls back to holdCrouchBottomPose() if this track is absent.
+    if r6.Unarmed.CrouchIdle and r6.Unarmed.CrouchIdle ~= "" then
+        toLoad["Unarmed_CrouchIdle"] = r6.Unarmed.CrouchIdle
+    end
+
+    -- Stage 2N: CrouchIdleAlt — deferred alternate crouch-idle clip.
+    -- Loaded but never selected until a safe alternation system is built.
+    if r6.Unarmed.CrouchIdleAlt and r6.Unarmed.CrouchIdleAlt ~= "" then
+        toLoad["Unarmed_CrouchIdleAlt"] = r6.Unarmed.CrouchIdleAlt
+    end
+
+    -- Stage 2N: CrouchWalkStart — one-shot transition from crouched-idle to crouched-walk.
+    -- Plays exactly once when movement begins while crouched; cleared by Stopped callback.
+    if r6.Unarmed.CrouchWalkStart and r6.Unarmed.CrouchWalkStart ~= "" then
+        toLoad["Unarmed_CrouchWalkStart"] = r6.Unarmed.CrouchWalkStart
+    end
+
     -- CrouchWalk tracks are optional. Only loaded if IDs exist in Constants.
     -- Stage 2J: nine Unarmed directional CrouchWalk* IDs added. All looped.
     -- CrouchWalk and CrouchWalkForward share the same asset ID (forward is the canonical fallback).
@@ -1282,8 +1343,8 @@ local function loadMovementAnimations(character: Model)
             animInstance.AnimationId = assetId
             animationInstances[key]  = animInstance
             local track              = animator:LoadAnimation(animInstance)
-            -- EnterCrouch and ExitCrouch are one-shot clips; all others loop.
-            if key:match("_EnterCrouch$") or key:match("_ExitCrouch$") then
+            -- EnterCrouch, ExitCrouch, and CrouchWalkStart are one-shot clips; all others loop.
+            if key:match("_EnterCrouch$") or key:match("_ExitCrouch$") or key:match("_CrouchWalkStart$") then
                 track.Looped = false
             else
                 track.Looped = true
@@ -1327,6 +1388,35 @@ local function updateMovementAnimation()
     -- ── Crouching branch (Stage 2I + 2J) ─────────────────────────────────────
     if movementState.isCrouching then
         if movementState.isMoving then
+            -- ── Stage 2N: CrouchWalkStart one-shot on first movement ──────
+            -- wasMovingWhileCrouching is false only at the exact transition from still to moving
+            -- while crouched. If the player was already moving when EnterCrouch finished, the
+            -- EnterCrouch Stopped callback sets it true to skip this block.
+            if not wasMovingWhileCrouching then
+                wasMovingWhileCrouching = true
+                local startKey = setName .. "_CrouchWalkStart"
+                if animationTracks[startKey] ~= nil and not crouchWalkStartPlaying then
+                    -- Disconnect callback BEFORE stopping CrouchIdle to prevent spurious events.
+                    clearCrouchWalkStart()
+                    if isHoldingCrouchBottomPose then
+                        clearCrouchBottomHold()
+                    end
+                    stopCurrentMovementAnimation()  -- stops CrouchIdle if playing
+                    crouchWalkStartPlaying = true
+                    playMovementAnimation(startKey)
+                    local startTrack = animationTracks[startKey]
+                    if startTrack then
+                        crouchWalkStartConn = startTrack.Stopped:Connect(function()
+                            clearCrouchWalkStart()
+                        end)
+                    end
+                    return  -- Let the one-shot run; directional selection resumes next Heartbeat.
+                end
+            end
+
+            -- Skip directional selection while the CrouchWalkStart one-shot is still running.
+            if crouchWalkStartPlaying then return end
+
             -- ── Determine target crouch-walk animation key ────────────────
             local targetCrouchKey: string? = nil
 
@@ -1490,13 +1580,32 @@ local function updateMovementAnimation()
             end
 
         else
-            -- ── Crouching and not moving: hold the bottom pose ────────────
+            -- ── Stage 2N: Crouching and not moving ───────────────────────
+            -- Reset movement tracking so the next movement burst plays CrouchWalkStart.
+            wasMovingWhileCrouching = false
+            -- Disconnect CrouchWalkStart callback BEFORE stopping any track (prevents spurious callbacks).
+            if crouchWalkStartPlaying then
+                clearCrouchWalkStart()
+            end
             -- Stop any CrouchWalk* animation that was playing (string pattern check).
             if currentAnimationName ~= "" and currentAnimationName:find("_CrouchWalk") then
                 stopCurrentMovementAnimation()
             end
-            if not isHoldingCrouchBottomPose then
-                holdCrouchBottomPose()
+            -- Prefer CrouchIdle (looped) over holding the EnterCrouch bottom pose (Stage 2N).
+            -- Fall back to holdCrouchBottomPose() when the track is absent.
+            local crouchIdleKey = setName .. "_CrouchIdle"
+            if animationTracks[crouchIdleKey] ~= nil then
+                -- CrouchIdle track exists. Release the bottom-hold if active, then play idle.
+                if isHoldingCrouchBottomPose then
+                    clearCrouchBottomHold()
+                end
+                -- playMovementAnimation guard prevents restart if CrouchIdle is already playing.
+                playMovementAnimation(crouchIdleKey)
+            else
+                -- No CrouchIdle for this set — fall back to the EnterCrouch bottom-pose hold.
+                if not isHoldingCrouchBottomPose then
+                    holdCrouchBottomPose()
+                end
             end
         end
         return  -- Never fall through to standing/sprint branch while crouching.
@@ -1821,6 +1930,9 @@ function MovementController:destroy()
     -- Stage 2H + 2I: disconnect callback, clear hold, then stop tracks.
     clearCrouchTransitionConnection()
     crouchTransitionPlaying   = false
+    -- Stage 2N: disconnect CrouchWalkStart callback and clear its state.
+    clearCrouchWalkStart()
+    wasMovingWhileCrouching = false
     clearCrouchBottomHold()
     -- Stop the active animation if still playing, then clear track references.
     stopCurrentMovementAnimation()

@@ -371,8 +371,10 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Unarmed.Idle              = rbxassetid://132044223555193  (Stage 2H — standing idle, looped)
                         --       Unarmed.EnterCrouch       = rbxassetid://105064599119554  (Stage 2H — enter-crouch one-shot)
                         --       Unarmed.ExitCrouch        = rbxassetid://104596765238289  (Stage 2H — exit-crouch one-shot)
-                        --       Unarmed.CrouchWalk            = rbxassetid://82558685099409   (Stage 2J — crouch walk forward, canonical fallback alias)
-                        --       Unarmed.CrouchWalkForward     = rbxassetid://82558685099409   (Stage 2J — crouch walk forward)
+                        --       Unarmed.CrouchIdle            = rbxassetid://81947601552045   (Stage 2N — crouch idle looped; plays while crouched+still)
+                        --       Unarmed.CrouchIdleAlt         = rbxassetid://132053404406349  (Stage 2N — deferred alternate; loaded, not yet selected)
+                        --       Unarmed.CrouchWalk            = rbxassetid://70428646705219   (Stage 2N — crouch walk forward, canonical fallback alias; was 82558685099409)
+                        --       Unarmed.CrouchWalkForward     = rbxassetid://70428646705219   (Stage 2N — crouch walk forward; was 82558685099409)
                         --       Unarmed.CrouchWalkBackward    = rbxassetid://131295440357763  (Stage 2J — crouch walk backward)
                         --       Unarmed.CrouchWalkLeft        = rbxassetid://103170217015576  (Stage 2J — crouch walk strafe left)
                         --       Unarmed.CrouchWalkRight       = rbxassetid://84961452934451   (Stage 2J — crouch walk strafe right)
@@ -380,6 +382,7 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Unarmed.CrouchWalkForwardRight = rbxassetid://107284851359368 (Stage 2J — crouch walk forward-right diagonal)
                         --       Unarmed.CrouchWalkBackwardLeft  = rbxassetid://118800024223445 (Stage 2J — crouch walk backward-left diagonal)
                         --       Unarmed.CrouchWalkBackwardRight = rbxassetid://104285284019251 (Stage 2J — crouch walk backward-right diagonal)
+                        --       Unarmed.CrouchWalkStart       = rbxassetid://129868628706658  (Stage 2N — one-shot idle-to-walk transition; plays once on first move while crouched)
                         --       AR15.WalkForward          = rbxassetid://138802532485746
                         --       AR15.RunForward           = rbxassetid://79735501581082
                         --       AR15.Idle                 = rbxassetid://117989834436525  (Stage 2H — standing idle, looped)
@@ -391,7 +394,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Stage 2M (2026-05-20) — All 8 Unarmed walk IDs replaced + WalkForwardAlt added (loaded, not yet selected);
                         --       Stage 2G (2026-05-20) — RunForwardLeft + RunForwardRight IDs added (retained in Constants; deferred since Stage 2L);
                         --       Stage 2H (2026-05-20) — Idle + EnterCrouch/ExitCrouch added for both sets;
-                        --       Stage 2J (2026-05-20) — 9 Unarmed CrouchWalk* directional IDs added)
+                        --       Stage 2J (2026-05-20) — 9 Unarmed CrouchWalk* directional IDs added;
+                        --       Stage 2N (2026-05-20) — CrouchIdle, CrouchIdleAlt, CrouchWalkStart added; CrouchWalk/CrouchWalkForward IDs updated)
                         --     Sprint behavior (Stage 2L — 2026-05-20):
                         --       All sprint directions (Forward/Backward/Left/Right/diagonals), all sets, mouse lock on or off → RunForward.
                         --       RunForwardLeft/RunForwardRight IDs remain in Constants but are not selected (deferred).
@@ -428,8 +432,20 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       customMouseLocked ON  → 8-directional selection (same gate as walk strafe animations).
                         --       AR15/gun-equipped: no CrouchWalk IDs — falls back to crouch bottom-pose hold (deferred).
                         --       Crouch visuals: no Humanoid.HipHeight, CameraOffset, or camera.CFrame changes.
-                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I/2J: AR15 CrouchWalk IDs (deferred),
-                        --       CrouchIdle animation, lower/upper-body split, reload/fire/ADS weapon animations.
+                        --     Crouch idle + walk-start behavior (Stage 2N — 2026-05-20):
+                        --       CrouchIdle (looped): plays when crouched + not moving. Preferred over holdCrouchBottomPose()
+                        --         when the track is loaded. Falls back to holdCrouchBottomPose() when absent.
+                        --         playMovementAnimation() guard prevents restart every Heartbeat frame.
+                        --       CrouchIdleAlt: deferred alternate. Loaded but never selected until variation system built.
+                        --       CrouchWalkStart (one-shot): plays exactly once when the player starts moving while crouched.
+                        --         wasMovingWhileCrouching flag tracks first-movement-burst. Reset to false on stop/respawn.
+                        --         Set true in EnterCrouch Stopped callback when already moving — skips CrouchWalkStart.
+                        --         clearCrouchWalkStart() (mirrors clearCrouchTransitionConnection pattern) must be called
+                        --         before any external Stop to prevent spurious callbacks.
+                        --       Speed multiplier for CrouchIdle/CrouchIdleAlt: MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER (1.0×).
+                        --       AR15/non-Unarmed: no CrouchIdle or CrouchWalkStart tracks — bottom-pose hold fallback unchanged.
+                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I/2J/2N: AR15 CrouchWalk/CrouchIdle IDs (deferred),
+                        --       lower/upper-body split, reload/fire/ADS weapon animations.
                         --
                         --   Stage 2K — third-person camera zoom limits + mouse-lock camera (2026-05-20):
                         --     Normal third-person zoom: CameraMin=4, CameraMax=14 (set in Start() and on CharacterAdded).

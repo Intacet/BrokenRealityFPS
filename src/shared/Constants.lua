@@ -117,8 +117,12 @@ Constants.MOVEMENT_ANIMATION_IDS = {
             ExitCrouch         = "rbxassetid://104596765238289",  -- no-gun exit-crouch one-shot (Stage 2H)
             -- Stage 2J: Unarmed directional crouch-walk animations
             -- CrouchWalk / CrouchWalkForward share the same ID (forward is the canonical clip).
-            CrouchWalk            = "rbxassetid://82558685099409",   -- no-gun crouch walk forward (canonical fallback alias)
-            CrouchWalkForward     = "rbxassetid://82558685099409",   -- no-gun crouch walk forward
+            -- Stage 2N: CrouchIdle (looped idle while crouched+still), CrouchIdleAlt (deferred alternate),
+            --   CrouchWalkForward updated to new clip, CrouchWalkStart (one-shot idle-to-walk transition).
+            CrouchIdle            = "rbxassetid://81947601552045",   -- no-gun crouch idle looped (Stage 2N)
+            CrouchIdleAlt         = "rbxassetid://132053404406349",  -- no-gun crouch idle alternate; loaded but not yet selected (Stage 2N)
+            CrouchWalk            = "rbxassetid://70428646705219",   -- no-gun crouch walk forward (canonical fallback alias) (Stage 2N)
+            CrouchWalkForward     = "rbxassetid://70428646705219",   -- no-gun crouch walk forward (Stage 2N)
             CrouchWalkBackward    = "rbxassetid://131295440357763",  -- no-gun crouch walk backward
             CrouchWalkLeft        = "rbxassetid://103170217015576",  -- no-gun crouch walk strafe left
             CrouchWalkRight       = "rbxassetid://84961452934451",   -- no-gun crouch walk strafe right
@@ -126,6 +130,7 @@ Constants.MOVEMENT_ANIMATION_IDS = {
             CrouchWalkForwardRight = "rbxassetid://107284851359368", -- no-gun crouch walk forward-right diagonal
             CrouchWalkBackwardLeft  = "rbxassetid://118800024223445",-- no-gun crouch walk backward-left diagonal
             CrouchWalkBackwardRight = "rbxassetid://104285284019251",-- no-gun crouch walk backward-right diagonal
+            CrouchWalkStart       = "rbxassetid://129868628706658",  -- no-gun crouch walk start one-shot transition (Stage 2N)
         },
         AR15 = {
             WalkForward = "rbxassetid://138802532485746",
