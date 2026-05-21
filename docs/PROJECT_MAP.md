@@ -290,7 +290,7 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --     Humanoid.WalkSpeed. Values from Constants.lua:
                         --       MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.3  (WalkForward/Backward/diagonals)
                         --       MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.4  (WalkLeft, WalkRight)
-                        --       MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15 (RunForward, RunForwardLeft, RunForwardRight)
+                        --       MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15 (RunForward; RunForwardLeft/Right deferred since Stage 2L)
                         --
                         --   Animation set selection (added 2026-05-18):
                         --     Default animation set is Unarmed (no gun) when equippedWeaponName == nil.
@@ -356,8 +356,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --     AR15 set: unchanged — left/right grouping with WalkForward fallback.
                         --     Debug: set-change and strafe-blocked-change logged once per change.
                         --     Animation IDs (Constants.MOVEMENT_ANIMATION_IDS.R6):
-                        --       Unarmed.WalkForward       = rbxassetid://97200177177374
-                        --       Unarmed.RunForward        = rbxassetid://81826691810907
+                        --       Unarmed.WalkForward       = rbxassetid://71329939839948   (Stage 2L — confirmed-good R6 no-gun walk forward)
+                        --       Unarmed.RunForward        = rbxassetid://79045069356901   (Stage 2L — confirmed-good R6 no-gun run forward)
                         --       Unarmed.WalkLeft          = rbxassetid://115652140967957
                         --       Unarmed.WalkRight         = rbxassetid://82804864629403
                         --       Unarmed.WalkBackward      = rbxassetid://107080862064563  (Stage 2F)
@@ -365,8 +365,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Unarmed.WalkBackwardRight = rbxassetid://109190640713438  (Stage 2F)
                         --       Unarmed.WalkForwardLeft   = rbxassetid://97324289156918   (Stage 2F)
                         --       Unarmed.WalkForwardRight  = rbxassetid://81077784555491   (Stage 2F)
-                        --       Unarmed.RunForwardLeft    = rbxassetid://94337945101783   (Stage 2G — mouse-lock-gated sprint diagonal)
-                        --       Unarmed.RunForwardRight   = rbxassetid://104724352837263  (Stage 2G — mouse-lock-gated sprint diagonal)
+                        --       Unarmed.RunForwardLeft    = rbxassetid://94337945101783   (Stage 2G — deferred/unused; sprint always uses RunForward since Stage 2L)
+                        --       Unarmed.RunForwardRight   = rbxassetid://104724352837263  (Stage 2G — deferred/unused; sprint always uses RunForward since Stage 2L)
                         --       Unarmed.Idle              = rbxassetid://132044223555193  (Stage 2H — standing idle, looped)
                         --       Unarmed.EnterCrouch       = rbxassetid://105064599119554  (Stage 2H — enter-crouch one-shot)
                         --       Unarmed.ExitCrouch        = rbxassetid://104596765238289  (Stage 2H — exit-crouch one-shot)
@@ -386,14 +386,14 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       AR15.ExitCrouch           = rbxassetid://91295776984408   (Stage 2H — exit-crouch one-shot)
                         --     (IDs updated 2026-05-20 — Unarmed strafe-left/right swapped to confirmed-good R6 clips;
                         --       Stage 2F (2026-05-20) — 5 new Unarmed walk directional clips added;
-                        --       2026-05-20 — Unarmed WalkForward + RunForward replaced with confirmed-good R6 clips;
-                        --       Stage 2G (2026-05-20) — RunForwardLeft + RunForwardRight added; mouse-lock-gated sprint diagonals;
+                        --       Stage 2L (2026-05-20) — Unarmed WalkForward replaced (71329939839948) + RunForward replaced (79045069356901); sprint simplified to always use RunForward;
+                        --       Stage 2G (2026-05-20) — RunForwardLeft + RunForwardRight IDs added (retained in Constants; deferred since Stage 2L);
                         --       Stage 2H (2026-05-20) — Idle + EnterCrouch/ExitCrouch added for both sets;
                         --       Stage 2J (2026-05-20) — 9 Unarmed CrouchWalk* directional IDs added)
-                        --     Sprint diagonal behavior (Stage 2G):
-                        --       Unarmed + customMouseLocked ON (LeftControl): ForwardLeft sprint → RunForwardLeft; ForwardRight sprint → RunForwardRight.
-                        --       Unarmed + customMouseLocked OFF: all sprint directions → RunForward.
-                        --       AR15/gun-equipped: all sprint directions → AR15 RunForward (no run diagonals).
+                        --     Sprint behavior (Stage 2L — 2026-05-20):
+                        --       All sprint directions (Forward/Backward/Left/Right/diagonals), all sets, mouse lock on or off → RunForward.
+                        --       RunForwardLeft/RunForwardRight IDs remain in Constants but are not selected (deferred).
+                        --       AR15/gun-equipped: sprinting uses AR15 RunForward in all directions.
                         --     Idle behavior (Stage 2H):
                         --       Both sets: Idle (looped) plays when standing still in ACTIVE phase.
                         --       Idle plays via updateMovementAnimation (not moving path) — no special gate.
@@ -515,7 +515,7 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --   Movement animation playback speed multipliers (updated Stage 2H 2026-05-20):
              --     MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER              = 1.3  (WalkForward/Backward/diagonals)
              --     MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER            = 1.4  (WalkLeft, WalkRight)
-             --     MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER               = 1.15 (RunForward, RunForwardLeft, RunForwardRight)
+             --     MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER               = 1.15 (RunForward; RunForwardLeft/Right deferred)
              --     MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER              = 0.75 (Idle — Stage 2H)
              --     MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.9  (EnterCrouch, ExitCrouch — Stage 2H)
              --     MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER       = 1.0  (CrouchWalk* directional — Stage 2J)

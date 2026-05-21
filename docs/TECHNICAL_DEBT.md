@@ -536,7 +536,7 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-20 (x14)
+## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-20 (x15)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
@@ -662,10 +662,19 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - Eight new Constants: `THIRD_PERSON_MIN_ZOOM_DISTANCE`, `THIRD_PERSON_MAX_ZOOM_DISTANCE`, `CUSTOM_MOUSE_LOCK_CAMERA_DISTANCE`, `CUSTOM_MOUSE_LOCK_CAMERA_OFFSET`, `CUSTOM_MOUSE_LOCK_RESTORE_CAMERA_OFFSET`, `CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_DISTANCE`, `CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_OFFSET`.
 - MCP/Studio verified 2026-05-20: INIT zoom=4/14 offset=0,0,0 ✅ ON zoom=8/8 offset=1.75,0,0 ✅ OFF zoom=4/14 offset=0,0,0 ✅
 
-**Remaining gaps (updated Stage 2K):**
+**Updated (2026-05-20 — Stage 2L: Unarmed WalkForward/RunForward ID swap + sprint simplification):**
+- `Unarmed.WalkForward` replaced: `97200177177374` → `71329939839948` (confirmed-good R6 no-gun walk forward).
+- `Unarmed.RunForward` replaced: `81826691810907` → `79045069356901` (confirmed-good R6 no-gun run forward).
+- Sprint selection in `updateMovementAnimation()` simplified: all sprint directions, all animation sets, mouse lock on or off now play `setName .. "_RunForward"`. The 14-line Unarmed+mouse-lock conditional (RunForwardLeft for ForwardLeft, RunForwardRight for ForwardRight) is removed.
+- `RunForwardLeft` and `RunForwardRight` IDs remain in `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed` and are still loaded by `loadMovementAnimations()`, but are never selected at runtime. They are explicitly deferred.
+- All animation speed multipliers preserved: walk 1.3×, strafe 1.4×, run 1.15×, idle 0.75×, crouch transition 0.9×, crouch walk 1.0×.
+- Walking directional animations (WalkBackward, diagonals, strafes), crouch-walk animations, and idle behavior are unchanged.
+- MCP/Studio verified 2026-05-20: sprint block code confirmed = `animName = setName .. "_RunForward"` only.
+
+**Remaining gaps (updated Stage 2L):**
 - Crouch walk animation — implemented for Unarmed (9 directional IDs, Stage 2J). AR15/gun-equipped CrouchWalk IDs still deferred.
 - Crouch idle animation — not a separate clip; crouching while standing still holds the EnterCrouch bottom pose (Stage 2I). A dedicated CrouchIdle clip can be added in a future stage by assigning the ID and loading it.
-- Run sprint diagonals only cover ForwardLeft and ForwardRight (Unarmed + mouse lock). Run strafe (Left/Right) and run backward are not implemented.
+- Directional sprint animations — all sprint directions now use RunForward (Stage 2L). RunForwardLeft/RunForwardRight IDs are in Constants but deferred. Sprinting sideways or backward visually uses the forward run clip; this is intentional and acceptable for the prototype. Directional run animations may be re-enabled later by restoring the sprint branch and adding more IDs.
 - AR15 run diagonal animations — AR15 set sprinting uses RunForward for all directions; no AR15-specific run diagonals.
 - AR15 backward/diagonal walk animations — AR15 set only has WalkForward and RunForward; backward and diagonal walk directions fall back to WalkForward/strafe grouping.
 - Lower-body / upper-body animation split — not implemented; the full body plays the movement animation.
@@ -702,6 +711,7 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - **Stage 2K new risk — CameraOffset and character size:** `CUSTOM_MOUSE_LOCK_CAMERA_OFFSET = Vector3.new(1.75, 0, 0)` is tuned for the default R6 rig dimensions. If the character is scaled (accessories, hats, or future character resizing), the right-shoulder offset may drift visually (too far right or too close to the camera). No fix needed now; revisit when character scaling is added.
 - **Stage 2K new risk — CameraOffset fallback reliability:** `applyCustomMouseLockCamera()` and `restoreNormalThirdPersonCamera()` fall back to `Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid")` when the module-level `humanoid` is nil. If `Character` itself is nil (player hasn't spawned yet or is in the death/respawn gap), the fallback returns nil and the CameraOffset write is silently skipped. The zoom distance write still succeeds (it targets `LocalPlayer`, not the humanoid). The CameraOffset will be applied correctly on the next CharacterAdded callback. This is acceptable — the camera distance still changes on toggle; only the shoulder offset is temporarily missed.
 - **Stage 2K new risk — zoom distance tuning:** `THIRD_PERSON_MIN_ZOOM_DISTANCE = 4` and `THIRD_PERSON_MAX_ZOOM_DISTANCE = 14` and `CUSTOM_MOUSE_LOCK_CAMERA_DISTANCE = 8` are initial values and have not been evaluated with multiple level sizes or field-of-view settings. Adjust only these three Constants if the camera feels too close or too far in Studio — no controller logic changes needed.
+- **Stage 2L new risk — sprint direction mismatch:** All sprint directions play RunForward. Sprinting left, right, backward, or diagonally will play a forward-facing run clip regardless of character movement direction. This is a known and intentional simplification. Re-enable directional sprint selection if directional run IDs are confirmed correct and needed for polish.
 - **Stage 2K new risk — character-facing jitter while mouse-locked:** With `AutoRotate = false` (Stage 2E) and `CameraOffset = Vector3.new(1.75, 0, 0)` (Stage 2K), the character's HumanoidRootPart is written every Heartbeat to face the camera yaw (Stage 2E). The combined effect is a right-shoulder over-the-shoulder view where the character continuously tracks the camera. If frame-rate drops cause Heartbeat timing jitter, the character facing may stutter visibly. If this is noticeable in Studio, consider clamping yaw changes per frame or moving the facing write to RunService.RenderStepped (smoother but client-only).
 - **Stage 2E new risk:** `HumanoidRootPart.CFrame` is written every Heartbeat while mouse lock is active. Roblox's physics engine normally controls `HumanoidRootPart` position; writing CFrame while the character is moving may cause micro-jitter visible at low frame rates. If jitter is observed in Studio, consider applying the yaw rotation only when `MoveDirection.Magnitude` exceeds the deadzone (character is moving) and reverting to `AutoRotate = true` while standing still.
 - **Stage 2E new risk:** `getCameraFlatLookVector()` returns nil and skips rotation when the camera is looking near-straight-up or near-straight-down. This is unlikely in normal FPS play but will produce a frozen character-facing during extreme camera angles. Acceptable for Stage 2E; a future camera stage may add a separate yaw-memory for this edge case.

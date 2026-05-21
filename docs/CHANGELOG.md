@@ -7,6 +7,46 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-20] — Movement Stage 2L: Unarmed forward animation ID swap + sprint simplification
+
+### Summary
+Replaced both Unarmed R6 forward animation IDs with confirmed-good clips. Simplified sprint
+animation selection so all sprint directions (Forward, Backward, Left, Right, and all diagonals)
+always play `RunForward` for the current animation set, regardless of `customMouseLocked` state.
+`RunForwardLeft` and `RunForwardRight` IDs are retained in Constants but are intentionally unused.
+All existing animation speed multipliers are unchanged.
+
+### Changed files
+
+- **`src/shared/Constants.lua`**:
+  - `Unarmed.WalkForward`: `rbxassetid://97200177177374` → `rbxassetid://71329939839948`
+  - `Unarmed.RunForward`:  `rbxassetid://81826691810907` → `rbxassetid://79045069356901`
+  - `MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER` comment updated to note RunForwardLeft/Right deferred.
+  - All other IDs and all speed multiplier values preserved.
+
+- **`src/client/MovementController.lua`**:
+  - Sprint block in `updateMovementAnimation()` simplified from a 14-line conditional (Unarmed+mouse-lock → RunForwardLeft/Right for diagonals) to a single line: `animName = setName .. "_RunForward"`.
+  - Header, `updateMovementAnimation` scope comment, and ready log updated to document Stage 2L.
+  - Stage header updated: 2K → 2K + 2L.
+
+- **`docs/PROJECT_MAP.md`** — Unarmed WalkForward/RunForward IDs updated; RunForwardLeft/Right marked deferred; sprint behavior section updated; multiplier table updated.
+
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-044 updated (x15): Stage 2L block added; sprint diagonal gap updated to note intentional deferral; Stage 2L direction-mismatch risk added.
+
+### What was NOT changed
+No `src/server/` files. No `default.project.json`. No other client controllers.
+All other Unarmed animation IDs (WalkLeft, WalkRight, WalkBackward, diagonals, Idle, EnterCrouch,
+ExitCrouch, all 9 CrouchWalk* IDs) preserved. All AR15 IDs preserved.
+No camera changes. No new remotes. No movement speed constants changed.
+No mouse-lock, crouch, idle, or walk directional behavior changed.
+Speed multipliers (walk 1.3×, strafe 1.4×, run 1.15×, idle 0.75×, crouch transition 0.9×, crouch walk 1.0×) preserved.
+
+### Validation
+- `rojo build` — passes.
+- MCP/Studio verified 2026-05-20: sprint block code = `animName = setName .. "_RunForward"` (single line, no conditionals).
+
+---
+
 ## [2026-05-20] — Movement Stage 2K: third-person zoom limits + mouse-lock camera distance/offset
 
 ### Summary

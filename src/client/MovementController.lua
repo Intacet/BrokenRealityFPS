@@ -2,10 +2,10 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K (Animate-disable, R6 detection, animation-set selection,
+-- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L (Animate-disable, R6 detection, animation-set selection,
 -- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
 -- character-facing camera yaw, Unarmed backward/diagonal directional animations,
--- Unarmed run-forward-left/right diagonal sprint animations,
+-- sprint always uses RunForward (RunForwardLeft/Right deferred — Stage 2L),
 -- standing idle + enter/exit crouch one-shot transition animations,
 -- hold-to-crouch + EnterCrouch bottom-pose hold,
 -- Unarmed 8-directional crouch-walk animations + CrouchWalk speed multiplier,
@@ -162,14 +162,14 @@
 --   Without custom mouse lock, pure Left/Right fall back to WalkForward.
 --   WalkBackward always plays for Backward direction regardless of mouse-lock state.
 --   WalkForwardLeft/Right and WalkBackwardLeft/Right always play regardless of mouse-lock state.
---   Sprint + mouse locked + Unarmed: RunForwardLeft/Right play for ForwardLeft/Right; all other sprint → RunForward.
---   Sprint + mouse lock off, or AR15/other sets: all sprint directions use RunForward.
---   WalkForward/Backward/diagonals: 1.3× speed. WalkLeft/WalkRight: 1.4× speed. RunForward/RunForwardLeft/Right: 1.15× speed.
+--   Sprint in any direction always uses RunForward for the current animation set. (Stage 2L)
+--   RunForwardLeft/RunForwardRight IDs retained in Constants but no longer selected. (Stage 2L)
+--   WalkForward/Backward/diagonals: 1.3× speed. WalkLeft/WalkRight: 1.4× speed. RunForward: 1.15× speed.
 --   Sprint works with LeftShift even while shift lock is active (TextBox check instead of gp).
 --   Stage 2F (2026-05-20): Unarmed backward/diagonal animation support added:
 --     WalkBackward, WalkBackwardLeft, WalkBackwardRight, WalkForwardLeft, WalkForwardRight.
---   Stage 2G (2026-05-20): Unarmed run-forward diagonal animation support added:
---     RunForwardLeft, RunForwardRight (mouse-lock-gated sprint diagonals).
+--   Stage 2G (2026-05-20): Unarmed run-forward diagonal IDs added (RunForwardLeft, RunForwardRight).
+--     Sprint diagonal selection deferred in Stage 2L — sprint always uses RunForward now.
 --   Stage 2H (2026-05-20): Idle (looped) + EnterCrouch/ExitCrouch one-shot transition animations added:
 --     Idle plays when standing still in ACTIVE (both Unarmed and AR15 sets).
 --     EnterCrouch plays when C is held; ExitCrouch plays when C is released (both sets).
@@ -1291,12 +1291,12 @@ end
 -- Skipped if CUSTOM_MOVEMENT_ANIMATIONS_ENABLED is false.
 -- currentAnimationName guard inside playMovementAnimation prevents track restarts.
 --
--- Stage 2A + 2C + 2F + 2G + 2H + 2I + 2J scope:
+-- Stage 2A + 2C + 2F + 2G + 2H + 2I + 2J + 2L scope:
 --   WalkLeft/WalkRight only play when canUseStrafeAnimations is true (mouse lock active).
 --   WalkBackward plays for Backward regardless of mouse-lock state (Unarmed set only).
 --   WalkForwardLeft/Right and WalkBackwardLeft/Right play for diagonals regardless of mouse lock (Unarmed only).
---   Sprint + mouse locked + Unarmed: RunForwardLeft/RunForwardRight for ForwardLeft/ForwardRight (Stage 2G).
---   Sprint + mouse lock off, or AR15/other sets: RunForward for all sprint directions.
+--   Sprint (any direction, any set, mouse lock on or off): always plays RunForward. (Stage 2L)
+--   RunForwardLeft/RunForwardRight IDs exist in Constants but are not selected here. (Stage 2L)
 --   Not moving (standing): plays Idle (looped) when the track is loaded; stops otherwise.
 --   Skips entirely while crouchTransitionPlaying is true (transition clips run uninterrupted).
 --   Stage 2I+2J crouch branch (returns early before standing/sprint logic):
@@ -1539,21 +1539,9 @@ local function updateMovementAnimation()
     local animName: string
 
     if movementState.isSprinting then
-        -- Sprint: Unarmed + mouse locked → run diagonal for ForwardLeft/ForwardRight (Stage 2G).
-        -- All other sprint cases (mouse lock off, AR15, or any other direction) → RunForward.
-        if setName == Constants.MOVEMENT_ANIMATION_SET_UNARMED and customMouseLocked then
-            if dirName == "ForwardLeft" then
-                local key = "Unarmed_RunForwardLeft"
-                animName = if animationTracks[key] ~= nil then key else "Unarmed_RunForward"
-            elseif dirName == "ForwardRight" then
-                local key = "Unarmed_RunForwardRight"
-                animName = if animationTracks[key] ~= nil then key else "Unarmed_RunForward"
-            else
-                animName = "Unarmed_RunForward"
-            end
-        else
-            animName = setName .. "_RunForward"
-        end
+        -- Sprint: always use RunForward for the current animation set, regardless of direction
+        -- or customMouseLocked state. RunForwardLeft/RunForwardRight IDs are deferred. (Stage 2L)
+        animName = setName .. "_RunForward"
 
     elseif setName == Constants.MOVEMENT_ANIMATION_SET_UNARMED then
         -- Unarmed set: full per-direction selection (Stage 2F).
@@ -2105,7 +2093,7 @@ function MovementController:Start()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1–2K: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk)")
+    Logger.debug("[MovementController] Ready (Stage 1–2L: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→RunForward)")
 end
 
 return MovementController
