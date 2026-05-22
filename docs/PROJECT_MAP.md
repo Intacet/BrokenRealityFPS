@@ -206,7 +206,7 @@ FleaMarketService / PlayerMarketplace
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2R + 3A (Animate-disable, R6 detection, animation-set selection,
+MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2R + 3A + 3B (Animate-disable, R6 detection, animation-set selection,
                         --   strafe gating, animation speed multipliers, shift-lock sprint fix,
                         --   custom mouse-lock toggle on LeftControl, character-facing camera yaw,
                         --   third-person zoom limits, mouse-lock camera distance and shoulder offset,
@@ -555,7 +555,40 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       New speed multiplier constants: MOVEMENT_LANDING_LIGHT_SPEED_MULTIPLIER (1.15),
                         --         MOVEMENT_LANDING_MEDIUM_SPEED_MULTIPLIER (1.0), MOVEMENT_LANDING_HEAVY_SPEED_MULTIPLIER (0.9).
                         --
-                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I/2J/2N/2O/2P/2Q/2R/3A: AR15 Falling/Landing IDs (deferred),
+                        --     Landing movement lock + sprint-jump momentum carry (Stage 3B — 2026-05-21):
+                        --       LandingLight: no lock. Player retains full movement input on light landings.
+                        --       LandingMedium: WalkSpeed set to 0 while animation plays.
+                        --         Sprint-jump path: lock lasts SPRINT_JUMP_LANDING_MOMENTUM_DURATION (0.22s);
+                        --           a LinearVelocity carries horizontal momentum at SPRINT_JUMP_LANDING_MOMENTUM_SPEED (18 studs/s).
+                        --           This is NOT a slide system — no slide state, no slide input, no slide animation.
+                        --           LinearVelocity + Attachment parented to HumanoidRootPart; destroyed after 0.22s.
+                        --         Non-sprint-jump path: lock lasts LANDING_MEDIUM_LOCK_FALLBACK_DURATION (0.35s).
+                        --       LandingHeavy: WalkSpeed set to 0 for LANDING_HEAVY_LOCK_FALLBACK_DURATION (0.65s).
+                        --       Early unlock: animation Stopped callback releases the lock when it fires before
+                        --         the fallback timer, unless sprint-jump momentum is still active.
+                        --       applySpeed() override: if isLandingMovementLocked == true, sets WalkSpeed=0 and returns
+                        --         early, before tactical sprint ramp, before all other speed logic.
+                        --       Token-based stale-unlock prevention: landingLockToken incremented on every
+                        --         clearLandingMovementLock(); each task.delay captures token at dispatch, no-ops if changed.
+                        --       captureJumpMomentumDirection(): called at Jumping state entry (not Freefall) because
+                        --         AssemblyLinearVelocity/MoveDirection still reflect sprint at that point.
+                        --         Priority: AssemblyLinearVelocity → MoveDirection → CFrame.LookVector.
+                        --       Phase exit (non-ACTIVE), respawn (loadMovementAnimations), and destroy() all
+                        --         call clearLandingMovementLock() — WalkSpeed is never left stuck at 0.
+                        --       New state: isLandingMovementLocked, landingLockToken, landingMomentumActive,
+                        --         landingMomentumAttachment, landingMomentumVelocity, sprintJumpMomentumDirection.
+                        --       New helpers (inserted before loadMovementAnimations to satisfy --!strict forward-ref):
+                        --         getFlatVector, captureJumpMomentumDirection, clearLandingMomentum,
+                        --         clearLandingMovementLock, startLandingMovementLock, startSprintJumpLandingMomentum.
+                        --       New constants: LANDING_MOVEMENT_LOCK_ENABLED, LANDING_MEDIUM_LOCKS_MOVEMENT,
+                        --         LANDING_HEAVY_LOCKS_MOVEMENT, LANDING_LIGHT_LOCKS_MOVEMENT,
+                        --         LANDING_MEDIUM_LOCK_FALLBACK_DURATION (0.35s), LANDING_HEAVY_LOCK_FALLBACK_DURATION (0.65s),
+                        --         SPRINT_JUMP_LANDING_MOMENTUM_ENABLED, SPRINT_JUMP_LANDING_MOMENTUM_DURATION (0.22s),
+                        --         SPRINT_JUMP_LANDING_MOMENTUM_SPEED (18), SPRINT_JUMP_LANDING_MOMENTUM_MAX_FORCE (60000).
+                        --       Studio verified (MCP): LandingLight at 6 studs — no lock; LandingMedium at 14 studs
+                        --         — locked ~0.37s; LandingHeavy at 22 studs — locked exactly 0.65s.
+                        --
+                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I/2J/2N/2O/2P/2Q/2R/3A/3B: AR15 Falling/Landing IDs (deferred),
                         --       AR15 CrouchWalk/CrouchIdle IDs (deferred), AR15 tactical sprint IDs (deferred),
                         --       TacticalSprintForward2 variation system (deferred),
                         --       lower/upper-body split, reload/fire/ADS weapon animations.

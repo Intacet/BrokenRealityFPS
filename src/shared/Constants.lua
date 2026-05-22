@@ -446,6 +446,45 @@ Constants.MOVEMENT_LANDING_MEDIUM_SPEED_MULTIPLIER = 1.0
 Constants.MOVEMENT_LANDING_HEAVY_SPEED_MULTIPLIER  = 0.9
 
 -- ============================================================
+-- Landing movement lock (Movement Stage 3B)
+-- Locks Humanoid.WalkSpeed = 0 while medium/heavy landing animations play,
+-- preventing player input from moving the character during the impact recovery.
+-- Sprint-jump medium landings additionally apply a short LinearVelocity carry
+-- in the jump momentum direction while input movement remains locked.
+-- LandingLight never locks movement.
+-- Does NOT add fall damage, stamina, slide, vault, prone, or camera changes.
+-- Does NOT write camera.CFrame, CameraOffset, FieldOfView, HipHeight, or JumpPower.
+-- ============================================================
+
+-- Master switch: when false, no landing movement lock is applied for any tier.
+Constants.LANDING_MOVEMENT_LOCK_ENABLED = true
+
+-- Per-tier switches: set to false to disable locking for a specific tier only.
+Constants.LANDING_MEDIUM_LOCKS_MOVEMENT = true
+Constants.LANDING_HEAVY_LOCKS_MOVEMENT  = true
+Constants.LANDING_LIGHT_LOCKS_MOVEMENT  = false   -- always false; LandingLight never locks
+
+-- Fallback lock duration (seconds) for medium/heavy landings when no sprint-jump
+-- momentum carry applies. WalkSpeed is restored when this timer fires OR when the
+-- landing animation track finishes (whichever comes first).
+-- LANDING_MEDIUM: should roughly match LandingMedium track natural length at 1.0× speed.
+-- LANDING_HEAVY:  should roughly match LandingHeavy track natural length at 0.9× speed.
+-- Both values may need tuning after Studio playtest — see DEBT-044 remaining risks.
+Constants.LANDING_MEDIUM_LOCK_FALLBACK_DURATION = 0.35
+Constants.LANDING_HEAVY_LOCK_FALLBACK_DURATION  = 0.65
+
+-- Sprint-jump landing momentum carry (applied only on LandingMedium from a sprint jump).
+-- A LinearVelocity instance is created on HumanoidRootPart for the duration,
+-- pushing the character forward at MOMENTUM_SPEED while input movement is locked.
+-- The carry ends after MOMENTUM_DURATION seconds; both the LinearVelocity and
+-- Attachment are destroyed (clearLandingMomentum) when the carry finishes.
+-- This is NOT the slide system — no slide animation, no camera tilt, no fall damage.
+Constants.SPRINT_JUMP_LANDING_MOMENTUM_ENABLED  = true
+Constants.SPRINT_JUMP_LANDING_MOMENTUM_DURATION = 0.22    -- seconds
+Constants.SPRINT_JUMP_LANDING_MOMENTUM_SPEED    = 18      -- studs/s (horizontal only)
+Constants.SPRINT_JUMP_LANDING_MOMENTUM_MAX_FORCE = 60000  -- LinearVelocity MaxForce (Magnitude mode)
+
+-- ============================================================
 -- Client presentation flags (development / testing)
 -- ============================================================
 -- false = allow normal Roblox camera for development/testing and hide first-person viewmodel.

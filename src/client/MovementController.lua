@@ -2,7 +2,7 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2R + 3A (Animate-disable, R6 detection, animation-set selection,
+-- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2R + 3A + 3B (Animate-disable, R6 detection, animation-set selection,
 -- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
 -- character-facing camera yaw, Unarmed backward/diagonal directional animations,
 -- directional sprint selection (RunForwardLeft/Right with mouse lock; RunForward fallback),
@@ -341,6 +341,41 @@ local wasJumpingThisAirborne: boolean = false
 -- Cleared to false after landing is processed. Reset on respawn.
 local jumpedWhileSprinting: boolean = false
 
+-- Stage 3B: landing movement lock state ──────────────────────────────────────
+
+-- true while a medium/heavy landing is locking player input movement (WalkSpeed = 0).
+-- Cleared by clearLandingMovementLock() — either from the animation Stopped callback,
+-- the fallback task.delay timer, or from phase exit / respawn / destroy.
+local isLandingMovementLocked: boolean = false
+
+-- Monotonically incrementing token used to invalidate stale task.delay unlock callbacks.
+-- Incremented by clearLandingMovementLock(). Each task.delay captures the token value
+-- at creation; it only runs if the token still matches when the delay fires.
+-- Prevents a respawn or earlier manual unlock from causing a double-unlock later.
+local landingLockToken: number = 0
+
+-- true while a sprint-jump momentum LinearVelocity carry is active.
+-- Set by startSprintJumpLandingMomentum; cleared by clearLandingMomentum.
+-- Checked by the landing Stopped callback — when active, the callback defers
+-- the movement-lock release to the momentum's own task.delay.
+local landingMomentumActive: boolean = false
+
+-- The Attachment instance created on HumanoidRootPart for the momentum carry.
+-- Parented to currentRootPart; destroyed (not just unparented) in clearLandingMomentum.
+-- nil when no momentum carry is active.
+local landingMomentumAttachment: Attachment? = nil
+
+-- The LinearVelocity instance driving the sprint-jump forward carry.
+-- Parented to currentRootPart; destroyed in clearLandingMomentum.
+-- nil when no momentum carry is active.
+local landingMomentumVelocity: LinearVelocity? = nil
+
+-- The horizontal unit direction captured at the moment of a sprint jump.
+-- Set by captureJumpMomentumDirection() in the Jumping state handler.
+-- Consumed (read then set to nil) by the Landed handler when starting the carry.
+-- nil when not tracking a sprint-jump airborne phase.
+local sprintJumpMomentumDirection: Vector3? = nil
+
 -- Custom mouse-lock state (Stage 2D — key changed to LeftControl in Stage 2K).
 -- true  = LeftControl has toggled mouse lock on; UserInputService.MouseBehavior == LockCenter.
 -- false = mouse lock off; UserInputService.MouseBehavior == Default.
@@ -499,6 +534,15 @@ local function applySpeed()
     if not hum then return end
 
     if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then
+        hum.WalkSpeed = 0
+        return
+    end
+
+    -- Stage 3B: landing movement lock overrides all other speed logic.
+    -- When a medium/heavy landing is locking input, WalkSpeed stays at 0
+    -- regardless of sprint/crouch/walk state. The LinearVelocity carry (if active)
+    -- provides the only motion during this window; player input is not applied.
+    if isLandingMovementLocked then
         hum.WalkSpeed = 0
         return
     end
@@ -898,6 +942,222 @@ local function stopCrouchTracksExcept(allowedKey: string?)
     then
         currentAnimationName = ""
     end
+end
+
+-- ============================================================
+-- Private helpers — Stage 3B: landing movement lock + sprint-jump momentum
+-- Inserted here (before loadMovementAnimations) so that loadMovementAnimations can
+-- call clearLandingMovementLock() without a Luau --!strict forward-reference error.
+-- All helpers depend only on applySpeed() and module-level state, both declared above.
+-- ============================================================
+
+-- Returns the XZ-flattened unit vector of `vector`, or nil when the horizontal
+-- magnitude is too small to produce a stable unit direction (<= 0.01).
+-- Used to derive a momentum carry direction from AssemblyLinearVelocity or MoveDirection.
+local function getFlatVector(vector: Vector3): Vector3?
+    local flat = Vector3.new(vector.X, 0, vector.Z)
+    if flat.Magnitude <= 0.01 then return nil end
+    return flat.Unit
+end
+
+-- Captures the horizontal unit direction to use for the sprint-jump momentum carry.
+-- Called in the Jumping state handler when jumpedWhileSprinting is true — before the
+-- character enters Freefall, so velocity and facing are still valid for the takeoff frame.
+--
+-- Priority (highest to lowest):
+--  1. currentRootPart.AssemblyLinearVelocity (physics velocity at takeoff)
+--  2. humanoid.MoveDirection (input direction if velocity is unavailable)
+--  3. currentRootPart.CFrame.LookVector (character facing as last resort)
+--
+-- Result stored in sprintJumpMomentumDirection. Consumed (set to nil) by the Landed handler.
+local function captureJumpMomentumDirection()
+    local rootPart = currentRootPart
+    local hum      = humanoid
+
+    -- Priority 1: physics velocity direction.
+    if rootPart then
+        local vel = (rootPart :: BasePart).AssemblyLinearVelocity
+        local dir = getFlatVector(vel)
+        if dir then
+            sprintJumpMomentumDirection = dir
+            if Constants.MOVEMENT_ANIMATION_DEBUG then
+                Logger.debug(
+                    "[MovementController] captureJumpMomentumDirection: velocity dir "
+                    .. string.format("(%.2f,%.2f,%.2f)", dir.X, dir.Y, dir.Z)
+                )
+            end
+            return
+        end
+    end
+
+    -- Priority 2: humanoid MoveDirection.
+    if hum then
+        local dir = getFlatVector(hum.MoveDirection)
+        if dir then
+            sprintJumpMomentumDirection = dir
+            if Constants.MOVEMENT_ANIMATION_DEBUG then
+                Logger.debug(
+                    "[MovementController] captureJumpMomentumDirection: MoveDirection dir "
+                    .. string.format("(%.2f,%.2f,%.2f)", dir.X, dir.Y, dir.Z)
+                )
+            end
+            return
+        end
+    end
+
+    -- Priority 3: character facing (CFrame LookVector).
+    if rootPart then
+        local dir = getFlatVector((rootPart :: BasePart).CFrame.LookVector)
+        if dir then
+            sprintJumpMomentumDirection = dir
+            if Constants.MOVEMENT_ANIMATION_DEBUG then
+                Logger.debug(
+                    "[MovementController] captureJumpMomentumDirection: LookVector fallback "
+                    .. string.format("(%.2f,%.2f,%.2f)", dir.X, dir.Y, dir.Z)
+                )
+            end
+            return
+        end
+    end
+
+    -- All sources failed; no momentum direction available.
+    sprintJumpMomentumDirection = nil
+    if Constants.MOVEMENT_ANIMATION_DEBUG then
+        Logger.debug("[MovementController] captureJumpMomentumDirection: no valid direction — momentum carry will be skipped")
+    end
+end
+
+-- Destroys the LinearVelocity and Attachment instances created by
+-- startSprintJumpLandingMomentum, if they exist.
+-- Idempotent — safe to call when no momentum carry is active (no-op).
+-- Does NOT call clearLandingMovementLock — callers manage lock state separately.
+local function clearLandingMomentum()
+    if landingMomentumVelocity then
+        landingMomentumVelocity:Destroy()
+        landingMomentumVelocity = nil
+    end
+    if landingMomentumAttachment then
+        landingMomentumAttachment:Destroy()
+        landingMomentumAttachment = nil
+    end
+    landingMomentumActive = false
+end
+
+-- Clears the landing movement lock and restores normal WalkSpeed.
+-- Invalidates any pending task.delay unlock callbacks via landingLockToken.
+-- Calls clearLandingMomentum to ensure LinearVelocity is always cleaned up.
+-- Idempotent — safe to call when no lock is active (applySpeed is harmless).
+local function clearLandingMovementLock()
+    landingLockToken       += 1          -- invalidate any pending task.delay unlock
+    isLandingMovementLocked = false
+    clearLandingMomentum()
+    -- Restore WalkSpeed to the phase/state-appropriate value.
+    applySpeed()
+    if Constants.MOVEMENT_ANIMATION_DEBUG then
+        Logger.debug("[MovementController] Landing movement lock CLEARED → WalkSpeed restored")
+    end
+end
+
+-- Sets isLandingMovementLocked = true and schedules an automatic unlock after `duration`
+-- seconds via task.delay. The unlock only fires if the token still matches (i.e., no
+-- manual clearLandingMovementLock() or respawn has already cleared it).
+--
+-- Also suppresses sprint/tactical-sprint state so the animation system does not
+-- resume sprint clips while input is locked. WalkSpeed is zeroed immediately via applySpeed().
+--
+-- No-op when Constants.LANDING_MOVEMENT_LOCK_ENABLED ~= true.
+-- Uses task.delay — never wait() or spawn().
+local function startLandingMovementLock(duration: number)
+    assert(typeof(duration) == "number", "[MovementController] startLandingMovementLock: duration must be a number")
+
+    if Constants.LANDING_MOVEMENT_LOCK_ENABLED ~= true then return end
+
+    isLandingMovementLocked = true
+    landingLockToken        += 1
+    local token              = landingLockToken   -- capture for closure
+
+    -- Suppress sprint flags so animation/speed logic sees a non-sprint state.
+    movementState.isSprinting         = false
+    movementState.isTacticalSprinting = false
+    isTacticalSprinting               = false
+
+    -- Zero WalkSpeed immediately — applySpeed() now sees isLandingMovementLocked = true.
+    applySpeed()
+
+    if Constants.MOVEMENT_ANIMATION_DEBUG then
+        Logger.debug(
+            "[MovementController] Landing movement lock START"
+            .. " duration=" .. string.format("%.2fs", duration)
+            .. " token=" .. tostring(token)
+        )
+    end
+
+    -- Fallback unlock: fires if the animation Stopped callback did not unlock first.
+    task.delay(duration, function()
+        if landingLockToken ~= token then return end   -- already cleared by callback or respawn
+        clearLandingMovementLock()
+        if Constants.MOVEMENT_ANIMATION_DEBUG then
+            Logger.debug("[MovementController] Landing movement lock TIMEOUT unlock (token=" .. tostring(token) .. ")")
+        end
+    end)
+end
+
+-- Creates a LinearVelocity on HumanoidRootPart that carries the character forward
+-- in `direction` at SPRINT_JUMP_LANDING_MOMENTUM_SPEED for SPRINT_JUMP_LANDING_MOMENTUM_DURATION
+-- seconds. Cleans up automatically after the duration via task.delay.
+--
+-- The carry provides the only motion during the lock window; player input is ignored because
+-- WalkSpeed = 0 (set by startLandingMovementLock). This is NOT a slide system — no slide
+-- animation, no camera tilt, no camera.CFrame writes, no fall damage.
+--
+-- No-op when Constants.SPRINT_JUMP_LANDING_MOMENTUM_ENABLED ~= true or currentRootPart is nil.
+local function startSprintJumpLandingMomentum(direction: Vector3)
+    assert(typeof(direction) == "Vector3", "[MovementController] startSprintJumpLandingMomentum: direction must be a Vector3")
+
+    if Constants.SPRINT_JUMP_LANDING_MOMENTUM_ENABLED ~= true then return end
+    local rootPart = currentRootPart
+    if not rootPart then return end
+
+    -- Clear any stale carry from a previous landing before creating new instances.
+    clearLandingMomentum()
+
+    local flatDir = getFlatVector(direction)
+    if not flatDir then
+        Logger.warn("[MovementController] startSprintJumpLandingMomentum: direction has no horizontal component — skipping carry")
+        return
+    end
+
+    local att = Instance.new("Attachment")
+    att.Name   = "BRLandingMomentumAttachment"
+    att.Parent = rootPart :: BasePart
+    landingMomentumAttachment = att
+
+    local lv = Instance.new("LinearVelocity")
+    lv.Name           = "BRLandingMomentumVelocity"
+    lv.Attachment0    = att
+    lv.RelativeTo     = Enum.ActuatorRelativeTo.World
+    lv.MaxForce       = Constants.SPRINT_JUMP_LANDING_MOMENTUM_MAX_FORCE
+    lv.VectorVelocity = (flatDir :: Vector3) * Constants.SPRINT_JUMP_LANDING_MOMENTUM_SPEED
+    lv.Parent         = rootPart :: BasePart
+    landingMomentumVelocity = lv
+
+    landingMomentumActive = true
+
+    if Constants.MOVEMENT_ANIMATION_DEBUG then
+        Logger.debug(
+            "[MovementController] Sprint-jump momentum carry START"
+            .. string.format(" dir=(%.2f,%.2f,%.2f)", (flatDir :: Vector3).X, (flatDir :: Vector3).Y, (flatDir :: Vector3).Z)
+            .. " speed=" .. tostring(Constants.SPRINT_JUMP_LANDING_MOMENTUM_SPEED)
+            .. " duration=" .. string.format("%.2fs", Constants.SPRINT_JUMP_LANDING_MOMENTUM_DURATION)
+        )
+    end
+
+    task.delay(Constants.SPRINT_JUMP_LANDING_MOMENTUM_DURATION, function()
+        clearLandingMomentum()
+        if Constants.MOVEMENT_ANIMATION_DEBUG then
+            Logger.debug("[MovementController] Sprint-jump momentum carry ENDED")
+        end
+    end)
 end
 
 -- ============================================================
@@ -1523,6 +1783,14 @@ local function loadMovementAnimations(character: Model)
     isFalling    = false
     airStartTime = 0
     clearLandingConnection()
+    -- Stage 3B: clear landing movement lock and momentum on respawn.
+    -- clearLandingMovementLock() increments the token (invalidates any pending task.delay
+    -- unlock from the previous character), sets isLandingMovementLocked = false, calls
+    -- clearLandingMomentum() to destroy LinearVelocity/Attachment, and calls applySpeed().
+    -- At this point humanoid and currentRootPart are already set by setupCharacter(), so
+    -- applySpeed() can write to the new Humanoid safely.
+    clearLandingMovementLock()
+    sprintJumpMomentumDirection = nil
     -- Stage 3A: clear new jump/drop tracking state on respawn.
     airborneStartY         = nil
     wasJumpingThisAirborne = false
@@ -1921,6 +2189,14 @@ local function playLandingAnimation(animationName: string)
     -- the callback from firing spuriously — mirrors clearCrouchTransitionConnection() pattern.
     landingConn = track.Stopped:Connect(function()
         clearLandingConnection()
+        -- Stage 3B: if the animation finished before the fallback timer, release the
+        -- movement lock early — but only when no momentum carry is still active.
+        -- When momentum IS active, the carry's own task.delay (and startLandingMovementLock's
+        -- timer) will clear the lock when the carry ends. Releasing early here would destroy
+        -- the LinearVelocity before the carry duration completes.
+        if isLandingMovementLocked and not landingMomentumActive then
+            clearLandingMovementLock()
+        end
         if Constants.MOVEMENT_ANIMATION_DEBUG then
             Logger.debug("[MovementController] " .. animationName .. " finished → resuming locomotion")
         end
@@ -2404,6 +2680,14 @@ local function onHumanoidStateChanged(
         -- double-setting these values.
         wasJumpingThisAirborne = true
         jumpedWhileSprinting   = movementState.isSprinting or movementState.isTacticalSprinting
+        -- Stage 3B: capture the horizontal takeoff direction now, at jump entry, while the
+        -- character's velocity and facing still reflect the sprint direction. Freefall entry
+        -- is slightly later and may have different velocity if the character bumps geometry.
+        if jumpedWhileSprinting then
+            captureJumpMomentumDirection()
+        else
+            sprintJumpMomentumDirection = nil  -- ensure no stale direction from a previous sprint jump
+        end
         -- Capture the highest Y position at jump launch (not at Freefall entry, which is
         -- a bit later and slightly lower). Used to compute drop on landing.
         local rootAtJump = currentRootPart
@@ -2523,6 +2807,43 @@ local function onHumanoidStateChanged(
         end
 
         playLandingAnimation(animName)
+
+        -- Stage 3B: apply movement lock (and optional sprint-jump momentum carry) per tier.
+        -- Lock state is managed by token; cleanup happens in clearLandingMovementLock().
+        -- Capture and nil-out sprintJumpMomentumDirection before any early returns so we
+        -- never carry a stale direction into the next landing event.
+        local capturedMomentumDir = sprintJumpMomentumDirection
+        sprintJumpMomentumDirection = nil
+
+        if animName == "LandingLight" then
+            -- LandingLight: no movement lock. Movement flow is preserved for normal jumps/drops.
+            -- No-op — do nothing, capturedMomentumDir is discarded.
+
+        elseif animName == "LandingMedium" then
+            if Constants.LANDING_MEDIUM_LOCKS_MOVEMENT then
+                if wasJump and sprintJp then
+                    -- Sprint-jump medium landing: lock + LinearVelocity carry.
+                    startLandingMovementLock(Constants.SPRINT_JUMP_LANDING_MOMENTUM_DURATION)
+                    if capturedMomentumDir ~= nil then
+                        startSprintJumpLandingMomentum(capturedMomentumDir)
+                    else
+                        -- Direction capture failed at jump time; lock only, no carry.
+                        if Constants.MOVEMENT_ANIMATION_DEBUG then
+                            Logger.debug("[MovementController] Sprint-jump momentum: direction unavailable — lock only")
+                        end
+                    end
+                else
+                    -- Non-sprint-jump medium landing: lock only (pure drop or normal jump).
+                    startLandingMovementLock(Constants.LANDING_MEDIUM_LOCK_FALLBACK_DURATION)
+                end
+            end
+
+        elseif animName == "LandingHeavy" then
+            if Constants.LANDING_HEAVY_LOCKS_MOVEMENT then
+                -- Heavy landing: lock only, no momentum carry regardless of jump context.
+                startLandingMovementLock(Constants.LANDING_HEAVY_LOCK_FALLBACK_DURATION)
+            end
+        end
     end
 end
 
@@ -2727,6 +3048,11 @@ function MovementController:destroy()
     isFalling    = false
     airStartTime = 0
     clearLandingConnection()
+    -- Stage 3B: clear landing movement lock and momentum on destroy.
+    -- humanoid is still valid at this point (nil'd later in destroy()), so applySpeed()
+    -- inside clearLandingMovementLock() may write to it; that is safe and correct.
+    clearLandingMovementLock()
+    sprintJumpMomentumDirection = nil
     -- Stage 3A: clear new jump/drop tracking state.
     airborneStartY         = nil
     wasJumpingThisAirborne = false
@@ -2853,6 +3179,12 @@ function MovementController:Start()
             -- Stage 2O: reset falling/landing state so re-entry to ACTIVE starts clean.
             isFalling = false
             clearLandingConnection()
+            -- Stage 3B: clear movement lock and momentum on phase exit.
+            -- clearLandingMovementLock() increments token (invalidates task.delay), sets
+            -- isLandingMovementLocked = false, and calls clearLandingMomentum() which destroys
+            -- any active LinearVelocity/Attachment on HumanoidRootPart.
+            clearLandingMovementLock()
+            sprintJumpMomentumDirection = nil
             -- Stage 3A: clear jump/drop tracking state on phase exit.
             airborneStartY         = nil
             wasJumpingThisAirborne = false
@@ -3140,7 +3472,7 @@ function MovementController:Start()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1–3A: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals+new IDs, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→directional(2R), CrouchIdle, CrouchWalkStart, Falling+LandingLight/Medium/Heavy, TacticalSprint double-tap+ramp+stop, sprintFOV+landingClassification)")
+    Logger.debug("[MovementController] Ready (Stage 1–3B: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals+new IDs, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→directional(2R), CrouchIdle, CrouchWalkStart, Falling+LandingLight/Medium/Heavy, TacticalSprint double-tap+ramp+stop, sprintFOV+landingClassification, landingMovementLock+sprintJumpMomentum)")
 end
 
 return MovementController

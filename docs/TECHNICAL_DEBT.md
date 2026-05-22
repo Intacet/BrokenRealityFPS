@@ -536,7 +536,7 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-21 (x22)
+## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-21 (x23)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
@@ -751,8 +751,28 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - No fall damage. No stamina. No slide/vault/prone. No camera.CFrame writes. No CameraOffset changes. No new remotes. No server changes.
 - MCP/Studio verified 2026-05-21: all 6 FOV constants live in Studio; camera FOV starts at 70.0; TweenService round-trip 70→78→70 confirmed; all 7 landing classifier cases verified inline (NormalJump→Light, SprintJump→Medium, HighJump≥18→Heavy, SmallDrop→Light, MedDrop→Medium, HeavyDrop→Heavy, TinyDrop<0.25s→nil). No runtime errors in Output panel. Known limitation: full end-to-end FOV tween during live sprint and landing animations during actual jumps require manual Studio playtest — MCP keyboard input does not reach `InputBegan` handlers (same gameProcessed limitation as Stages 2P/2Q/2R).
 
-**Remaining gaps (updated Stage 3A):**
+**Updated (2026-05-21 — Stage 3B: landing movement lock + sprint-jump momentum carry):**
+- `isLandingMovementLocked` state variable added. When `true`, `applySpeed()` immediately sets `WalkSpeed = 0` and returns — before tactical sprint ramp, before all other speed logic.
+- `landingLockToken` (number) added. Incremented on every `clearLandingMovementLock()` call. Each `task.delay` fallback closure captures the token at dispatch time and no-ops if the token has changed (stale-unlock prevention for respawn, phase-exit, and rapid re-landing).
+- `landingMomentumActive`, `landingMomentumAttachment: Attachment?`, `landingMomentumVelocity: LinearVelocity?` added for sprint-jump momentum carry.
+- `sprintJumpMomentumDirection: Vector3?` added — captured in the Jumping state handler; consumed and cleared at landing.
+- Six new private helpers inserted before `loadMovementAnimations()` to satisfy Luau `--!strict` forward-reference rules:
+  - `getFlatVector(vector)` — flatten Y, return unit or nil.
+  - `captureJumpMomentumDirection()` — reads `AssemblyLinearVelocity` → `MoveDirection` → `CFrame.LookVector` at jump entry.
+  - `clearLandingMomentum()` — destroys `LinearVelocity` + `Attachment`, clears flag.
+  - `clearLandingMovementLock()` — increments token, sets flag false, calls `clearLandingMomentum()`, calls `applySpeed()`.
+  - `startLandingMovementLock(duration)` — sets lock, suppresses sprint flags, calls `applySpeed()`, schedules fallback timer.
+  - `startSprintJumpLandingMomentum(direction)` — creates `Attachment` + `LinearVelocity` on `HumanoidRootPart`.
+- `playLandingAnimation` Stopped callback updated: after `clearLandingConnection()`, calls `clearLandingMovementLock()` if `isLandingMovementLocked and not landingMomentumActive` (early-unlock, not called while momentum carry is still active).
+- `onHumanoidStateChanged` Jumping branch updated: captures `captureJumpMomentumDirection()` when `jumpedWhileSprinting`, clears to nil otherwise.
+- `onHumanoidStateChanged` Landed branch updated: after `playLandingAnimation(animName)`, routes to `startLandingMovementLock` (with optional `startSprintJumpLandingMomentum`) per tier.
+- Phase-exit handler, `loadMovementAnimations()`, and `destroy()` all call `clearLandingMovementLock()` + reset `sprintJumpMomentumDirection`.
+- Ten new Constants (see "New constants" in CHANGELOG Stage 3B entry).
+- MCP/Studio verified 2026-05-21: LandingLight (6 studs) — min WalkSpeed 14.0 (no lock) ✅; LandingMedium (14 studs) — locked ~0.37s ✅; LandingHeavy (22 studs) — locked exactly 0.65s ✅; no LinearVelocity on non-sprint-jump landings ✅.
+
+**Remaining gaps (updated Stage 3B):**
 - Crouch walk animation — implemented for Unarmed (9 directional IDs, Stage 2J). AR15/gun-equipped CrouchWalk IDs still deferred.
+- Sprint-jump momentum carry — LinearVelocity carry implemented for LandingMedium sprint-jump path (Stage 3B). AR15 set and LandingHeavy paths use only the lock (no carry). A dedicated heavy-landing carry is deferred.
 - Directional sprint animations — ForwardLeft and ForwardRight now play RunForwardLeft/RunForwardRight when customMouseLocked is ON (Stage 2R). Remaining directions (Left, Right, Backward, BackwardLeft, BackwardRight) still use RunForward in all cases. AR15 sprinting uses AR15 RunForward in all directions.
 - AR15 run diagonal animations — AR15 set sprinting uses RunForward for all directions; no AR15-specific run diagonals.
 - AR15 backward/diagonal walk animations — AR15 set only has WalkForward and RunForward; backward and diagonal walk directions fall back to WalkForward/strafe grouping.
@@ -823,8 +843,14 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - **Stage 2E new risk:** `currentRootPart` is cached in `setupCharacter()` via `WaitForChild`. If the HumanoidRootPart is temporarily removed and re-added (e.g. by a ragdoll system that swaps the root), the cached reference will point to the old part. The cached reference is only refreshed on the next `CharacterAdded`. Verify in Studio that ragdoll (via `RagdollService`) does not swap the HumanoidRootPart after `setupCharacter()` runs.
 - Input/mouse-lock and character-facing behavior needs Studio verification — particularly: LeftAlt toggles cursor lock and character facing simultaneously, character visibly rotates to face camera on LeftAlt toggle, character does not jitter while moving with mouse lock on, AutoRotate is restored on toggle-off and on phase exit, facing resumes on ACTIVE re-entry when toggle was left on, respawn resets both cursor lock and AutoRotate correctly.
 
-**Trigger:** Any playtesting session where T-pose during idle/jump or missing backward/diagonal animations is noticeable; where crouch bottom-pose hold or CrouchWalk transitions look wrong; where the `getRigDebugSummary` warn appears; where CrouchWalk direction does not match movement direction; or where animation speed or input feels wrong after Studio testing.
-**Fix when:** A future movement stage adds idle/jump/fall/climb custom clips, AR15 CrouchWalk IDs, a dedicated CrouchIdle clip, and server-owned equipment integration. Tune speed multipliers after first Studio playtest. Do not build full Scriptable camera system until camera refactor is scheduled.
+- **Stage 3B new risk — LinearVelocity vs. physics systems:** `startSprintJumpLandingMomentum()` creates a `LinearVelocity` with `RelativeTo = World` and `MaxForce = 60000`. If another physics constraint (e.g. a future conveyor, wind zone, or ragdoll joint) is applied to the same `HumanoidRootPart` simultaneously, the constraints will fight each other. `clearLandingMomentum()` always destroys the constraint after `SPRINT_JUMP_LANDING_MOMENTUM_DURATION` (0.22s) — the window is short enough that conflicts are unlikely in normal play. If a physics system is added in the future, verify that it checks for and yields to active `LinearVelocity` constraints.
+- **Stage 3B new risk — WalkSpeed stuck at 0 in edge cases:** If a bug causes `clearLandingMovementLock()` to never be called (e.g. an unhandled exception in the token-delay closure), the player will be stuck with `WalkSpeed = 0` until respawn. The token guard, early-unlock from animation Stopped, and cleanup in phase-exit/respawn/destroy are all independent paths that should prevent this — but all are async (`task.delay`, event callbacks). If this occurs in live play, the respawn path is the guaranteed fix. Add a diagnostic: if `WalkSpeed == 0` more than `LANDING_HEAVY_LOCK_FALLBACK_DURATION + 0.5s` after a landing, emit a `Logger.warn` and force `clearLandingMovementLock()`.
+- **Stage 3B new risk — sprint-jump momentum carry not MCP-verified end-to-end:** The `LinearVelocity` path requires `jumpedWhileSprinting = true` at landing, which is client-side state set by actual sprint+jump input. MCP `user_keyboard_input` does not sustain LeftShift or W in Studio play mode, so the full sprint-jump → momentum carry sequence was not live-tested. The non-sprint medium landing lock (0.35s) and heavy landing lock (0.65s) were verified via server-side teleport tests. Manual Studio playtest required to confirm: sprint → jump → land → LinearVelocity appears on HRP → WalkSpeed=0 for 0.22s → LinearVelocity destroyed → WalkSpeed restored.
+- **Stage 3B new risk — `captureJumpMomentumDirection()` called at Jumping, not Freefall:** Direction is captured when `Humanoid.StateType == Jumping`. If the jump animation or a lag spike causes the `AssemblyLinearVelocity` to be near-zero at the exact Jumping frame (before horizontal velocity builds), `MoveDirection` and then `CFrame.LookVector` are used as fallbacks. If all three are near-zero (player standing still at jump entry), `sprintJumpMomentumDirection` is left nil and momentum carry is skipped gracefully. Verify in Studio that a standing sprint-jump (pressing LeftShift but not W just before jump) still produces a reasonable carry direction.
+- **Stage 3B new risk — token invalidation and early unlock interaction:** The Stopped callback releases the lock early (`clearLandingMovementLock()`) when `not landingMomentumActive`. The fallback `task.delay` also calls `clearLandingMovementLock()` when the token matches. If both fire in the same frame (Stopped fires exactly as the fallback timer expires), the second call is a no-op (`isLandingMovementLocked` will already be false and `landingLockToken` will have been incremented). This is safe but worth noting: the increment-on-clear means the fallback timer is always invalidated after the Stopped early-unlock.
+
+**Trigger:** Any playtesting session where T-pose during idle/jump or missing backward/diagonal animations is noticeable; where crouch bottom-pose hold or CrouchWalk transitions look wrong; where the `getRigDebugSummary` warn appears; where CrouchWalk direction does not match movement direction; where WalkSpeed appears stuck at 0 after a landing; or where animation speed or input feels wrong after Studio testing.
+**Fix when:** A future movement stage adds idle/jump/fall/climb custom clips, AR15 CrouchWalk IDs, a dedicated CrouchIdle clip, and server-owned equipment integration. Tune speed multipliers after first Studio playtest. Do not build full Scriptable camera system until camera refactor is scheduled. Add the WalkSpeed=0 stuck diagnostic when any live-play test confirms the edge case.
 
 ---
 

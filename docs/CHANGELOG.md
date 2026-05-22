@@ -7,6 +7,59 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-21] — Movement Stage 3B: Landing movement lock + sprint-jump momentum carry
+
+### Summary
+
+Landing movement lock and optional sprint-jump momentum carry added to `MovementController`.
+
+- **LandingLight** — no change to movement; player retains full input control.
+- **LandingMedium** — `WalkSpeed` set to 0 while the animation plays. If the player landed from a sprint jump, a `LinearVelocity` carries horizontal momentum for `SPRINT_JUMP_LANDING_MOMENTUM_DURATION` (0.22 s) while input is locked; the lock matches the momentum window. For non-sprint-jump medium landings the lock uses `LANDING_MEDIUM_LOCK_FALLBACK_DURATION` (0.35 s). Lock is released early if the animation's `Stopped` event fires first (and momentum is not still active).
+- **LandingHeavy** — `WalkSpeed` set to 0 for `LANDING_HEAVY_LOCK_FALLBACK_DURATION` (0.65 s) or until animation finishes, whichever is shorter.
+
+**Token-based stale-unlock prevention:** `landingLockToken` is incremented on every lock clear. Each `task.delay` closure captures the token at dispatch time and no-ops if the token has since changed (prevents stale unlocks after respawn, phase-exit, or rapid re-landing).
+
+**Sprint-jump momentum carry:** `LinearVelocity` + `Attachment` parented to `HumanoidRootPart`; horizontal direction captured at the `Jumping` state entry (not `Freefall`). Destroyed after `SPRINT_JUMP_LANDING_MOMENTUM_DURATION`. Not a slide system — no player slide state, no slide input, no slide animation.
+
+**Phase-exit / respawn cleanup:** `clearLandingMovementLock()` called in the phase-exit handler, `loadMovementAnimations()`, and `destroy()` to guarantee `WalkSpeed` is never left at 0 after the active game phase ends.
+
+**Studio verification (MCP):** LandingLight at 6 studs — min WalkSpeed 14.0 (no lock). LandingMedium at 14 studs — locked for ~0.37 s. LandingHeavy at 22 studs — locked for exactly 0.65 s. No `LinearVelocity` present on non-sprint-jump landings (correct — sprint-jump path requires client-side `jumpedWhileSprinting` flag).
+
+### New constants (`src/shared/Constants.lua`)
+
+- `LANDING_MOVEMENT_LOCK_ENABLED = true` — master switch; when false no lock is ever applied
+- `LANDING_MEDIUM_LOCKS_MOVEMENT = true` — enables lock for LandingMedium tier
+- `LANDING_HEAVY_LOCKS_MOVEMENT = true` — enables lock for LandingHeavy tier
+- `LANDING_LIGHT_LOCKS_MOVEMENT = false` — always false; LandingLight never locks
+- `LANDING_MEDIUM_LOCK_FALLBACK_DURATION = 0.35` — non-sprint-jump medium lock duration (seconds)
+- `LANDING_HEAVY_LOCK_FALLBACK_DURATION = 0.65` — heavy lock duration (seconds)
+- `SPRINT_JUMP_LANDING_MOMENTUM_ENABLED = true` — master switch for LinearVelocity carry
+- `SPRINT_JUMP_LANDING_MOMENTUM_DURATION = 0.22` — seconds of momentum carry (also the lock duration for sprint-jump medium landings)
+- `SPRINT_JUMP_LANDING_MOMENTUM_SPEED = 18` — horizontal carry speed in studs/s
+- `SPRINT_JUMP_LANDING_MOMENTUM_MAX_FORCE = 60000` — LinearVelocity MaxForce (Magnitude mode)
+
+### New helpers (`src/client/MovementController.lua`)
+
+Inserted after `stopCrouchTracksExcept` (~line 945) and **before** `loadMovementAnimations` (~line 1766) to satisfy Luau `--!strict` forward-reference rules:
+
+- **`getFlatVector(vector)`** — flattens Y, returns unit or nil if magnitude ≤ 0.01
+- **`captureJumpMomentumDirection()`** — captures sprint takeoff direction at `Jumping` state entry; priority: `AssemblyLinearVelocity` → `MoveDirection` → `CFrame.LookVector`
+- **`clearLandingMomentum()`** — destroys `LinearVelocity` and `Attachment` on `HumanoidRootPart`; sets `landingMomentumActive = false`
+- **`clearLandingMovementLock()`** — increments token, sets `isLandingMovementLocked = false`, calls `clearLandingMomentum()`, calls `applySpeed()`
+- **`startLandingMovementLock(duration)`** — sets lock, suppresses sprint flags, calls `applySpeed()` (→ `WalkSpeed = 0`), schedules token-guarded `task.delay` fallback
+- **`startSprintJumpLandingMomentum(direction)`** — creates `Attachment` + `LinearVelocity` on `HumanoidRootPart`, sets velocity, schedules `task.delay` cleanup
+
+### New module-level state
+
+- `isLandingMovementLocked: boolean` — when true, `applySpeed()` immediately sets `WalkSpeed = 0` and returns
+- `landingLockToken: number` — invalidation token; incremented on every lock clear
+- `landingMomentumActive: boolean` — true while `LinearVelocity` carry is running
+- `landingMomentumAttachment: Attachment?` — reference for cleanup
+- `landingMomentumVelocity: LinearVelocity?` — reference for cleanup
+- `sprintJumpMomentumDirection: Vector3?` — captured at jump entry; consumed and cleared at landing
+
+---
+
 ## [2026-05-21] — Movement Stage 3A: Sprint FOV stretch + landing animation classification
 
 ### Summary
