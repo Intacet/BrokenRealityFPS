@@ -873,7 +873,7 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - Crouch `InputBegan`: calls `clearSprintStopLock()` and sets `sprintStartTime = nil` before entering crouch.
 - Phase exit, `loadMovementAnimations()` (respawn), and `destroy()` all call `clearSprintStopLock()`, reset `sprintStartTime`, and reset `lastSprintMomentumDirection`.
 - Nine new Constants: `SPRINT_STOP_ENABLED`, `SPRINT_STOP_MIN_SPRINT_DURATION` (0.75), `SPRINT_STOP_LOCKS_MOVEMENT`, `SPRINT_STOP_LOCK_FALLBACK_DURATION` (0.38), `SPRINT_STOP_MOMENTUM_ENABLED`, `SPRINT_STOP_MOMENTUM_DURATION` (0.24), `SPRINT_STOP_MOMENTUM_SPEED` (16), `SPRINT_STOP_MOMENTUM_MAX_FORCE` (60000), `SPRINT_STOP_MIN_HORIZONTAL_SPEED` (8).
-- `rojo build` passes; all grep checks passed on disk. Studio MCP verification not completed — Rojo Connect dialog required manual click that is not possible via MCP tools.
+- MCP/Studio verified 2026-05-22 (26/26 checks): all 9 Constants live in Studio; all 17 MovementController code patterns confirmed present in running module source via `loadstring` + plain-text `src:find` scan. No Output errors. Note: full end-to-end behavioral test (sprint ≥ 0.75s → SprintStop plays + WalkSpeed=0 + momentum carry) requires manual Studio playtest — MCP keyboard input does not reach `InputBegan` in Studio play mode (same limitation as Stages 2P/2Q/2R/3A/3B).
 
 **Remaining gaps (updated Stage 3C):**
 - Crouch walk animation — implemented for Unarmed (9 directional IDs, Stage 2J). AR15/gun-equipped CrouchWalk IDs still deferred.

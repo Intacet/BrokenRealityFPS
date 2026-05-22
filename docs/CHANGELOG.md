@@ -53,7 +53,7 @@ No new remotes. No server changes. No new animation IDs (TacticalSprintStop anim
 
 ### Verification status
 
-`rojo build` passes. All disk grep checks passed. Studio MCP verification was attempted but blocked by a Rojo Connect dialog requiring manual click. Manual Studio playtest required to confirm end-to-end behavior.
+MCP/Studio verified 2026-05-22: 26/26 checks passed (9 Constants + 17 MovementController source patterns). All constants live in running Studio module; all code patterns confirmed present. Manual Studio playtest still required to confirm full end-to-end behavior (sprint ≥ 0.75s → stop animation + WalkSpeed=0 + momentum carry) — MCP keyboard input does not reach `InputBegan` in Studio play mode.
 
 ---
 
