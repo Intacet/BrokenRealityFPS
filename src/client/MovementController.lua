@@ -3602,14 +3602,25 @@ function MovementController:Start()
             if input.KeyCode ~= Enum.KeyCode.LeftShift then return end
             if not movementState.isSprinting then return end
 
-            -- Stage 2P: Shift release ends tactical sprint (plays TacticalSprintStop one-shot).
-            -- SprintStop animation and lock only play on tactical sprint end, not regular sprint.
+            -- Stage 2P/3C: Shift release ends sprint.
+            -- Tactical sprint: full stop — TacticalSprintStop animation + movement lock + momentum carry.
+            -- Regular sprint:  no end animation, no lock, no carry — clear flags only.
             if isTacticalSprinting then
-                stopTacticalSprint()
+                -- Clear tactical sprint tracking state first (before playSprintStopWithLock so
+                -- the fallback path in that function never leaves isTacticalSprinting stuck true).
+                isTacticalSprinting               = false
+                movementState.isTacticalSprinting = false
+                tacticalSprintStartTime           = 0
+                clearTacticalSprintStopConnection()
+                -- Full tactical sprint stop: animation + movement lock + momentum carry.
+                -- playSprintStopWithLock also clears movementState.isSprinting and calls applySpeed().
+                playSprintStopWithLock(lastSprintMomentumDirection)
+            else
+                -- Regular sprint end: no animation, no lock, no carry.
+                movementState.isSprinting = false
+                applySpeed()
             end
             sprintStartTime = nil
-            movementState.isSprinting = false
-            applySpeed()
             -- Stage 3A: restore FOV immediately on sprint end.
             updateSprintFov()
         end
@@ -3752,10 +3763,11 @@ function MovementController:Start()
             end
         end
 
-        -- Stage 3C: update lastSprintMomentumDirection each frame while sprinting normally.
-        -- Captures the most recent XZ direction so SprintStop has an accurate carry vector.
-        -- Only updated during normal (non-tactical) sprint when SprintStop is not already playing.
-        if movementState.isSprinting and not isTacticalSprinting and not isSprintStopPlaying then
+        -- Stage 3C: update lastSprintMomentumDirection each frame while sprinting.
+        -- Captures the most recent XZ direction so SprintStop / tactical sprint stop has an
+        -- accurate carry vector. Updated during both normal and tactical sprint; gated only on
+        -- SprintStop not already in-flight so the direction stays fresh for the stop carry.
+        if movementState.isSprinting and not isSprintStopPlaying then
             local hrp = currentRootPart
             if hrp then
                 local vel     = hrp.AssemblyLinearVelocity
