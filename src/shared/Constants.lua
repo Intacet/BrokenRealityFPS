@@ -486,6 +486,54 @@ Constants.SPRINT_JUMP_LANDING_MOMENTUM_SPEED    = 18      -- studs/s (horizontal
 Constants.SPRINT_JUMP_LANDING_MOMENTUM_MAX_FORCE = 60000  -- LinearVelocity MaxForce (Magnitude mode)
 
 -- ============================================================
+-- Sprint stop behavior (Movement Stage 3C — 2026-05-22)
+-- Applies a movement lock and short forward momentum carry when normal sprint
+-- (LeftShift hold) ends, provided the player sprinted for at least
+-- SPRINT_STOP_MIN_SPRINT_DURATION seconds.
+-- Uses the TacticalSprintStop animation asset (same clip, no new animation ID).
+-- This is NOT the slide system — no slide animation, no camera tilt, no prone state.
+-- Does NOT write camera.CFrame, CameraOffset, FieldOfView, HipHeight, or JumpPower.
+-- ============================================================
+
+-- Master switch: when false, SprintStop never plays and no lock or momentum is applied.
+-- Normal sprint ends silently (same as before Stage 3C).
+Constants.SPRINT_STOP_ENABLED = true
+
+-- Minimum sprint duration (seconds) before SprintStop is eligible to play.
+-- Tap-sprints shorter than this threshold skip SprintStop entirely and end normally.
+Constants.SPRINT_STOP_MIN_SPRINT_DURATION = 0.75
+
+-- When true, Humanoid.WalkSpeed is set to 0 while SprintStop is playing.
+-- Normal walk/sprint/crouch speed logic does not override it while locked.
+-- WalkSpeed is restored after SprintStop ends (Stopped callback or fallback timer).
+Constants.SPRINT_STOP_LOCKS_MOVEMENT = true
+
+-- Fallback lock duration (seconds) if the animation Stopped callback never fires.
+-- The greater of track.Length and this value is used as the actual lock window.
+Constants.SPRINT_STOP_LOCK_FALLBACK_DURATION = 0.38
+
+-- When true, a short LinearVelocity momentum carry is applied during SprintStop,
+-- pushing the player forward in their last sprint direction while input is locked.
+-- Produces a brief forward-carry feel without a slide animation or slide state.
+Constants.SPRINT_STOP_MOMENTUM_ENABLED = true
+
+-- Seconds the LinearVelocity carry lasts.
+-- Should be <= SPRINT_STOP_LOCK_FALLBACK_DURATION so carry ends before or with the lock.
+Constants.SPRINT_STOP_MOMENTUM_DURATION = 0.24
+
+-- Horizontal carry speed in studs/s during the momentum window.
+Constants.SPRINT_STOP_MOMENTUM_SPEED = 16
+
+-- LinearVelocity MaxForce (Magnitude mode) for the sprint stop momentum carry.
+-- Matches the value used for landing momentum (SPRINT_JUMP_LANDING_MOMENTUM_MAX_FORCE).
+Constants.SPRINT_STOP_MOMENTUM_MAX_FORCE = 60000
+
+-- Minimum horizontal speed (studs/s from AssemblyLinearVelocity) required to use
+-- the root part's actual velocity as the sprint direction source each Heartbeat.
+-- Below this, Humanoid.MoveDirection is used instead (fallback to CFrame.LookVector if zero).
+Constants.SPRINT_STOP_MIN_HORIZONTAL_SPEED = 8
+
+-- ============================================================
 -- Client presentation flags (development / testing)
 -- ============================================================
 -- false = allow normal Roblox camera for development/testing and hide first-person viewmodel.

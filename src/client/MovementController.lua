@@ -2,7 +2,7 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2Q+ + 2R + 3A + 3B (Animate-disable, R6 detection, animation-set selection,
+-- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2Q+ + 2R + 3A + 3B + 3C (Animate-disable, R6 detection, animation-set selection,
 -- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
 -- character-facing camera yaw, Unarmed backward/diagonal directional animations,
 -- directional sprint selection (RunForwardLeft/Right with mouse lock; RunForward fallback),
@@ -512,6 +512,37 @@ local lastShiftPressTime: number = 0
 -- the one-shot is still running and Heartbeat must not override it.
 local tacticalSprintStopConn: RBXScriptConnection? = nil
 
+-- Stage 3C: normal sprint-stop state ─────────────────────────────────────────
+
+-- os.clock() captured when normal sprint (LeftShift) begins.
+-- Set to nil after duration is evaluated at sprint end, and on respawn/destroy.
+-- Used to gate SprintStop by SPRINT_STOP_MIN_SPRINT_DURATION.
+local sprintStartTime: number? = nil
+
+-- Last known XZ-normalised sprint direction, updated every Heartbeat while
+-- movementState.isSprinting is true (and tactical sprint is not active).
+-- Consumed by playSprintStopWithLock as the momentum carry direction.
+-- Cleared on respawn/destroy and on phase exit.
+local lastSprintMomentumDirection: Vector3? = nil
+
+-- True while the SprintStop one-shot is playing and movement is locked.
+-- Cleared by clearSprintStopLock() when the animation finishes or the fallback timer fires.
+-- Gates updateMovementAnimation() and applySpeed() while the one-shot runs.
+local isSprintStopPlaying: boolean = false
+
+-- Invalidation counter for stale task.delay unlock callbacks — mirrors landingLockToken.
+-- Incremented on every clearSprintStopLock() call; each task.delay captures the value
+-- at dispatch time and no-ops if the token has since changed.
+local sprintStopLockToken: number = 0
+
+-- LinearVelocity Attachment parented to HumanoidRootPart during the momentum carry.
+-- Nil when no carry is active. Destroyed by clearSprintStopMomentum().
+local sprintStopMomentumAttachment: Attachment? = nil
+
+-- The LinearVelocity instance pushing the player forward during the momentum carry.
+-- Nil when no carry is active. Destroyed by clearSprintStopMomentum().
+local sprintStopMomentumVelocity: LinearVelocity? = nil
+
 -- ============================================================
 -- Private helpers — Stage 1
 -- ============================================================
@@ -545,6 +576,14 @@ local function applySpeed()
     -- regardless of sprint/crouch/walk state. The LinearVelocity carry (if active)
     -- provides the only motion during this window; player input is not applied.
     if isLandingMovementLocked then
+        hum.WalkSpeed = 0
+        return
+    end
+
+    -- Stage 3C: sprint-stop movement lock — second-highest priority after landing lock.
+    -- When SprintStop is playing and SPRINT_STOP_LOCKS_MOVEMENT is true, WalkSpeed stays
+    -- at 0 regardless of sprint/crouch/walk state. Cleared by clearSprintStopLock().
+    if isSprintStopPlaying and Constants.SPRINT_STOP_LOCKS_MOVEMENT == true then
         hum.WalkSpeed = 0
         return
     end
@@ -1170,6 +1209,101 @@ local function startSprintJumpLandingMomentum(direction: Vector3)
 end
 
 -- ============================================================
+-- Private helpers — Stage 3C: sprint-stop movement lock + momentum carry
+-- ============================================================
+
+-- Returns true when all conditions for playing SprintStop are met.
+-- Returns false when: SPRINT_STOP_ENABLED is false, sprint was shorter than
+-- SPRINT_STOP_MIN_SPRINT_DURATION, phase is not ACTIVE, player is crouching,
+-- or landing movement lock is currently active.
+local function shouldPlaySprintStop(sprintDuration: number): boolean
+    if Constants.SPRINT_STOP_ENABLED ~= true then return false end
+    if sprintDuration < Constants.SPRINT_STOP_MIN_SPRINT_DURATION then return false end
+    if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return false end
+    if movementState.isCrouching then return false end
+    if isLandingMovementLocked then return false end
+    return true
+end
+
+-- Destroys the active sprint-stop LinearVelocity and Attachment if present.
+-- Idempotent — safe to call when no momentum is active.
+-- Does NOT touch any other constraints or attachments on HumanoidRootPart.
+local function clearSprintStopMomentum()
+    if sprintStopMomentumVelocity then
+        sprintStopMomentumVelocity:Destroy()
+        sprintStopMomentumVelocity = nil
+    end
+    if sprintStopMomentumAttachment then
+        sprintStopMomentumAttachment:Destroy()
+        sprintStopMomentumAttachment = nil
+    end
+end
+
+-- Clears the sprint-stop movement lock and restores normal WalkSpeed.
+-- Increments sprintStopLockToken to invalidate any pending task.delay unlock callbacks.
+-- Calls clearSprintStopMomentum() to destroy any active LinearVelocity.
+-- Idempotent — safe to call when no lock is active (applySpeed is harmless).
+local function clearSprintStopLock()
+    sprintStopLockToken += 1
+    isSprintStopPlaying  = false
+    clearSprintStopMomentum()
+    applySpeed()
+    if Constants.MOVEMENT_ANIMATION_DEBUG then
+        Logger.debug("[MovementController] SprintStop lock CLEARED → WalkSpeed restored")
+    end
+end
+
+-- Creates a LinearVelocity on HumanoidRootPart carrying the character forward in
+-- `direction` at SPRINT_STOP_MOMENTUM_SPEED for SPRINT_STOP_MOMENTUM_DURATION seconds.
+-- Flattens direction to XZ and normalises before use.
+-- No-op when SPRINT_STOP_MOMENTUM_ENABLED is false, direction is degenerate, or
+-- currentRootPart is nil.
+-- Does NOT write camera.CFrame. Uses the stored sprint direction only — player
+-- cannot steer this momentum with A/D/W/S after it starts.
+local function startSprintStopMomentum(direction: Vector3)
+    if Constants.SPRINT_STOP_MOMENTUM_ENABLED ~= true then return end
+    local hrp = currentRootPart
+    if hrp == nil then return end
+
+    local flatDir = Vector3.new(direction.X, 0, direction.Z)
+    if flatDir.Magnitude < 0.001 then return end
+    local unitDir = flatDir.Unit
+
+    -- Clear any stale carry before creating new instances.
+    clearSprintStopMomentum()
+
+    local att = Instance.new("Attachment")
+    att.Name   = "BRSprintStopMomentumAttachment"
+    att.Parent = hrp
+    sprintStopMomentumAttachment = att
+
+    local lv = Instance.new("LinearVelocity")
+    lv.Name           = "BRSprintStopMomentumVelocity"
+    lv.Attachment0    = att
+    lv.RelativeTo     = Enum.ActuatorRelativeTo.World
+    lv.MaxForce       = Constants.SPRINT_STOP_MOMENTUM_MAX_FORCE
+    lv.VectorVelocity = unitDir * Constants.SPRINT_STOP_MOMENTUM_SPEED
+    lv.Parent         = hrp
+    sprintStopMomentumVelocity = lv
+
+    if Constants.MOVEMENT_ANIMATION_DEBUG then
+        Logger.debug(
+            "[MovementController] SprintStop momentum START"
+            .. string.format(" dir=(%.2f,%.2f,%.2f)", unitDir.X, unitDir.Y, unitDir.Z)
+            .. " speed=" .. tostring(Constants.SPRINT_STOP_MOMENTUM_SPEED)
+            .. " duration=" .. string.format("%.2fs", Constants.SPRINT_STOP_MOMENTUM_DURATION)
+        )
+    end
+
+    task.delay(Constants.SPRINT_STOP_MOMENTUM_DURATION, function()
+        clearSprintStopMomentum()
+        if Constants.MOVEMENT_ANIMATION_DEBUG then
+            Logger.debug("[MovementController] SprintStop momentum carry ENDED")
+        end
+    end)
+end
+
+-- ============================================================
 -- Private helpers — Stage 2A: animation
 -- ============================================================
 
@@ -1555,6 +1689,99 @@ local function stopTacticalSprint()
     updateSprintFov()
 end
 
+-- Stage 3C: Plays the SprintStop one-shot, locks WalkSpeed = 0, and optionally applies
+-- a short LinearVelocity forward carry in `direction`.
+-- Reuses Unarmed_TacticalSprintStop (same animation asset, already loaded).
+-- Must be defined AFTER stopCurrentMovementAnimation() and playMovementAnimation() so
+-- Lua can resolve those names — mirrors the stopTacticalSprint() placement rule.
+--
+-- Token-based stale-unlock prevention:
+--   sprintStopLockToken is incremented here; the Stopped callback and fallback task.delay
+--   each capture capturedToken and no-op if the token has changed (cleared by phase-exit,
+--   respawn, or a second SprintStop start).
+--
+-- If the TacticalSprintStop track is absent (e.g. AR15 set has no stop clip), sprint
+-- state is cleared normally and no lock or momentum is applied — graceful fallback.
+local function playSprintStopWithLock(direction: Vector3?)
+    local setName = getAnimationSetName()
+    local stopKey = setName .. "_TacticalSprintStop"
+
+    -- Graceful fallback: track not loaded (AR15 set, or animation failed to load).
+    if animationTracks[stopKey] == nil then
+        if Constants.MOVEMENT_ANIMATION_DEBUG then
+            Logger.debug(
+                "[MovementController] SprintStop: track absent (" .. stopKey .. ") — clearing sprint state only"
+            )
+        end
+        movementState.isSprinting = false
+        applySpeed()
+        return
+    end
+
+    -- Set lock state BEFORE applySpeed() so WalkSpeed is zeroed immediately.
+    isSprintStopPlaying               = true
+    movementState.isSprinting         = false
+    movementState.isTacticalSprinting = false
+    isTacticalSprinting               = false
+
+    -- Increment token for stale-unlock prevention; capture for closures.
+    sprintStopLockToken += 1
+    local capturedToken = sprintStopLockToken
+
+    -- Zero WalkSpeed — applySpeed() sees isSprintStopPlaying = true.
+    applySpeed()
+
+    -- Apply momentum carry in the stored sprint direction, if provided.
+    if direction ~= nil then
+        startSprintStopMomentum(direction)
+    end
+
+    -- Stop the current animation and play SprintStop one-shot.
+    stopCurrentMovementAnimation()
+    playMovementAnimation(stopKey)
+
+    -- Determine lock duration: use the greater of track.Length and the fallback constant.
+    local stopTrack   = animationTracks[stopKey]
+    local lockDuration = Constants.SPRINT_STOP_LOCK_FALLBACK_DURATION
+    if stopTrack and stopTrack.Length > 0 then
+        lockDuration = math.max(stopTrack.Length, Constants.SPRINT_STOP_LOCK_FALLBACK_DURATION)
+    end
+
+    -- Early unlock: Stopped callback releases the lock when the animation finishes.
+    -- Disconnect immediately to prevent stacking multiple Stopped connections if somehow
+    -- called again while a previous SprintStop Stopped is still pending.
+    if stopTrack then
+        local conn: RBXScriptConnection
+        conn = stopTrack.Stopped:Connect(function()
+            conn:Disconnect()
+            if sprintStopLockToken == capturedToken then
+                clearSprintStopLock()
+                if Constants.MOVEMENT_ANIMATION_DEBUG then
+                    Logger.debug("[MovementController] SprintStop FINISHED (Stopped callback)")
+                end
+            end
+        end)
+    end
+
+    -- Fallback timer: releases lock in case the Stopped callback never fires
+    -- (e.g. animation interrupted externally or track destroyed mid-play).
+    task.delay(lockDuration, function()
+        if sprintStopLockToken ~= capturedToken then return end
+        clearSprintStopLock()
+        if Constants.MOVEMENT_ANIMATION_DEBUG then
+            Logger.debug("[MovementController] SprintStop TIMEOUT unlock (token=" .. tostring(capturedToken) .. ")")
+        end
+    end)
+
+    if Constants.MOVEMENT_ANIMATION_DEBUG then
+        Logger.debug(
+            "[MovementController] SprintStop BEGIN (" .. stopKey .. ")"
+            .. (direction and string.format(" dir=(%.2f,%.2f,%.2f)", direction.X, direction.Y, direction.Z) or " dir=nil")
+            .. " lockDuration=" .. string.format("%.2fs", lockDuration)
+        )
+    end
+end
+
 -- ============================================================
 -- Private helpers — Stage 2I: crouch bottom-hold
 -- ============================================================
@@ -1833,6 +2060,14 @@ local function loadMovementAnimations(character: Model)
     tacticalSprintStartTime           = 0
     lastShiftPressTime                = 0
     clearTacticalSprintStopConnection()
+    -- Stage 3C: clear sprint-stop state on respawn.
+    -- Do NOT call clearSprintStopLock() (which calls applySpeed()) here — the previous
+    -- Animator may already be destroyed. Clear state directly and destroy constraints.
+    isSprintStopPlaying         = false
+    sprintStopLockToken        += 1   -- invalidate any pending task.delay unlock callbacks
+    clearSprintStopMomentum()        -- destroy any active LinearVelocity/Attachment
+    sprintStartTime             = nil
+    lastSprintMomentumDirection = nil
     -- Do NOT call clearCrouchBottomHold() here — the previous Animator may already be
     -- destroyed, making the hold track reference unsafe to Stop(). Clear state directly.
     crouchHoldTrack          = nil
@@ -2258,6 +2493,8 @@ local function updateMovementAnimation()
     -- Stage 2P: do not interrupt TacticalSprintStop one-shot (tacticalSprintStopConn is non-nil
     -- only while the stop animation is playing — mirrors the landingConn "is-playing" pattern).
     if tacticalSprintStopConn ~= nil then return end
+    -- Stage 3C: do not interrupt normal SprintStop one-shot (mirrors tacticalSprintStopConn pattern).
+    if isSprintStopPlaying then return end
 
     local setName = getAnimationSetName()   -- "Unarmed" (default) or "AR15" (when weapon equipped)
 
@@ -3075,6 +3312,11 @@ function MovementController:destroy()
     -- inside clearLandingMovementLock() may write to it; that is safe and correct.
     clearLandingMovementLock()
     sprintJumpMomentumDirection = nil
+    -- Stage 3C: clear sprint-stop lock and momentum on destroy.
+    -- clearSprintStopLock() calls applySpeed() — humanoid still valid here, safe and correct.
+    clearSprintStopLock()
+    sprintStartTime             = nil
+    lastSprintMomentumDirection = nil
     -- Stage 3A: clear new jump/drop tracking state.
     airborneStartY         = nil
     wasJumpingThisAirborne = false
@@ -3212,6 +3454,13 @@ function MovementController:Start()
             -- any active LinearVelocity/Attachment on HumanoidRootPart.
             clearLandingMovementLock()
             sprintJumpMomentumDirection = nil
+            -- Stage 3C: clear sprint-stop lock on phase exit.
+            -- clearSprintStopLock() increments token (invalidates task.delay), sets
+            -- isSprintStopPlaying = false, and destroys any sprint-stop LinearVelocity.
+            -- This ensures WalkSpeed is never left stuck at 0 across phase transitions.
+            clearSprintStopLock()
+            sprintStartTime             = nil
+            lastSprintMomentumDirection = nil
             -- Stage 3A: clear jump/drop tracking state on phase exit.
             airborneStartY         = nil
             wasJumpingThisAirborne = false
@@ -3335,6 +3584,12 @@ function MovementController:Start()
             lastShiftPressTime = now
 
             movementState.isSprinting = true
+            -- Stage 3C: record sprint start time for SPRINT_STOP_MIN_SPRINT_DURATION gate.
+            sprintStartTime = os.clock()
+            -- Stage 3C: cancel any in-flight SprintStop if the player re-sprints immediately.
+            if isSprintStopPlaying then
+                clearSprintStopLock()
+            end
             applySpeed()
             -- Stage 3A: start sprint FOV tween immediately on sprint start.
             updateSprintFov()
@@ -3346,15 +3601,53 @@ function MovementController:Start()
         function(input: InputObject, _gp: boolean)
             if input.KeyCode ~= Enum.KeyCode.LeftShift then return end
             if not movementState.isSprinting then return end
+
             -- Stage 2P: Shift release ends tactical sprint (plays TacticalSprintStop one-shot).
-            -- stopTacticalSprint() calls updateSprintFov() internally.
+            -- stopTacticalSprint() handles its own animation, speed, and FOV.
+            -- SprintStop (Stage 3C) does not play after a tactical sprint — skip directly.
             if isTacticalSprinting then
                 stopTacticalSprint()
+                sprintStartTime = nil
+                movementState.isSprinting = false
+                applySpeed()
+                updateSprintFov()
+                return
             end
-            movementState.isSprinting = false
-            applySpeed()
-            -- Stage 3A: restore FOV immediately on sprint end.
-            updateSprintFov()
+
+            -- Stage 3C: normal sprint end — compute duration and conditionally play SprintStop.
+            local sprintDuration = 0
+            if sprintStartTime ~= nil then
+                sprintDuration = os.clock() - sprintStartTime
+                sprintStartTime = nil
+            end
+
+            if Constants.MOVEMENT_ANIMATION_DEBUG then
+                Logger.debug(
+                    "[MovementController] Sprint end: duration=" .. string.format("%.2fs", sprintDuration)
+                )
+            end
+
+            if shouldPlaySprintStop(sprintDuration) then
+                if Constants.MOVEMENT_ANIMATION_DEBUG then
+                    Logger.debug("[MovementController] SprintStop: PLAYING (duration gate passed)")
+                end
+                -- playSprintStopWithLock sets isSprinting=false, applySpeed(), momentum, animation.
+                playSprintStopWithLock(lastSprintMomentumDirection)
+                -- Stage 3A: restore FOV now that sprint is ending.
+                updateSprintFov()
+            else
+                if Constants.MOVEMENT_ANIMATION_DEBUG and Constants.SPRINT_STOP_ENABLED == true then
+                    Logger.debug(
+                        "[MovementController] SprintStop: SKIPPED"
+                        .. " (duration=" .. string.format("%.2fs", sprintDuration)
+                        .. " min=" .. tostring(Constants.SPRINT_STOP_MIN_SPRINT_DURATION) .. ")"
+                    )
+                end
+                movementState.isSprinting = false
+                applySpeed()
+                -- Stage 3A: restore FOV immediately on sprint end.
+                updateSprintFov()
+            end
         end
     )
     table.insert(_connections, sprintEndConn)
@@ -3409,6 +3702,12 @@ function MovementController:Start()
             if isTacticalSprinting then
                 stopTacticalSprint()
             end
+            -- Stage 3C: crouch cancels any in-flight SprintStop; clear sprint timer too.
+            -- SprintStop should not play when entering crouch — player chose to crouch.
+            if isSprintStopPlaying then
+                clearSprintStopLock()
+            end
+            sprintStartTime = nil
             movementState.isCrouching = true
             movementState.isSprinting = false
             applySpeed()
@@ -3489,6 +3788,31 @@ function MovementController:Start()
             end
         end
 
+        -- Stage 3C: update lastSprintMomentumDirection each frame while sprinting normally.
+        -- Captures the most recent XZ direction so SprintStop has an accurate carry vector.
+        -- Only updated during normal (non-tactical) sprint when SprintStop is not already playing.
+        if movementState.isSprinting and not isTacticalSprinting and not isSprintStopPlaying then
+            local hrp = currentRootPart
+            if hrp then
+                local vel     = hrp.AssemblyLinearVelocity
+                local flatVel = Vector3.new(vel.X, 0, vel.Z)
+                if flatVel.Magnitude >= Constants.SPRINT_STOP_MIN_HORIZONTAL_SPEED then
+                    -- Use actual velocity for the most physically accurate direction.
+                    lastSprintMomentumDirection = flatVel.Unit
+                else
+                    -- Velocity too low (just started sprinting or on a slope); use input direction.
+                    local md = hum.MoveDirection
+                    if md.Magnitude > Constants.MOVEMENT_DIRECTION_DEADZONE then
+                        lastSprintMomentumDirection = Vector3.new(md.X, 0, md.Z)
+                    else
+                        -- No input direction; fall back to camera look vector.
+                        local look = workspace.CurrentCamera.CFrame.LookVector
+                        lastSprintMomentumDirection = Vector3.new(look.X, 0, look.Z)
+                    end
+                end
+            end
+        end
+
         -- Stage 2A: select and play the correct walk/run animation.
         updateMovementAnimation()
 
@@ -3499,7 +3823,7 @@ function MovementController:Start()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1–3B: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals+new IDs, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→directional(2R), CrouchIdle, CrouchWalkStart, Falling+LandingLight/Medium/Heavy, TacticalSprint double-tap+ramp+stop, sprintFOV+landingClassification, landingMovementLock+sprintJumpMomentum)")
+    Logger.debug("[MovementController] Ready (Stage 1–3C: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals+new IDs, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→directional(2R), CrouchIdle, CrouchWalkStart, Falling+LandingLight/Medium/Heavy, TacticalSprint double-tap+ramp+stop, sprintFOV+landingClassification, landingMovementLock+sprintJumpMomentum, sprintStopLock+momentumCarry)")
 end
 
 return MovementController

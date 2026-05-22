@@ -601,7 +601,44 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Studio verified (MCP): LandingLight at 6 studs — no lock; LandingMedium at 14 studs
                         --         — locked ~0.37s; LandingHeavy at 22 studs — locked exactly 0.65s.
                         --
-                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I/2J/2N/2O/2P/2Q/2R/3A/3B: AR15 Falling/Landing IDs (deferred),
+                        --     Sprint stop polish (Stage 3C — 2026-05-22):
+                        --       Normal sprint stop (Shift released after sprinting) is now gated, movement-locked,
+                        --         and momentum-carried. This is NOT the slide system — no slide state, no slide
+                        --         input, no slide animation. The same TacticalSprintStop animation is reused.
+                        --       Duration gate: SprintStop only plays when sprintDuration ≥ SPRINT_STOP_MIN_SPRINT_DURATION (0.75s).
+                        --         Short Shift taps (< 0.75s) exit sprint normally without the stop animation.
+                        --       Movement lock: WalkSpeed=0 while SprintStop animation plays
+                        --         (SPRINT_STOP_LOCKS_MOVEMENT = true). Fallback timer of
+                        --         SPRINT_STOP_LOCK_FALLBACK_DURATION (0.38s) releases lock if Stopped callback
+                        --         never fires (e.g. animation not loaded).
+                        --       Momentum carry: a LinearVelocity pushes the player forward at
+                        --         SPRINT_STOP_MOMENTUM_SPEED (16 studs/s) for SPRINT_STOP_MOMENTUM_DURATION (0.24s).
+                        --         Direction is taken from lastSprintMomentumDirection, updated each Heartbeat from
+                        --         AssemblyLinearVelocity → MoveDirection → CFrame.LookVector fallback chain.
+                        --         Only tracked when flatVel.Magnitude ≥ SPRINT_STOP_MIN_HORIZONTAL_SPEED (8).
+                        --         LinearVelocity + Attachment parented to HumanoidRootPart; destroyed after 0.24s.
+                        --       Token-based stale-unlock: sprintStopLockToken mirrors landingLockToken pattern.
+                        --       Interaction — tactical sprint: if isTacticalSprinting when Shift released,
+                        --         stopTacticalSprint() runs and returns early; normal SprintStop does NOT also play.
+                        --       Interaction — crouch: pressing C while sprinting clears sprintStartTime and cancels
+                        --         any in-flight SprintStop via clearSprintStopLock().
+                        --       applySpeed() priority: landing lock → sprint-stop lock → tactical sprint ramp → normal.
+                        --       updateMovementAnimation() gate: if isSprintStopPlaying then return end (after
+                        --         tacticalSprintStopConn gate).
+                        --       New state variables: sprintStartTime, lastSprintMomentumDirection,
+                        --         isSprintStopPlaying, sprintStopLockToken, sprintStopMomentumAttachment,
+                        --         sprintStopMomentumVelocity.
+                        --       New helpers: shouldPlaySprintStop, clearSprintStopMomentum, clearSprintStopLock,
+                        --         startSprintStopMomentum, playSprintStopWithLock.
+                        --       New constants: SPRINT_STOP_ENABLED, SPRINT_STOP_MIN_SPRINT_DURATION (0.75),
+                        --         SPRINT_STOP_LOCKS_MOVEMENT, SPRINT_STOP_LOCK_FALLBACK_DURATION (0.38),
+                        --         SPRINT_STOP_MOMENTUM_ENABLED, SPRINT_STOP_MOMENTUM_DURATION (0.24),
+                        --         SPRINT_STOP_MOMENTUM_SPEED (16), SPRINT_STOP_MOMENTUM_MAX_FORCE (60000),
+                        --         SPRINT_STOP_MIN_HORIZONTAL_SPEED (8).
+                        --       Studio verification: not yet confirmed via MCP (Rojo Connect dialog required
+                        --         manual click; rojo build passes, all grep checks passed on disk).
+                        --
+                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I/2J/2N/2O/2P/2Q/2R/3A/3B/3C: AR15 Falling/Landing IDs (deferred),
                         --       AR15 CrouchWalk/CrouchIdle IDs (deferred), AR15 tactical sprint IDs (deferred),
                         --       TacticalSprintForward2 variation system (deferred),
                         --       lower/upper-body split, reload/fire/ADS weapon animations.
