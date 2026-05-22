@@ -207,6 +207,12 @@ Constants.TACTICAL_SPRINT_BLOCKS_GUN_USE = true
 -- When false, tactical sprint ends silently and normal animation selection resumes immediately.
 Constants.TACTICAL_SPRINT_STOP_ANIMATION_ENABLED = true
 
+-- Minimum seconds the player must have been in a tactical sprint before the full stop
+-- (TacticalSprintStop animation + movement lock + momentum carry) plays on Shift release.
+-- Below this threshold, Shift release ends tactical sprint instantly with no animation or lock.
+-- Only applies to the Shift-release path; direction-change stops (Heartbeat) are unaffected.
+Constants.TACTICAL_SPRINT_STOP_MIN_DURATION = 5.0
+
 -- When true, WalkLeft/WalkRight strafe animations only play while mouse lock / shift-lock
 -- style state is active (UserInputService.MouseBehavior == LockCenter).
 -- Left/right/diagonal movement falls back to WalkForward when mouse lock is off.
@@ -517,8 +523,9 @@ Constants.SPRINT_STOP_LOCK_FALLBACK_DURATION = 0.38
 -- Produces a brief forward-carry feel without a slide animation or slide state.
 Constants.SPRINT_STOP_MOMENTUM_ENABLED = true
 
--- Seconds the LinearVelocity carry lasts.
--- Should be <= SPRINT_STOP_LOCK_FALLBACK_DURATION so carry ends before or with the lock.
+-- NOTE: This constant is no longer used. The tactical sprint stop carry duration is now
+-- derived from the TacticalSprintStop animation's Length (matched exactly so the slide
+-- lasts the full animation). Kept here for reference; safe to remove in a future cleanup.
 Constants.SPRINT_STOP_MOMENTUM_DURATION = 0.24
 
 -- Horizontal carry speed in studs/s during the momentum window.

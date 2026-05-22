@@ -1254,13 +1254,15 @@ local function clearSprintStopLock()
 end
 
 -- Creates a LinearVelocity on HumanoidRootPart carrying the character forward in
--- `direction` at SPRINT_STOP_MOMENTUM_SPEED for SPRINT_STOP_MOMENTUM_DURATION seconds.
+-- `direction` at SPRINT_STOP_MOMENTUM_SPEED for `duration` seconds.
 -- Flattens direction to XZ and normalises before use.
 -- No-op when SPRINT_STOP_MOMENTUM_ENABLED is false, direction is degenerate, or
 -- currentRootPart is nil.
 -- Does NOT write camera.CFrame. Uses the stored sprint direction only — player
 -- cannot steer this momentum with A/D/W/S after it starts.
-local function startSprintStopMomentum(direction: Vector3)
+-- `duration` is passed explicitly by the caller so the carry can be matched to the
+-- animation length (tactical sprint stop) or a fixed constant (other callers).
+local function startSprintStopMomentum(direction: Vector3, duration: number)
     if Constants.SPRINT_STOP_MOMENTUM_ENABLED ~= true then return end
     local hrp = currentRootPart
     if hrp == nil then return end
@@ -1291,11 +1293,11 @@ local function startSprintStopMomentum(direction: Vector3)
             "[MovementController] SprintStop momentum START"
             .. string.format(" dir=(%.2f,%.2f,%.2f)", unitDir.X, unitDir.Y, unitDir.Z)
             .. " speed=" .. tostring(Constants.SPRINT_STOP_MOMENTUM_SPEED)
-            .. " duration=" .. string.format("%.2fs", Constants.SPRINT_STOP_MOMENTUM_DURATION)
+            .. " duration=" .. string.format("%.2fs", duration)
         )
     end
 
-    task.delay(Constants.SPRINT_STOP_MOMENTUM_DURATION, function()
+    task.delay(duration, function()
         clearSprintStopMomentum()
         if Constants.MOVEMENT_ANIMATION_DEBUG then
             Logger.debug("[MovementController] SprintStop momentum carry ENDED")
@@ -1731,21 +1733,22 @@ local function playSprintStopWithLock(direction: Vector3?)
     -- Zero WalkSpeed — applySpeed() sees isSprintStopPlaying = true.
     applySpeed()
 
-    -- Apply momentum carry in the stored sprint direction, if provided.
-    if direction ~= nil then
-        startSprintStopMomentum(direction)
-    end
-
-    -- Stop the current animation and play SprintStop one-shot.
-    stopCurrentMovementAnimation()
-    playMovementAnimation(stopKey)
-
-    -- Determine lock duration: use the greater of track.Length and the fallback constant.
+    -- Determine lock duration BEFORE starting momentum so the carry can be matched to
+    -- the exact animation length (momentum lasts the full stop animation, not a fixed window).
     local stopTrack   = animationTracks[stopKey]
     local lockDuration = Constants.SPRINT_STOP_LOCK_FALLBACK_DURATION
     if stopTrack and stopTrack.Length > 0 then
         lockDuration = math.max(stopTrack.Length, Constants.SPRINT_STOP_LOCK_FALLBACK_DURATION)
     end
+
+    -- Apply momentum carry for the full duration of the stop animation.
+    if direction ~= nil then
+        startSprintStopMomentum(direction, lockDuration)
+    end
+
+    -- Stop the current animation and play SprintStop one-shot.
+    stopCurrentMovementAnimation()
+    playMovementAnimation(stopKey)
 
     -- Early unlock: Stopped callback releases the lock when the animation finishes.
     -- Disconnect immediately to prevent stacking multiple Stopped connections if somehow
@@ -3603,18 +3606,30 @@ function MovementController:Start()
             if not movementState.isSprinting then return end
 
             -- Stage 2P/3C: Shift release ends sprint.
-            -- Tactical sprint: full stop — TacticalSprintStop animation + movement lock + momentum carry.
-            -- Regular sprint:  no end animation, no lock, no carry — clear flags only.
+            -- Tactical sprint: full stop (animation + lock + carry) only when the player has been
+            --   tactical sprinting for at least TACTICAL_SPRINT_STOP_MIN_DURATION seconds.
+            --   Below that threshold, or for regular sprint, state is cleared instantly with no animation.
             if isTacticalSprinting then
+                local tacticalDuration = tacticalSprintStartTime > 0
+                    and (os.clock() - tacticalSprintStartTime)
+                    or 0
+
                 -- Clear tactical sprint tracking state first (before playSprintStopWithLock so
                 -- the fallback path in that function never leaves isTacticalSprinting stuck true).
                 isTacticalSprinting               = false
                 movementState.isTacticalSprinting = false
                 tacticalSprintStartTime           = 0
                 clearTacticalSprintStopConnection()
-                -- Full tactical sprint stop: animation + movement lock + momentum carry.
-                -- playSprintStopWithLock also clears movementState.isSprinting and calls applySpeed().
-                playSprintStopWithLock(lastSprintMomentumDirection)
+
+                if tacticalDuration >= Constants.TACTICAL_SPRINT_STOP_MIN_DURATION then
+                    -- Long tactical sprint: full stop with animation + lock + carry.
+                    -- playSprintStopWithLock clears movementState.isSprinting and calls applySpeed().
+                    playSprintStopWithLock(lastSprintMomentumDirection)
+                else
+                    -- Short tactical sprint (under threshold): instant clear, no animation or lock.
+                    movementState.isSprinting = false
+                    applySpeed()
+                end
             else
                 -- Regular sprint end: no animation, no lock, no carry.
                 movementState.isSprinting = false
