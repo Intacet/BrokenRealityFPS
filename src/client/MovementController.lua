@@ -2,7 +2,7 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2R + 3A + 3B (Animate-disable, R6 detection, animation-set selection,
+-- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2Q+ + 2R + 3A + 3B (Animate-disable, R6 detection, animation-set selection,
 -- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
 -- character-facing camera yaw, Unarmed backward/diagonal directional animations,
 -- directional sprint selection (RunForwardLeft/Right with mouse lock; RunForward fallback),
@@ -13,7 +13,8 @@
 -- CrouchIdle looped idle while crouched+still + CrouchWalkStart one-shot idle-to-walk transition,
 -- Unarmed Falling looped + landing one-shot (LandingLight/Medium/Heavy) via Humanoid.StateChanged,
 -- Tactical sprint foundation: double-tap LeftShift → faster sprint with speed ramp + forward-only animation + gun block,
--- Fix crouch animation contamination: stopCrouchTracksExcept helper + direct CrouchIdle transition + clearCrouchBottomHold no-resume fix,
+-- Fix crouch animation contamination (Stage 2Q): stopCrouchTracksExcept helper + direct CrouchIdle transition + clearCrouchBottomHold no-resume fix,
+-- Crouch blend contamination follow-up (Stage 2Q+): fix "Crouch" pattern (catches EnterCrouch/ExitCrouch), remove IsPlaying guard, Stop(0) for immediate weight cut, add stopCrouchTracksExcept call in playCrouchTransition before track:Play,
 -- Sprint FOV stretch via TweenService (FieldOfView only — no camera.CFrame) + landing classification light/medium/heavy) —
 -- walk, sprint, crouch speed; 8-direction camera-relative movement state; phase gating;
 -- respawn handling; connection cleanup; R6 animation playback with Unarmed default set.
@@ -917,28 +918,35 @@ local function clearTacticalSprintStopConnection()
     end
 end
 
--- Stage 2Q: Stops every loaded crouch-variant AnimationTrack whose key is NOT allowedKey.
--- Called before transitioning into CrouchIdle, CrouchWalk*, or CrouchWalkStart to ensure
--- no stale EnterCrouch hold or other crouch blend is still active on the Animator.
+-- Stage 2Q+: Stops every loaded crouch-variant AnimationTrack whose key is NOT allowedKey.
+-- Called before transitioning into EnterCrouch, ExitCrouch, CrouchIdle, CrouchWalk*,
+-- CrouchWalkStart, or any other crouch clip to ensure no stale crouch blend persists.
 -- allowedKey may be nil to stop ALL crouch tracks (used during phase exit / full cleanup).
 -- Does NOT call clearCrouchBottomHold() — callers that need to release the hold state must
 -- do so explicitly before calling this function.
 -- Clears currentAnimationName when the currently tracked animation was one of the stopped tracks.
+--
+-- Pattern uses key:find("Crouch") (not "_Crouch") so that EnterCrouch and ExitCrouch
+-- (whose keys end with "Crouch" after the verb prefix) are also matched — previously these
+-- were silently skipped and could continue blending as the new animation faded in.
+--
+-- Stop(0) is used (not MOVEMENT_ANIMATION_FADE_TIME) so that any track with a non-zero
+-- weight — including tracks already stopped via Stop(fadeTime) whose weight is still
+-- decaying — is immediately cut to zero weight before the new animation starts.
+-- This prevents the "old crouch pose bleeds through the fade-in window" contamination.
 local function stopCrouchTracksExcept(allowedKey: string?)
     for key, track in pairs(animationTracks) do
-        if key:find("_Crouch") and key ~= allowedKey then
-            if track.IsPlaying then
-                track:Stop(Constants.MOVEMENT_ANIMATION_FADE_TIME)
-                if Constants.MOVEMENT_ANIMATION_DEBUG then
-                    Logger.debug("[MovementController] stopCrouchTracksExcept: stopped " .. key)
-                end
+        if key:find("Crouch") and key ~= allowedKey then
+            track:Stop(0)
+            if Constants.MOVEMENT_ANIMATION_DEBUG then
+                Logger.debug("[MovementController] stopCrouchTracksExcept: cut " .. key)
             end
         end
     end
     -- If the currently tracked animation was a crouch track that was just stopped, clear it
     -- so stopCurrentMovementAnimation() does not try to stop it a second time.
     if currentAnimationName ~= ""
-        and currentAnimationName:find("_Crouch")
+        and currentAnimationName:find("Crouch")
         and currentAnimationName ~= allowedKey
     then
         currentAnimationName = ""
@@ -1678,6 +1686,14 @@ local function playCrouchTransition(entering: boolean)
         )
     end
 
+    -- Stage 2Q+: hard-stop every other crouch track (EnterCrouch, ExitCrouch, CrouchIdle,
+    -- CrouchWalk*, CrouchWalkStart) before playing the new transition clip.
+    -- This is the critical missing call from Stage 2Q: without it, any previously fading
+    -- CrouchIdle, ExitCrouch, or CrouchWalk track from a prior state continues to blend
+    -- through the new transition's fade-in window (e.g. quick C-release → C-press cycles
+    -- leave a fading CrouchIdle that bleeds into the next EnterCrouch).
+    stopCrouchTracksExcept(key)
+
     -- Mark transition active BEFORE Play() so the next Heartbeat tick is gated.
     crouchTransitionPlaying = true
     -- Track via currentAnimationName so stopCurrentMovementAnimation() can externally
@@ -1713,6 +1729,8 @@ local function playCrouchTransition(entering: boolean)
                     local fwdKey    = setName2 .. "_CrouchWalkForward"
                     local aliasKey  = setName2 .. "_CrouchWalk"
                     if animationTracks[fwdKey] ~= nil then
+                        -- Stage 2Q+: stop all other crouch tracks before the walk animation.
+                        stopCrouchTracksExcept(fwdKey)
                         playMovementAnimation(fwdKey)
                         if Constants.MOVEMENT_ANIMATION_DEBUG then
                             Logger.debug(
@@ -1721,6 +1739,8 @@ local function playCrouchTransition(entering: boolean)
                             )
                         end
                     elseif animationTracks[aliasKey] ~= nil then
+                        -- Stage 2Q+: stop all other crouch tracks before the walk animation.
+                        stopCrouchTracksExcept(aliasKey)
                         playMovementAnimation(aliasKey)
                         if Constants.MOVEMENT_ANIMATION_DEBUG then
                             Logger.debug("[MovementController] crouch: EnterCrouch done → " .. aliasKey)
@@ -3178,6 +3198,11 @@ function MovementController:Start()
             crouchTransitionPlaying = false
             clearCrouchBottomHold()
             stopCurrentMovementAnimation()
+            -- Stage 2Q+: hard-stop all remaining crouch tracks (EnterCrouch, ExitCrouch,
+            -- CrouchIdle, CrouchWalk*) so no fading crouch weight persists across phase
+            -- transitions. stopCurrentMovementAnimation() only stops currentAnimationName;
+            -- any previously-faded crouch track not tracked there is caught here.
+            stopCrouchTracksExcept(nil)
             -- Stage 2O: reset falling/landing state so re-entry to ACTIVE starts clean.
             isFalling = false
             clearLandingConnection()

@@ -7,6 +7,47 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-22] — Movement Stage 2Q+: Crouch blend contamination follow-up fix
+
+### Summary
+
+Follow-up to Stage 2Q that resolves the remaining "old crouch pose briefly visible" contamination that Stage 2Q did not fully eliminate.
+
+**Three root causes fixed:**
+
+1. **Wrong pattern in `stopCrouchTracksExcept`** — the helper used `key:find("_Crouch")`, which matches `Unarmed_CrouchIdle`, `Unarmed_CrouchWalk*`, etc., but silently skips `Unarmed_EnterCrouch` and `Unarmed_ExitCrouch` (whose keys end with `Crouch` after the verb prefix, with no `_Crouch` substring). Transitioning away from EnterCrouch/ExitCrouch left those tracks still fading and blending through the new animation. Fixed by changing the pattern to `key:find("Crouch")` — catches all crouch-related tracks; no false positives on non-crouch animations.
+
+2. **`if track.IsPlaying` guard in `stopCrouchTracksExcept`** — the guard skipped tracks whose weight was still decaying after a prior `Stop(fadeTime)` call (`IsPlaying` is `false` immediately after `Stop` even while the weight fades). Changed to unconditionally call `Stop(0)` on every matching track, immediately zeroing any residual weight.
+
+3. **Missing `stopCrouchTracksExcept(key)` call in `playCrouchTransition`** — when starting EnterCrouch or ExitCrouch, no prior call cleared the other crouch tracks. Any fading CrouchIdle, CrouchWalk, or previous transition track continued blending through the new transition's fade-in window (most visible during rapid C-release → C-press cycles). Added `stopCrouchTracksExcept(key)` immediately before `track:Play(...)`.
+
+### Additional hardening
+
+- Added `stopCrouchTracksExcept(fwdKey)` / `stopCrouchTracksExcept(aliasKey)` before `playMovementAnimation` in the **EnterCrouch Stopped callback moving branch** (was previously missing; only the not-moving branch had this call from Stage 2Q).
+- Added `stopCrouchTracksExcept(nil)` in the **phase exit handler** after `stopCurrentMovementAnimation()` — ensures no fading crouch weight persists across phase transitions when `currentAnimationName` no longer tracks the fading track.
+
+### Changes to `src/client/MovementController.lua`
+
+- **`stopCrouchTracksExcept`**: pattern `"_Crouch"` → `"Crouch"`; removed `if track.IsPlaying` guard; `Stop(Constants.MOVEMENT_ANIMATION_FADE_TIME)` → `Stop(0)`. `currentAnimationName` clear-guard also updated to use `find("Crouch")`.
+- **`playCrouchTransition`**: added `stopCrouchTracksExcept(key)` before `crouchTransitionPlaying = true` and `track:Play(...)`.
+- **EnterCrouch Stopped callback (moving branch)**: added `stopCrouchTracksExcept(fwdKey)` before `playMovementAnimation(fwdKey)`; added `stopCrouchTracksExcept(aliasKey)` before `playMovementAnimation(aliasKey)`.
+- **Phase exit handler**: added `stopCrouchTracksExcept(nil)` after `stopCurrentMovementAnimation()`.
+- Header comment and stage tag updated to `2Q+`.
+
+### No-change scope
+
+No new remotes. No server changes. No animation IDs changed. No speed constants changed. No camera writes. No `CameraOffset`, `FieldOfView`, or `CameraType` changes. No `GunController`, `ViewModelController`, or `SoundController` changes. No UI changes.
+
+### MCP Studio verification (2026-05-22)
+
+- All 7 pattern checks passed in running module (new pattern, absent old pattern, `Stop(0)`, all 4 new call sites).
+- Pattern smoke test: `Unarmed_EnterCrouch`, `Unarmed_ExitCrouch`, `AR15_EnterCrouch`, `AR15_ExitCrouch` — all newly matched ✅; 6 non-crouch keys correctly skipped ✅.
+- Module loaded cleanly — no errors or unexpected warns in Output panel.
+- 8 total `stopCrouchTracksExcept` call sites confirmed (4 existing from Stage 2Q + 4 new from Stage 2Q+).
+- Known limitation: C key input via `user_keyboard_input` does not reach `InputBegan` in Studio play mode — full end-to-end crouch transition visual requires manual Studio playtest (same limitation as Stages 2P/2Q/2R/3A/3B).
+
+---
+
 ## [2026-05-21] — Movement Stage 3B: Landing movement lock + sprint-jump momentum carry
 
 ### Summary

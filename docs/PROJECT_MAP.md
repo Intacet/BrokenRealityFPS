@@ -206,7 +206,7 @@ FleaMarketService / PlayerMarketplace
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2R + 3A + 3B (Animate-disable, R6 detection, animation-set selection,
+MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2Q+ + 2R + 3A + 3B (Animate-disable, R6 detection, animation-set selection,
                         --   strafe gating, animation speed multipliers, shift-lock sprint fix,
                         --   custom mouse-lock toggle on LeftControl, character-facing camera yaw,
                         --   third-person zoom limits, mouse-lock camera distance and shoulder offset,
@@ -518,6 +518,19 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       stopCrouchTracksExcept call-sites: Stopped callback (crouchIdleKey2),
                         --       updateMovementAnimation not-moving branch (crouchIdleKey),
                         --       CrouchWalkStart path (startKey), CrouchWalk target path (targetCrouchKey).
+                        --     Stage 2Q+ (2026-05-22): crouch blend contamination follow-up.
+                        --       Root cause 1 fixed: stopCrouchTracksExcept pattern changed from
+                        --       "_Crouch" to "Crouch" — EnterCrouch and ExitCrouch keys (which end
+                        --       with "Crouch" after the verb) were silently skipped by the old pattern.
+                        --       Root cause 2 fixed: removed "if track.IsPlaying" guard; changed
+                        --       Stop(FADE_TIME) to Stop(0) — immediately zeroes any residual weight
+                        --       including tracks that are fading-but-stopped (IsPlaying=false).
+                        --       Root cause 3 fixed: added stopCrouchTracksExcept(key) in
+                        --       playCrouchTransition before track:Play() — the critical missing call
+                        --       that prevented fading CrouchIdle/ExitCrouch from bleeding through.
+                        --       Additional: stopCrouchTracksExcept(fwdKey/aliasKey) added in
+                        --       EnterCrouch Stopped moving branch; stopCrouchTracksExcept(nil)
+                        --       added in phase exit handler. Total call sites: 8 (4 from 2Q, 4 new).
                         --
                         --     Sprint FOV stretch (Stage 3A — 2026-05-21):
                         --       TweenService smoothly tweens workspace.CurrentCamera.FieldOfView.
