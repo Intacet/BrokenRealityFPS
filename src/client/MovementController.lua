@@ -337,7 +337,8 @@ local wasJumpingThisAirborne: boolean = false
 
 -- true when the player was sprinting (normal or tactical) at the moment of jump.
 -- Only meaningful when wasJumpingThisAirborne is true.
--- Used by getLandingAnimationName to choose LandingMedium for sprint jumps.
+-- Used by getLandingAnimationName; when MOVEMENT_LANDING_SPRINT_JUMP_USES_MEDIUM = false,
+-- sprint jumps resolve to LandingLight (same as normal jumps). Walk-off drops are unaffected.
 -- Cleared to false after landing is processed. Reset on respawn.
 local jumpedWhileSprinting: boolean = false
 
@@ -2082,10 +2083,11 @@ local playLandingAnimWarned: {[string]: boolean} = {}
 -- Priority:
 --  1. dropDistance >= MOVEMENT_LANDING_HEAVY_MIN_DROP → "LandingHeavy"  (always, even for jumps)
 --  2. wasJump == true and sprintJump == true and SPRINT_JUMP_USES_MEDIUM → "LandingMedium"
+--     (SPRINT_JUMP_USES_MEDIUM = false by default — all intentional jumps resolve to LandingLight)
 --  3. wasJump == true → "LandingLight"
---  4. dropDistance <= MOVEMENT_LANDING_LIGHT_MAX_DROP  → "LandingLight"
---  5. dropDistance <= MOVEMENT_LANDING_MEDIUM_MAX_DROP → "LandingMedium"
---  6. else → "LandingHeavy"
+--  4. dropDistance <= MOVEMENT_LANDING_LIGHT_MAX_DROP  → "LandingLight"   (walk-off drop)
+--  5. dropDistance <= MOVEMENT_LANDING_MEDIUM_MAX_DROP → "LandingMedium"  (walk-off drop)
+--  6. else → "LandingHeavy"                                               (walk-off drop)
 local function getLandingAnimationName(
     dropDistance: number,
     airTime: number,

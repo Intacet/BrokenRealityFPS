@@ -431,8 +431,9 @@ Constants.MOVEMENT_LANDING_HEAVY_MIN_DROP = 18
 Constants.MOVEMENT_LANDING_JUMP_LIGHT_MAX_AIR_TIME = 0.85
 
 -- When true, a jump performed while normal or tactical sprint is active uses LandingMedium.
--- When false, all jumps use LandingLight (unless the drop exceeds the heavy threshold).
-Constants.MOVEMENT_LANDING_SPRINT_JUMP_USES_MEDIUM = true
+-- When false, all intentional jumps use LandingLight regardless of sprint state.
+-- Walk-off drops (ledge falls with no jump input) still use height-based Medium/Heavy classification.
+Constants.MOVEMENT_LANDING_SPRINT_JUMP_USES_MEDIUM = false
 
 -- Fade time (seconds) for playing and stopping landing animation tracks.
 -- Shorter than MOVEMENT_ANIMATION_FADE_TIME (0.15) so landing clips blend in and out quickly.
