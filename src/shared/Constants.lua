@@ -131,9 +131,13 @@ Constants.MOVEMENT_ANIMATION_IDS = {
             CrouchWalkBackwardLeft  = "rbxassetid://118800024223445",-- no-gun crouch walk backward-left diagonal
             CrouchWalkBackwardRight = "rbxassetid://104285284019251",-- no-gun crouch walk backward-right diagonal
             CrouchWalkStart       = "rbxassetid://129868628706658",  -- no-gun crouch walk start one-shot transition (Stage 2N)
-            -- Stage 2O: falling and landing animations.
+            -- Stage 2O: falling animation.
+            -- Stage 3A: landing classification — three tiers (light/medium/heavy).
+            -- LandingMedium ID unchanged from Stage 2O; LandingLight and LandingHeavy are new.
             Falling               = "rbxassetid://86705296926580",   -- no-gun falling looped (Stage 2O)
-            LandingMedium         = "rbxassetid://135915211175953",  -- no-gun medium landing one-shot (Stage 2O)
+            LandingLight          = "rbxassetid://135438895968665",  -- no-gun light landing one-shot (Stage 3A — normal jumps + small drops)
+            LandingMedium         = "rbxassetid://135915211175953",  -- no-gun medium landing one-shot (Stage 2O / Stage 3A reclassified — sprint jumps + medium drops)
+            LandingHeavy          = "rbxassetid://72796290236543",   -- no-gun heavy landing one-shot (Stage 3A — high drops)
             -- Stage 2P: tactical sprint animations (Unarmed only; no AR15 tactical sprint yet).
             TacticalSprintForward1 = "rbxassetid://135119369971434", -- tactical sprint forward primary (looped) (Stage 2P)
             TacticalSprintForward2 = "rbxassetid://110008857265859", -- tactical sprint forward alternate; loaded, not yet selected (Stage 2P)
@@ -160,13 +164,15 @@ Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER               = 1.15  -- RunFo
 Constants.MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER              = 0.75  -- Idle plays at 0.75× clip speed (Stage 2H)
 Constants.MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.9   -- EnterCrouch/ExitCrouch one-shots play at 0.9× clip speed (Stage 2H)
 Constants.MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER       = 1.0   -- CrouchWalk* directional tracks play at 1.0× clip speed (Stage 2J)
--- Stage 2O: falling and landing animation playback constants.
+-- Stage 2O: falling animation playback constant.
 Constants.MOVEMENT_FALLING_ANIMATION_SPEED_MULTIPLIER           = 1.0   -- Falling looped track AdjustSpeed multiplier (Stage 2O)
-Constants.MOVEMENT_LANDING_ANIMATION_SPEED_MULTIPLIER           = 1.0   -- LandingMedium one-shot AdjustSpeed multiplier (Stage 2O)
--- Minimum seconds spent in Freefall before LandingMedium plays on landing.
--- Falls shorter than this threshold skip the landing animation (small hop, fall from a step).
--- Increase to require a longer drop before the landing clip triggers.
-Constants.MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME               = 0.25  -- seconds in Freefall required to trigger LandingMedium (Stage 2O)
+-- Stage 2O (legacy alias) / Stage 3A: LandingMedium playback speed.
+-- Superseded by MOVEMENT_LANDING_MEDIUM_SPEED_MULTIPLIER in Stage 3A; kept for reference.
+Constants.MOVEMENT_LANDING_ANIMATION_SPEED_MULTIPLIER           = 1.0   -- LandingMedium AdjustSpeed multiplier (legacy alias — use LANDING_MEDIUM_SPEED_MULTIPLIER)
+-- Minimum seconds in airborne state before a non-jump landing animation plays.
+-- Pure drops shorter than this threshold skip the landing clip (tiny step-off).
+-- Does NOT apply to jumps (wasJumping == true) — jump landings always classify. (Stage 3A)
+Constants.MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME               = 0.25  -- seconds airborne required for non-jump landing (Stage 2O; still used in Stage 3A)
 
 -- ============================================================
 -- Tactical sprint (Movement Stage 2P — double-tap LeftShift)
@@ -366,6 +372,78 @@ Constants.DEFAULT_WEAPON = "AR15"
 -- Shot validation thresholds (server-side, GunService only)
 Constants.SHOT_ORIGIN_MAX_DISTANCE    = 12    -- max studs between client origin and shooter HumanoidRootPart; farther origins are rejected
 Constants.SHOT_DIRECTION_MIN_MAGNITUDE = 0.001 -- minimum direction vector magnitude; near-zero directions are rejected before normalization
+
+-- ============================================================
+-- Sprint FOV stretch (Movement Stage 3A — camera-feel only)
+-- Changes workspace.CurrentCamera.FieldOfView smoothly while sprinting.
+-- Does NOT write camera.CFrame. Does NOT set CameraType to Scriptable.
+-- Does NOT change CameraOffset. Does NOT add camera bob/sway/tilt/viewmodel effects.
+-- FieldOfView is restored on sprint end, tactical sprint end, phase exit (non-ACTIVE),
+-- character respawn, and MovementController.destroy().
+-- ============================================================
+
+-- Master switch: when false, sprint FOV stretch is disabled entirely.
+-- FieldOfView is not written by MovementController at all when this is false.
+Constants.SPRINT_FOV_ENABLED = true
+
+-- Default FieldOfView applied on Start() and restored when sprinting ends.
+-- Roblox's built-in camera default is 70. Match your project's baseline FOV here.
+Constants.DEFAULT_CAMERA_FOV = 70
+
+-- FieldOfView target while normal sprint (LeftShift) is active and the player is moving.
+-- Higher values widen the field of view — makes movement feel faster without increasing speed.
+Constants.SPRINT_CAMERA_FOV = 78
+
+-- FieldOfView target while tactical sprint (double-tap LeftShift) is active.
+-- Slightly higher than SPRINT_CAMERA_FOV for a stronger visual feel.
+-- Only applied when TACTICAL_SPRINT_ENABLED is true and tactical sprint is active.
+Constants.TACTICAL_SPRINT_CAMERA_FOV = 84
+
+-- Seconds to tween FieldOfView to the sprint/tactical-sprint target (sprint-start direction).
+Constants.SPRINT_FOV_TWEEN_TIME = 0.18
+
+-- Seconds to tween FieldOfView back to DEFAULT_CAMERA_FOV (sprint-end / phase-exit / respawn).
+Constants.SPRINT_FOV_RESTORE_TIME = 0.22
+
+-- ============================================================
+-- Landing animation classification (Movement Stage 3A)
+-- Three tiers replace the single LandingMedium from Stage 2O.
+-- Drop distance = vertical displacement (studs) from airborne-start Y to landing Y.
+-- Jump classification takes precedence over drop-distance classification:
+--   wasJump=true + not sprint → LandingLight (regardless of drop distance, unless heavy)
+--   wasJump=true + sprint     → LandingMedium (unless heavy drop)
+-- Pure drops (no jump) are classified by drop distance.
+-- ============================================================
+
+-- Maximum drop distance (studs) for a LandingLight animation (pure drops only).
+Constants.MOVEMENT_LANDING_LIGHT_MAX_DROP = 8
+
+-- Maximum drop distance (studs) for a LandingMedium animation (pure drops only).
+-- Drops above this use LandingHeavy.
+Constants.MOVEMENT_LANDING_MEDIUM_MAX_DROP = 18
+
+-- Minimum drop distance (studs) at which LandingHeavy is always played.
+-- Equal to MOVEMENT_LANDING_MEDIUM_MAX_DROP — drops at or above this use heavy regardless of wasJump.
+Constants.MOVEMENT_LANDING_HEAVY_MIN_DROP = 18
+
+-- Maximum air time (seconds) for a jump to be classified as light.
+-- Reserved for future use — current getLandingAnimationName uses wasJump boolean + drop distance.
+Constants.MOVEMENT_LANDING_JUMP_LIGHT_MAX_AIR_TIME = 0.85
+
+-- When true, a jump performed while normal or tactical sprint is active uses LandingMedium.
+-- When false, all jumps use LandingLight (unless the drop exceeds the heavy threshold).
+Constants.MOVEMENT_LANDING_SPRINT_JUMP_USES_MEDIUM = true
+
+-- Fade time (seconds) for playing and stopping landing animation tracks.
+-- Shorter than MOVEMENT_ANIMATION_FADE_TIME (0.15) so landing clips blend in and out quickly.
+Constants.MOVEMENT_LANDING_ANIMATION_FADE_TIME = 0.08
+
+-- Playback speed multipliers for each landing tier (via AnimationTrack:AdjustSpeed).
+-- LandingLight is faster (1.15×) so the clip completes quickly and movement flow resumes sooner.
+-- LandingHeavy is slightly slower (0.9×) for a heavier, more impactful feel.
+Constants.MOVEMENT_LANDING_LIGHT_SPEED_MULTIPLIER  = 1.15
+Constants.MOVEMENT_LANDING_MEDIUM_SPEED_MULTIPLIER = 1.0
+Constants.MOVEMENT_LANDING_HEAVY_SPEED_MULTIPLIER  = 0.9
 
 -- ============================================================
 -- Client presentation flags (development / testing)

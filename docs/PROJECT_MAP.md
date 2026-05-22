@@ -206,7 +206,7 @@ FleaMarketService / PlayerMarketplace
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2R (Animate-disable, R6 detection, animation-set selection,
+MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2R + 3A (Animate-disable, R6 detection, animation-set selection,
                         --   strafe gating, animation speed multipliers, shift-lock sprint fix,
                         --   custom mouse-lock toggle on LeftControl, character-facing camera yaw,
                         --   third-person zoom limits, mouse-lock camera distance and shoulder offset,
@@ -226,7 +226,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --   direction detection AND for camera yaw facing (Stage 2E).
                         --   Writes UserInputService.MouseBehavior (LockCenter on, Default off) for
                         --   custom mouse lock — does NOT use MouseBehavior as strafe gate source.
-                        --   Does NOT write camera.CFrame or FieldOfView.
+                        --   Writes workspace.CurrentCamera.FieldOfView via TweenService (Stage 3A —
+                        --     sprint FOV stretch; see Sprint FOV section below). Never writes camera.CFrame.
                         --   Does NOT set CameraType to Scriptable.
                         --   Does NOT implement a full custom camera controller.
                         --   No new remotes. No slide, vault, or camera effects.
@@ -389,7 +390,9 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Unarmed.CrouchWalkBackwardRight = rbxassetid://104285284019251 (Stage 2J — crouch walk backward-right diagonal)
                         --       Unarmed.CrouchWalkStart       = rbxassetid://129868628706658  (Stage 2N — one-shot idle-to-walk transition; plays once on first move while crouched)
                         --       Unarmed.Falling               = rbxassetid://86705296926580   (Stage 2O — looped falling clip; plays while Humanoid is in Freefall)
-                        --       Unarmed.LandingMedium         = rbxassetid://135915211175953  (Stage 2O — one-shot landing clip; plays after ≥0.25s freefall, not while crouching)
+                        --       Unarmed.LandingLight          = rbxassetid://135438895968665  (Stage 3A — one-shot light landing; normal jumps + small drops ≤ 8 studs)
+                        --       Unarmed.LandingMedium         = rbxassetid://135915211175953  (Stage 2O/3A — one-shot medium landing; sprint jumps + drops 8–18 studs)
+                        --       Unarmed.LandingHeavy          = rbxassetid://72796290236543   (Stage 3A — one-shot heavy landing; drops ≥ 18 studs regardless of jump)
                         --       Unarmed.TacticalSprintForward1 = rbxassetid://135119369971434 (Stage 2P — looped tactical sprint forward, primary clip)
                         --       Unarmed.TacticalSprintForward2 = rbxassetid://110008857265859 (Stage 2P — alternate forward clip; loaded, not yet selected — no variation system)
                         --       Unarmed.TacticalSprintStop     = rbxassetid://81946205769343  (Stage 2P — one-shot stop clip; plays when tactical sprint ends)
@@ -408,7 +411,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Stage 2N (2026-05-20) — CrouchIdle, CrouchIdleAlt, CrouchWalkStart added; CrouchWalk/CrouchWalkForward IDs updated;
                         --       Stage 2O (2026-05-21) — Falling, LandingMedium added; 3 speed/timing constants added;
                         --       Stage 2P (2026-05-21) — TacticalSprintForward1, TacticalSprintForward2, TacticalSprintStop added;
-                        --       Stage 2R (2026-05-21) — directional sprint selection enabled via getSprintAnimationName() helper)
+                        --       Stage 2R (2026-05-21) — directional sprint selection enabled via getSprintAnimationName() helper;
+                        --       Stage 3A (2026-05-21) — LandingLight + LandingHeavy IDs added; sprint FOV constants added)
                         --     Sprint behavior (Stage 2R — 2026-05-21):
                         --       customMouseLocked OFF: all sprint directions → RunForward (matches Stage 2L behavior).
                         --       customMouseLocked ON, ForwardLeft: RunForwardLeft if loaded, else RunForward.
@@ -515,7 +519,43 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       updateMovementAnimation not-moving branch (crouchIdleKey),
                         --       CrouchWalkStart path (startKey), CrouchWalk target path (targetCrouchKey).
                         --
-                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I/2J/2N/2O/2P/2Q: AR15 Falling/LandingMedium IDs (deferred),
+                        --     Sprint FOV stretch (Stage 3A — 2026-05-21):
+                        --       TweenService smoothly tweens workspace.CurrentCamera.FieldOfView.
+                        --       Normal sprint (LeftShift + moving + not crouching) → SPRINT_CAMERA_FOV (78).
+                        --       Tactical sprint active → TACTICAL_SPRINT_CAMERA_FOV (84).
+                        --       All other states → DEFAULT_CAMERA_FOV (70).
+                        --       tweenCameraFov(target, duration): cancels prior tween, starts new one. Never touches camera.CFrame.
+                        --       updateSprintFov(): dedup guard (targetFov) prevents per-frame tween restarts.
+                        --         Called from: stopTacticalSprint(), sprint InputBegan, sprint InputEnded,
+                        --         crouch InputBegan, phase-exit handler, Heartbeat loop.
+                        --       FieldOfView restored (tweened to 70) on sprint end, tactical sprint end, phase exit (non-ACTIVE).
+                        --       FieldOfView reset (direct set, no tween) on respawn / CharacterAdded.
+                        --       FieldOfView tween cancelled + set to 70 in destroy().
+                        --       Master switch: SPRINT_FOV_ENABLED (default true). When false, nothing is written.
+                        --       New constants: SPRINT_FOV_ENABLED, DEFAULT_CAMERA_FOV, SPRINT_CAMERA_FOV,
+                        --         TACTICAL_SPRINT_CAMERA_FOV, SPRINT_FOV_TWEEN_TIME (0.18s), SPRINT_FOV_RESTORE_TIME (0.22s).
+                        --       No fall damage. No stamina. No slide, vault, or prone. No camera.CFrame writes.
+                        --
+                        --     Landing animation classification (Stage 3A — 2026-05-21):
+                        --       Three tiers replace Stage 2O's single LandingMedium:
+                        --         LandingLight  — normal jumps (no sprint) + small pure drops (≤ 8 studs).
+                        --         LandingMedium — sprint jumps + medium pure drops (8–18 studs).
+                        --         LandingHeavy  — any drop ≥ 18 studs regardless of jump context.
+                        --       wasJumpingThisAirborne: true when airborne phase started with a Jumping state (not walk-off).
+                        --       jumpedWhileSprinting: true if sprinting at jump time.
+                        --       airborneStartY: HumanoidRootPart.Y captured on Jumping; used for drop-distance calc.
+                        --       getLandingAnimationName(dropDist, airTime, wasJump, sprintJump): returns tier string or nil.
+                        --       playLandingAnimation(name): uses MOVEMENT_LANDING_ANIMATION_FADE_TIME (0.08) not 0.15.
+                        --       Pure-drop guard: MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME (0.25s) — tiny hops play nothing.
+                        --       LandingLight and LandingHeavy: Looped=false (one-shots), same as LandingMedium.
+                        --       onHumanoidStateChanged rewritten: Jumping state tracked; Freefall captures airborneStartY
+                        --         if wasJumpingThisAirborne=false (walk-off); Landed calls getLandingAnimationName.
+                        --       New animation IDs: Unarmed.LandingLight (rbxassetid://135438895968665),
+                        --         Unarmed.LandingHeavy (rbxassetid://72796290236543).
+                        --       New speed multiplier constants: MOVEMENT_LANDING_LIGHT_SPEED_MULTIPLIER (1.15),
+                        --         MOVEMENT_LANDING_MEDIUM_SPEED_MULTIPLIER (1.0), MOVEMENT_LANDING_HEAVY_SPEED_MULTIPLIER (0.9).
+                        --
+                        --     Not in Stage 2A/2C/2D/2F/2G/2H/2I/2J/2N/2O/2P/2Q/2R/3A: AR15 Falling/Landing IDs (deferred),
                         --       AR15 CrouchWalk/CrouchIdle IDs (deferred), AR15 tactical sprint IDs (deferred),
                         --       TacticalSprintForward2 variation system (deferred),
                         --       lower/upper-body split, reload/fire/ADS weapon animations.

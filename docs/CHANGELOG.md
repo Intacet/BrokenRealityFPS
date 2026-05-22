@@ -7,6 +7,88 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-21] — Movement Stage 3A: Sprint FOV stretch + landing animation classification
+
+### Summary
+
+Two independent polish systems added to `MovementController`:
+
+1. **Sprint FOV stretch** — `TweenService` smoothly adjusts `workspace.CurrentCamera.FieldOfView` while sprinting (normal sprint → 78, tactical sprint → 84, restore to 70 on sprint end / phase-exit / respawn / destroy). No speed changes. Never writes `camera.CFrame`. Controlled by `Constants.SPRINT_FOV_ENABLED` master switch.
+
+2. **Landing animation classification** — Three tiers replace Stage 2O's single `LandingMedium`. `LandingLight` for normal jumps and small drops; `LandingMedium` for sprint jumps and medium drops; `LandingHeavy` for high drops (≥ 18 studs regardless of jump context). Pure-drop landings require ≥ 0.25 s of air time to classify. Jumping state is tracked so jump-vs-drop context is always known.
+
+### New constants (`src/shared/Constants.lua`)
+
+Sprint FOV block:
+- `SPRINT_FOV_ENABLED = true` — master switch; when false MovementController never touches FieldOfView
+- `DEFAULT_CAMERA_FOV = 70` — baseline; restored on sprint end / phase-exit / respawn / destroy
+- `SPRINT_CAMERA_FOV = 78` — target while normal sprint active and moving
+- `TACTICAL_SPRINT_CAMERA_FOV = 84` — target while tactical sprint active
+- `SPRINT_FOV_TWEEN_TIME = 0.18` — seconds to tween to sprint/tactical-sprint target
+- `SPRINT_FOV_RESTORE_TIME = 0.22` — seconds to tween back to default
+
+Landing classification block:
+- `MOVEMENT_LANDING_LIGHT_MAX_DROP = 8` — max drop distance (studs) for LandingLight (pure drops)
+- `MOVEMENT_LANDING_MEDIUM_MAX_DROP = 18` — max drop distance (studs) for LandingMedium (pure drops)
+- `MOVEMENT_LANDING_HEAVY_MIN_DROP = 18` — at or above this, LandingHeavy plays regardless of jump context
+- `MOVEMENT_LANDING_JUMP_LIGHT_MAX_AIR_TIME = 0.85` — reserved; currently unused by classifier
+- `MOVEMENT_LANDING_SPRINT_JUMP_USES_MEDIUM = true` — sprint jumps resolve to LandingMedium instead of LandingLight
+- `MOVEMENT_LANDING_ANIMATION_FADE_TIME = 0.08` — fade-in time for landing animations (shorter than the standard 0.15)
+- `MOVEMENT_LANDING_LIGHT_SPEED_MULTIPLIER = 1.15` — LandingLight playback speed
+- `MOVEMENT_LANDING_MEDIUM_SPEED_MULTIPLIER = 1.0` — LandingMedium playback speed
+- `MOVEMENT_LANDING_HEAVY_SPEED_MULTIPLIER = 0.9` — LandingHeavy playback speed
+- `MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME = 0.25` — pure drops shorter than this play no landing animation
+
+Updated animation IDs (`MOVEMENT_ANIMATION_IDS.R6.Unarmed`):
+- `LandingLight = "rbxassetid://135438895968665"` — new; one-shot light landing
+- `LandingMedium = "rbxassetid://135915211175953"` — unchanged from Stage 2O; reclassified use
+- `LandingHeavy = "rbxassetid://72796290236543"` — new; one-shot heavy landing
+
+### New helpers (`src/client/MovementController.lua`)
+
+**Sprint FOV section** (inserted before Stage 2P tactical sprint section to avoid Luau forward-reference):
+- **`tweenCameraFov(target, duration)`** — cancels any in-progress FOV tween and starts a new one. Never touches `camera.CFrame`. No-op when `SPRINT_FOV_ENABLED ~= true` or camera is nil.
+- **`updateSprintFov()`** — determines the correct target FOV from phase + sprint state, then calls `tweenCameraFov` only if target differs from `targetFov` (dedup guard prevents per-frame tween restarts).
+
+**Landing section** (inserted before `updateMovementAnimation`):
+- **`getLandingAnimationName(dropDistance, airTime, wasJump, sprintJump): string?`** — classifies landing tier. Heavy always wins; then jump context (sprint jump → Medium, normal jump → Light); then pure-drop thresholds. Returns `nil` for drops shorter than `MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME`.
+- **`playLandingAnimation(animationName)`** — plays landing animation using `MOVEMENT_LANDING_ANIMATION_FADE_TIME` (0.08) instead of the standard fade time. Sets `isLandingPlaying = true` and `currentAnimationName`. Falls back to Unarmed set for AR15.
+
+### New module-level state
+
+- `currentFovTween: Tween?` — reference to the active FOV tween; cancelled before starting a new one
+- `targetFov: number` — last-requested FOV target; dedup guard in `updateSprintFov()`
+- `airborneStartY: number?` — HumanoidRootPart Y captured on Jumping state; used to compute drop distance
+- `wasJumpingThisAirborne: boolean` — true if the current airborne phase started with a jump (not a walk-off)
+- `jumpedWhileSprinting: boolean` — true if the jump that started the current airborne phase happened while sprinting
+
+### Files changed
+
+- **`src/shared/Constants.lua`** — Sprint FOV block + landing classification block added; animation IDs updated; `MOVEMENT_LANDING_ANIMATION_SPEED_MULTIPLIER` comment updated.
+- **`src/client/MovementController.lua`** — TweenService required; new state variables; `getAnimationSpeedMultiplier` updated for three tiers; `loadMovementAnimations` loads LandingLight + LandingHeavy (Looped=false) and resets new state on respawn; FOV helpers inserted before Stage 2P section; landing helpers inserted before `updateMovementAnimation`; `stopTacticalSprint` calls `updateSprintFov()`; `onHumanoidStateChanged` rewritten to track Jumping, update `airborneStartY`/`wasJumpingThisAirborne`/`jumpedWhileSprinting`, and call `getLandingAnimationName` + `playLandingAnimation` on Landed; `destroy()` cancels FOV tween and resets new state; `Start()` resets `targetFov` on CharacterAdded; phase-exit handler restores FOV; sprint/crouch/Heartbeat handlers call `updateSprintFov()`; ready log updated to Stage 1–3A.
+
+### No-change scope
+
+No new remotes. No server changes. No speed changes. No fall damage. No stamina. No slide/vault/prone. No `camera.CFrame` writes. No `CameraType` changes. No `CameraOffset` changes. No third-person zoom changes. No `ViewModelController` changes. No `GunController` changes. No `SoundController` changes. No UI changes.
+
+### MCP verification (2026-05-21)
+
+- Constants block: all 10 FOV + landing constants confirmed live in Studio (`SPRINT_FOV_ENABLED=true`, `DEFAULT_CAMERA_FOV=70`, `SPRINT_CAMERA_FOV=78`, `TACTICAL_SPRINT_CAMERA_FOV=84`, `TWEEN=0.18s`, `RESTORE=0.22s`, all landing thresholds correct).
+- Camera FOV at play start: 70.0 ✓
+- Manual tween smoke test: 70 → 78 → 70 round-trip via TweenService confirmed ✓
+- Landing classifier inline test — all 7 cases correct:
+  - Normal jump (no sprint) → LandingLight ✓
+  - Sprint jump → LandingMedium ✓
+  - High jump (drop ≥ 18 studs) → LandingHeavy ✓
+  - Small pure drop (≤ 8 studs, air ≥ 0.25 s) → LandingLight ✓
+  - Medium pure drop (8–18 studs) → LandingMedium ✓
+  - Heavy pure drop (≥ 18 studs) → LandingHeavy ✓
+  - Tiny drop (air < 0.25 s) → nil (no animation) ✓
+- No runtime errors or unexpected warnings in Output panel.
+- **Known limitation:** full end-to-end FOV tween during live sprint + landing animations during actual jumps/drops require manual Studio playtest — MCP `user_keyboard_input` does not reach `InputBegan` handlers (gameProcessed gate).
+
+---
+
 ## [2026-05-21] — Movement Stage 2R: Directional sprint animation selection with custom mouse lock
 
 ### Summary

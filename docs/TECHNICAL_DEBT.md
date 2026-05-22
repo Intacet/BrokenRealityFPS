@@ -536,7 +536,7 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-21 (x21)
+## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-21 (x22)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
@@ -742,13 +742,22 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - No camera writes. No `camera.CFrame`, `CameraOffset`, `FieldOfView`, `CameraType` changes. No new remotes. No server changes. No GunController changes. Tactical sprint branch unchanged.
 - MCP/Studio verified 2026-05-21: all code patterns confirmed via `src:find(str, 1, true)` plain-text search; `customMouseLocked` toggle confirmed via live module call; disk file length 149,222 bytes confirmed. Rojo stale-intermediate issue resolved via `mcp__Roblox_Studio__multi_edit`. Known limitation: W and C key inputs via MCP `user_keyboard_input` do not reach `InputBegan` in Studio play mode — full end-to-end directional sprint flow requires manual Studio playtest (same limitation as Stages 2P/2Q).
 
-**Remaining gaps (updated Stage 2R):**
+**Updated (2026-05-21 — Stage 3A: sprint FOV stretch + landing animation classification):**
+- `tweenCameraFov(target, duration)` and `updateSprintFov()` added as private helpers. Inserted BEFORE the Stage 2P `stopTacticalSprint` section to satisfy Luau `--!strict` forward-reference rules (`stopTacticalSprint` calls `updateSprintFov`; both must be defined before `stopTacticalSprint`).
+- Sprint FOV: `TweenService:Create(camera, TweenInfo.new(duration, Quad, Out), {FieldOfView=target})`. Normal sprint → 78, tactical sprint → 84, all else → 70. `targetFov` dedup guard prevents per-frame tween restarts from Heartbeat. FOV restored on sprint end, tactical sprint end, phase exit (non-ACTIVE), CharacterAdded (direct set), and `destroy()` (cancel + direct set).
+- Landing classification: three tiers (LandingLight/Medium/Heavy) replace the single LandingMedium from Stage 2O. `wasJumpingThisAirborne` and `jumpedWhileSprinting` track jump context. `airborneStartY` records the Y position at jump/freefall start for drop-distance calculation. `getLandingAnimationName()` implements classification; `playLandingAnimation()` uses `MOVEMENT_LANDING_ANIMATION_FADE_TIME` (0.08s) for a snappier hit. New IDs: `Unarmed.LandingLight = rbxassetid://135438895968665`, `Unarmed.LandingHeavy = rbxassetid://72796290236543`.
+- `onHumanoidStateChanged` rewritten: Jumping state now captured (previously only Freefall was handled). Freefall records `airborneStartY` only when `wasJumpingThisAirborne=false` (walk-off drops). Landed calls `getLandingAnimationName(dropDist, airTime, wasJump, sprintJump)` and routes to `playLandingAnimation`.
+- Three new speed multiplier constants: `MOVEMENT_LANDING_LIGHT_SPEED_MULTIPLIER=1.15`, `MOVEMENT_LANDING_MEDIUM_SPEED_MULTIPLIER=1.0`, `MOVEMENT_LANDING_HEAVY_SPEED_MULTIPLIER=0.9`.
+- No fall damage. No stamina. No slide/vault/prone. No camera.CFrame writes. No CameraOffset changes. No new remotes. No server changes.
+- MCP/Studio verified 2026-05-21: all 6 FOV constants live in Studio; camera FOV starts at 70.0; TweenService round-trip 70→78→70 confirmed; all 7 landing classifier cases verified inline (NormalJump→Light, SprintJump→Medium, HighJump≥18→Heavy, SmallDrop→Light, MedDrop→Medium, HeavyDrop→Heavy, TinyDrop<0.25s→nil). No runtime errors in Output panel. Known limitation: full end-to-end FOV tween during live sprint and landing animations during actual jumps require manual Studio playtest — MCP keyboard input does not reach `InputBegan` handlers (same gameProcessed limitation as Stages 2P/2Q/2R).
+
+**Remaining gaps (updated Stage 3A):**
 - Crouch walk animation — implemented for Unarmed (9 directional IDs, Stage 2J). AR15/gun-equipped CrouchWalk IDs still deferred.
 - Directional sprint animations — ForwardLeft and ForwardRight now play RunForwardLeft/RunForwardRight when customMouseLocked is ON (Stage 2R). Remaining directions (Left, Right, Backward, BackwardLeft, BackwardRight) still use RunForward in all cases. AR15 sprinting uses AR15 RunForward in all directions.
 - AR15 run diagonal animations — AR15 set sprinting uses RunForward for all directions; no AR15-specific run diagonals.
 - AR15 backward/diagonal walk animations — AR15 set only has WalkForward and RunForward; backward and diagonal walk directions fall back to WalkForward/strafe grouping.
 - AR15 CrouchIdle / CrouchWalkStart — AR15 set has no CrouchIdle or CrouchWalkStart tracks; falls back to bottom-pose hold while crouched+still. Deferred to a future armed-crouch stage.
-- AR15 Falling / LandingMedium — AR15 set has no Falling or LandingMedium IDs; both are safely skipped by `animationTracks[key] ~= nil` guards. Deferred.
+- AR15 Falling / LandingLight / LandingMedium / LandingHeavy — AR15 set has no Falling or landing IDs; all are safely skipped by `animationTracks[key] ~= nil` guards. Deferred.
 - AR15 tactical sprint — AR15 set has no TacticalSprint* IDs; tactical sprint safely falls back to RunForward for the animation, but the forward clip does not match the armed aesthetic. Deferred to a future armed-tactical-sprint stage.
 - TacticalSprintForward2 variation system — `TacticalSprintForward2` is loaded but never selected. A safe alternation system (cooldown, random pick, or distance-based trigger) is needed before it can be used.
 - Jump animations — suppressed along with locomotion when Animate is disabled. Custom replacement needed in a future movement stage.
@@ -767,6 +776,7 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - Disabling Animate removes the default idle, jump, fall, and climb animations. Until custom clips are added, the character will T-pose during these states.
 - `equippedWeaponName` is presentation-only. True armed/unarmed state must later come from a server-owned equipment/loadout system. `SetEquippedWeaponName` must eventually be called by a real EquipmentController or weapon equip system (see DEBT-050).
 - Sprint Left, Right, Backward, BackwardLeft, BackwardRight still use RunForward in all cases (Stage 2R only adds ForwardLeft → RunForwardLeft and ForwardRight → RunForwardRight when mouse lock ON). Dedicated run-left, run-right, and run-backward IDs do not exist yet. Walking backward/diagonal uses WalkForward fallback when mouse lock is OFF.
+- Sprint FOV: `SPRINT_FOV_ENABLED` master switch is `true`. If a future stage adds a separate camera system that also writes FieldOfView, a tween conflict may occur. `currentFovTween:Cancel()` is always called before starting a new tween; ensure any future camera system also cancels this tween on takeover.
 - If `DISABLE_DEFAULT_ANIMATE_FOR_CUSTOM_MOVEMENT = false`, Animate keeps running and may override or blend with custom locomotion tracks. This constant must stay `true` for custom animations to take effect.
 - Animation speed multipliers (walk 1.3×, strafe 1.4×, run 1.15×, idle 0.75×, crouch transition 0.9×). Walk was changed from 1.7→1.3 in Stage 2G; idle and crouch transition added in Stage 2H. These values may still need tuning after Studio verification — if the clip cadence feels too fast or too slow, adjust only the Constants without touching controller logic.
 - **Stage 2H/2I new risk:** If `playCrouchTransition` is called while `crouchTransitionPlaying` is true (rapid press of C during an in-flight one-shot), `clearCrouchTransitionConnection()` disconnects the Stopped conn and then plays a fresh clip. The previous clip fades out via `stopCurrentMovementAnimation()`. This is correct behavior but may feel abrupt at low playback speeds. Tune `MOVEMENT_ANIMATION_FADE_TIME` if the interruption is visually jarring. (Note: `stopCrouchTransition()` was renamed to `clearCrouchTransitionConnection()` in Stage 2I.)

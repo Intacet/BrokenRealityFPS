@@ -2,7 +2,7 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2R (Animate-disable, R6 detection, animation-set selection,
+-- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2R + 3A (Animate-disable, R6 detection, animation-set selection,
 -- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
 -- character-facing camera yaw, Unarmed backward/diagonal directional animations,
 -- directional sprint selection (RunForwardLeft/Right with mouse lock; RunForward fallback),
@@ -11,9 +11,10 @@
 -- Unarmed 8-directional crouch-walk animations + CrouchWalk speed multiplier,
 -- third-person zoom limits + custom mouse-lock camera distance/offset,
 -- CrouchIdle looped idle while crouched+still + CrouchWalkStart one-shot idle-to-walk transition,
--- Unarmed Falling looped + LandingMedium one-shot via Humanoid.StateChanged,
+-- Unarmed Falling looped + landing one-shot (LandingLight/Medium/Heavy) via Humanoid.StateChanged,
 -- Tactical sprint foundation: double-tap LeftShift → faster sprint with speed ramp + forward-only animation + gun block,
--- Fix crouch animation contamination: stopCrouchTracksExcept helper + direct CrouchIdle transition + clearCrouchBottomHold no-resume fix) —
+-- Fix crouch animation contamination: stopCrouchTracksExcept helper + direct CrouchIdle transition + clearCrouchBottomHold no-resume fix,
+-- Sprint FOV stretch via TweenService (FieldOfView only — no camera.CFrame) + landing classification light/medium/heavy) —
 -- walk, sprint, crouch speed; 8-direction camera-relative movement state; phase gating;
 -- respawn handling; connection cleanup; R6 animation playback with Unarmed default set.
 --
@@ -222,6 +223,7 @@
 
 local Players               = game:GetService("Players")
 local RunService            = game:GetService("RunService")
+local TweenService          = game:GetService("TweenService")   -- Stage 3A: sprint FOV tween
 local UserInputService      = game:GetService("UserInputService")
 local ContextActionService  = game:GetService("ContextActionService")
 local ReplicatedStorage     = game:GetService("ReplicatedStorage")
@@ -308,6 +310,36 @@ local lastStrafeBlockedState: boolean = false
 -- Guards against per-frame log spam: only logs when the sprint anim key changes.
 -- Reset to "" on each character load and in destroy().
 local lastSprintAnimName: string = ""
+
+-- Stage 3A: sprint FOV tween state ───────────────────────────────────────────
+-- Active TweenService Tween object for the sprint FieldOfView transition.
+-- Cancelled before a new tween starts. Cancelled and cleared in destroy().
+-- nil when no tween is in flight (idle, or FOV already at target).
+local currentFovTween: Tween? = nil
+
+-- The FieldOfView value that the most recent tween targeted.
+-- Guards against restarting the same tween every frame: updateSprintFov only
+-- starts a new tween when the desired target differs from this value.
+-- Reset to Constants.DEFAULT_CAMERA_FOV on respawn and in destroy().
+local targetFov: number = 70  -- will be synced to Constants.DEFAULT_CAMERA_FOV on Start/respawn
+
+-- Stage 3A: jump and drop tracking ───────────────────────────────────────────
+-- World-Y position of HumanoidRootPart when the airborne phase began.
+-- Set on Jumping state (jump entry) or Freefall entry (ledge drop with no Jumping state).
+-- Used on landing to compute dropDistance = airborneStartY - landingY.
+-- nil when not airborne or after landing is processed. Reset on respawn.
+local airborneStartY: number? = nil
+
+-- true when the current airborne phase began with a Jumping state.
+-- false for pure ledge drops (Freefall without a preceding Jumping state).
+-- Cleared to false after landing is processed. Reset on respawn.
+local wasJumpingThisAirborne: boolean = false
+
+-- true when the player was sprinting (normal or tactical) at the moment of jump.
+-- Only meaningful when wasJumpingThisAirborne is true.
+-- Used by getLandingAnimationName to choose LandingMedium for sprint jumps.
+-- Cleared to false after landing is processed. Reset on respawn.
+local jumpedWhileSprinting: boolean = false
 
 -- Custom mouse-lock state (Stage 2D — key changed to LeftControl in Stage 2K).
 -- true  = LeftControl has toggled mouse lock on; UserInputService.MouseBehavior == LockCenter.
@@ -1057,9 +1089,15 @@ local function getAnimationSpeedMultiplier(animationName: string): number
     elseif animationName == "Falling" then
         -- Stage 2O: looped falling clip played while Humanoid is in Freefall.
         return Constants.MOVEMENT_FALLING_ANIMATION_SPEED_MULTIPLIER
+    elseif animationName == "LandingLight" then
+        -- Stage 3A: light landing — plays at 1.15× so the clip completes quickly.
+        return Constants.MOVEMENT_LANDING_LIGHT_SPEED_MULTIPLIER
     elseif animationName == "LandingMedium" then
-        -- Stage 2O: one-shot landing clip played after landing from sufficient height.
-        return Constants.MOVEMENT_LANDING_ANIMATION_SPEED_MULTIPLIER
+        -- Stage 2O / Stage 3A: medium landing — sprint jumps and medium drops.
+        return Constants.MOVEMENT_LANDING_MEDIUM_SPEED_MULTIPLIER
+    elseif animationName == "LandingHeavy" then
+        -- Stage 3A: heavy landing — high drops; plays at 0.9× for heavier feel.
+        return Constants.MOVEMENT_LANDING_HEAVY_SPEED_MULTIPLIER
     elseif animationName == "TacticalSprintForward1"
         or animationName == "TacticalSprintForward2"
     then
@@ -1132,6 +1170,62 @@ local function playMovementAnimation(animationName: string)
 end
 
 -- ============================================================
+-- Private helpers — Stage 3A: sprint FOV tween
+-- ============================================================
+
+-- Cancels any in-progress FOV tween and starts a new one toward `target`.
+-- Never touches camera.CFrame. Never sets CameraType to Scriptable.
+-- No-op if Constants.SPRINT_FOV_ENABLED is not true or camera is nil.
+local function tweenCameraFov(target: number, duration: number)
+	assert(typeof(target)   == "number", "[MovementController] tweenCameraFov: target must be a number")
+	assert(typeof(duration) == "number", "[MovementController] tweenCameraFov: duration must be a number")
+	if Constants.SPRINT_FOV_ENABLED ~= true then return end
+	local camera = workspace.CurrentCamera
+	if not camera then return end
+	if currentFovTween then
+		currentFovTween:Cancel()
+		currentFovTween = nil
+	end
+	local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local tween     = TweenService:Create(camera, tweenInfo, { FieldOfView = target })
+	tween:Play()
+	currentFovTween = tween
+	if Constants.MOVEMENT_ANIMATION_DEBUG then
+		Logger.debug(
+			"[MovementController] FOV → " .. target
+			.. " over " .. string.format("%.2f", duration) .. "s"
+		)
+	end
+end
+
+-- Determines the correct target FOV based on current sprint/tactical-sprint
+-- state and phase, then calls tweenCameraFov only if the target differs from
+-- the last-requested value (dedup guard prevents per-frame tween restarts).
+local function updateSprintFov()
+	if Constants.SPRINT_FOV_ENABLED ~= true then return end
+	local newTarget: number
+	local phase = MatchController:GetPhase()
+	if phase ~= Constants.Phase.ACTIVE then
+		newTarget = Constants.DEFAULT_CAMERA_FOV
+	elseif isTacticalSprinting then
+		newTarget = Constants.TACTICAL_SPRINT_CAMERA_FOV
+	elseif movementState.isSprinting
+		and movementState.isMoving
+		and not movementState.isCrouching
+	then
+		newTarget = Constants.SPRINT_CAMERA_FOV
+	else
+		newTarget = Constants.DEFAULT_CAMERA_FOV
+	end
+	if newTarget == targetFov then return end
+	targetFov = newTarget
+	local duration: number = if newTarget == Constants.DEFAULT_CAMERA_FOV
+		then Constants.SPRINT_FOV_RESTORE_TIME
+		else Constants.SPRINT_FOV_TWEEN_TIME
+	tweenCameraFov(newTarget, duration)
+end
+
+-- ============================================================
 -- Private helpers — Stage 2P: tactical sprint
 -- ============================================================
 
@@ -1184,6 +1278,12 @@ local function stopTacticalSprint()
     if Constants.MOVEMENT_ANIMATION_DEBUG then
         Logger.debug("[MovementController] Tactical sprint END")
     end
+
+    -- Stage 3A: update FOV after tactical sprint ends.
+    -- If the player is still holding Shift (isSprinting), updateSprintFov will
+    -- transition from TACTICAL_SPRINT_CAMERA_FOV down to SPRINT_CAMERA_FOV.
+    -- If Shift was released, it will restore to DEFAULT_CAMERA_FOV.
+    updateSprintFov()
 end
 
 -- ============================================================
@@ -1423,6 +1523,20 @@ local function loadMovementAnimations(character: Model)
     isFalling    = false
     airStartTime = 0
     clearLandingConnection()
+    -- Stage 3A: clear new jump/drop tracking state on respawn.
+    airborneStartY         = nil
+    wasJumpingThisAirborne = false
+    jumpedWhileSprinting   = false
+    -- Stage 3A: restore FOV to default immediately on respawn (no tween — new character).
+    if currentFovTween then
+        currentFovTween:Cancel()
+        currentFovTween = nil
+    end
+    targetFov = Constants.DEFAULT_CAMERA_FOV
+    local _camOnRespawn = workspace.CurrentCamera
+    if _camOnRespawn then
+        _camOnRespawn.FieldOfView = Constants.DEFAULT_CAMERA_FOV
+    end
     -- Stage 2P: clear tactical sprint state on respawn — do NOT play TacticalSprintStop here
     -- because the previous Animator may already be destroyed (same reason as crouchHoldTrack).
     isTacticalSprinting               = false
@@ -1548,10 +1662,17 @@ local function loadMovementAnimations(character: Model)
         toLoad["Unarmed_Falling"] = r6.Unarmed.Falling
     end
 
-    -- Stage 2O: LandingMedium — one-shot clip played on landing after MIN_AIR_TIME seconds.
-    -- Only loaded for Unarmed set (same AR15 guard applies — see above).
+    -- Stage 3A: LandingLight — one-shot; plays for normal jumps and small drops.
+    if r6.Unarmed.LandingLight and r6.Unarmed.LandingLight ~= "" then
+        toLoad["Unarmed_LandingLight"] = r6.Unarmed.LandingLight
+    end
+    -- Stage 2O / Stage 3A: LandingMedium — one-shot; reclassified to sprint jumps + medium drops.
     if r6.Unarmed.LandingMedium and r6.Unarmed.LandingMedium ~= "" then
         toLoad["Unarmed_LandingMedium"] = r6.Unarmed.LandingMedium
+    end
+    -- Stage 3A: LandingHeavy — one-shot; plays for high drops.
+    if r6.Unarmed.LandingHeavy and r6.Unarmed.LandingHeavy ~= "" then
+        toLoad["Unarmed_LandingHeavy"] = r6.Unarmed.LandingHeavy
     end
 
     -- Stage 2P: Tactical sprint animations — Unarmed set only.
@@ -1612,7 +1733,8 @@ local function loadMovementAnimations(character: Model)
             -- Stage 2O: LandingMedium added to the one-shot list.
             -- Stage 2P: TacticalSprintStop added to the one-shot list.
             if key:match("_EnterCrouch$") or key:match("_ExitCrouch$")
-                or key:match("_CrouchWalkStart$") or key:match("_LandingMedium$")
+                or key:match("_CrouchWalkStart$")
+                or key:match("_LandingLight$") or key:match("_LandingMedium$") or key:match("_LandingHeavy$")
                 or key:match("_TacticalSprintStop$")
             then
                 track.Looped = false
@@ -1676,6 +1798,133 @@ local function getSprintAnimationName(animSetName: string, directionName: string
     -- Left, Right, Backward, BackwardLeft, BackwardRight, Forward, or unclassified → RunForward.
     -- Dedicated run-left/run-right/run-backward IDs are deferred to a future movement stage.
     return "RunForward"
+end
+
+-- ============================================================
+-- Private helpers — Stage 3A: landing animation classification
+-- ============================================================
+
+-- Warn-once guard for playLandingAnimation: fires Logger.warn exactly once per
+-- missing landing track name per session. Not reset on respawn (same tracks every char).
+local playLandingAnimWarned: {[string]: boolean} = {}
+
+-- Classifies a landing event into a landing animation name based on drop distance,
+-- air time, and jump/sprint flags. Returns nil if no animation should play.
+--
+-- Priority:
+--  1. dropDistance >= MOVEMENT_LANDING_HEAVY_MIN_DROP → "LandingHeavy"  (always, even for jumps)
+--  2. wasJump == true and sprintJump == true and SPRINT_JUMP_USES_MEDIUM → "LandingMedium"
+--  3. wasJump == true → "LandingLight"
+--  4. dropDistance <= MOVEMENT_LANDING_LIGHT_MAX_DROP  → "LandingLight"
+--  5. dropDistance <= MOVEMENT_LANDING_MEDIUM_MAX_DROP → "LandingMedium"
+--  6. else → "LandingHeavy"
+local function getLandingAnimationName(
+    dropDistance: number,
+    airTime: number,
+    wasJump: boolean,
+    sprintJump: boolean
+): string?
+    assert(typeof(dropDistance) == "number",  "[MovementController] getLandingAnimationName: dropDistance must be a number")
+    assert(typeof(airTime)      == "number",  "[MovementController] getLandingAnimationName: airTime must be a number")
+    assert(typeof(wasJump)      == "boolean", "[MovementController] getLandingAnimationName: wasJump must be a boolean")
+    assert(typeof(sprintJump)   == "boolean", "[MovementController] getLandingAnimationName: sprintJump must be a boolean")
+
+    -- Heavy drop always wins regardless of jump context.
+    if dropDistance >= Constants.MOVEMENT_LANDING_HEAVY_MIN_DROP then
+        return "LandingHeavy"
+    end
+
+    -- Jump context: wasJump takes precedence over drop-distance thresholds.
+    if wasJump then
+        if sprintJump and Constants.MOVEMENT_LANDING_SPRINT_JUMP_USES_MEDIUM then
+            return "LandingMedium"  -- sprint jump → medium
+        end
+        return "LandingLight"       -- normal jump → light
+    end
+
+    -- Pure drop (no jump): classify by distance.
+    if dropDistance <= Constants.MOVEMENT_LANDING_LIGHT_MAX_DROP then
+        return "LandingLight"
+    elseif dropDistance <= Constants.MOVEMENT_LANDING_MEDIUM_MAX_DROP then
+        return "LandingMedium"
+    else
+        return "LandingHeavy"
+    end
+end
+
+-- Plays the named landing animation (e.g. "LandingLight") for the current animation set.
+-- Falls back to Unarmed set if the current set lacks the landing track.
+-- Warns once (playLandingAnimWarned) if no track exists even after the Unarmed fallback.
+-- Stops Falling and any in-flight landing animation before playing the new one.
+-- Uses MOVEMENT_LANDING_ANIMATION_FADE_TIME (shorter than the normal fade) for quick blending.
+-- Sets isLandingPlaying = true and connects a Stopped callback to clear it when done.
+-- Does NOT freeze WalkSpeed or lock input — movement physics are unaffected.
+local function playLandingAnimation(animationName: string)
+    assert(animationName ~= nil, "[MovementController] playLandingAnimation: animationName is required")
+
+    local setName    = getAnimationSetName()
+    local primaryKey = setName .. "_" .. animationName
+
+    -- Resolve track: try current set first, fall back to Unarmed if set lacks the track.
+    local track: AnimationTrack? = animationTracks[primaryKey]
+    local usedKey: string        = primaryKey
+    if track == nil and setName ~= Constants.MOVEMENT_ANIMATION_SET_UNARMED then
+        local unarmedKey = Constants.MOVEMENT_ANIMATION_SET_UNARMED .. "_" .. animationName
+        if animationTracks[unarmedKey] ~= nil then
+            track   = animationTracks[unarmedKey]
+            usedKey = unarmedKey
+        end
+    end
+
+    if track == nil then
+        if not playLandingAnimWarned[animationName] then
+            playLandingAnimWarned[animationName] = true
+            Logger.warn(
+                "[MovementController] playLandingAnimation: no track for '"
+                .. primaryKey .. "' (no Unarmed fallback either) — skipping"
+            )
+        end
+        return
+    end
+
+    -- Disconnect any old landing Stopped callback (prevents spurious clearLandingConnection
+    -- calls from a previously started but not-yet-finished landing animation).
+    -- This sets isLandingPlaying = false; we re-set it true below after clearing.
+    clearLandingConnection()
+
+    -- Stop whatever is currently playing (typically Falling or idle).
+    -- This also stops any landing track that is currentAnimationName-tracked.
+    stopCurrentMovementAnimation()
+
+    -- Determine speed multiplier for this landing tier.
+    local speedMult: number
+    if animationName == "LandingLight" then
+        speedMult = Constants.MOVEMENT_LANDING_LIGHT_SPEED_MULTIPLIER
+    elseif animationName == "LandingHeavy" then
+        speedMult = Constants.MOVEMENT_LANDING_HEAVY_SPEED_MULTIPLIER
+    else
+        -- LandingMedium or unknown → use medium multiplier as safe default.
+        speedMult = Constants.MOVEMENT_LANDING_MEDIUM_SPEED_MULTIPLIER
+    end
+
+    -- Play the track and set gate state.
+    -- currentAnimationName is set so stopCurrentMovementAnimation() can stop it externally
+    -- (phase exit, destroy, or a second landing before the first finishes).
+    isLandingPlaying     = true
+    currentAnimationName = usedKey
+
+    track:Play(Constants.MOVEMENT_LANDING_ANIMATION_FADE_TIME)
+    track:AdjustSpeed(speedMult)
+
+    -- Connect Stopped callback: releases the gate when the one-shot finishes.
+    -- clearLandingConnection() MUST be called before any external track:Stop() to prevent
+    -- the callback from firing spuriously — mirrors clearCrouchTransitionConnection() pattern.
+    landingConn = track.Stopped:Connect(function()
+        clearLandingConnection()
+        if Constants.MOVEMENT_ANIMATION_DEBUG then
+            Logger.debug("[MovementController] " .. animationName .. " finished → resuming locomotion")
+        end
+    end)
 end
 
 -- Selects and triggers the correct movement animation for the current movementState.
@@ -2119,19 +2368,25 @@ end
 -- Private helpers — Stage 2O: Humanoid.StateChanged handler
 -- ============================================================
 
--- Handles Humanoid state transitions to drive Falling (looped) and LandingMedium (one-shot).
+-- Handles Humanoid state transitions to drive Falling (looped) and landing (one-shot).
 -- Connected in setupCharacter() after loadMovementAnimations(), stored in stateChangedConn.
 -- Disconnected at the top of loadMovementAnimations() on respawn and in destroy().
 -- NOT stored in _connections — it is per-character and must be managed separately.
 --
--- Freefall  → isFalling = true; capture airStartTime; play Falling if the track exists.
--- Landed / Running → isFalling = false; stop Falling; play LandingMedium if:
---   • airTime ≥ MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME
---   • not crouching (crouch branch owns the animation layer while isCrouching)
---   • crouchTransitionPlaying is false (a one-shot transition owns the layer)
---   • Falling and LandingMedium tracks exist for the current set
---   After LandingMedium's Stopped event fires, clearLandingConnection() releases the gate
---   and the next Heartbeat resumes normal animation selection.
+-- Stage 3A rework (replaces Stage 2O single-LandingMedium logic):
+--
+-- Jumping → capture airborneStartY + airStartTime; set wasJumpingThisAirborne + jumpedWhileSprinting.
+--           Freefall handler fills in these values if Jumping never fires (ledge drop).
+-- Freefall  → isFalling = true. If not already captured, sets airStartTime + airborneStartY.
+--             Clears any in-flight landing animation via clearLandingConnection +
+--             stopCurrentMovementAnimation. Plays Falling looped if the track exists.
+-- Landed / Running → isFalling = false. Computes airTime and dropDistance.
+--   Guards: (a) must have been in a tracked airborne state (isFalling or wasJumpingThisAirborne);
+--           (b) not crouching (crouch branch owns the layer); (c) no active crouch transition.
+--   For non-jump landings: additional guard airTime ≥ MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME
+--   (pure tiny step-offs skip the landing animation). Jump landings are never skipped on airTime.
+--   Calls getLandingAnimationName(dropDistance, airTime, wasJump, sprintJump) to classify tier.
+--   Calls playLandingAnimation(animName) to play the one-shot.
 -- All other states → ignored.
 local function onHumanoidStateChanged(
     _oldState: Enum.HumanoidStateType,
@@ -2143,25 +2398,48 @@ local function onHumanoidStateChanged(
 
     local setName = getAnimationSetName()
 
-    if newState == Enum.HumanoidStateType.Freefall then
-        -- ── Entered Freefall ──────────────────────────────────────────────────
-        if isFalling then return end   -- already falling; guard against double-fire
-        isFalling    = true
+    if newState == Enum.HumanoidStateType.Jumping then
+        -- ── Player jumped ────────────────────────────────────────────────────
+        -- Capture jump context before Freefall fires. Freefall handler will guard against
+        -- double-setting these values.
+        wasJumpingThisAirborne = true
+        jumpedWhileSprinting   = movementState.isSprinting or movementState.isTacticalSprinting
+        -- Capture the highest Y position at jump launch (not at Freefall entry, which is
+        -- a bit later and slightly lower). Used to compute drop on landing.
+        local rootAtJump = currentRootPart
+        if rootAtJump then
+            airborneStartY = (rootAtJump :: BasePart).Position.Y
+        end
+        -- Record air start time at jump; Freefall handler leaves this unchanged if already set.
         airStartTime = os.clock()
 
-        -- Clear any in-flight LandingMedium Stopped callback (edge case: landed then jumped
-        -- again before the one-shot finished and landed a second time).
-        clearLandingConnection()
-        local landKey   = setName .. "_LandingMedium"
-        local landTrack = animationTracks[landKey]
-        if landTrack and landTrack.IsPlaying then
-            landTrack:Stop(Constants.MOVEMENT_ANIMATION_FADE_TIME)
+    elseif newState == Enum.HumanoidStateType.Freefall then
+        -- ── Entered Freefall ─────────────────────────────────────────────────
+        if isFalling then return end   -- already falling; guard against double-fire
+        isFalling = true
+
+        -- Fill in airborne tracking if not already set by the Jumping handler
+        -- (ledge drop: Freefall fires without a preceding Jumping state).
+        if airStartTime == 0 then
+            airStartTime = os.clock()
         end
+        if airborneStartY == nil then
+            local rootAtFall = currentRootPart
+            if rootAtFall then
+                airborneStartY = (rootAtFall :: BasePart).Position.Y
+            end
+        end
+
+        -- Clear any in-flight landing animation from a previous landing that was
+        -- interrupted (player landed and jumped again before the one-shot finished).
+        -- clearLandingConnection() disconnects the Stopped callback; stopCurrentMovementAnimation
+        -- stops the track if it is tracked as currentAnimationName.
+        clearLandingConnection()
+        stopCurrentMovementAnimation()
 
         -- Play Falling looped. Guard: track must exist (AR15 set has no Falling ID).
         local fallingKey = setName .. "_Falling"
         if animationTracks[fallingKey] ~= nil then
-            stopCurrentMovementAnimation()
             playMovementAnimation(fallingKey)
             if Constants.MOVEMENT_ANIMATION_DEBUG then
                 Logger.debug("[MovementController] Falling BEGIN (" .. fallingKey .. ")")
@@ -2171,70 +2449,80 @@ local function onHumanoidStateChanged(
     elseif newState == Enum.HumanoidStateType.Landed
         or newState == Enum.HumanoidStateType.Running
     then
-        -- ── Landed or transitioned to Running from airborne ───────────────────
-        -- Running fires when the character starts moving on the ground; Landed fires on
-        -- any ground contact. Both are treated as "landed" for animation purposes.
-        if not isFalling then return end   -- was not in a tracked Freefall; ignore
+        -- ── Landed or transitioned to Running from airborne ──────────────────
+        -- Running fires when the character begins ground movement; Landed fires on any
+        -- ground contact. Both signal the end of an airborne phase.
+        -- Guard: must have been tracking an airborne state.
+        if not isFalling and not wasJumpingThisAirborne then return end
+
         isFalling = false
 
-        local airTime = os.clock() - airStartTime
-
-        -- Stop the Falling looped track.
-        local fallingKey   = setName .. "_Falling"
-        local fallingTrack = animationTracks[fallingKey]
-        if fallingTrack ~= nil then
-            if currentAnimationName == fallingKey then
-                -- Let stopCurrentMovementAnimation handle the fade and name clear.
-                stopCurrentMovementAnimation()
-            elseif fallingTrack.IsPlaying then
-                fallingTrack:Stop(Constants.MOVEMENT_ANIMATION_FADE_TIME)
-            end
+        -- Compute air metrics.
+        local airTime: number      = if airStartTime > 0 then (os.clock() - airStartTime) else 0
+        local landingRootPart      = currentRootPart
+        local dropDistance: number = 0
+        if airborneStartY ~= nil and landingRootPart ~= nil then
+            dropDistance = math.max(0, (airborneStartY :: number) - (landingRootPart :: BasePart).Position.Y)
         end
 
-        -- Guard: skip LandingMedium for any of these conditions:
-        --   • airTime too short (small hop or step-off — not a meaningful fall)
-        --   • player is crouching (crouch branch owns the animation layer)
-        --   • a crouch transition one-shot is in flight (it owns the layer)
-        --   • LandingMedium track was not loaded (AR15 set, or track absent)
-        local landKey   = setName .. "_LandingMedium"
-        local landTrack = animationTracks[landKey]
-        if airTime < Constants.MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME
-            or movementState.isCrouching
-            or crouchTransitionPlaying
-            or landTrack == nil
+        -- Capture and clear jump-tracking state before any early returns.
+        local wasJump  = wasJumpingThisAirborne
+        local sprintJp = jumpedWhileSprinting
+        wasJumpingThisAirborne = false
+        jumpedWhileSprinting   = false
+        airborneStartY         = nil
+        airStartTime           = 0
+
+        -- Stop the Falling looped track (if still playing as currentAnimationName).
+        local fallingKey = setName .. "_Falling"
+        if currentAnimationName == fallingKey then
+            stopCurrentMovementAnimation()
+        elseif animationTracks[fallingKey] ~= nil
+            and (animationTracks[fallingKey] :: AnimationTrack).IsPlaying
         then
+            (animationTracks[fallingKey] :: AnimationTrack):Stop(Constants.MOVEMENT_ANIMATION_FADE_TIME)
+        end
+
+        -- Guard: skip landing animation when crouching or in a crouch transition.
+        -- The crouch branch owns the animation layer — playing a landing on top would conflict.
+        if movementState.isCrouching or crouchTransitionPlaying then
             if Constants.MOVEMENT_ANIMATION_DEBUG then
                 Logger.debug(
-                    "[MovementController] Landing: LandingMedium skipped"
-                    .. " (airTime=" .. string.format("%.2f", airTime) .. "s"
-                    .. " crouching=" .. tostring(movementState.isCrouching)
+                    "[MovementController] Landing skipped"
+                    .. " (crouching=" .. tostring(movementState.isCrouching)
                     .. " transition=" .. tostring(crouchTransitionPlaying) .. ")"
                 )
             end
             return
         end
 
-        -- Play LandingMedium one-shot. Gate isLandingPlaying so updateMovementAnimation
-        -- does not override it before the Stopped event fires.
-        isLandingPlaying = true
-        stopCurrentMovementAnimation()
-        playMovementAnimation(landKey)
+        -- Guard: for non-jump landings (pure drops), skip if air time is too short.
+        -- Jump landings are always classified regardless of air time.
+        if not wasJump and airTime < Constants.MOVEMENT_LANDING_ANIMATION_MIN_AIR_TIME then
+            if Constants.MOVEMENT_ANIMATION_DEBUG then
+                Logger.debug(
+                    "[MovementController] Landing skipped"
+                    .. " (pure drop, airTime=" .. string.format("%.2f", airTime) .. "s < MIN_AIR_TIME)"
+                )
+            end
+            return
+        end
+
+        -- Classify landing tier and play.
+        local animName = getLandingAnimationName(dropDistance, airTime, wasJump, sprintJp)
+        if animName == nil then return end
+
         if Constants.MOVEMENT_ANIMATION_DEBUG then
             Logger.debug(
-                "[MovementController] LandingMedium BEGIN (" .. landKey
-                .. " airTime=" .. string.format("%.2f", airTime) .. "s)"
+                "[MovementController] Landing: " .. animName
+                .. " (drop=" .. string.format("%.1f", dropDistance) .. " studs"
+                .. " airTime=" .. string.format("%.2f", airTime) .. "s"
+                .. " wasJump=" .. tostring(wasJump)
+                .. " sprintJump=" .. tostring(sprintJp) .. ")"
             )
         end
 
-        -- Stopped callback: release the gate so normal selection resumes next Heartbeat.
-        -- clearLandingConnection() BEFORE track:Stop() in any external caller — same pattern
-        -- as clearCrouchTransitionConnection() and clearCrouchWalkStart().
-        landingConn = landTrack.Stopped:Connect(function()
-            clearLandingConnection()
-            if Constants.MOVEMENT_ANIMATION_DEBUG then
-                Logger.debug("[MovementController] LandingMedium finished")
-            end
-        end)
+        playLandingAnimation(animName)
     end
 end
 
@@ -2439,6 +2727,20 @@ function MovementController:destroy()
     isFalling    = false
     airStartTime = 0
     clearLandingConnection()
+    -- Stage 3A: clear new jump/drop tracking state.
+    airborneStartY         = nil
+    wasJumpingThisAirborne = false
+    jumpedWhileSprinting   = false
+    -- Stage 3A: cancel any in-flight FOV tween and restore default FieldOfView immediately.
+    if currentFovTween then
+        currentFovTween:Cancel()
+        currentFovTween = nil
+    end
+    targetFov = Constants.DEFAULT_CAMERA_FOV
+    local _camOnDestroy = workspace.CurrentCamera
+    if _camOnDestroy then
+        _camOnDestroy.FieldOfView = Constants.DEFAULT_CAMERA_FOV
+    end
     -- Stage 2P: clear tactical sprint state without playing TacticalSprintStop (destroy path).
     isTacticalSprinting               = false
     movementState.isTacticalSprinting = false
@@ -2526,6 +2828,10 @@ function MovementController:Start()
         else
             restoreNormalThirdPersonCamera()
         end
+        -- Stage 3A: FOV was already restored to DEFAULT directly in loadMovementAnimations
+        -- (no tween on respawn — new character). Reset targetFov here so the first
+        -- sprint after respawn triggers a fresh tween instead of seeing "no change".
+        targetFov = Constants.DEFAULT_CAMERA_FOV
     end)
     table.insert(_connections, charConn)
 
@@ -2547,6 +2853,18 @@ function MovementController:Start()
             -- Stage 2O: reset falling/landing state so re-entry to ACTIVE starts clean.
             isFalling = false
             clearLandingConnection()
+            -- Stage 3A: clear jump/drop tracking state on phase exit.
+            airborneStartY         = nil
+            wasJumpingThisAirborne = false
+            jumpedWhileSprinting   = false
+            -- Stage 3A: restore FOV immediately on phase exit — do not wait for the next
+            -- Heartbeat. Tween to DEFAULT so the transition is visible but quick.
+            if Constants.SPRINT_FOV_ENABLED then
+                if targetFov ~= Constants.DEFAULT_CAMERA_FOV then
+                    targetFov = Constants.DEFAULT_CAMERA_FOV
+                    tweenCameraFov(Constants.DEFAULT_CAMERA_FOV, Constants.SPRINT_FOV_RESTORE_TIME)
+                end
+            end
             -- Stage 2P: clear tactical sprint state on phase exit.
             -- Do NOT call stopTacticalSprint() here — it would try to play TacticalSprintStop
             -- while the phase is leaving ACTIVE (the animation would have no visible effect and
@@ -2659,6 +2977,8 @@ function MovementController:Start()
 
             movementState.isSprinting = true
             applySpeed()
+            -- Stage 3A: start sprint FOV tween immediately on sprint start.
+            updateSprintFov()
         end
     )
     table.insert(_connections, sprintBeginConn)
@@ -2668,11 +2988,14 @@ function MovementController:Start()
             if input.KeyCode ~= Enum.KeyCode.LeftShift then return end
             if not movementState.isSprinting then return end
             -- Stage 2P: Shift release ends tactical sprint (plays TacticalSprintStop one-shot).
+            -- stopTacticalSprint() calls updateSprintFov() internally.
             if isTacticalSprinting then
                 stopTacticalSprint()
             end
             movementState.isSprinting = false
             applySpeed()
+            -- Stage 3A: restore FOV immediately on sprint end.
+            updateSprintFov()
         end
     )
     table.insert(_connections, sprintEndConn)
@@ -2723,12 +3046,15 @@ function MovementController:Start()
             if movementState.isCrouching then return end  -- already crouching; ignore repeat
 
             -- Stage 2P: crouch cancels tactical sprint (plays TacticalSprintStop one-shot).
+            -- stopTacticalSprint() calls updateSprintFov() internally.
             if isTacticalSprinting then
                 stopTacticalSprint()
             end
             movementState.isCrouching = true
             movementState.isSprinting = false
             applySpeed()
+            -- Stage 3A: crouch clears sprint → restore FOV immediately.
+            updateSprintFov()
             playCrouchTransition(true)   -- play EnterCrouch
         end
     )
@@ -2806,10 +3132,15 @@ function MovementController:Start()
 
         -- Stage 2A: select and play the correct walk/run animation.
         updateMovementAnimation()
+
+        -- Stage 3A: update sprint FOV every frame. updateSprintFov() gates internally on
+        -- targetFov so redundant tweens are never started. Also called directly from sprint/
+        -- crouch input handlers for immediate response — this call covers continuous state.
+        updateSprintFov()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1–2R: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals+new IDs, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→directional(2R), CrouchIdle, CrouchWalkStart, Falling+LandingMedium, TacticalSprint double-tap+ramp+stop)")
+    Logger.debug("[MovementController] Ready (Stage 1–3A: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals+new IDs, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→directional(2R), CrouchIdle, CrouchWalkStart, Falling+LandingLight/Medium/Heavy, TacticalSprint double-tap+ramp+stop, sprintFOV+landingClassification)")
 end
 
 return MovementController
