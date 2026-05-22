@@ -206,10 +206,11 @@ FleaMarketService / PlayerMarketplace
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K (Animate-disable, R6 detection, animation-set selection,
+MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2R (Animate-disable, R6 detection, animation-set selection,
                         --   strafe gating, animation speed multipliers, shift-lock sprint fix,
                         --   custom mouse-lock toggle on LeftControl, character-facing camera yaw,
-                        --   third-person zoom limits, mouse-lock camera distance and shoulder offset):
+                        --   third-person zoom limits, mouse-lock camera distance and shoulder offset,
+                        --   directional sprint selection via getSprintAnimationName (Stage 2R)):
                         --   owns local movement input (LeftShift=sprint, C=hold-to-crouch (hold=enter, release=exit),
                         --   LeftControl=custom mouse-lock toggle),
                         --   customMouseLocked boolean, UserInputService.MouseBehavior writes,
@@ -274,7 +275,11 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --     Stage 2D primary path (CUSTOM_MOUSE_LOCK_STRAFE_ANIMS_ONLY = true, default):
                         --       isMouseLockedForStrafeAnimations() returns customMouseLocked.
                         --     Without custom mouse lock, left/right/diagonal movement falls back to WalkForward.
-                        --     Sprint uses RunForward in all directions regardless of customMouseLocked.
+                        --     Sprint with customMouseLocked OFF: always RunForward regardless of direction.
+                        --     Sprint with customMouseLocked ON, ForwardLeft: RunForwardLeft if loaded, else RunForward. (Stage 2R)
+                        --     Sprint with customMouseLocked ON, ForwardRight: RunForwardRight if loaded, else RunForward. (Stage 2R)
+                        --     Sprint with customMouseLocked ON, other directions: RunForward fallback. (Stage 2R)
+                        --     Directional sprint selection via getSprintAnimationName() helper (Stage 2R). (Stage 2R)
                         --     Outer gate: MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK (kept, still true).
                         --
                         --   LeftShift sprint + shift-lock fix (Stage 2C — 2026-05-18):
@@ -366,8 +371,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Unarmed.WalkBackwardRight = rbxassetid://83443564844340   (Stage 2M)
                         --       Unarmed.WalkForwardLeft   = rbxassetid://137297382056770  (Stage 2M)
                         --       Unarmed.WalkForwardRight  = rbxassetid://133633696854516  (Stage 2M)
-                        --       Unarmed.RunForwardLeft    = rbxassetid://94337945101783   (Stage 2G — deferred/unused; sprint always uses RunForward since Stage 2L)
-                        --       Unarmed.RunForwardRight   = rbxassetid://104724352837263  (Stage 2G — deferred/unused; sprint always uses RunForward since Stage 2L)
+                        --       Unarmed.RunForwardLeft    = rbxassetid://94337945101783   (Stage 2G — active since Stage 2R: plays when customMouseLocked ON + ForwardLeft sprint)
+                        --       Unarmed.RunForwardRight   = rbxassetid://104724352837263  (Stage 2G — active since Stage 2R: plays when customMouseLocked ON + ForwardRight sprint)
                         --       Unarmed.Idle              = rbxassetid://132044223555193  (Stage 2H — standing idle, looped)
                         --       Unarmed.EnterCrouch       = rbxassetid://105064599119554  (Stage 2H — enter-crouch one-shot)
                         --       Unarmed.ExitCrouch        = rbxassetid://104596765238289  (Stage 2H — exit-crouch one-shot)
@@ -397,16 +402,19 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Stage 2F (2026-05-20) — 5 new Unarmed walk directional clips added;
                         --       Stage 2L (2026-05-20) — Unarmed WalkForward/RunForward replaced; sprint simplified to always use RunForward;
                         --       Stage 2M (2026-05-20) — All 8 Unarmed walk IDs replaced + WalkForwardAlt added (loaded, not yet selected);
-                        --       Stage 2G (2026-05-20) — RunForwardLeft + RunForwardRight IDs added (retained in Constants; deferred since Stage 2L);
+                        --       Stage 2G (2026-05-20) — RunForwardLeft + RunForwardRight IDs added (retained in Constants; deferred in Stage 2L, active since Stage 2R);
                         --       Stage 2H (2026-05-20) — Idle + EnterCrouch/ExitCrouch added for both sets;
                         --       Stage 2J (2026-05-20) — 9 Unarmed CrouchWalk* directional IDs added;
                         --       Stage 2N (2026-05-20) — CrouchIdle, CrouchIdleAlt, CrouchWalkStart added; CrouchWalk/CrouchWalkForward IDs updated;
                         --       Stage 2O (2026-05-21) — Falling, LandingMedium added; 3 speed/timing constants added;
-                        --       Stage 2P (2026-05-21) — TacticalSprintForward1, TacticalSprintForward2, TacticalSprintStop added)
-                        --     Sprint behavior (Stage 2L — 2026-05-20):
-                        --       All sprint directions (Forward/Backward/Left/Right/diagonals), all sets, mouse lock on or off → RunForward.
-                        --       RunForwardLeft/RunForwardRight IDs remain in Constants but are not selected (deferred).
-                        --       AR15/gun-equipped: sprinting uses AR15 RunForward in all directions.
+                        --       Stage 2P (2026-05-21) — TacticalSprintForward1, TacticalSprintForward2, TacticalSprintStop added;
+                        --       Stage 2R (2026-05-21) — directional sprint selection enabled via getSprintAnimationName() helper)
+                        --     Sprint behavior (Stage 2R — 2026-05-21):
+                        --       customMouseLocked OFF: all sprint directions → RunForward (matches Stage 2L behavior).
+                        --       customMouseLocked ON, ForwardLeft: RunForwardLeft if loaded, else RunForward.
+                        --       customMouseLocked ON, ForwardRight: RunForwardRight if loaded, else RunForward.
+                        --       customMouseLocked ON, other directions (Left, Right, Backward, diagonals): RunForward.
+                        --       AR15/gun-equipped: sprinting uses AR15 RunForward in all directions (no AR15 run diagonals).
                         --     Idle behavior (Stage 2H):
                         --       Both sets: Idle (looped) plays when standing still in ACTIVE phase.
                         --       Idle plays via updateMovementAnimation (not moving path) — no special gate.

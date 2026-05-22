@@ -2,10 +2,10 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q (Animate-disable, R6 detection, animation-set selection,
+-- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2R (Animate-disable, R6 detection, animation-set selection,
 -- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
 -- character-facing camera yaw, Unarmed backward/diagonal directional animations,
--- sprint always uses RunForward (RunForwardLeft/Right deferred — Stage 2L),
+-- directional sprint selection (RunForwardLeft/Right with mouse lock; RunForward fallback),
 -- standing idle + enter/exit crouch one-shot transition animations,
 -- hold-to-crouch + EnterCrouch bottom-pose hold,
 -- Unarmed 8-directional crouch-walk animations + CrouchWalk speed multiplier,
@@ -166,8 +166,10 @@
 --   Without custom mouse lock, pure Left/Right fall back to WalkForward.
 --   WalkBackward always plays for Backward direction regardless of mouse-lock state.
 --   WalkForwardLeft/Right and WalkBackwardLeft/Right always play regardless of mouse-lock state.
---   Sprint in any direction always uses RunForward for the current animation set. (Stage 2L)
---   RunForwardLeft/RunForwardRight IDs retained in Constants but no longer selected. (Stage 2L)
+--   Sprint with custom mouse lock OFF: always RunForward regardless of direction. (Stage 2L)
+--   Sprint with custom mouse lock ON, ForwardLeft: RunForwardLeft if loaded, else RunForward. (Stage 2R)
+--   Sprint with custom mouse lock ON, ForwardRight: RunForwardRight if loaded, else RunForward. (Stage 2R)
+--   Sprint with custom mouse lock ON, other directions: RunForward fallback. (Stage 2R)
 --   WalkForward/Backward/diagonals: 1.3× speed. WalkLeft/WalkRight: 1.4× speed. RunForward: 1.15× speed.
 --   Sprint works with LeftShift even while shift lock is active (TextBox check instead of gp).
 --   Stage 2F (2026-05-20): Unarmed backward/diagonal animation support added:
@@ -301,6 +303,11 @@ local lastAnimationSet: string = ""
 -- true = strafe was blocked on the last frame that logged. Logs only on state change.
 -- Reset to false on each character load and in destroy().
 local lastStrafeBlockedState: boolean = false
+
+-- Stage 2R: last sprint animation name that was logged to Output.
+-- Guards against per-frame log spam: only logs when the sprint anim key changes.
+-- Reset to "" on each character load and in destroy().
+local lastSprintAnimName: string = ""
 
 -- Custom mouse-lock state (Stage 2D — key changed to LeftControl in Stage 2K).
 -- true  = LeftControl has toggled mouse lock on; UserInputService.MouseBehavior == LockCenter.
@@ -1438,6 +1445,8 @@ local function loadMovementAnimations(character: Model)
     lastAnimationSet       = ""
     -- Reset strafe-blocked log guard so the first movement after respawn re-logs the state.
     lastStrafeBlockedState = false
+    -- Stage 2R: reset sprint anim log guard so the first sprint after respawn re-logs.
+    lastSprintAnimName     = ""
     -- Reset custom mouse lock on respawn: release the cursor so the player is not stuck
     -- with a locked mouse if they die or respawn while mouse lock was active.
     customMouseLocked                    = false
@@ -1617,17 +1626,70 @@ local function loadMovementAnimations(character: Model)
     Logger.debug("[MovementController] R6 movement animations loaded for: " .. character.Name)
 end
 
+-- Stage 2R: Returns the short animation suffix (without set prefix) for the current normal sprint.
+-- The caller prepends the animation set name: `setName .. "_" .. getSprintAnimationName(...)`.
+-- Only resolves RunForwardLeft/RunForwardRight when customMouseLocked == true AND the track exists.
+-- All other directions (Left, Right, Backward, BackwardLeft, BackwardRight, Forward, unknown)
+-- return "RunForward" — no dedicated run-left/run-right/run-backward animations exist yet.
+-- Warns once per missing directional sprint track via Logger.warn(); never spams per frame.
+-- Does NOT call playMovementAnimation(). Does NOT write camera.CFrame.
+--
+-- missedSprintAnimWarned: module-level table, keyed by full track key.
+-- Intentionally not reset on respawn — the same set of tracks is loaded each character.
+local missedSprintAnimWarned: {[string]: boolean} = {}
+local function getSprintAnimationName(animSetName: string, directionName: string): string
+    assert(animSetName ~= nil,   "[MovementController] getSprintAnimationName: animSetName is required")
+    assert(directionName ~= nil, "[MovementController] getSprintAnimationName: directionName is required")
+
+    -- Without custom mouse lock, all sprint directions play RunForward (matches Stage 2L behavior).
+    if not customMouseLocked then
+        return "RunForward"
+    end
+
+    -- Custom mouse lock ON: resolve directional run clips when tracks are loaded.
+    if directionName == "ForwardLeft" then
+        local key = animSetName .. "_RunForwardLeft"
+        if animationTracks[key] ~= nil then
+            return "RunForwardLeft"
+        else
+            if not missedSprintAnimWarned[key] then
+                missedSprintAnimWarned[key] = true
+                Logger.warn("[MovementController] getSprintAnimationName: " .. key .. " not loaded — RunForward fallback")
+            end
+            return "RunForward"
+        end
+    end
+
+    if directionName == "ForwardRight" then
+        local key = animSetName .. "_RunForwardRight"
+        if animationTracks[key] ~= nil then
+            return "RunForwardRight"
+        else
+            if not missedSprintAnimWarned[key] then
+                missedSprintAnimWarned[key] = true
+                Logger.warn("[MovementController] getSprintAnimationName: " .. key .. " not loaded — RunForward fallback")
+            end
+            return "RunForward"
+        end
+    end
+
+    -- Left, Right, Backward, BackwardLeft, BackwardRight, Forward, or unclassified → RunForward.
+    -- Dedicated run-left/run-right/run-backward IDs are deferred to a future movement stage.
+    return "RunForward"
+end
+
 -- Selects and triggers the correct movement animation for the current movementState.
 -- Called every Heartbeat tick during ACTIVE phase.
 -- Skipped if CUSTOM_MOVEMENT_ANIMATIONS_ENABLED is false.
 -- currentAnimationName guard inside playMovementAnimation prevents track restarts.
 --
--- Stage 2A + 2C + 2F + 2G + 2H + 2I + 2J + 2L scope:
+-- Stage 2A + 2C + 2F + 2G + 2H + 2I + 2J + 2L + 2R scope:
 --   WalkLeft/WalkRight only play when canUseStrafeAnimations is true (mouse lock active).
 --   WalkBackward plays for Backward regardless of mouse-lock state (Unarmed set only).
 --   WalkForwardLeft/Right and WalkBackwardLeft/Right play for diagonals regardless of mouse lock (Unarmed only).
---   Sprint (any direction, any set, mouse lock on or off): always plays RunForward. (Stage 2L)
---   RunForwardLeft/RunForwardRight IDs exist in Constants but are not selected here. (Stage 2L)
+--   Sprint (mouse lock OFF or non-Forward directions): always plays RunForward.
+--   Sprint ForwardLeft (mouse lock ON): RunForwardLeft if loaded, otherwise RunForward. (Stage 2R)
+--   Sprint ForwardRight (mouse lock ON): RunForwardRight if loaded, otherwise RunForward. (Stage 2R)
 --   Not moving (standing): plays Idle (looped) when the track is loaded; stops otherwise.
 --   Skips entirely while crouchTransitionPlaying is true (transition clips run uninterrupted).
 --   Stage 2I+2J crouch branch (returns early before standing/sprint logic):
@@ -1945,10 +2007,17 @@ local function updateMovementAnimation()
             return  -- no further direction selection while tactical sprinting
         end
 
-        -- Normal sprint: always use RunForward for the current animation set,
-        -- regardless of direction or customMouseLocked state.
-        -- RunForwardLeft/RunForwardRight IDs are deferred. (Stage 2L)
-        animName = setName .. "_RunForward"
+        -- Stage 2R: directional sprint animation selection via getSprintAnimationName().
+        -- With custom mouse lock ON: ForwardLeft → RunForwardLeft (if loaded), else RunForward.
+        --                             ForwardRight → RunForwardRight (if loaded), else RunForward.
+        -- With custom mouse lock OFF or any other direction: RunForward.
+        animName = setName .. "_" .. getSprintAnimationName(setName, movementState.directionName)
+
+        -- Debug: log once when the resolved sprint animation key changes (not every frame).
+        if Constants.MOVEMENT_ANIMATION_DEBUG and animName ~= lastSprintAnimName then
+            lastSprintAnimName = animName
+            Logger.debug("[MovementController] sprint animation → " .. animName)
+        end
 
     elseif setName == Constants.MOVEMENT_ANIMATION_SET_UNARMED then
         -- Unarmed set: full per-direction selection (Stage 2F).
@@ -2385,6 +2454,7 @@ function MovementController:destroy()
     equippedWeaponName        = nil
     lastAnimationSet          = ""
     lastStrafeBlockedState    = false
+    lastSprintAnimName        = ""   -- Stage 2R
     crouchBottomPoseWarned    = false
     -- Stage 2E: restore AutoRotate if mouse lock is active before clearing state.
     if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW and customMouseLocked then
@@ -2739,7 +2809,7 @@ function MovementController:Start()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1–2P: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals+new IDs, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→RunForward, CrouchIdle, CrouchWalkStart, Falling+LandingMedium, TacticalSprint double-tap+ramp+stop)")
+    Logger.debug("[MovementController] Ready (Stage 1–2R: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals+new IDs, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→directional(2R), CrouchIdle, CrouchWalkStart, Falling+LandingMedium, TacticalSprint double-tap+ramp+stop)")
 end
 
 return MovementController

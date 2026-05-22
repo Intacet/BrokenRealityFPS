@@ -7,6 +7,57 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-21] — Movement Stage 2R: Directional sprint animation selection with custom mouse lock
+
+### Summary
+
+Re-enables directional sprint animation selection that was deferred in Stage 2L. When `customMouseLocked == true` (LeftControl), sprinting in the `ForwardLeft` direction plays `RunForwardLeft` if the track is loaded; sprinting in the `ForwardRight` direction plays `RunForwardRight` if the track is loaded. All other sprint directions (Left, Right, Backward, BackwardLeft, BackwardRight, Forward) and all directions when `customMouseLocked == false` continue to use `RunForward`. No camera writes. No new animation IDs. No Constants changes.
+
+### New helper
+
+- **`getSprintAnimationName(animSetName: string, directionName: string): string`** — resolves which sprint animation suffix to use. With `customMouseLocked == false`, always returns `"RunForward"`. With `customMouseLocked == true`: `ForwardLeft` → `"RunForwardLeft"` if `animationTracks[animSetName .. "_RunForwardLeft"] ~= nil`, else `"RunForward"` (warn once via `missedSprintAnimWarned`); `ForwardRight` → `"RunForwardRight"` if loaded, else `"RunForward"` (warn once); all other directions → `"RunForward"`. Caller composes `setName .. "_" .. suffix`.
+
+### New module-level state
+
+- **`missedSprintAnimWarned: {[string]: boolean}`** — per-track-key warn-once table. Each missing directional sprint track (`animSetName_RunForwardLeft`, `animSetName_RunForwardRight`) fires `Logger.warn()` exactly once per session. Not reset on respawn — warns once per module lifetime.
+- **`lastSprintAnimName: string`** — debug deduplication guard. `Logger.debug` fires only when the resolved sprint animation key changes (not every frame). Reset to `""` on each character load and in `destroy()`.
+
+### Files changed
+
+- **`src/client/MovementController.lua`** (Stage 2R):
+  - Header comment updated: stage list `2P + 2Q` → `2P + 2Q + 2R`; sprint behavior summary updated.
+  - Behavior summary block updated: "Sprint in any direction always uses RunForward" replaced with four-line description of directional sprint fallback behavior.
+  - Module-level `lastSprintAnimName: string = ""` added (after `lastStrafeBlockedState`).
+  - `loadMovementAnimations()` reset block: `lastSprintAnimName = ""` added.
+  - `destroy()` reset block: `lastSprintAnimName = ""` added.
+  - `missedSprintAnimWarned` table and `getSprintAnimationName()` function inserted before `updateMovementAnimation()`.
+  - `updateMovementAnimation()` normal sprint block replaced: single `animName = setName .. "_RunForward"` line replaced with `animName = setName .. "_" .. getSprintAnimationName(setName, movementState.directionName)` plus debug log guard.
+  - Ready log updated: `Stage 1–2Q` → `Stage 1–2R`; sprint description updated.
+
+### No-change scope
+
+No new animation IDs. No Constants changes. No camera writes (no `camera.CFrame`, `CameraOffset`, `FieldOfView`, `CameraType`). No speed multiplier changes. No movement speed changes. No new remotes. No server changes. No GunController/ViewModelController/SoundController changes. Tactical sprint branch unchanged (still uses `TacticalSprintForward1` / `RunForward` fallback). AR15 sprint unchanged (still always `AR15_RunForward`).
+
+### MCP verification (2026-05-21)
+
+- Studio play mode entered; module loaded cleanly (`type=table`).
+- MatchController patched to ACTIVE for phase-gate passthrough.
+- Source-level checks via `mcScript.Source` (all using plain-text search `find(str, 1, true)`):
+  - `getSprintAnimationName` function definition confirmed ✓
+  - `missedSprintAnimWarned` table declaration confirmed ✓
+  - `ForwardLeft` branch with `RunForwardLeft` key confirmed ✓
+  - `ForwardRight` branch with `RunForwardRight` key confirmed ✓
+  - `lastSprintAnimName` declaration confirmed ✓
+  - `lastSprintAnimName = ""` in `loadMovementAnimations` confirmed ✓
+  - `lastSprintAnimName = ""` in `destroy()` confirmed ✓
+  - Debug log `sprint animation →` confirmed ✓
+  - Old single-line `animName = setName .. "_RunForward"` absent in sprint block ✓
+  - `customMouseLocked` toggle (`SetCustomMouseLocked(true)`/`(false)`) state changes confirmed via live module call ✓
+- **Source length verified:** disk file 149,222 bytes; Studio synced correctly after rojo stale-intermediate issue resolved via `mcp__Roblox_Studio__multi_edit`.
+- **Known limitation:** W and C key inputs via MCP `user_keyboard_input` do not reach `InputBegan` handlers in Studio play mode (gameProcessed gate). Full end-to-end sprint animation flow requires manual Studio playtest — same limitation as Stages 2P and 2Q.
+
+---
+
 ## [2026-05-21] — Movement Stage 2Q: Fix crouch animation contamination
 
 ### Summary
