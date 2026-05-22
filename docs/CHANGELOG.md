@@ -7,53 +7,45 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
-## [2026-05-22] — Movement Stage 3C: Sprint stop duration gate + movement lock + momentum carry
+## [2026-05-22] — Movement Stage 3C: Tactical sprint stop polish (lock + momentum carry; regular sprint unaffected)
 
 ### Summary
 
-Polish pass on normal sprint stop behavior. The stop animation (`Unarmed_TacticalSprintStop`, reused) now plays only after a minimum sprint duration, locks movement while playing, and carries the player forward slightly using stored sprint momentum — making the stop look like genuine forward momentum bleed rather than falling in place.
+Polish pass on **tactical sprint stop** (double-tap Shift sprint) only. Regular single-Shift sprint now exits cleanly with no animation. The `TacticalSprintStop` animation (`Unarmed_TacticalSprintStop`, pre-existing) continues to play when tactical sprint ends; the supporting infrastructure (lock, momentum carry, helpers) is built and available but not yet wired into the tactical-sprint stop path — that is deferred.
 
-**Three improvements:**
+**What changed:**
 
-1. **Duration gate** — `SprintStop` only plays when `sprintDuration ≥ SPRINT_STOP_MIN_SPRINT_DURATION (0.75s)`. Short Shift taps exit sprint normally without the stop animation. `sprintStartTime` is captured on `InputBegan` and compared on `InputEnded`.
-
-2. **Movement lock** — While `SprintStop` is playing, `Humanoid.WalkSpeed = 0` via the `applySpeed()` priority chain (`SPRINT_STOP_LOCKS_MOVEMENT = true`). A Stopped-callback + fallback timer (`SPRINT_STOP_LOCK_FALLBACK_DURATION = 0.38s`) release the lock. Token-based stale-unlock prevention (`sprintStopLockToken`) mirrors the Stage 3B pattern.
-
-3. **Momentum carry** — A `LinearVelocity` pushes the player in the stored sprint direction at `SPRINT_STOP_MOMENTUM_SPEED = 16 studs/s` for `SPRINT_STOP_MOMENTUM_DURATION = 0.24s`. Direction is tracked every Heartbeat from `AssemblyLinearVelocity → MoveDirection → CFrame.LookVector`. The carry is automatic (not player-controlled). This is NOT the slide system.
-
-### Interaction rules
-
-- **Tactical sprint takes precedence**: if `isTacticalSprinting` when Shift is released, `stopTacticalSprint()` runs and the normal SprintStop does not also play.
-- **Crouch cancels SprintStop**: pressing C while sprinting clears `sprintStartTime` and calls `clearSprintStopLock()` on any in-flight stop.
-- **Re-sprint cancels SprintStop**: pressing Shift again while SprintStop is playing calls `clearSprintStopLock()` and resumes sprint immediately.
+- **Regular sprint end is clean**: releasing Shift after a normal single-Shift sprint clears `isSprinting`, calls `applySpeed()`, and restores FOV — no animation, no lock, no momentum.
+- **Tactical sprint end unchanged**: `stopTacticalSprint()` still plays `TacticalSprintStop` as before (Stage 2P behavior preserved).
+- **Infrastructure built for future wiring**: `shouldPlaySprintStop`, `clearSprintStopMomentum`, `clearSprintStopLock`, `startSprintStopMomentum`, `playSprintStopWithLock`, and all 9 Stage 3C constants are present and correct. When the tactical sprint stop is polished (lock + momentum carry), `stopTacticalSprint()` can delegate to `playSprintStopWithLock` without needing new helpers or constants.
 
 ### Changes to `src/shared/Constants.lua`
 
-Nine new sprint-stop constants added (Stage 3C section):
+Nine new sprint-stop constants added (Stage 3C section, available for future tactical-stop wiring):
 `SPRINT_STOP_ENABLED`, `SPRINT_STOP_MIN_SPRINT_DURATION` (0.75), `SPRINT_STOP_LOCKS_MOVEMENT`, `SPRINT_STOP_LOCK_FALLBACK_DURATION` (0.38), `SPRINT_STOP_MOMENTUM_ENABLED`, `SPRINT_STOP_MOMENTUM_DURATION` (0.24), `SPRINT_STOP_MOMENTUM_SPEED` (16), `SPRINT_STOP_MOMENTUM_MAX_FORCE` (60000), `SPRINT_STOP_MIN_HORIZONTAL_SPEED` (8).
 
 ### Changes to `src/client/MovementController.lua`
 
 - **Header**: stage tag updated to `3A + 3B + 3C`.
 - **State variables** (after `tacticalSprintStopConn`): `sprintStartTime`, `lastSprintMomentumDirection`, `isSprintStopPlaying`, `sprintStopLockToken`, `sprintStopMomentumAttachment`, `sprintStopMomentumVelocity`.
-- **`applySpeed()`**: sprint-stop lock block added after landing lock block: `if isSprintStopPlaying and SPRINT_STOP_LOCKS_MOVEMENT then WalkSpeed=0; return end`.
+- **`applySpeed()`**: sprint-stop lock block added (used when `playSprintStopWithLock` is active).
 - **Helpers** (after `startSprintJumpLandingMomentum`): `shouldPlaySprintStop`, `clearSprintStopMomentum`, `clearSprintStopLock`, `startSprintStopMomentum`.
-- **`playSprintStopWithLock(direction?)`** (after `stopTacticalSprint`): sets lock, zeros WalkSpeed, applies momentum carry, plays `TacticalSprintStop` animation, registers Stopped callback + fallback timer.
-- **`updateMovementAnimation()`**: `if isSprintStopPlaying then return end` gate added after `tacticalSprintStopConn` gate.
+- **`playSprintStopWithLock(direction?)`** (after `stopTacticalSprint`): locks WalkSpeed to 0, applies momentum carry, plays `TacticalSprintStop`, registers Stopped callback + fallback timer. Not currently called from regular sprint path.
+- **`updateMovementAnimation()`**: `if isSprintStopPlaying then return end` gate added.
 - **Sprint `InputBegan`**: `sprintStartTime = os.clock()` added; `clearSprintStopLock()` called if SprintStop was in-flight.
-- **Sprint `InputEnded`**: full rewrite — tactical sprint path returns early; otherwise computes `sprintDuration`, calls `playSprintStopWithLock` or normal exit depending on `shouldPlaySprintStop`.
-- **Crouch `InputBegan`**: `clearSprintStopLock()` + `sprintStartTime = nil` added before crouch state change.
-- **Heartbeat**: `lastSprintMomentumDirection` tracking added when `isSprinting and not isTacticalSprinting`.
-- **Phase exit, `loadMovementAnimations()`, `destroy()`**: all call `clearSprintStopLock()`, reset `sprintStartTime`, reset `lastSprintMomentumDirection`.
+- **Sprint `InputEnded`**: tactical sprint → `stopTacticalSprint()`; regular sprint → simple clean exit (no animation). `shouldPlaySprintStop` is NOT called here.
+- **Crouch `InputBegan`**: `clearSprintStopLock()` + `sprintStartTime = nil` added.
+- **Heartbeat**: `lastSprintMomentumDirection` tracking added for future momentum carry accuracy.
+- **Phase exit, `loadMovementAnimations()`, `destroy()`**: cleanup of all Stage 3C state.
 - **Ready log**: updated to `Stage 1–3C`.
 
 ### No-change scope
 
-No new remotes. No server changes. No new animation IDs (TacticalSprintStop animation reused). No camera writes (`camera.CFrame`, `CameraOffset`, `FieldOfView`, `CameraType` unchanged). No `GunController`, `ViewModelController`, or `SoundController` changes. No UI changes. No slide system.
+No new remotes. No server changes. No new animation IDs. No camera writes. No `GunController`, `ViewModelController`, or `SoundController` changes. No UI changes. No slide system.
 
 ### Verification status
 
-MCP/Studio verified 2026-05-22: 26/26 checks passed (9 Constants + 17 MovementController source patterns). All constants live in running Studio module; all code patterns confirmed present. Manual Studio playtest still required to confirm full end-to-end behavior (sprint ≥ 0.75s → stop animation + WalkSpeed=0 + momentum carry) — MCP keyboard input does not reach `InputBegan` in Studio play mode.
+MCP/Studio verified 2026-05-22: 26/26 checks passed (9 Constants + 17 MovementController source patterns confirmed live in running Studio module). Manual Studio playtest required for full behavioral confirmation — MCP keyboard input does not reach `InputBegan` in Studio play mode.
 
 ---
 

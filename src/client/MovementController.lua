@@ -3603,51 +3603,15 @@ function MovementController:Start()
             if not movementState.isSprinting then return end
 
             -- Stage 2P: Shift release ends tactical sprint (plays TacticalSprintStop one-shot).
-            -- stopTacticalSprint() handles its own animation, speed, and FOV.
-            -- SprintStop (Stage 3C) does not play after a tactical sprint — skip directly.
+            -- SprintStop animation and lock only play on tactical sprint end, not regular sprint.
             if isTacticalSprinting then
                 stopTacticalSprint()
-                sprintStartTime = nil
-                movementState.isSprinting = false
-                applySpeed()
-                updateSprintFov()
-                return
             end
-
-            -- Stage 3C: normal sprint end — compute duration and conditionally play SprintStop.
-            local sprintDuration = 0
-            if sprintStartTime ~= nil then
-                sprintDuration = os.clock() - sprintStartTime
-                sprintStartTime = nil
-            end
-
-            if Constants.MOVEMENT_ANIMATION_DEBUG then
-                Logger.debug(
-                    "[MovementController] Sprint end: duration=" .. string.format("%.2fs", sprintDuration)
-                )
-            end
-
-            if shouldPlaySprintStop(sprintDuration) then
-                if Constants.MOVEMENT_ANIMATION_DEBUG then
-                    Logger.debug("[MovementController] SprintStop: PLAYING (duration gate passed)")
-                end
-                -- playSprintStopWithLock sets isSprinting=false, applySpeed(), momentum, animation.
-                playSprintStopWithLock(lastSprintMomentumDirection)
-                -- Stage 3A: restore FOV now that sprint is ending.
-                updateSprintFov()
-            else
-                if Constants.MOVEMENT_ANIMATION_DEBUG and Constants.SPRINT_STOP_ENABLED == true then
-                    Logger.debug(
-                        "[MovementController] SprintStop: SKIPPED"
-                        .. " (duration=" .. string.format("%.2fs", sprintDuration)
-                        .. " min=" .. tostring(Constants.SPRINT_STOP_MIN_SPRINT_DURATION) .. ")"
-                    )
-                end
-                movementState.isSprinting = false
-                applySpeed()
-                -- Stage 3A: restore FOV immediately on sprint end.
-                updateSprintFov()
-            end
+            sprintStartTime = nil
+            movementState.isSprinting = false
+            applySpeed()
+            -- Stage 3A: restore FOV immediately on sprint end.
+            updateSprintFov()
         end
     )
     table.insert(_connections, sprintEndConn)
