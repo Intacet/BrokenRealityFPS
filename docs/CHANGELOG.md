@@ -7,6 +7,57 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-23] — Movement Stage 3D: Sprint directional body-facing during custom mouse lock
+
+### Summary
+
+When custom mouse lock is active and the player is sprinting (non-tactical), the character body now rotates to face the camera-relative movement input direction instead of always facing camera yaw. Walking during mouse lock is unchanged (still faces camera yaw — Stage 2E behavior). Camera is never written; only `HumanoidRootPart.CFrame` yaw is modified. Crouch state is excluded (sprint facing is suppressed while crouching). Tactical sprint is excluded (always camera-forward by design).
+
+**What changed:**
+
+- **Sprint body-facing** (`SPRINT_DIRECTIONAL_BODY_FACING_ENABLED = true`, `SPRINT_FACE_MOVEMENT_DIRECTION_WHILE_MOUSE_LOCKED = true`): `applyCharacterFacing()` now checks whether the player is sprinting and not tactical-sprinting and not crouching before writing `HumanoidRootPart.CFrame`. If conditions met, reads `movementState.moveVector` (already camera-relative in Roblox — engine computes this), flattens to XZ, and calls `faceCharacterTowardsDirection()` instead of the camera-yaw write.
+- **Walking unchanged**: when not sprinting, `applyCharacterFacing()` still writes camera yaw as before (Stage 2E unchanged).
+- **BackwardLeft/BackwardRight sprint animations**: `getSprintAnimationName()` now maps `BackwardLeft` → `RunForwardLeft` and `BackwardRight` → `RunForwardRight` (when those tracks exist), with `RunForward` fallback and a one-time warn per missing key. This also applies to `getDesiredStandingLocomotionKey()` (which calls `getSprintAnimationName()` internally).
+- **Debug logging**: `lastSprintFacingMode` tracks mode transitions so the debug log fires only when the mode changes (`"move_dir"` vs `"camera_yaw"`), not every frame.
+- **Smoothing**: optional per-frame lerp (`SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = false` by default; alpha controlled by `SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 1`).
+- **Cleanup**: `lastSprintFacingMode` reset in `loadMovementAnimations` and `destroy()`.
+
+### New helpers (`src/client/MovementController.lua`)
+
+- **`getCameraRelativeMoveDirection(): Vector3?`** — Reads `movementState.moveVector`, flattens to XZ, returns unit vector if magnitude ≥ `SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE`, else `nil`. No camera read needed — Roblox engine already computes `MoveDirection` in camera-relative space.
+- **`faceCharacterTowardsDirection(direction: Vector3)`** — Sets `humanoid.AutoRotate = false` and writes `HumanoidRootPart.CFrame` yaw toward a given flat XZ direction. Optionally lerps via `SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED`. Guards against zero-magnitude input.
+
+### Changes to `src/shared/Constants.lua`
+
+Six new constants added (Stage 3D section, after Stage 2S block):
+- `SPRINT_FACE_MOVEMENT_DIRECTION_WHILE_MOUSE_LOCKED = true`
+- `SPRINT_DIRECTIONAL_BODY_FACING_ENABLED = true`
+- `SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE = 0.1`
+- `SPRINT_DIRECTIONAL_BODY_FACING_DEBUG = true`
+- `SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = false`
+- `SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 1`
+
+All existing crouch, landing, sprint, camera, and weapon constants unchanged.
+
+### Verification
+
+MCP Studio verification was NOT performed — Studio instance "Project BR Dev" disconnected before the MCP execute step. Static checks (`rojo build`) passed with no parse errors. Marked as "needs Studio verification" in `docs/TECHNICAL_DEBT.md`.
+
+**Manual test steps:**
+1. Spawn as R6, enter ACTIVE phase, enable custom mouse lock (LeftControl or configured key).
+2. Hold LeftShift and press W (forward sprint): character body should face camera-forward.
+3. Hold LeftShift and press A (strafe-left sprint): character body should rotate to face camera-left while sprinting.
+4. Hold LeftShift and press W+A (forward-left diagonal sprint): body faces forward-left; `RunForwardLeft` animation plays if loaded.
+5. Hold LeftShift and press S+A (backward-left diagonal sprint): body faces backward-left; `RunForwardLeft` animation plays (reused) if loaded, else `RunForward` fallback.
+6. Hold LeftShift and press S (backward sprint): body faces backward; `RunForward` animation plays (fallback).
+7. Release LeftShift while still moving: body should revert to camera-yaw facing (walking mode).
+8. Disable mouse lock: body facing should revert to default Roblox AutoRotate.
+9. Hold C + LeftShift (sprint while crouching, if allowed): sprint body-facing should be suppressed; crouch animations unchanged.
+10. Enable tactical sprint (if bound): body should face camera-forward, not movement input.
+11. Respawn: confirm no stuck AutoRotate = false state, no duplicate tracks.
+
+---
+
 ## [2026-05-23] — Movement Stage 2S: Zero-gap crouch-exit transitions
 
 ### Summary

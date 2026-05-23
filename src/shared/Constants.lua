@@ -107,6 +107,34 @@ Constants.CROUCH_EXIT_IDLE_BLEND_FADE_TIME = 0.12
 -- Eliminates the ≥1 frame blank-pose window after the ExitCrouch one-shot ends.
 Constants.CROUCH_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true
 
+-- ── Stage 3D: Sprint directional body-facing ──────────────────────────────────
+-- When true and custom mouse lock is active, sprinting rotates the character body toward
+-- the camera-relative movement input direction instead of always facing camera yaw.
+-- Walking (isSprinting == false) is unaffected — character still faces camera yaw while walking.
+Constants.SPRINT_FACE_MOVEMENT_DIRECTION_WHILE_MOUSE_LOCKED = true
+
+-- Master switch for the sprint directional body-facing feature.
+-- Set false to disable entirely and revert to camera-yaw facing during all mouse-locked states.
+Constants.SPRINT_DIRECTIONAL_BODY_FACING_ENABLED = true
+
+-- Minimum XZ movement-input magnitude below which no sprint direction facing is applied.
+-- Below this threshold, faceCharacterTowardsDirection() and getCameraRelativeMoveDirection()
+-- both no-op, and camera-yaw facing is used as the fallback.
+Constants.SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE = 0.1
+
+-- When true, logs sprint body-facing mode changes (camera-yaw ↔ movement-direction)
+-- and sprint animation name changes to Output. Change-gated — does not spam per frame.
+Constants.SPRINT_DIRECTIONAL_BODY_FACING_DEBUG = true
+
+-- When true, body rotation is smoothed using LERP over multiple Heartbeat frames instead
+-- of snapping immediately to the target direction. Default false for instant, responsive feel.
+Constants.SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = false
+
+-- LERP alpha applied per Heartbeat when smoothing is enabled. 1.0 = immediate (no smoothing).
+-- Values closer to 0 produce slower, heavier-feeling rotation.
+-- Has no effect when SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED is false.
+Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 1
+
 -- ============================================================
 -- Objective settings
 -- ============================================================

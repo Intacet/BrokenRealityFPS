@@ -600,6 +600,48 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --         C key cannot reach InputBegan via MCP — full visual test requires
                         --         manual Studio playtest.
                         --
+                        --     Sprint directional body-facing (Stage 3D — 2026-05-23):
+                        --       Custom mouse lock ON + walking: character still faces camera yaw (Stage 2E).
+                        --       Custom mouse lock ON + sprinting (isSprinting=true, not tactical, not crouching):
+                        --         character body rotates toward movement input direction (camera-relative).
+                        --         Camera remains in default Roblox control — no camera.CFrame write.
+                        --
+                        --       Two new helpers:
+                        --         getCameraRelativeMoveDirection(): reads movementState.moveVector
+                        --           (Humanoid.MoveDirection, already camera-relative in Roblox);
+                        --           flattens to XZ; returns nil if below
+                        --           SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE.
+                        --         faceCharacterTowardsDirection(direction): CFrame.lookAt yaw-only write
+                        --           (identical pattern to applyCharacterFacing camera-yaw path);
+                        --           sets AutoRotate = false; optional LERP smoothing.
+                        --
+                        --       applyCharacterFacing() sprint branch (runs before camera-yaw path):
+                        --         gates: SPRINT_DIRECTIONAL_BODY_FACING_ENABLED, isSprinting,
+                        --           not isTacticalSprinting, not isCrouching, mouse locked.
+                        --         Calls getCameraRelativeMoveDirection() → faceCharacterTowardsDirection().
+                        --         Falls back to camera-yaw facing if move direction below threshold.
+                        --
+                        --       Sprint animation selection (getSprintAnimationName extended):
+                        --         Forward, Left, Right, Backward → RunForward (body faces direction).
+                        --         ForwardLeft  → RunForwardLeft if loaded, else RunForward.
+                        --         ForwardRight → RunForwardRight if loaded, else RunForward.
+                        --         BackwardLeft  → RunForwardLeft if loaded, else RunForward. (Stage 3D new)
+                        --         BackwardRight → RunForwardRight if loaded, else RunForward. (Stage 3D new)
+                        --         Body rotates toward movement direction so RunForward visually goes
+                        --         in the correct world-space direction.
+                        --
+                        --       New state: lastSprintFacingMode (module-level, cleared on respawn/destroy).
+                        --       No camera.CFrame writes. No HipHeight/CameraOffset/FOV changes.
+                        --       No new animation IDs. No new remotes. No server changes.
+                        --       New constants: SPRINT_FACE_MOVEMENT_DIRECTION_WHILE_MOUSE_LOCKED = true,
+                        --         SPRINT_DIRECTIONAL_BODY_FACING_ENABLED = true,
+                        --         SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE = 0.1,
+                        --         SPRINT_DIRECTIONAL_BODY_FACING_DEBUG = true,
+                        --         SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = false,
+                        --         SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 1.
+                        --       MCP unavailable — Studio verification was not performed.
+                        --       Needs manual playtest.
+                        --
                         --     Sprint FOV stretch (Stage 3A — 2026-05-21):
                         --       TweenService smoothly tweens workspace.CurrentCamera.FieldOfView.
                         --       Normal sprint (LeftShift + moving + not crouching) → SPRINT_CAMERA_FOV (78).
@@ -844,6 +886,20 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --     CROUCH_USE_CROUCH_WALK_START_ANIMATION = false — when false, CrouchWalkStart one-shot
              --       is never played; updateMovementAnimation falls through to directional selection
              --       immediately on the first crouched step. Set to true to restore original one-shot.
+             --   Sprint directional body-facing constants (Stage 3D — 2026-05-23):
+             --     SPRINT_FACE_MOVEMENT_DIRECTION_WHILE_MOUSE_LOCKED = true — gates the sprint branch in
+             --       applyCharacterFacing(); when false, camera-yaw facing is used even while sprinting.
+             --     SPRINT_DIRECTIONAL_BODY_FACING_ENABLED = true — master switch; when false, the
+             --       entire sprint directional branch is skipped.
+             --     SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE = 0.1 — minimum XZ MoveDirection
+             --       magnitude; below this threshold getCameraRelativeMoveDirection() returns nil and
+             --       camera-yaw facing is used as fallback.
+             --     SPRINT_DIRECTIONAL_BODY_FACING_DEBUG = true — logs sprint body-facing mode changes
+             --       (camera-yaw ↔ movement-direction) to Output, change-gated (not per-frame).
+             --     SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = false — when true, LERP-smooths
+             --       body rotation each Heartbeat; default false for immediate responsive facing.
+             --     SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 1 — LERP alpha when smoothing enabled;
+             --       1.0 = instant; lower values produce heavier, slower rotation.
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag

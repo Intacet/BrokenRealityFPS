@@ -2,7 +2,7 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2Q+ + 2Q-D + 2R + 2S + 3A + 3B + 3C (Animate-disable, R6 detection, animation-set selection,
+-- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2Q+ + 2Q-D + 2R + 2S + 3A + 3B + 3C + 3D (Animate-disable, R6 detection, animation-set selection,
 -- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
 -- character-facing camera yaw, Unarmed backward/diagonal directional animations,
 -- directional sprint selection (RunForwardLeft/Right with mouse lock; RunForward fallback),
@@ -403,6 +403,10 @@ local currentRootPart: BasePart? = nil
 -- Cleared (set nil) on respawn (loadMovementAnimations) and when lock is explicitly disabled.
 local originalAutoRotate: boolean? = nil
 
+-- Stage 3D: last sprint body-facing mode, used to deduplicate debug log on mode change.
+-- "move_dir" while sprinting + mouse lock + valid move direction; "camera_yaw" otherwise.
+local lastSprintFacingMode: string = ""
+
 -- Last reason applyCharacterFacing() was skipped, used to deduplicate debug logs.
 -- Reset to "" on each character load.
 local lastFacingSkippedReason: string = ""
@@ -679,6 +683,73 @@ local function getCameraFlatLookVector(): Vector3?
     return flat.Unit
 end
 
+-- ── Stage 3D ─────────────────────────────────────────────────────────────────
+
+-- Returns the flat XZ world-space direction of the player's current movement input,
+-- expressed camera-relative. Uses movementState.moveVector (Humanoid.MoveDirection),
+-- which Roblox already computes camera-relative — no additional camera transform needed.
+-- Returns nil when movement magnitude is below SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE
+-- (no useful direction to face toward).
+-- Does NOT write camera.CFrame. Does NOT modify any state.
+local function getCameraRelativeMoveDirection(): Vector3?
+    local mv = movementState.moveVector
+    if mv == nil then return nil end
+    local flat = Vector3.new(mv.X, 0, mv.Z)
+    if flat.Magnitude < Constants.SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE then
+        return nil
+    end
+    return flat.Unit
+end
+
+-- Rotates HumanoidRootPart to face `direction` (XZ, yaw-only) without changing position.
+-- Mirrors the CFrame.lookAt pattern used by applyCharacterFacing() for camera-yaw facing.
+-- Sets Humanoid.AutoRotate = false so the manual CFrame write is not overwritten by Roblox
+-- physics on the next step. originalAutoRotate is cached by the existing mouse-lock path.
+-- Does NOT write camera.CFrame. Does NOT change velocity or teleport the character.
+-- Optional LERP: when SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED is true, blends
+-- toward the target over multiple frames using SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA.
+local function faceCharacterTowardsDirection(direction: Vector3)
+    assert(typeof(direction) == "Vector3",
+        "[MovementController] faceCharacterTowardsDirection: direction must be a Vector3")
+    local root = currentRootPart
+    if not root then return end
+    local hum = humanoid
+    if not hum then return end
+
+    local flat = Vector3.new(direction.X, 0, direction.Z)
+    if flat.Magnitude < Constants.SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE then
+        return
+    end
+    local targetDir = flat.Unit
+
+    -- AutoRotate must be false for the CFrame write to persist.
+    -- originalAutoRotate is already cached by SetCustomMouseLocked when the lock was enabled.
+    hum.AutoRotate = false
+
+    local pos = root.Position
+
+    if Constants.SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED then
+        -- Smoothed path: LERP between current facing and target direction.
+        local alpha = math.clamp(Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA, 0, 1)
+        local currentLook = root.CFrame.LookVector
+        local currentFlat = Vector3.new(currentLook.X, 0, currentLook.Z)
+        if currentFlat.Magnitude > 0.001 then
+            -- Lerp then normalise — avoids division by zero when the two vectors are collinear.
+            local lerpedDir = currentFlat.Unit:Lerp(targetDir, alpha)
+            if lerpedDir.Magnitude > 0.001 then
+                root.CFrame = CFrame.lookAt(pos, pos + lerpedDir.Unit)
+                return
+            end
+        end
+        -- Fallback to immediate facing if current look is degenerate.
+    end
+
+    -- Immediate (default) path.
+    root.CFrame = CFrame.lookAt(pos, pos + targetDir)
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
 -- Restores Humanoid.AutoRotate to the cached originalAutoRotate value (defaults to true
 -- if nothing was cached). Does NOT clear originalAutoRotate — callers that need to clear
 -- it (disable path, respawn, destroy) must set it to nil themselves after calling.
@@ -743,6 +814,39 @@ local function applyCharacterFacing()
     if lastFacingSkippedReason ~= "" then
         lastFacingSkippedReason = ""
     end
+
+    -- ── Stage 3D: Sprint directional body-facing ──────────────────────────────
+    -- When sprinting with custom mouse lock active, rotate toward movement input direction
+    -- instead of camera yaw. Walking, idle, and crouching still use camera yaw.
+    -- Tactical sprint always goes camera-forward; exclude it here to avoid interference.
+    if Constants.SPRINT_DIRECTIONAL_BODY_FACING_ENABLED
+        and Constants.SPRINT_FACE_MOVEMENT_DIRECTION_WHILE_MOUSE_LOCKED
+        and movementState.isSprinting
+        and not isTacticalSprinting
+        and not movementState.isCrouching
+    then
+        local moveDir = getCameraRelativeMoveDirection()
+        if moveDir ~= nil then
+            if Constants.SPRINT_DIRECTIONAL_BODY_FACING_DEBUG
+                and lastSprintFacingMode ~= "move_dir"
+            then
+                lastSprintFacingMode = "move_dir"
+                Logger.debug(
+                    "[MovementController] sprint body-facing → movement input direction"
+                )
+            end
+            faceCharacterTowardsDirection(moveDir)
+            return  -- do not also apply camera-yaw facing this frame
+        end
+        -- moveDir is nil (below threshold): fall through to camera-yaw facing.
+    end
+
+    -- Camera-yaw facing (original behavior) — also reached as sprint-facing fallback.
+    if Constants.SPRINT_DIRECTIONAL_BODY_FACING_DEBUG and lastSprintFacingMode ~= "camera_yaw" then
+        lastSprintFacingMode = "camera_yaw"
+        Logger.debug("[MovementController] sprint body-facing → camera yaw")
+    end
+    -- ─────────────────────────────────────────────────────────────────────────
 
     -- Rotate character to face camera yaw. Position is unchanged — this is a yaw-only
     -- CFrame replacement, not a teleport and not a velocity change.
@@ -2163,6 +2267,8 @@ local function loadMovementAnimations(character: Model)
     lastStrafeBlockedState = false
     -- Stage 2R: reset sprint anim log guard so the first sprint after respawn re-logs.
     lastSprintAnimName     = ""
+    -- Stage 3D: reset sprint body-facing mode log guard on respawn.
+    lastSprintFacingMode   = ""
     -- Reset custom mouse lock on respawn: release the cursor so the player is not stuck
     -- with a locked mouse if they die or respawn while mouse lock was active.
     customMouseLocked                    = false
@@ -2397,8 +2503,45 @@ local function getSprintAnimationName(animSetName: string, directionName: string
         end
     end
 
-    -- Left, Right, Backward, BackwardLeft, BackwardRight, Forward, or unclassified → RunForward.
-    -- Dedicated run-left/run-right/run-backward IDs are deferred to a future movement stage.
+    -- Stage 3D: backward diagonals reuse forward-diagonal animations when available.
+    -- Body will be rotated toward backward-left/right by faceCharacterTowardsDirection(),
+    -- so RunForwardLeft/RunForwardRight plays in the correct world-space direction.
+    if directionName == "BackwardLeft" then
+        local key = animSetName .. "_RunForwardLeft"
+        if animationTracks[key] ~= nil then
+            return "RunForwardLeft"
+        else
+            if not missedSprintAnimWarned[key] then
+                missedSprintAnimWarned[key] = true
+                Logger.warn(
+                    "[MovementController] getSprintAnimationName: "
+                    .. key .. " not loaded — RunForward fallback (BackwardLeft)"
+                )
+            end
+            return "RunForward"
+        end
+    end
+
+    if directionName == "BackwardRight" then
+        local key = animSetName .. "_RunForwardRight"
+        if animationTracks[key] ~= nil then
+            return "RunForwardRight"
+        else
+            if not missedSprintAnimWarned[key] then
+                missedSprintAnimWarned[key] = true
+                Logger.warn(
+                    "[MovementController] getSprintAnimationName: "
+                    .. key .. " not loaded — RunForward fallback (BackwardRight)"
+                )
+            end
+            return "RunForward"
+        end
+    end
+
+    -- Left, Right, Backward, Forward, or unclassified → RunForward.
+    -- Body is rotated toward movement direction by faceCharacterTowardsDirection(),
+    -- so RunForward plays in the correct world-space direction.
+    -- Dedicated run-left/run-right/run-backward IDs are deferred to a future stage.
     return "RunForward"
 end
 
@@ -3627,6 +3770,7 @@ function MovementController:destroy()
     lastAnimationSet          = ""
     lastStrafeBlockedState    = false
     lastSprintAnimName        = ""   -- Stage 2R
+    lastSprintFacingMode      = ""   -- Stage 3D
     crouchBottomPoseWarned    = false
     -- Stage 2E: restore AutoRotate if mouse lock is active before clearing state.
     if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW and customMouseLocked then
