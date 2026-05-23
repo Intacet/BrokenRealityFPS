@@ -7,6 +7,31 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-23] — Vault animation IDs reserved in Constants (system deferred)
+
+### Summary
+
+`LowVault` and `MediumVault` animation IDs added to `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed`. No loading code, no selection code, no controller changes. IDs are present in the data table only, clearly marked deferred. The vault system design (obstacle detection, input binding, state machine, movement lock, server interaction) is tracked in DEBT-052.
+
+**What changed:**
+
+- `Unarmed.LowVault = "rbxassetid://78932004147700"` added after `TacticalSprintStop` in the Unarmed table.
+- `Unarmed.MediumVault = "rbxassetid://98948076922717"` added after `LowVault`.
+- Both entries are commented as deferred and explicitly note that `loadMovementAnimations()` must not load them until the vault system is implemented.
+- No Constants speed multiplier entries. No MovementController changes of any kind.
+
+### Changes to `src/shared/Constants.lua`
+
+Two entries added to `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed` (after `TacticalSprintStop`):
+- `LowVault = "rbxassetid://78932004147700"` — deferred
+- `MediumVault = "rbxassetid://98948076922717"` — deferred
+
+### No runtime changes
+
+`MovementController.lua` is not modified. The IDs are never passed to `LoadAnimation()` or `AnimationTrack:Play()`. No behavior change of any kind at runtime.
+
+---
+
 ## [2026-05-23] — RunForwardTest toggle: audition R6 no-gun run-forward animation
 
 ### Summary

@@ -792,6 +792,7 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - TacticalSprintForward2 variation system — `TacticalSprintForward2` is loaded but never selected. A safe alternation system (cooldown, random pick, or distance-based trigger) is needed before it can be used.
 - Jump animations — suppressed along with locomotion when Animate is disabled. Custom replacement needed in a future movement stage.
 - Climb animations — suppressed by Animate disable. Custom replacement needed.
+- Vault animations (LowVault, MediumVault) — IDs reserved in `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed` (2026-05-23). NOT loaded by `loadMovementAnimations()`. Vault system design, obstacle detection, input binding, and state machine integration are all deferred. See DEBT-052.
 - Lower-body / upper-body animation split — not implemented; the full body plays the movement animation.
 - Reload, fire, ADS, and sprint-hold weapon animations — deferred to a weapon-anim stage.
 - True server-owned equipment state — equippedWeaponName is presentation-only; see DEBT-050.
@@ -1051,6 +1052,34 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - When a player drops or loses the AR15, something must call `MovementController.SetEquippedWeaponName(nil)`.
 **Trigger:** InventoryService or EquipmentController is built and sends equipped weapon state to the client.
 **Fix when:** A real equipment/loadout system exists. Wire `SetEquippedWeaponName` to the weapon equip/unequip event from that system. At that point the client-side presentation state correctly mirrors server authority — remove the "presentation-only" caveat from this entry.
+
+---
+
+## [DEBT-052] Vault system not implemented — animation IDs reserved — ADDED 2026-05-23
+
+**File:** `src/shared/Constants.lua`, `src/client/MovementController.lua` (future)
+**Severity:** Low (no code gap yet — IDs are reserved only)
+**Studio verification required:** Not applicable until implementation begins
+
+**What exists:**
+- `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed.LowVault = "rbxassetid://78932004147700"` — reserved, not loaded.
+- `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed.MediumVault = "rbxassetid://98948076922717"` — reserved, not loaded.
+- No vault state, no loading code, no detection code, no input binding exists.
+
+**What a vault system will require (design checklist for when the system is staged):**
+
+1. **Obstacle detection** — raycast or `GetPartsInBox` to detect vaultable geometry in front of the character. Must distinguish low (≤ ~2.5 studs) from medium (≤ ~5 studs) obstacles. Server-side or client-side? Likely client-side (presentation), with server verifying position after vault.
+2. **Input binding** — a dedicated vault key (common: Space or a dedicated key), or automatic trigger when approaching vaultable geometry while moving. Must not conflict with jump (Space is already the default jump key in Roblox).
+3. **Vault state** — new `isVaulting: boolean` in `movementState`. Must gate: no sprint start, no crouch, no jump, no shooting while vaulting.
+4. **Character movement during vault** — the character must glide over the obstacle. Options: (a) `LinearVelocity` carry over the object (similar to Stage 3B sprint-jump momentum); (b) `Humanoid:MoveTo()` to a calculated landing point; (c) server-authoritative position correction after vault ends.
+5. **Animation playback** — `LowVault` and `MediumVault` are one-shot clips (`Looped = false`). They must be loaded in `loadMovementAnimations()` and gated by `Stopped` callback before normal locomotion resumes — mirrors `LandingMedium` and `TacticalSprintStop` patterns.
+6. **Movement lock during vault** — `WalkSpeed = 0` while vaulting, restored on animation `Stopped` (same token-guard pattern as Stage 3B/3C landing lock).
+7. **AR15 set** — no vault IDs exist for AR15. If vault is enabled while armed, fall back to the Unarmed clip or skip vault entirely. Decide before implementation.
+8. **Server interaction** — if vault teleports or carries the character through collision geometry, the server must accept the resulting position change. `GunService` origin checks (`SHOT_ORIGIN_MAX_DISTANCE`) may need to tolerate a brief post-vault position shift. See DEBT-014.
+
+**Trigger:** A movement stage is scheduled to implement vaulting and obstacle interaction.
+
+**Fix when:** Each checklist item above has been designed, staged, and verified in Studio. Do not load the vault IDs in `loadMovementAnimations()` until the animation playback + Stopped callback path is ready.
 
 ---
 

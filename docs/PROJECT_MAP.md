@@ -397,6 +397,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Unarmed.TacticalSprintForward1 = rbxassetid://135119369971434 (Stage 2P — looped tactical sprint forward, primary clip)
                         --       Unarmed.TacticalSprintForward2 = rbxassetid://110008857265859 (Stage 2P — alternate forward clip; loaded, not yet selected — no variation system)
                         --       Unarmed.TacticalSprintStop     = rbxassetid://81946205769343  (Stage 2P — one-shot stop clip; plays when tactical sprint ends)
+                        --       Unarmed.LowVault    = rbxassetid://78932004147700   (DEFERRED — ID reserved; not loaded or selected; vault system not yet implemented)
+                        --       Unarmed.MediumVault = rbxassetid://98948076922717   (DEFERRED — ID reserved; not loaded or selected; vault system not yet implemented)
                         --       AR15.WalkForward          = rbxassetid://138802532485746
                         --       AR15.RunForward           = rbxassetid://79735501581082
                         --       AR15.Idle                 = rbxassetid://117989834436525  (Stage 2H — standing idle, looped)
@@ -413,7 +415,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Stage 2O (2026-05-21) — Falling, LandingMedium added; 3 speed/timing constants added;
                         --       Stage 2P (2026-05-21) — TacticalSprintForward1, TacticalSprintForward2, TacticalSprintStop added;
                         --       Stage 2R (2026-05-21) — directional sprint selection enabled via getSprintAnimationName() helper;
-                        --       Stage 3A (2026-05-21) — LandingLight + LandingHeavy IDs added; sprint FOV constants added)
+                        --       Stage 3A (2026-05-21) — LandingLight + LandingHeavy IDs added; sprint FOV constants added;
+                        --       2026-05-23 — LowVault + MediumVault IDs reserved in Constants; vault system deferred (see DEBT-052))
                         --     Sprint behavior (Stage 2R — 2026-05-21):
                         --       customMouseLocked OFF: all sprint directions → RunForward (matches Stage 2L behavior).
                         --       customMouseLocked ON, ForwardLeft: RunForwardLeft if loaded, else RunForward.

@@ -221,6 +221,11 @@ Constants.MOVEMENT_ANIMATION_IDS = {
             TacticalSprintForward1 = "rbxassetid://135119369971434", -- tactical sprint forward primary (looped) (Stage 2P)
             TacticalSprintForward2 = "rbxassetid://110008857265859", -- tactical sprint forward alternate; loaded, not yet selected (Stage 2P)
             TacticalSprintStop     = "rbxassetid://81946205769343",  -- tactical sprint stop one-shot; plays when tactical sprint ends (Stage 2P)
+            -- Vault animations (Unarmed only).
+            -- IDs reserved for future implementation. NOT loaded by loadMovementAnimations() yet.
+            -- Do not add loading or selection code until the vault system is designed and staged.
+            LowVault    = "rbxassetid://78932004147700",  -- low-vault one-shot (deferred — vault system not yet implemented)
+            MediumVault = "rbxassetid://98948076922717",  -- medium-vault one-shot (deferred — vault system not yet implemented)
         },
         AR15 = {
             WalkForward = "rbxassetid://138802532485746",
