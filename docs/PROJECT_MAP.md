@@ -607,42 +607,61 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --     Sprint directional body-facing (Stage 3D — 2026-05-23):
                         --       Custom mouse lock ON + walking: character still faces camera yaw (Stage 2E).
                         --       Custom mouse lock ON + sprinting (isSprinting=true, not tactical, not crouching):
-                        --         character body rotates toward movement input direction (camera-relative).
-                        --         Camera remains in default Roblox control — no camera.CFrame write.
+                        --         character body rotated toward movement input direction via
+                        --         faceCharacterTowardsDirection() CFrame.lookAt write.
+                        --         NOTE: Stage 3E (2026-05-23) replaced the Stage 3D CFrame-snap path with
+                        --         natural AutoRotate. Stage 3D helpers are retained as rollback infrastructure
+                        --         but are dead code paths when Stage 3E flags are true.
                         --
-                        --       Two new helpers:
+                        --       Stage 3D helpers (retained, not called when Stage 3E active):
                         --         getCameraRelativeMoveDirection(): reads movementState.moveVector
                         --           (Humanoid.MoveDirection, already camera-relative in Roblox);
                         --           flattens to XZ; returns nil if below
                         --           SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE.
-                        --         faceCharacterTowardsDirection(direction): CFrame.lookAt yaw-only write
-                        --           (identical pattern to applyCharacterFacing camera-yaw path);
+                        --         faceCharacterTowardsDirection(direction): CFrame.lookAt yaw-only write;
                         --           sets AutoRotate = false; optional LERP smoothing.
                         --
-                        --       applyCharacterFacing() sprint branch (runs before camera-yaw path):
-                        --         gates: SPRINT_DIRECTIONAL_BODY_FACING_ENABLED, isSprinting,
-                        --           not isTacticalSprinting, not isCrouching, mouse locked.
-                        --         Calls getCameraRelativeMoveDirection() → faceCharacterTowardsDirection().
-                        --         Falls back to camera-yaw facing if move direction below threshold.
-                        --
-                        --       Sprint animation selection (getSprintAnimationName extended):
+                        --       Sprint animation selection (getSprintAnimationName extended in Stage 3D):
                         --         Forward, Left, Right, Backward → RunForward (body faces direction).
                         --         ForwardLeft  → RunForwardLeft if loaded, else RunForward.
                         --         ForwardRight → RunForwardRight if loaded, else RunForward.
                         --         BackwardLeft  → RunForwardLeft if loaded, else RunForward. (Stage 3D new)
                         --         BackwardRight → RunForwardRight if loaded, else RunForward. (Stage 3D new)
-                        --         Body rotates toward movement direction so RunForward visually goes
-                        --         in the correct world-space direction.
+                        --         Still applies in Stage 3E — body rotation is now handled by the engine.
                         --
                         --       New state: lastSprintFacingMode (module-level, cleared on respawn/destroy).
+                        --       New constants (Stage 3D, retained): SPRINT_FACE_MOVEMENT_DIRECTION_WHILE_MOUSE_LOCKED,
+                        --         SPRINT_DIRECTIONAL_BODY_FACING_ENABLED,
+                        --         SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE,
+                        --         SPRINT_DIRECTIONAL_BODY_FACING_DEBUG,
+                        --         SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED,
+                        --         SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA.
+                        --
+                        --     Natural AutoRotate sprint rotation (Stage 3E — 2026-05-23):
+                        --       Replaces Stage 3D directional CFrame snapping inside applyCharacterFacing().
+                        --       Custom mouse lock ON + sprinting: sets Humanoid.AutoRotate = true and returns
+                        --         early — Roblox engine rotates character naturally toward movement direction.
+                        --         Eliminates discrete 45°/90° body-facing snaps at directionName boundaries.
+                        --       Walking, idle, crouching, tactical sprint, sprint-stop, landing: continue on
+                        --         camera-yaw CFrame path (AutoRotate = false, root.CFrame = CFrame.lookAt).
+                        --
+                        --       New helper shouldUseNaturalSprintAutoRotate(): boolean — gates Stage 3E path.
+                        --         Returns true only when: both kill-switch constants true, customMouseLocked,
+                        --         isSprinting, not isTacticalSprinting, not isCrouching,
+                        --         not isSprintStopPlaying, not isLandingMovementLocked.
+                        --
+                        --       applyCharacterFacing() Stage 3E block:
+                        --         if shouldUseNaturalSprintAutoRotate(): hum.AutoRotate = true; return.
+                        --         if lastNaturalSprintAutoRotateActive (exit): hum.AutoRotate = false.
+                        --         Then camera-yaw CFrame write as before.
+                        --
+                        --       New state: lastNaturalSprintAutoRotateActive: boolean = false
+                        --         (cleared on respawn, mouse-lock disable, destroy).
                         --       No camera.CFrame writes. No HipHeight/CameraOffset/FOV changes.
                         --       No new animation IDs. No new remotes. No server changes.
-                        --       New constants: SPRINT_FACE_MOVEMENT_DIRECTION_WHILE_MOUSE_LOCKED = true,
-                        --         SPRINT_DIRECTIONAL_BODY_FACING_ENABLED = true,
-                        --         SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE = 0.1,
-                        --         SPRINT_DIRECTIONAL_BODY_FACING_DEBUG = true,
-                        --         SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = false,
-                        --         SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 1.
+                        --       New constants: SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED = true,
+                        --         SPRINT_DISABLE_MANUAL_BODY_FACING_WHILE_MOUSE_LOCKED = true,
+                        --         SPRINT_NATURAL_AUTOROTATE_DEBUG = true.
                         --       MCP unavailable — Studio verification was not performed.
                         --       Needs manual playtest.
                         --
@@ -891,20 +910,22 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --     CROUCH_USE_CROUCH_WALK_START_ANIMATION = false — when false, CrouchWalkStart one-shot
              --       is never played; updateMovementAnimation falls through to directional selection
              --       immediately on the first crouched step. Set to true to restore original one-shot.
-             --   Sprint directional body-facing constants (Stage 3D — 2026-05-23):
-             --     SPRINT_FACE_MOVEMENT_DIRECTION_WHILE_MOUSE_LOCKED = true — gates the sprint branch in
-             --       applyCharacterFacing(); when false, camera-yaw facing is used even while sprinting.
-             --     SPRINT_DIRECTIONAL_BODY_FACING_ENABLED = true — master switch; when false, the
-             --       entire sprint directional branch is skipped.
+             --   Sprint directional body-facing constants (Stage 3D — 2026-05-23, retained as rollback):
+             --     SPRINT_FACE_MOVEMENT_DIRECTION_WHILE_MOUSE_LOCKED = true — gates the Stage 3D sprint
+             --       branch (dead code when Stage 3E flags are both true).
+             --     SPRINT_DIRECTIONAL_BODY_FACING_ENABLED = true — master switch for Stage 3D branch.
              --     SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE = 0.1 — minimum XZ MoveDirection
-             --       magnitude; below this threshold getCameraRelativeMoveDirection() returns nil and
-             --       camera-yaw facing is used as fallback.
-             --     SPRINT_DIRECTIONAL_BODY_FACING_DEBUG = true — logs sprint body-facing mode changes
-             --       (camera-yaw ↔ movement-direction) to Output, change-gated (not per-frame).
-             --     SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = false — when true, LERP-smooths
-             --       body rotation each Heartbeat; default false for immediate responsive facing.
-             --     SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 1 — LERP alpha when smoothing enabled;
-             --       1.0 = instant; lower values produce heavier, slower rotation.
+             --       magnitude threshold for getCameraRelativeMoveDirection() (Stage 3D helper).
+             --     SPRINT_DIRECTIONAL_BODY_FACING_DEBUG = true — logs Stage 3D mode changes.
+             --     SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = false — Stage 3D LERP toggle.
+             --     SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 1 — Stage 3D LERP alpha.
+             --   Natural AutoRotate sprint constants (Stage 3E — 2026-05-23):
+             --     SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED = true — kill switch; when false,
+             --       shouldUseNaturalSprintAutoRotate() returns false immediately.
+             --     SPRINT_DISABLE_MANUAL_BODY_FACING_WHILE_MOUSE_LOCKED = true — second kill switch;
+             --       both must be true for Stage 3E to activate.
+             --     SPRINT_NATURAL_AUTOROTATE_DEBUG = true — logs Stage 3E mode entry/exit once per
+             --       transition; gated by lastNaturalSprintAutoRotateActive (no per-frame spam).
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag

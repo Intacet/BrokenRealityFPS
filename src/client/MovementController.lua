@@ -407,6 +407,11 @@ local originalAutoRotate: boolean? = nil
 -- "move_dir" while sprinting + mouse lock + valid move direction; "camera_yaw" otherwise.
 local lastSprintFacingMode: string = ""
 
+-- Stage 3E: true while natural-AutoRotate sprint is active. Used to detect the transition back
+-- to camera-yaw facing (so AutoRotate is restored to false before the CFrame write).
+-- Reset on respawn (loadMovementAnimations), mouse-lock disable, and destroy().
+local lastNaturalSprintAutoRotateActive: boolean = false
+
 -- Last reason applyCharacterFacing() was skipped, used to deduplicate debug logs.
 -- Reset to "" on each character load.
 local lastFacingSkippedReason: string = ""
@@ -766,6 +771,29 @@ local function restoreCharacterAutoRotate()
     end
 end
 
+-- ── Stage 3E ─────────────────────────────────────────────────────────────────
+
+-- Returns true when the Stage 3E natural-AutoRotate sprint path should be active.
+-- Both SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED and
+-- SPRINT_DISABLE_MANUAL_BODY_FACING_WHILE_MOUSE_LOCKED must be true (independent kill switches).
+-- Requires: custom mouse lock on, actively sprinting, not in tactical sprint, not crouching,
+-- not during sprint-stop animation playback, and not during landing movement lock.
+-- Does NOT check phase — phase is gated at the top of applyCharacterFacing() already.
+-- Does NOT write any state or modify any variables.
+local function shouldUseNaturalSprintAutoRotate(): boolean
+    if not Constants.SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED then return false end
+    if not Constants.SPRINT_DISABLE_MANUAL_BODY_FACING_WHILE_MOUSE_LOCKED then return false end
+    if not customMouseLocked then return false end
+    if not movementState.isSprinting then return false end
+    if isTacticalSprinting then return false end
+    if movementState.isCrouching then return false end
+    if isSprintStopPlaying then return false end
+    if isLandingMovementLocked then return false end
+    return true
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
 -- Rotates the character's HumanoidRootPart to face the camera's yaw direction every
 -- Heartbeat while custom mouse lock is active and FACE_CAMERA_YAW is enabled.
 -- Phase-gated when REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION is true (only runs in ACTIVE).
@@ -773,6 +801,8 @@ end
 -- Writes HumanoidRootPart.CFrame with the same position — the character is rotated in place;
 -- it is NOT teleported and its velocity is NOT modified.
 -- Logs skip-reason changes once per reason when CUSTOM_MOUSE_LOCK_ROTATION_DEBUG is true.
+-- Stage 3E: when shouldUseNaturalSprintAutoRotate() is true, sets AutoRotate = true and
+-- returns without writing HumanoidRootPart.CFrame — Roblox physics handles the yaw rotation.
 local function applyCharacterFacing()
     if not Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW then return end
     if not customMouseLocked then return end
@@ -815,36 +845,41 @@ local function applyCharacterFacing()
         lastFacingSkippedReason = ""
     end
 
-    -- ── Stage 3D: Sprint directional body-facing ──────────────────────────────
-    -- When sprinting with custom mouse lock active, rotate toward movement input direction
-    -- instead of camera yaw. Walking, idle, and crouching still use camera yaw.
-    -- Tactical sprint always goes camera-forward; exclude it here to avoid interference.
-    if Constants.SPRINT_DIRECTIONAL_BODY_FACING_ENABLED
-        and Constants.SPRINT_FACE_MOVEMENT_DIRECTION_WHILE_MOUSE_LOCKED
-        and movementState.isSprinting
-        and not isTacticalSprinting
-        and not movementState.isCrouching
-    then
-        local moveDir = getCameraRelativeMoveDirection()
-        if moveDir ~= nil then
-            if Constants.SPRINT_DIRECTIONAL_BODY_FACING_DEBUG
-                and lastSprintFacingMode ~= "move_dir"
-            then
-                lastSprintFacingMode = "move_dir"
-                Logger.debug(
-                    "[MovementController] sprint body-facing → movement input direction"
-                )
-            end
-            faceCharacterTowardsDirection(moveDir)
-            return  -- do not also apply camera-yaw facing this frame
+    -- ── Stage 3E: Natural AutoRotate sprint rotation ──────────────────────────
+    -- When sprinting + custom mouse lock active (and both Stage 3E kill switches are true),
+    -- delegate yaw rotation to the Roblox engine by setting AutoRotate = true.
+    -- This eliminates the discrete 45°/90° CFrame snaps produced by Stage 3D's
+    -- faceCharacterTowardsDirection() when the player crosses a directionName boundary.
+    -- Walking, idle, crouching, tactical sprint, sprint-stop, and landing continue on the
+    -- camera-yaw CFrame path below (AutoRotate = false, root.CFrame = CFrame.lookAt).
+    if shouldUseNaturalSprintAutoRotate() then
+        local hum = humanoid
+        if hum then
+            hum.AutoRotate = true
         end
-        -- moveDir is nil (below threshold): fall through to camera-yaw facing.
+        if Constants.SPRINT_NATURAL_AUTOROTATE_DEBUG and not lastNaturalSprintAutoRotateActive then
+            lastNaturalSprintAutoRotateActive = true
+            Logger.debug(
+                "[MovementController] applyCharacterFacing → natural AutoRotate (sprint, Stage 3E)"
+            )
+        end
+        return
     end
 
-    -- Camera-yaw facing (original behavior) — also reached as sprint-facing fallback.
-    if Constants.SPRINT_DIRECTIONAL_BODY_FACING_DEBUG and lastSprintFacingMode ~= "camera_yaw" then
-        lastSprintFacingMode = "camera_yaw"
-        Logger.debug("[MovementController] sprint body-facing → camera yaw")
+    -- Stage 3E exit: if we just left natural-AutoRotate sprint, re-enforce AutoRotate = false
+    -- before the camera-yaw CFrame write below — otherwise the engine would immediately
+    -- overwrite our CFrame via its own AutoRotate rotation.
+    if lastNaturalSprintAutoRotateActive then
+        lastNaturalSprintAutoRotateActive = false
+        local hum = humanoid
+        if hum then
+            hum.AutoRotate = false
+        end
+        if Constants.SPRINT_NATURAL_AUTOROTATE_DEBUG then
+            Logger.debug(
+                "[MovementController] applyCharacterFacing → camera yaw (AutoRotate restored false, Stage 3E)"
+            )
+        end
     end
     -- ─────────────────────────────────────────────────────────────────────────
 
@@ -980,6 +1015,8 @@ local function applyCustomMouseLock()
             restoreCharacterAutoRotate()
             originalAutoRotate = nil
         end
+        -- Stage 3E: clear natural-AutoRotate sprint flag so the next lock session starts clean.
+        lastNaturalSprintAutoRotateActive = false
     end
 end
 
@@ -2269,7 +2306,9 @@ local function loadMovementAnimations(character: Model)
     -- Stage 2R: reset sprint anim log guard so the first sprint after respawn re-logs.
     lastSprintAnimName     = ""
     -- Stage 3D: reset sprint body-facing mode log guard on respawn.
-    lastSprintFacingMode   = ""
+    lastSprintFacingMode              = ""
+    -- Stage 3E: reset natural-AutoRotate sprint state on respawn.
+    lastNaturalSprintAutoRotateActive = false
     -- Reset custom mouse lock on respawn: release the cursor so the player is not stuck
     -- with a locked mouse if they die or respawn while mouse lock was active.
     customMouseLocked                    = false
@@ -3792,7 +3831,8 @@ function MovementController:destroy()
     lastAnimationSet          = ""
     lastStrafeBlockedState    = false
     lastSprintAnimName        = ""   -- Stage 2R
-    lastSprintFacingMode      = ""   -- Stage 3D
+    lastSprintFacingMode              = ""    -- Stage 3D
+    lastNaturalSprintAutoRotateActive = false -- Stage 3E
     crouchBottomPoseWarned    = false
     -- Stage 2E: restore AutoRotate if mouse lock is active before clearing state.
     if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW and customMouseLocked then

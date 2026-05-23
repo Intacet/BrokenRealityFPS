@@ -7,6 +7,44 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-23] — Stage 3E: Natural AutoRotate sprint rotation (replaces Stage 3D directional CFrame snapping)
+
+### Summary
+
+Replaces the Stage 3D `faceCharacterTowardsDirection()` CFrame-snap path with a natural `Humanoid.AutoRotate = true` approach during sprint + custom mouse lock. Stage 3D rotated the character by writing `HumanoidRootPart.CFrame` toward a discrete `directionName`-bucketed direction on every Heartbeat, causing visible 45°/90° snaps each time the player crossed a direction boundary. Stage 3E instead sets `AutoRotate = true` during sprint, letting Roblox physics rotate the character smoothly toward movement direction without any CFrame writes from the controller. Walking, idle, crouching, tactical sprint, sprint-stop, and landing all continue on the existing camera-yaw CFrame path (`AutoRotate = false`).
+
+**What changed:**
+
+- **Three new constants** in `Constants.lua` (Stage 3E section after Stage 3D constants): `SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED = true`, `SPRINT_DISABLE_MANUAL_BODY_FACING_WHILE_MOUSE_LOCKED = true`, `SPRINT_NATURAL_AUTOROTATE_DEBUG = true`.
+- **New helper** `shouldUseNaturalSprintAutoRotate()` in `MovementController.lua`: returns true when both kill-switch constants are on, custom mouse lock is active, player is sprinting, not in tactical sprint, not crouching, not in sprint-stop, and not landing-movement-locked.
+- **`applyCharacterFacing()` Stage 3D block replaced with Stage 3E block:** When `shouldUseNaturalSprintAutoRotate()` is true, sets `humanoid.AutoRotate = true` and returns early (no CFrame write). An exit block (`if lastNaturalSprintAutoRotateActive`) runs on the first non-sprint frame to restore `AutoRotate = false` before the camera-yaw CFrame write.
+- **New state variable** `lastNaturalSprintAutoRotateActive: boolean = false`: tracks whether Stage 3E is currently active; reset on respawn, mouse-lock disable, and `destroy()`.
+- **Mouse-lock disable path updated:** `lastNaturalSprintAutoRotateActive = false` added to the `customMouseLocked = false` branch of `applyCustomMouseLock()` so the flag is clean on the next lock session.
+- **Stage 3D helpers retained** (not deleted): `getCameraRelativeMoveDirection()`, `faceCharacterTowardsDirection()`, `lastSprintFacingMode`, and all six Stage 3D constants remain in the codebase as rollback infrastructure. They are dead code paths when both Stage 3E flags are true.
+- **MCP unavailable — Studio verification not performed.** Needs manual playtest (see DEBT-044 Stage 3E risks).
+
+### Changes to `src/shared/Constants.lua`
+
+- New Stage 3E constant block added after Stage 3D constants (`SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA`):
+  - `SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED = true`
+  - `SPRINT_DISABLE_MANUAL_BODY_FACING_WHILE_MOUSE_LOCKED = true`
+  - `SPRINT_NATURAL_AUTOROTATE_DEBUG = true`
+
+### Changes to `src/client/MovementController.lua`
+
+- New state variable `lastNaturalSprintAutoRotateActive: boolean = false` (after `lastSprintFacingMode`, line ~413).
+- New private helper `shouldUseNaturalSprintAutoRotate(): boolean` (inserted in Stage 3E section before `applyCharacterFacing()`).
+- `applyCharacterFacing()`: Stage 3D sprint block replaced with Stage 3E natural-AutoRotate block.
+- `applyCustomMouseLock()` off-branch: `lastNaturalSprintAutoRotateActive = false` added.
+- `loadMovementAnimations()`: `lastNaturalSprintAutoRotateActive = false` added to respawn reset block.
+- `destroy()`: `lastNaturalSprintAutoRotateActive = false` added to teardown reset block.
+
+### No animation ID changes, no speed changes, no camera changes
+
+No animation IDs, animation track loading, speed multipliers, camera CFrame, CameraOffset, FieldOfView, HipHeight, JumpPower, or server-side systems were modified.
+
+---
+
 ## [2026-05-23] — Vault animation IDs reserved in Constants (system deferred)
 
 ### Summary

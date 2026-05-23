@@ -135,6 +135,23 @@ Constants.SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = false
 -- Has no effect when SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED is false.
 Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 1
 
+-- ── Stage 3E: Natural AutoRotate sprint rotation ──────────────────────────────────────────────
+-- Replaces Stage 3D directional CFrame snapping during sprint + custom mouse lock.
+-- When both flags below are true, sprinting under custom mouse lock sets Humanoid.AutoRotate = true
+-- so the Roblox physics engine rotates the character naturally toward movement direction,
+-- eliminating the discrete 45°/90° snaps caused by the Stage 3D faceCharacterTowardsDirection() path.
+-- Walking, idle, crouching, tactical sprint, sprint-stop, and landing all continue on the
+-- existing camera-yaw CFrame facing path (AutoRotate = false, root.CFrame = CFrame.lookAt).
+-- Set both false to revert to camera-yaw-only facing (no sprint direction rotation at all).
+-- Set SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED false alone to disable this path
+-- without touching SPRINT_DISABLE_MANUAL_BODY_FACING_WHILE_MOUSE_LOCKED (future-proofing).
+Constants.SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED     = true
+Constants.SPRINT_DISABLE_MANUAL_BODY_FACING_WHILE_MOUSE_LOCKED = true
+
+-- When true, logs natural-AutoRotate mode entry and exit to Output once per mode change.
+-- Does not spam per frame — gated by lastNaturalSprintAutoRotateActive in applyCharacterFacing().
+Constants.SPRINT_NATURAL_AUTOROTATE_DEBUG = true
+
 -- ============================================================
 -- Objective settings
 -- ============================================================
