@@ -1656,32 +1656,17 @@ local function stopTacticalSprint()
     -- If tracks are not loaded (respawn edge case), just clear state and return.
     if next(animationTracks) == nil then return end
 
-    -- Stop TacticalSprintForward1 (or whatever track is currently playing).
+    -- Stop the TacticalSprintForward animation immediately.
     stopCurrentMovementAnimation()
 
-    -- Play TacticalSprintStop one-shot if enabled and present.
-    if Constants.TACTICAL_SPRINT_STOP_ANIMATION_ENABLED then
-        local setName = getAnimationSetName()
-        local stopKey = setName .. "_TacticalSprintStop"
-        if animationTracks[stopKey] ~= nil then
-            playMovementAnimation(stopKey)
-            local stopTrack = animationTracks[stopKey]
-            if stopTrack then
-                tacticalSprintStopConn = stopTrack.Stopped:Connect(function()
-                    clearTacticalSprintStopConnection()
-                    if Constants.MOVEMENT_ANIMATION_DEBUG then
-                        Logger.debug("[MovementController] TacticalSprintStop finished")
-                    end
-                end)
-            end
-            if Constants.MOVEMENT_ANIMATION_DEBUG then
-                Logger.debug("[MovementController] TacticalSprintStop BEGIN (" .. stopKey .. ")")
-            end
-        end
-    end
-
+    -- NOTE: We intentionally do NOT play TacticalSprintStop here.
+    -- Animation + movement lock + momentum carry are ONLY applied via playSprintStopWithLock,
+    -- which is called from sprintEndConn (Shift release) when the tactical sprint duration
+    -- threshold is met.  Direction-change and crouch interruptions cut instantly with no
+    -- stop animation, no lock, and no carry — this keeps the state machine simple and
+    -- prevents the player being locked in place during an involuntary interruption.
     if Constants.MOVEMENT_ANIMATION_DEBUG then
-        Logger.debug("[MovementController] Tactical sprint END")
+        Logger.debug("[MovementController] Tactical sprint END (instant — no stop animation)")
     end
 
     -- Stage 3A: update FOV after tactical sprint ends.
@@ -3687,8 +3672,11 @@ function MovementController:Start()
             if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
             if movementState.isCrouching then return end  -- already crouching; ignore repeat
 
-            -- Stage 2P: crouch cancels tactical sprint (plays TacticalSprintStop one-shot).
-            -- stopTacticalSprint() calls updateSprintFov() internally.
+            -- Stage 2P/3C: crouch cancels tactical sprint instantly (no stop animation).
+            -- stopTacticalSprint() is now a pure state-clear — it stops TacticalSprintForward
+            -- and clears all tactical sprint flags without playing TacticalSprintStop.
+            -- Animation + lock + carry only fire via playSprintStopWithLock (Shift-release path).
+            -- updateSprintFov() is called internally by stopTacticalSprint().
             if isTacticalSprinting then
                 stopTacticalSprint()
             end

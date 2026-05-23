@@ -7,6 +7,32 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-22] — Movement Stage 3C fix: sprint stop movement lock + stopTacticalSprint refactor
+
+### Summary
+
+Two bug fixes for the tactical sprint stop system, continuing Stage 3C.
+
+**Fix 1 — Sprint stop movement lock during direction-change stops.**
+`stopTacticalSprint()` previously played the `TacticalSprintStop` animation via `playMovementAnimation()` but never set `isSprintStopPlaying = true`, so `applySpeed()` never locked `WalkSpeed` to 0. The player could freely move during the animation. **Fix:** `stopTacticalSprint()` is now a pure state-clear function. It stops `TacticalSprintForward` immediately and clears all tactical sprint flags, but plays **no animation**. Animation + lock + momentum carry happen **only** via `playSprintStopWithLock` on the Shift-release path (when tactical sprint duration ≥ `TACTICAL_SPRINT_STOP_MIN_DURATION`). Direction-change and crouch interruptions now cut instantly with no stop animation.
+
+**Fix 2 — Stale comment update in `crouchBeginConn`.**
+The comment still referred to `stopTacticalSprint()` playing `TacticalSprintStop`; updated to reflect the new pure state-clear behaviour.
+
+### Changes to `src/client/MovementController.lua`
+
+- **`stopTacticalSprint()`**: removed the `if Constants.TACTICAL_SPRINT_STOP_ANIMATION_ENABLED then ... playMovementAnimation(stopKey) ... tacticalSprintStopConn = stopTrack.Stopped:Connect(...)` block entirely. The function now only clears `isTacticalSprinting`, `movementState.isTacticalSprinting`, `tacticalSprintStartTime`, calls `clearTacticalSprintStopConnection()`, `stopCurrentMovementAnimation()`, and `updateSprintFov()`. Added a `MOVEMENT_ANIMATION_DEBUG` log confirming the instant cut path.
+- **`crouchBeginConn`**: updated Stage 2P comment to reflect that `stopTacticalSprint()` is now a pure state-clear with no animation.
+
+### Verification
+
+- Sprint stop lock: MCP Studio — `MOVEMENT_ANIMATION_DEBUG` output confirmed; WalkSpeed = 0 during `TacticalSprintStop` requires manual test (needs >5 s tactical sprint, then Shift release).
+- Direction-change instant stop (Heartbeat path): verified `tacticalSprintStopConn` is never set by `stopTacticalSprint()` — no animation plays on direction change.
+- Crouch cancel of tactical sprint: verified `stopTacticalSprint()` now produces no animation; EnterCrouch plays cleanly from `playCrouchTransition(true)`.
+- **Crouch bug**: MCP cannot simulate C key in Studio play mode — requires manual visual verification by the user.
+
+---
+
 ## [2026-05-22] — Movement Stage 3C: Tactical sprint stop polish (lock + momentum carry; regular sprint unaffected)
 
 ### Summary
