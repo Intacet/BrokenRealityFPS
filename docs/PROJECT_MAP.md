@@ -532,6 +532,32 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       EnterCrouch Stopped moving branch; stopCrouchTracksExcept(nil)
                         --       added in phase exit handler. Total call sites: 8 (4 from 2Q, 4 new).
                         --
+                        --     Crouch direct-blend / EnterCrouch disable (Stage 2Q-D — 2026-05-23):
+                        --       EnterCrouch one-shot disabled by default (CROUCH_USE_ENTER_TRANSITION_ANIMATION = false).
+                        --       Asset had bad intermediate frames (forward-bend artifact visible on frame 0).
+                        --       Asset is still loaded into animationTracks — simply never played by default.
+                        --       Direct-blend path (playCrouchTransition, entering=true):
+                        --         crouchTransitionPlaying stays false — Heartbeat immediately maintains the pose.
+                        --         If moving: wasMovingWhileCrouching=true (skips CrouchWalkStart on next Heartbeat).
+                        --           customMouseLocked ON + Unarmed set → directional CrouchWalk* (8-dir selection).
+                        --           Otherwise → CrouchWalkForward or CrouchWalk alias fallback.
+                        --           Fade: CROUCH_DIRECT_BLEND_MOVING_FADE_TIME = 0.10s.
+                        --         If not moving: → CrouchIdle (or holdCrouchBottomPose() if track absent).
+                        --           Fade: CROUCH_DIRECT_BLEND_FADE_TIME = 0.12s.
+                        --         stopCrouchTracksExcept(nil) called before Play to zero residual weights.
+                        --         Exits early with return; ExitCrouch path (entering=false) is unchanged.
+                        --       CrouchWalkStart gated behind CROUCH_USE_CROUCH_WALK_START_ANIMATION = false.
+                        --         When false, updateMovementAnimation falls through immediately to directional selection.
+                        --         Forward-lunge artifact on first crouched step eliminated.
+                        --         CrouchWalkStart track still loads; never selected unless flag set true.
+                        --       No HipHeight, CameraOffset, FOV, camera.CFrame, or sprint/landing changes.
+                        --       No new animation IDs. No new remotes.
+                        --       New constants: CROUCH_USE_ENTER_TRANSITION_ANIMATION = false,
+                        --         CROUCH_DIRECT_BLEND_FADE_TIME = 0.12, CROUCH_DIRECT_BLEND_MOVING_FADE_TIME = 0.10,
+                        --         CROUCH_USE_CROUCH_WALK_START_ANIMATION = false.
+                        --       Files changed: src/shared/Constants.lua, src/client/MovementController.lua.
+                        --       MCP unavailable — needs Studio verification.
+                        --
                         --     Sprint FOV stretch (Stage 3A — 2026-05-21):
                         --       TweenService smoothly tweens workspace.CurrentCamera.FieldOfView.
                         --       Normal sprint (LeftShift + moving + not crouching) → SPRINT_CAMERA_FOV (78).
@@ -749,6 +775,17 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --     CROUCH_TRANSITION_MIN_HOLD_TIME = 0.05 — seconds from clip end; guards against TimePosition
              --       snapping to frame 0 at exact Length on some Roblox versions.
              --     CROUCH_BOTTOM_HOLD_TIME_POSITION_FALLBACK = 0.98 — used when EnterCrouch.Length == 0.
+             --   Crouch direct-blend constants (Stage 2Q-D — 2026-05-23):
+             --     CROUCH_USE_ENTER_TRANSITION_ANIMATION = false — when false, EnterCrouch one-shot is skipped
+             --       on crouch press; direct crossfade into CrouchIdle or CrouchWalk* instead.
+             --       Set to true to re-enable the original EnterCrouch one-shot (e.g. if asset is replaced).
+             --     CROUCH_DIRECT_BLEND_FADE_TIME = 0.12 — crossfade time (seconds) into CrouchIdle
+             --       when the player is not moving at the moment of crouch press.
+             --     CROUCH_DIRECT_BLEND_MOVING_FADE_TIME = 0.10 — crossfade time (seconds) into
+             --       CrouchWalk* when the player is moving at the moment of crouch press.
+             --     CROUCH_USE_CROUCH_WALK_START_ANIMATION = false — when false, CrouchWalkStart one-shot
+             --       is never played; updateMovementAnimation falls through to directional selection
+             --       immediately on the first crouched step. Set to true to restore original one-shot.
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag

@@ -7,6 +7,50 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-23] — Movement Stage 2Q-D: crouch direct-blend / EnterCrouch disable
+
+### Summary
+
+Visual fix for the crouch transition animation. The bundled `EnterCrouch` asset had bad intermediate frames (a visible forward-bend artifact on the first frame of the clip). Rather than replacing the asset, the animation is **disabled by default** and the system crossfades directly from the current standing pose into `CrouchIdle` or the appropriate `CrouchWalk*` direction.
+
+**What changed:**
+
+- **`EnterCrouch` disabled by default** (`CROUCH_USE_ENTER_TRANSITION_ANIMATION = false`). The asset still loads — flip the constant to `true` to restore the original one-shot if/when the asset is replaced.
+- **Direct-blend on crouch press**: when not moving, crossfades into `CrouchIdle` over `CROUCH_DIRECT_BLEND_FADE_TIME = 0.12s`; when moving, crossfades into the correct directional `CrouchWalk*` over `CROUCH_DIRECT_BLEND_MOVING_FADE_TIME = 0.10s`. `stopCrouchTracksExcept(nil)` called before the new play to zero any residual weights.
+- **`crouchTransitionPlaying` cleared immediately** in the direct-blend path, so Heartbeat takes over animation maintenance on the next frame (no gating delay).
+- **`wasMovingWhileCrouching = true`** set in the direct-blend path when the player is moving, so the first Heartbeat skips `CrouchWalkStart` and goes straight to directional selection.
+- **`CrouchWalkStart` gated off** (`CROUCH_USE_CROUCH_WALK_START_ANIMATION = false`). The forward-lunge artifact on the first crouched step is eliminated. The track still loads; set the constant to `true` to restore the one-shot.
+- **ExitCrouch path is unchanged.** No HipHeight, CameraOffset, FOV, camera.CFrame, sprint, landing, or server-side changes. No new animation IDs. No new remotes.
+
+### Changes to `src/shared/Constants.lua`
+
+Four new constants added (after `CROUCH_BOTTOM_HOLD_TIME_POSITION_FALLBACK`):
+- `CROUCH_USE_ENTER_TRANSITION_ANIMATION = false`
+- `CROUCH_DIRECT_BLEND_FADE_TIME = 0.12`
+- `CROUCH_DIRECT_BLEND_MOVING_FADE_TIME = 0.10`
+- `CROUCH_USE_CROUCH_WALK_START_ANIMATION = false`
+
+### Changes to `src/client/MovementController.lua`
+
+- **`playCrouchTransition(entering: boolean)`**: direct-blend branch inserted before the existing `local track = animationTracks[key]` line. When `entering == true and not Constants.CROUCH_USE_ENTER_TRANSITION_ANIMATION`, the branch runs the direct crossfade and returns early. The original `EnterCrouch` / `ExitCrouch` path is unchanged and reached for `entering == false` or when the flag is `true`.
+- **`updateMovementAnimation()` CrouchWalkStart block**: `if animationTracks[startKey] ~= nil and not crouchWalkStartPlaying then` gate replaced with `if Constants.CROUCH_USE_CROUCH_WALK_START_ANIMATION and animationTracks[startKey] ~= nil and not crouchWalkStartPlaying then`. When the flag is false, falls through immediately to directional selection.
+
+### Documentation
+
+- `docs/PROJECT_MAP.md`: Stage 2Q-D behavior block added after Stage 2Q+; four new constants documented in the Constants section.
+- `docs/TECHNICAL_DEBT.md`: Stage 2Q-D risks and Studio verification requirement added to the MovementController animation debt entry.
+
+### Verification
+
+MCP unavailable — Studio verification was not performed. Needs manual playtest:
+1. C press while standing → crossfades directly to `CrouchIdle` (no visible forward-bend).
+2. C press while walking → crossfades directly to `CrouchWalk*` without CrouchWalkStart lunge.
+3. C release → `ExitCrouch` plays cleanly from `CrouchIdle`/`CrouchWalk`.
+4. No animation blending artifacts (no old crouch track bleeding through).
+5. WalkSpeed, HipHeight, and CameraOffset are unaffected.
+
+---
+
 ## [2026-05-22] — Movement Stage 3C fix: sprint stop movement lock + stopTacticalSprint refactor
 
 ### Summary

@@ -57,6 +57,31 @@ Constants.CROUCH_TRANSITION_MIN_HOLD_TIME = 0.05
 -- (animation not yet loaded or zero-length clip). Must be >= 0.
 Constants.CROUCH_BOTTOM_HOLD_TIME_POSITION_FALLBACK = 0.98
 
+-- When false, the EnterCrouch one-shot animation is skipped entirely on crouch press.
+-- The character crossfades directly from the current idle/walk/run pose into CrouchIdle
+-- (if not moving) or the appropriate CrouchWalk* animation (if moving).
+-- Set true to re-enable the transition clip once a better EnterCrouch asset is provided.
+-- Default: false — the bundled EnterCrouch asset bends the character forward through bad
+-- intermediate frames before settling, producing an ugly transition. Disabled until a
+-- replacement asset is supplied.
+Constants.CROUCH_USE_ENTER_TRANSITION_ANIMATION = false
+
+-- Crossfade duration (seconds) for the direct-blend when entering crouch and NOT moving.
+-- Applied to the CrouchIdle (or fallback) fade-in. Shorter than MOVEMENT_ANIMATION_FADE_TIME
+-- (0.15) for a snappier, less floaty feel.
+Constants.CROUCH_DIRECT_BLEND_FADE_TIME = 0.12
+
+-- Crossfade duration (seconds) for the direct-blend when entering crouch while MOVING.
+-- Slightly shorter than CROUCH_DIRECT_BLEND_FADE_TIME to feel immediate and snappy.
+Constants.CROUCH_DIRECT_BLEND_MOVING_FADE_TIME = 0.10
+
+-- When false, the CrouchWalkStart one-shot is skipped when the player first moves while
+-- crouched. The character blends directly from CrouchIdle into the directional CrouchWalk
+-- without a start-of-movement transition clip.
+-- Set true to re-enable when a better CrouchWalkStart animation is provided.
+-- Default: false — avoids a forward-lunge artifact on the first crouched step.
+Constants.CROUCH_USE_CROUCH_WALK_START_ANIMATION = false
+
 -- ============================================================
 -- Objective settings
 -- ============================================================

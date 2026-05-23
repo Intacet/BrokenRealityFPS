@@ -1879,6 +1879,96 @@ local function playCrouchTransition(entering: boolean)
     local animSuffix = if entering then "EnterCrouch" else "ExitCrouch"
     local key        = setName .. "_" .. animSuffix
 
+    -- ── Stage 2Q-D: Direct-blend path ────────────────────────────────────────
+    -- When CROUCH_USE_ENTER_TRANSITION_ANIMATION is false, skip the EnterCrouch
+    -- one-shot entirely and crossfade directly into the correct crouched pose.
+    -- Only applies to crouch-enter; ExitCrouch always uses the original path below.
+    if entering and not Constants.CROUCH_USE_ENTER_TRANSITION_ANIMATION then
+        if Constants.MOVEMENT_ANIMATION_DEBUG then
+            Logger.debug(
+                "[MovementController] playCrouchTransition: EnterCrouch SKIPPED"
+                .. " (CROUCH_USE_ENTER_TRANSITION_ANIMATION=false) — direct blend"
+            )
+        end
+        -- Clean up any lingering transition state (e.g. ExitCrouch was playing).
+        clearCrouchTransitionConnection()
+        crouchTransitionPlaying = false  -- clear flag so Heartbeat can immediately maintain pose
+        clearCrouchBottomHold()
+        -- Fade out whatever standing animation is playing.
+        stopCurrentMovementAnimation()
+        -- Hard-stop all stale crouch tracks so nothing bleeds through the fade-in.
+        stopCrouchTracksExcept(nil)
+
+        -- Pick the target crouched animation.
+        -- Heartbeat takes over on the very next tick and refines direction if needed.
+        local directKey: string?      = nil
+        local directFade: number      = Constants.CROUCH_DIRECT_BLEND_FADE_TIME
+
+        if movementState.isMoving then
+            directFade = Constants.CROUCH_DIRECT_BLEND_MOVING_FADE_TIME
+            -- Mark already-moving so the next Heartbeat tick skips CrouchWalkStart.
+            wasMovingWhileCrouching = true
+
+            -- Attempt directional selection (Unarmed + mouse-lock = 8-way).
+            if setName == Constants.MOVEMENT_ANIMATION_SET_UNARMED and customMouseLocked then
+                local dir = movementState.directionName
+                if dir ~= "Idle" then
+                    local dirKey = setName .. "_CrouchWalk" .. dir
+                    if animationTracks[dirKey] ~= nil then
+                        directKey = dirKey
+                    end
+                end
+            end
+            -- Fallback: CrouchWalkForward → CrouchWalk alias (covers mouse-lock OFF and AR15).
+            if directKey == nil then
+                local fwdKey   = setName .. "_CrouchWalkForward"
+                local aliasKey = setName .. "_CrouchWalk"
+                if animationTracks[fwdKey] ~= nil then
+                    directKey = fwdKey
+                elseif animationTracks[aliasKey] ~= nil then
+                    directKey = aliasKey
+                end
+            end
+        end
+
+        -- When not moving (or no crouch-walk track found), prefer CrouchIdle.
+        if directKey == nil then
+            directFade = Constants.CROUCH_DIRECT_BLEND_FADE_TIME
+            local idleKey = setName .. "_CrouchIdle"
+            if animationTracks[idleKey] ~= nil then
+                directKey = idleKey
+            end
+        end
+
+        if directKey ~= nil then
+            local directTrack = animationTracks[directKey]
+            if directTrack then
+                currentAnimationName = directKey
+                local shortName = directKey:match("_(.+)$") or directKey
+                directTrack:Play(directFade)
+                directTrack:AdjustSpeed(getAnimationSpeedMultiplier(shortName))
+                if Constants.MOVEMENT_ANIMATION_DEBUG then
+                    Logger.debug(
+                        "[MovementController] crouch direct-blend → " .. directKey
+                        .. string.format(" (fade=%.2fs)", directFade)
+                    )
+                end
+            end
+        else
+            -- No CrouchIdle or CrouchWalk available for this set: fall back to hold-pose.
+            -- This path only fires for AR15 / non-Unarmed sets that lack both tracks.
+            holdCrouchBottomPose()
+            if Constants.MOVEMENT_ANIMATION_DEBUG then
+                Logger.debug(
+                    "[MovementController] crouch direct-blend: no idle/walk track for set '"
+                    .. setName .. "' — holdCrouchBottomPose fallback"
+                )
+            end
+        end
+        return   -- direct blend done; Heartbeat maintains the pose from here
+    end
+    -- ─────────────────────────────────────────────────────────────────────────
+
     local track = animationTracks[key]
     if not track then
         if Constants.MOVEMENT_ANIMATION_DEBUG then
@@ -2496,7 +2586,13 @@ local function updateMovementAnimation()
             if not wasMovingWhileCrouching then
                 wasMovingWhileCrouching = true
                 local startKey = setName .. "_CrouchWalkStart"
-                if animationTracks[startKey] ~= nil and not crouchWalkStartPlaying then
+                -- Stage 2Q-D: gate CrouchWalkStart behind CROUCH_USE_CROUCH_WALK_START_ANIMATION.
+                -- When false (default), skip the start one-shot and fall through to directional
+                -- selection below. Set true to re-enable once a better start animation is provided.
+                if Constants.CROUCH_USE_CROUCH_WALK_START_ANIMATION
+                    and animationTracks[startKey] ~= nil
+                    and not crouchWalkStartPlaying
+                then
                     -- Disconnect callback BEFORE stopping CrouchIdle to prevent spurious events.
                     clearCrouchWalkStart()
                     if isHoldingCrouchBottomPose then
@@ -2515,6 +2611,8 @@ local function updateMovementAnimation()
                     end
                     return  -- Let the one-shot run; directional selection resumes next Heartbeat.
                 end
+                -- CROUCH_USE_CROUCH_WALK_START_ANIMATION is false or track absent:
+                -- fall through to directional selection immediately.
             end
 
             -- Skip directional selection while the CrouchWalkStart one-shot is still running.
