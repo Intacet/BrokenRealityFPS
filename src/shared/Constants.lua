@@ -181,6 +181,7 @@ Constants.MOVEMENT_ANIMATION_IDS = {
             WalkForward        = "rbxassetid://81276554788940",   -- confirmed-good R6 no-gun walk forward (Stage 2M)
             WalkForwardAlt     = "rbxassetid://97919904114609",   -- alternate forward walk clip; loaded but not yet selected (Stage 2M)
             RunForward         = "rbxassetid://79045069356901",   -- confirmed-good R6 no-gun run forward  (Stage 2L)
+            RunForwardTest     = "rbxassetid://118179559114284",  -- test run-forward clip; toggle via MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION
             WalkLeft           = "rbxassetid://127934481756733",  -- no-gun strafe left  (Stage 2M)
             WalkRight          = "rbxassetid://122034548466839",  -- no-gun strafe right (Stage 2M)
             WalkBackward       = "rbxassetid://140436478515683",  -- no-gun walk backward          (Stage 2M)
@@ -239,6 +240,10 @@ Constants.MOVEMENT_ANIMATION_FADE_TIME = 0.15  -- seconds to cross-fade between 
 Constants.MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER              = 1.3   -- WalkForward/Backward/diagonals play at 1.3× clip speed
 Constants.MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER            = 1.4   -- WalkLeft/WalkRight play at 1.4× clip speed
 Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER               = 1.15  -- RunForward plays at 1.15× clip speed; RunForwardLeft/Right IDs retained but deferred (Stage 2L)
+-- Toggle to swap the active run-forward clip between RunForward (current) and RunForwardTest.
+-- Set true to audition the test clip; set false to restore the confirmed RunForward clip.
+-- Only affects the Unarmed set. AR15 RunForward is unaffected.
+Constants.MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION               = false -- false = RunForward (current), true = RunForwardTest
 Constants.MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER              = 0.75  -- Idle plays at 0.75× clip speed (Stage 2H)
 Constants.MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.9   -- EnterCrouch/ExitCrouch one-shots play at 0.9× clip speed (Stage 2H)
 Constants.MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER       = 1.0   -- CrouchWalk* directional tracks play at 1.0× clip speed (Stage 2J)

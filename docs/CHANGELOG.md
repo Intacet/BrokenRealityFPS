@@ -7,6 +7,52 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-23] — RunForwardTest toggle: audition R6 no-gun run-forward animation
+
+### Summary
+
+Adds a test run-forward animation for the Unarmed set alongside the existing `RunForward` clip. A single constant (`MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION`) switches between them. The existing confirmed clip is untouched. Toggle the constant, save, and `rojo serve` to audition; set back to `false` to restore.
+
+**What changed:**
+
+- **New animation ID** — `Unarmed.RunForwardTest = rbxassetid://118179559114284` added to `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed`. Loaded alongside `Unarmed_RunForward` on every character spawn; never loaded for the AR15 set.
+- **New toggle** — `MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION = false` (default: current `RunForward` clip plays). Set to `true` to play the test clip on all Unarmed sprint paths.
+- **New helper** — `getRunForwardSuffix(animSetName)` returns `"RunForwardTest"` when the toggle is `true` + track is loaded + set is Unarmed; otherwise `"RunForward"`. All code paths that previously produced the `RunForward` suffix now route through this helper.
+- **All sprint selection paths updated** — `getSprintAnimationName()` (all 6 return sites: no-mouse-lock path, ForwardLeft/ForwardRight/BackwardLeft/BackwardRight fallbacks, final catchall); `updateMovementAnimation()` tactical-sprint fallback; `getDesiredStandingLocomotionKey()` tactical-sprint fallback.
+- **Speed multiplier** — `RunForwardTest` added to the `MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER` (1.15×) branch in `getAnimationSpeedMultiplier()`. Identical speed to the current clip; tune separately if needed.
+- **AR15 unaffected** — `getRunForwardSuffix()` returns `"RunForward"` unconditionally for any non-Unarmed set.
+
+### Changes to `src/shared/Constants.lua`
+
+- `MOVEMENT_ANIMATION_IDS.R6.Unarmed.RunForwardTest = "rbxassetid://118179559114284"` (after `RunForward`)
+- `MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION = false` (after `MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER`)
+
+### Changes to `src/client/MovementController.lua`
+
+- `getAnimationSpeedMultiplier()`: `"RunForwardTest"` added to the `MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER` branch.
+- `loadMovementAnimations()`: conditional load block for `Unarmed_RunForwardTest` (after `Unarmed_WalkForwardAlt` block).
+- New private helper `getRunForwardSuffix(animSetName)` inserted before `getSprintAnimationName`.
+- All 6 `return "RunForward"` sites in `getSprintAnimationName()` → `return getRunForwardSuffix(animSetName)`.
+- `updateMovementAnimation()` tactical-sprint fallback → `setName .. "_" .. getRunForwardSuffix(setName)`.
+- `getDesiredStandingLocomotionKey()` tactical-sprint fallback → `setName .. "_" .. getRunForwardSuffix(setName)`.
+
+### Verification
+
+MCP Studio verification was NOT performed — Studio instance "Project BR Dev" disconnected before the MCP execute step. Static check (`rojo build`) passed with no parse errors. Marked "needs Studio verification" in `docs/TECHNICAL_DEBT.md`.
+
+**Manual test steps:**
+1. Set `MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION = false`. Save + `rojo serve`.
+2. Spawn R6, enter ACTIVE, sprint forward (LeftShift + W). Confirm original `RunForward` clip plays. Check Output — no errors.
+3. Sprint in all 8 directions; confirm no regression (RunForwardLeft/Right when mouse-locked, RunForward fallback elsewhere).
+4. Set `MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION = true`. Save + `rojo serve`.
+5. Respawn (or rejoin). Sprint forward. Confirm the new `RunForwardTest` clip plays — it should look different from the original.
+6. Sprint in all 8 directions. Confirm test clip plays for all Unarmed sprint paths.
+7. Switch to AR15 set (`MovementController.SetEquippedWeaponName("AR15")`). Sprint forward. Confirm AR15 `RunForward` plays (test clip must NOT affect AR15).
+8. Set `MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION = false`. Confirm original Unarmed clip restored.
+9. Confirm `WalkSpeed`, `HipHeight`, `CameraOffset`, `FOV` unchanged throughout.
+
+---
+
 ## [2026-05-23] — Movement Stage 3D: Sprint directional body-facing during custom mouse lock
 
 ### Summary

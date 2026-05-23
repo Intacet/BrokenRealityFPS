@@ -365,6 +365,7 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Unarmed.WalkForward       = rbxassetid://81276554788940   (Stage 2M — confirmed-good R6 no-gun walk forward)
                         --       Unarmed.WalkForwardAlt    = rbxassetid://97919904114609   (Stage 2M — alternate forward walk; loaded but not yet selected — no variation system)
                         --       Unarmed.RunForward        = rbxassetid://79045069356901   (Stage 2L — confirmed-good R6 no-gun run forward)
+                        --       Unarmed.RunForwardTest    = rbxassetid://118179559114284  (test clip — active when MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION = true)
                         --       Unarmed.WalkLeft          = rbxassetid://127934481756733  (Stage 2M)
                         --       Unarmed.WalkRight         = rbxassetid://122034548466839  (Stage 2M)
                         --       Unarmed.WalkBackward      = rbxassetid://140436478515683  (Stage 2M)
@@ -840,7 +841,8 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --   Movement animation playback speed multipliers (updated Stage 2H 2026-05-20):
              --     MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER              = 1.3  (WalkForward/Backward/diagonals)
              --     MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER            = 1.4  (WalkLeft, WalkRight)
-             --     MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER               = 1.15 (RunForward; RunForwardLeft/Right deferred)
+             --     MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER               = 1.15 (RunForward/RunForwardTest share this multiplier; RunForwardLeft/Right deferred)
+             --     MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION               = false (toggle: false = RunForward, true = RunForwardTest — Unarmed only)
              --     MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER              = 0.75 (Idle — Stage 2H)
              --     MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.9  (EnterCrouch, ExitCrouch — Stage 2H)
              --     MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER       = 1.0  (CrouchWalk* directional — Stage 2J)

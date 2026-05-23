@@ -1581,6 +1581,7 @@ local function getAnimationSpeedMultiplier(animationName: string): number
     elseif animationName == "RunForward"
         or animationName == "RunForwardLeft"
         or animationName == "RunForwardRight"
+        or animationName == "RunForwardTest"
     then
         return Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER
     elseif animationName == "Idle" then
@@ -2344,6 +2345,13 @@ local function loadMovementAnimations(character: Model)
         toLoad["Unarmed_WalkForwardAlt"] = r6.Unarmed.WalkForwardAlt
     end
 
+    -- Test run-forward clip — loaded alongside RunForward so both are always available.
+    -- Active when MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION == true.
+    -- Toggle the constant to switch without touching any logic code.
+    if r6.Unarmed.RunForwardTest and r6.Unarmed.RunForwardTest ~= "" then
+        toLoad["Unarmed_RunForwardTest"] = r6.Unarmed.RunForwardTest
+    end
+
     -- Stage 2N: CrouchIdle (looped idle while crouched+still) — preferred over the
     -- EnterCrouch bottom-pose hold when the player is crouched and not moving.
     -- Falls back to holdCrouchBottomPose() if this track is absent.
@@ -2456,6 +2464,20 @@ local function loadMovementAnimations(character: Model)
     Logger.debug("[MovementController] R6 movement animations loaded for: " .. character.Name)
 end
 
+-- Returns the run-forward animation suffix for a given set name.
+-- When MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION is true and Unarmed_RunForwardTest is loaded,
+-- returns "RunForwardTest" instead of "RunForward". All other sets always return "RunForward".
+-- Called from getSprintAnimationName() and any other code path that selects the run-forward clip.
+local function getRunForwardSuffix(animSetName: string): string
+    if Constants.MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION
+        and animSetName == Constants.MOVEMENT_ANIMATION_SET_UNARMED
+        and animationTracks[animSetName .. "_RunForwardTest"] ~= nil
+    then
+        return "RunForwardTest"
+    end
+    return "RunForward"
+end
+
 -- Stage 2R: Returns the short animation suffix (without set prefix) for the current normal sprint.
 -- The caller prepends the animation set name: `setName .. "_" .. getSprintAnimationName(...)`.
 -- Only resolves RunForwardLeft/RunForwardRight when customMouseLocked == true AND the track exists.
@@ -2473,7 +2495,7 @@ local function getSprintAnimationName(animSetName: string, directionName: string
 
     -- Without custom mouse lock, all sprint directions play RunForward (matches Stage 2L behavior).
     if not customMouseLocked then
-        return "RunForward"
+        return getRunForwardSuffix(animSetName)
     end
 
     -- Custom mouse lock ON: resolve directional run clips when tracks are loaded.
@@ -2486,7 +2508,7 @@ local function getSprintAnimationName(animSetName: string, directionName: string
                 missedSprintAnimWarned[key] = true
                 Logger.warn("[MovementController] getSprintAnimationName: " .. key .. " not loaded — RunForward fallback")
             end
-            return "RunForward"
+            return getRunForwardSuffix(animSetName)
         end
     end
 
@@ -2499,7 +2521,7 @@ local function getSprintAnimationName(animSetName: string, directionName: string
                 missedSprintAnimWarned[key] = true
                 Logger.warn("[MovementController] getSprintAnimationName: " .. key .. " not loaded — RunForward fallback")
             end
-            return "RunForward"
+            return getRunForwardSuffix(animSetName)
         end
     end
 
@@ -2518,7 +2540,7 @@ local function getSprintAnimationName(animSetName: string, directionName: string
                     .. key .. " not loaded — RunForward fallback (BackwardLeft)"
                 )
             end
-            return "RunForward"
+            return getRunForwardSuffix(animSetName)
         end
     end
 
@@ -2534,15 +2556,15 @@ local function getSprintAnimationName(animSetName: string, directionName: string
                     .. key .. " not loaded — RunForward fallback (BackwardRight)"
                 )
             end
-            return "RunForward"
+            return getRunForwardSuffix(animSetName)
         end
     end
 
-    -- Left, Right, Backward, Forward, or unclassified → RunForward.
+    -- Left, Right, Backward, Forward, or unclassified → RunForward (or RunForwardTest when toggled).
     -- Body is rotated toward movement direction by faceCharacterTowardsDirection(),
-    -- so RunForward plays in the correct world-space direction.
+    -- so the run-forward clip plays in the correct world-space direction.
     -- Dedicated run-left/run-right/run-backward IDs are deferred to a future stage.
-    return "RunForward"
+    return getRunForwardSuffix(animSetName)
 end
 
 -- ============================================================
@@ -2715,7 +2737,7 @@ local function getDesiredStandingLocomotionKey(): string?
         if isTacticalSprinting then
             local tsKey = setName .. "_TacticalSprintForward1"
             if animationTracks[tsKey] ~= nil then return tsKey end
-            return setName .. "_RunForward"
+            return setName .. "_" .. getRunForwardSuffix(setName)
         end
         local sprintSuffix = getSprintAnimationName(setName, movementState.directionName)
         return setName .. "_" .. sprintSuffix
@@ -3209,7 +3231,7 @@ local function updateMovementAnimation()
             if animationTracks[tsKey] ~= nil then
                 playMovementAnimation(tsKey)
             else
-                playMovementAnimation(setName .. "_RunForward")
+                playMovementAnimation(setName .. "_" .. getRunForwardSuffix(setName))
             end
             return  -- no further direction selection while tactical sprinting
         end
