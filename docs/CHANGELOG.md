@@ -7,6 +7,52 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-23] — Movement Stage 2S: Zero-gap crouch-exit transitions
+
+### Summary
+
+Eliminates the brief default Roblox neutral/T-pose that appeared between crouch release and walk/run animation start. Root cause: `playCrouchTransition(false)` hard-stopped all crouch tracks and gated Heartbeat behind `crouchTransitionPlaying`, leaving ≥1 frame where every track had zero weight — causing the engine to flash the default standing pose before the next animation faded in.
+
+**What changed:**
+
+- **Moving on C-release** (`CROUCH_USE_EXIT_TRANSITION_WHILE_MOVING = false`, default): ExitCrouch is now skipped entirely. `resumeStandingLocomotionAfterCrouch(0.10s)` fades all crouch tracks out and the correct walk/run animation in with the **same** `fadeTime` — combined weight never reaches zero, so the default pose cannot appear.
+- **Not moving on C-release**: ExitCrouch still plays. When it finishes, `resumeStandingLocomotionAfterCrouch` is called immediately inside the Stopped callback (`CROUCH_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true`). Idle starts inside the callback, not on the following Heartbeat tick — the ≥1 frame blank-pose gap after ExitCrouch is also eliminated.
+- **No ExitCrouch track**: falls directly to `resumeStandingLocomotionAfterCrouch`.
+- **Legacy path preserved**: setting `CROUCH_ZERO_GAP_TRANSITIONS_ENABLED = false` restores the original `playCrouchTransition(false)` behavior.
+- `wasMovingWhileCrouching` and `CrouchWalkStart` are now explicitly reset in `crouchEndConn` (were previously only reset by Heartbeat on the next tick).
+
+### New helpers (`src/client/MovementController.lua`)
+
+- **`getDesiredStandingLocomotionKey(): string?`** — Pure read; mirrors `updateMovementAnimation`'s standing/sprint animation selection; returns the full track key (e.g. `"Unarmed_WalkForward"`) without modifying state.
+- **`resumeStandingLocomotionAfterCrouch(fadeTime: number)`** — Fades all crouch tracks out with `fadeTime` and simultaneously starts the selected standing track in with the same `fadeTime`. Includes assert, `Logger.warn` on missing track, and same-track-already-playing guard.
+
+### Changes to `src/shared/Constants.lua`
+
+Five new constants added (Stage 2S section):
+- `CROUCH_ZERO_GAP_TRANSITIONS_ENABLED = true`
+- `CROUCH_USE_EXIT_TRANSITION_WHILE_MOVING = false`
+- `CROUCH_EXIT_DIRECT_BLEND_FADE_TIME = 0.10`
+- `CROUCH_EXIT_IDLE_BLEND_FADE_TIME = 0.12`
+- `CROUCH_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true`
+
+All existing crouch, landing, sprint, camera, and weapon constants unchanged.
+
+### Verification
+
+MCP Studio verified 2026-05-23: module loaded with no Output errors in play mode; all 5 new constants live at runtime; all 13 source patterns (helper names, constant names, debug log strings, crossfade loop pattern) confirmed present in running module source. C key does not reach `InputBegan` via MCP — full visual crouch test requires manual Studio playtest.
+
+**Manual test steps:**
+1. Spawn as R6, enter ACTIVE.
+2. Hold C (stand still) → release C: crouch exits cleanly into Idle with no default-pose frame.
+3. Hold C, move forward, release C while holding W: blends directly into WalkForward — no neutral pose gap.
+4. Hold C, move forward, hold LeftShift, release C: blends directly into RunForward/sprint animation.
+5. With LeftControl mouse-lock ON: hold C, strafe left, release C while strafing: blends into WalkLeft/WalkForwardLeft.
+6. Confirm crouch enter still blends directly into CrouchIdle/CrouchWalk (Stage 2Q-D unchanged).
+7. Confirm respawn does not produce duplicate tracks or stuck state.
+8. Confirm leaving ACTIVE clears crouch state safely.
+
+---
+
 ## [2026-05-23] — Movement Stage 2Q-D: crouch direct-blend / EnterCrouch disable
 
 ### Summary

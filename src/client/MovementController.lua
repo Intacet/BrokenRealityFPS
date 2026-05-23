@@ -2,7 +2,7 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > MovementController
 --
--- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2Q+ + 2R + 3A + 3B + 3C (Animate-disable, R6 detection, animation-set selection,
+-- Movement Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2Q+ + 2Q-D + 2R + 2S + 3A + 3B + 3C (Animate-disable, R6 detection, animation-set selection,
 -- strafe gating, animation speed multipliers, shift-lock sprint fix, custom mouse-lock toggle,
 -- character-facing camera yaw, Unarmed backward/diagonal directional animations,
 -- directional sprint selection (RunForwardLeft/Right with mouse lock; RunForward fallback),
@@ -2538,6 +2538,200 @@ local function playLandingAnimation(animationName: string)
     end)
 end
 
+-- ============================================================
+-- Private helpers — Stage 2S: Zero-gap crouch-exit transition
+-- These two functions work together to eliminate the brief default-pose flash that
+-- occurs when the player releases C while moving or running. The fix is to crossfade
+-- directly from CrouchIdle/CrouchWalk into the correct standing animation rather than
+-- waiting for ExitCrouch to finish and Heartbeat to pick up on the next tick.
+-- ============================================================
+
+-- Returns the full animation track key (e.g. "Unarmed_WalkForward") that
+-- updateMovementAnimation would select for the current non-crouching state.
+-- Pure read: does NOT call playMovementAnimation and does NOT modify any state.
+-- Returns nil when: phase is not ACTIVE, tracks not loaded, or standing is not applicable.
+-- The selection logic mirrors updateMovementAnimation's standing/sprint branch exactly;
+-- any future change to walk/sprint selection must be applied here too.
+local function getDesiredStandingLocomotionKey(): string?
+    if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return nil end
+    if next(animationTracks) == nil then return nil end
+
+    local setName = getAnimationSetName()
+
+    -- Not moving: Idle.
+    if not movementState.isMoving then
+        local idleKey = setName .. "_Idle"
+        if animationTracks[idleKey] ~= nil then
+            return idleKey
+        end
+        return nil
+    end
+
+    -- Sprinting branch (mirrors updateMovementAnimation sprint block).
+    if movementState.isSprinting then
+        if isTacticalSprinting then
+            local tsKey = setName .. "_TacticalSprintForward1"
+            if animationTracks[tsKey] ~= nil then return tsKey end
+            return setName .. "_RunForward"
+        end
+        local sprintSuffix = getSprintAnimationName(setName, movementState.directionName)
+        return setName .. "_" .. sprintSuffix
+    end
+
+    -- Walking branch (mirrors updateMovementAnimation Unarmed + non-Unarmed selection).
+    local canUseStrafe: boolean
+    if Constants.MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK then
+        canUseStrafe = isMouseLockedForStrafeAnimations()
+    else
+        canUseStrafe = true
+    end
+
+    local dirName = movementState.directionName
+
+    if setName == Constants.MOVEMENT_ANIMATION_SET_UNARMED then
+        if dirName == "Backward" then
+            local k = "Unarmed_WalkBackward"
+            return if animationTracks[k] ~= nil then k else "Unarmed_WalkForward"
+
+        elseif dirName == "ForwardLeft" then
+            local fl = "Unarmed_WalkForwardLeft"
+            local l  = "Unarmed_WalkLeft"
+            if animationTracks[fl] ~= nil then return fl end
+            if canUseStrafe and animationTracks[l] ~= nil then return l end
+            return "Unarmed_WalkForward"
+
+        elseif dirName == "ForwardRight" then
+            local fr = "Unarmed_WalkForwardRight"
+            local r  = "Unarmed_WalkRight"
+            if animationTracks[fr] ~= nil then return fr end
+            if canUseStrafe and animationTracks[r] ~= nil then return r end
+            return "Unarmed_WalkForward"
+
+        elseif dirName == "BackwardLeft" then
+            local bl  = "Unarmed_WalkBackwardLeft"
+            local bwd = "Unarmed_WalkBackward"
+            if animationTracks[bl] ~= nil then return bl end
+            if animationTracks[bwd] ~= nil then return bwd end
+            return "Unarmed_WalkForward"
+
+        elseif dirName == "BackwardRight" then
+            local br  = "Unarmed_WalkBackwardRight"
+            local bwd = "Unarmed_WalkBackward"
+            if animationTracks[br] ~= nil then return br end
+            if animationTracks[bwd] ~= nil then return bwd end
+            return "Unarmed_WalkForward"
+
+        elseif canUseStrafe then
+            if dirName == "Left" then
+                local lk = "Unarmed_WalkLeft"
+                return if animationTracks[lk] ~= nil then lk else "Unarmed_WalkForward"
+            elseif dirName == "Right" then
+                local rk = "Unarmed_WalkRight"
+                return if animationTracks[rk] ~= nil then rk else "Unarmed_WalkForward"
+            end
+        end
+        return "Unarmed_WalkForward"
+
+    elseif canUseStrafe then
+        if dirName == "Left" or dirName == "ForwardLeft" or dirName == "BackwardLeft" then
+            local lk = setName .. "_WalkLeft"
+            return if animationTracks[lk] ~= nil then lk else (setName .. "_WalkForward")
+        elseif dirName == "Right" or dirName == "ForwardRight" or dirName == "BackwardRight" then
+            local rk = setName .. "_WalkRight"
+            return if animationTracks[rk] ~= nil then rk else (setName .. "_WalkForward")
+        end
+    end
+    return setName .. "_WalkForward"
+end
+
+-- Immediately resumes the correct standing locomotion animation after crouch exit.
+-- Fades ALL crouch tracks out with `fadeTime` while simultaneously fading the target
+-- standing animation IN with the same `fadeTime`. Because both Stop and Play use the same
+-- duration, the combined animation weight is never zero — this prevents the brief flash of
+-- the default Roblox neutral pose that occurs when all tracks momentarily have zero weight.
+--
+-- fadeTime: crossfade duration; shorter than MOVEMENT_ANIMATION_FADE_TIME for a snappier feel.
+-- Called from:
+--   • crouchEndConn moving path (skip ExitCrouch, direct blend into walk/run).
+--   • crouchEndConn idle path when ExitCrouch track is absent (direct blend into Idle).
+--   • ExitCrouch Stopped callback when CROUCH_EXIT_RESUME_LOCOMOTION_IMMEDIATELY is true.
+-- Must be defined after getDesiredStandingLocomotionKey and getAnimationSpeedMultiplier.
+local function resumeStandingLocomotionAfterCrouch(fadeTime: number)
+    assert(typeof(fadeTime) == "number",
+        "[MovementController] resumeStandingLocomotionAfterCrouch: fadeTime must be a number")
+
+    local desiredKey = getDesiredStandingLocomotionKey()
+
+    -- Fade all crouch tracks out with fadeTime (not Stop(0)) so they decay concurrently
+    -- with the incoming animation fading in — crossfade, not cut.
+    for key, track in pairs(animationTracks) do
+        if key:find("Crouch") then
+            track:Stop(fadeTime)
+        end
+    end
+    -- Clear currentAnimationName if it pointed at a crouch track (now fading out).
+    if currentAnimationName ~= "" and currentAnimationName:find("Crouch") then
+        currentAnimationName = ""
+    end
+
+    if desiredKey == nil then
+        -- Phase not ACTIVE or no suitable standing track. Stop any remaining locomotion.
+        if currentAnimationName ~= "" then
+            local staleTrack = animationTracks[currentAnimationName]
+            if staleTrack then
+                staleTrack:Stop(fadeTime)
+            end
+            currentAnimationName = ""
+        end
+        if Constants.MOVEMENT_ANIMATION_DEBUG then
+            Logger.debug(
+                "[MovementController] resumeStandingLocomotionAfterCrouch:"
+                .. " no standing key (phase not ACTIVE or tracks absent)"
+            )
+        end
+        return
+    end
+
+    if Constants.MOVEMENT_ANIMATION_DEBUG then
+        Logger.debug(
+            "[MovementController] crouch exit → " .. desiredKey
+            .. string.format(" (fade=%.2fs)", fadeTime)
+        )
+    end
+
+    -- Don't restart the track if it is already playing (e.g. crouch entered and released
+    -- within a single Heartbeat while walking — extremely fast tap).
+    if currentAnimationName == desiredKey then
+        local existingTrack = animationTracks[desiredKey]
+        if existingTrack and existingTrack.IsPlaying then
+            return
+        end
+    end
+
+    -- Fade out any previous non-crouch animation at the same rate.
+    if currentAnimationName ~= "" and currentAnimationName ~= desiredKey then
+        local prevTrack = animationTracks[currentAnimationName]
+        if prevTrack then
+            prevTrack:Stop(fadeTime)
+        end
+    end
+
+    local targetTrack = animationTracks[desiredKey]
+    if not targetTrack then
+        Logger.warn(
+            "[MovementController] resumeStandingLocomotionAfterCrouch:"
+            .. " track not loaded: " .. desiredKey
+        )
+        currentAnimationName = ""
+        return
+    end
+
+    currentAnimationName = desiredKey
+    targetTrack:Play(fadeTime)
+    local shortName = desiredKey:match("_(.+)$") or desiredKey
+    targetTrack:AdjustSpeed(getAnimationSpeedMultiplier(shortName))
+end
+
 -- Selects and triggers the correct movement animation for the current movementState.
 -- Called every Heartbeat tick during ACTIVE phase.
 -- Skipped if CUSTOM_MOVEMENT_ANIMATIONS_ENABLED is false.
@@ -3802,14 +3996,94 @@ function MovementController:Start()
             movementState.isCrouching = false
             applySpeed()
             -- Disconnect any in-flight EnterCrouch Stopped callback so
-            -- holdCrouchBottomPose() does not fire after we've already exited crouch.
+            -- holdCrouchBottomPose() does not fire after we have already exited crouch.
             clearCrouchTransitionConnection()
             crouchTransitionPlaying = false
             -- Release the hold pose if it was active.
             clearCrouchBottomHold()
-            -- Play ExitCrouch. playCrouchTransition calls stopCurrentMovementAnimation
-            -- internally to cleanly stop any partially-played EnterCrouch or CrouchWalk.
-            playCrouchTransition(false)  -- play ExitCrouch
+            -- Disconnect CrouchWalkStart if still in-flight; reset first-movement tracking.
+            if crouchWalkStartPlaying then
+                clearCrouchWalkStart()
+            end
+            wasMovingWhileCrouching = false
+
+            -- ── Stage 2S: zero-gap crouch-exit transition ─────────────────────────
+            if Constants.CROUCH_ZERO_GAP_TRANSITIONS_ENABLED then
+                if movementState.isMoving
+                    and not Constants.CROUCH_USE_EXIT_TRANSITION_WHILE_MOVING
+                then
+                    -- Moving: skip ExitCrouch, blend directly into walk/run/sprint.
+                    -- resumeStandingLocomotionAfterCrouch fades crouch tracks out and the
+                    -- standing animation in with the same fadeTime — combined weight never
+                    -- reaches zero so the default Roblox pose cannot flash through.
+                    if Constants.MOVEMENT_ANIMATION_DEBUG then
+                        Logger.debug(
+                            "[MovementController] crouch exit: moving →"
+                            .. " ExitCrouch SKIPPED (CROUCH_USE_EXIT_TRANSITION_WHILE_MOVING=false)"
+                            .. " — direct blend into standing locomotion"
+                        )
+                    end
+                    resumeStandingLocomotionAfterCrouch(Constants.CROUCH_EXIT_DIRECT_BLEND_FADE_TIME)
+                else
+                    -- Not moving (or CROUCH_USE_EXIT_TRANSITION_WHILE_MOVING = true):
+                    -- play ExitCrouch one-shot, then immediately start Idle when it finishes.
+                    local sn        = getAnimationSetName()
+                    local exitKey   = sn .. "_ExitCrouch"
+                    local exitTrack = animationTracks[exitKey]
+                    if exitTrack then
+                        if Constants.MOVEMENT_ANIMATION_DEBUG then
+                            Logger.debug(
+                                "[MovementController] crouch exit: not moving →"
+                                .. " ExitCrouch (" .. exitKey .. ") → Idle"
+                            )
+                        end
+                        -- Stop remaining crouch tracks but keep ExitCrouch playing cleanly.
+                        stopCrouchTracksExcept(exitKey)
+                        stopCurrentMovementAnimation()
+                        crouchTransitionPlaying = true
+                        currentAnimationName    = exitKey
+                        exitTrack:Play(Constants.MOVEMENT_ANIMATION_FADE_TIME)
+                        exitTrack:AdjustSpeed(getAnimationSpeedMultiplier("ExitCrouch"))
+                        -- clearCrouchTransitionConnection() already called above.
+                        crouchTransitionConn = exitTrack.Stopped:Connect(function()
+                            clearCrouchTransitionConnection()
+                            crouchTransitionPlaying = false
+                            if currentAnimationName == exitKey then
+                                currentAnimationName = ""
+                            end
+                            if Constants.MOVEMENT_ANIMATION_DEBUG then
+                                Logger.debug(
+                                    "[MovementController] crouch exit: ExitCrouch done →"
+                                    .. " resuming standing locomotion"
+                                )
+                            end
+                            if Constants.CROUCH_EXIT_RESUME_LOCOMOTION_IMMEDIATELY then
+                                -- Start Idle immediately — no Heartbeat gap.
+                                resumeStandingLocomotionAfterCrouch(
+                                    Constants.CROUCH_EXIT_IDLE_BLEND_FADE_TIME
+                                )
+                            end
+                            -- If false, Heartbeat resumes on the next tick (legacy gap may reappear).
+                        end)
+                    else
+                        -- No ExitCrouch track for this set: blend directly into Idle.
+                        if Constants.MOVEMENT_ANIMATION_DEBUG then
+                            Logger.debug(
+                                "[MovementController] crouch exit: no ExitCrouch track →"
+                                .. " direct blend into standing locomotion"
+                            )
+                        end
+                        resumeStandingLocomotionAfterCrouch(
+                            Constants.CROUCH_EXIT_IDLE_BLEND_FADE_TIME
+                        )
+                    end
+                end
+            else
+                -- Legacy path (CROUCH_ZERO_GAP_TRANSITIONS_ENABLED = false).
+                -- Play ExitCrouch via playCrouchTransition; Heartbeat takes over when done.
+                playCrouchTransition(false)
+            end
+            -- ─────────────────────────────────────────────────────────────────────
         end
     )
     table.insert(_connections, crouchEndConn)

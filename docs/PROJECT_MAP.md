@@ -558,6 +558,48 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Files changed: src/shared/Constants.lua, src/client/MovementController.lua.
                         --       MCP unavailable — needs Studio verification.
                         --
+                        --     Zero-gap crouch-exit transitions (Stage 2S — 2026-05-23):
+                        --       Eliminates the brief default Roblox neutral pose that appeared between
+                        --       crouch release and walk/run/idle resumption. Root cause: playCrouchTransition
+                        --       hard-stopped crouch tracks and gated Heartbeat behind crouchTransitionPlaying,
+                        --       leaving ≥1 frame where all track weights were zero.
+                        --
+                        --       Two new pure-read helpers:
+                        --         getDesiredStandingLocomotionKey(): mirrors updateMovementAnimation's
+                        --           standing/sprint walk selection logic; returns the full track key
+                        --           (e.g. "Unarmed_WalkForward") without playing anything.
+                        --         resumeStandingLocomotionAfterCrouch(fadeTime): fades all crouch tracks
+                        --           out with fadeTime AND starts the standing track in with the same
+                        --           fadeTime, so combined weight never reaches zero → no pose flash.
+                        --
+                        --       crouchEndConn (C release) updated:
+                        --         CROUCH_ZERO_GAP_TRANSITIONS_ENABLED = true (master switch).
+                        --         Moving and CROUCH_USE_EXIT_TRANSITION_WHILE_MOVING = false (default):
+                        --           Skip ExitCrouch; call resumeStandingLocomotionAfterCrouch
+                        --           (CROUCH_EXIT_DIRECT_BLEND_FADE_TIME = 0.10s) immediately.
+                        --           wasMovingWhileCrouching reset to false; CrouchWalkStart cleared.
+                        --         Not moving (or CROUCH_USE_EXIT_TRANSITION_WHILE_MOVING = true):
+                        --           Play ExitCrouch (one-shot); in Stopped callback, if
+                        --           CROUCH_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true, immediately call
+                        --           resumeStandingLocomotionAfterCrouch (CROUCH_EXIT_IDLE_BLEND_FADE_TIME = 0.12s).
+                        --           No more Heartbeat gap after ExitCrouch finishes.
+                        --         No ExitCrouch track: falls directly to resumeStandingLocomotionAfterCrouch.
+                        --         Legacy path (CROUCH_ZERO_GAP_TRANSITIONS_ENABLED = false):
+                        --           original playCrouchTransition(false) call preserved unchanged.
+                        --
+                        --       No HipHeight, CameraOffset, FOV, camera.CFrame, sprint, landing, or
+                        --       server changes. No new animation IDs. No new remotes.
+                        --       New constants: CROUCH_ZERO_GAP_TRANSITIONS_ENABLED = true,
+                        --         CROUCH_USE_EXIT_TRANSITION_WHILE_MOVING = false,
+                        --         CROUCH_EXIT_DIRECT_BLEND_FADE_TIME = 0.10,
+                        --         CROUCH_EXIT_IDLE_BLEND_FADE_TIME = 0.12,
+                        --         CROUCH_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true.
+                        --       Files changed: src/shared/Constants.lua, src/client/MovementController.lua.
+                        --       MCP Studio verified (2026-05-23): module loaded clean, all 9 constants
+                        --         live, all 13 source patterns confirmed, no Output errors in play mode.
+                        --         C key cannot reach InputBegan via MCP — full visual test requires
+                        --         manual Studio playtest.
+                        --
                         --     Sprint FOV stretch (Stage 3A — 2026-05-21):
                         --       TweenService smoothly tweens workspace.CurrentCamera.FieldOfView.
                         --       Normal sprint (LeftShift + moving + not crouching) → SPRINT_CAMERA_FOV (78).
@@ -775,6 +817,22 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --     CROUCH_TRANSITION_MIN_HOLD_TIME = 0.05 — seconds from clip end; guards against TimePosition
              --       snapping to frame 0 at exact Length on some Roblox versions.
              --     CROUCH_BOTTOM_HOLD_TIME_POSITION_FALLBACK = 0.98 — used when EnterCrouch.Length == 0.
+             --   Crouch direct-blend constants (Stage 2Q-D — 2026-05-23):
+             --     (see Stage 2Q-D entry in MovementController block above)
+             --   Zero-gap crouch-exit constants (Stage 2S — 2026-05-23):
+             --     CROUCH_ZERO_GAP_TRANSITIONS_ENABLED = true — master switch; when false, original
+             --       ExitCrouch → Heartbeat path is used (may show default-pose gap on release).
+             --     CROUCH_USE_EXIT_TRANSITION_WHILE_MOVING = false — when false (default), ExitCrouch
+             --       is skipped while the player is moving; direct blend into walk/run instead.
+             --       Set true to play ExitCrouch even while moving (re-enables the gap).
+             --     CROUCH_EXIT_DIRECT_BLEND_FADE_TIME = 0.10 — crossfade duration (s) for direct
+             --       blend from CrouchIdle/CrouchWalk into walk/run (moving path). Both the crouch
+             --       fade-out and standing fade-in use this value so total weight never hits zero.
+             --     CROUCH_EXIT_IDLE_BLEND_FADE_TIME = 0.12 — crossfade duration (s) for direct
+             --       blend into Idle (not-moving path, or ExitCrouch Stopped → Idle).
+             --     CROUCH_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true — when true, standing locomotion
+             --       starts in the ExitCrouch Stopped callback rather than waiting for next Heartbeat.
+             --       Eliminates the ≥1 frame blank pose after ExitCrouch finishes.
              --   Crouch direct-blend constants (Stage 2Q-D — 2026-05-23):
              --     CROUCH_USE_ENTER_TRANSITION_ANIMATION = false — when false, EnterCrouch one-shot is skipped
              --       on crouch press; direct crossfade into CrouchIdle or CrouchWalk* instead.

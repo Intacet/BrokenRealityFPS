@@ -82,6 +82,31 @@ Constants.CROUCH_DIRECT_BLEND_MOVING_FADE_TIME = 0.10
 -- Default: false — avoids a forward-lunge artifact on the first crouched step.
 Constants.CROUCH_USE_CROUCH_WALK_START_ANIMATION = false
 
+-- ── Stage 2S: Zero-gap crouch-exit transitions ────────────────────────────────
+-- Master switch. When true, releasing C blends directly from the crouch pose into the
+-- correct standing idle/walk/run animation without showing the default Roblox neutral pose.
+-- When false, the original ExitCrouch one-shot path is used (may show a pose gap).
+Constants.CROUCH_ZERO_GAP_TRANSITIONS_ENABLED = true
+
+-- When false (default), the ExitCrouch one-shot is skipped while the player is moving.
+-- The character crossfades directly from CrouchIdle/CrouchWalk into the appropriate
+-- standing walk or run animation. Set true to restore ExitCrouch even while moving.
+Constants.CROUCH_USE_EXIT_TRANSITION_WHILE_MOVING = false
+
+-- Crossfade duration (seconds) for the direct blend from crouch into walk/run (moving path).
+-- Both the crouch track fade-out and the walk/run fade-in use this value, so the blender
+-- always has non-zero total weight — prevents the default pose flash.
+Constants.CROUCH_EXIT_DIRECT_BLEND_FADE_TIME = 0.10
+
+-- Crossfade duration (seconds) for the direct blend from crouch into Idle (not-moving path),
+-- used both when ExitCrouch is absent and when ExitCrouch finishes and Idle should start.
+Constants.CROUCH_EXIT_IDLE_BLEND_FADE_TIME = 0.12
+
+-- When true, the correct standing animation starts immediately inside the ExitCrouch Stopped
+-- callback, rather than waiting for the next Heartbeat tick.
+-- Eliminates the ≥1 frame blank-pose window after the ExitCrouch one-shot ends.
+Constants.CROUCH_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true
+
 -- ============================================================
 -- Objective settings
 -- ============================================================
