@@ -7,6 +7,36 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-25] — Stage 3F: Zero-gap landing exit (mirrors Stage 2S crouch-exit fix)
+
+### Summary
+
+Eliminates the brief T-pose / blank-pose flash that appeared between the end of a landing one-shot animation and the resumption of locomotion. Root cause: the `landingConn` Stopped callback in `playLandingAnimation()` cleared `isLandingPlaying` (releasing the Heartbeat gate) but did not immediately start the next locomotion animation. The next `updateMovementAnimation()` call on the following Heartbeat tick (~16ms later) would then start the correct animation, leaving at least one rendered frame with all track weights at zero — producing the visible neutral-pose flash. Fix: call `playMovementAnimation(getDesiredStandingLocomotionKey())` directly from the Stopped callback, mirroring the Stage 2S crouch-exit approach.
+
+**What changed:**
+
+- **One new constant** in `Constants.lua`: `LANDING_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true`. When `true`, the landing Stopped callback immediately crossfades to the correct locomotion animation. Set `false` to revert to the old Heartbeat-gap behaviour.
+- **`getDesiredStandingLocomotionKey()` moved** from the Stage 2S section (~line 2759) to just before `playLandingAnimation()` (~line 2662) so the landing Stopped callback can call it without a forward-reference. All dependencies of the helper (`getAnimationSetName`, `isMouseLockedForStrafeAnimations`, `getRunForwardSuffix`, `getSprintAnimationName`) are already defined before the new position.
+- **Stage 2S section header updated**: the duplicate `getDesiredStandingLocomotionKey` definition removed; header comment updated to reference Stage 3F placement.
+- **`landingConn` Stopped callback extended**: after `clearLandingConnection()` and the optional early movement-lock release, the callback now calls `playMovementAnimation(getDesiredStandingLocomotionKey())` when `LANDING_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true` and `not isLandingPlaying` (guards against a second landing starting before the callback fires).
+- **Studio MCP verified 2026-05-25**: 25-stud drop showed `LandingHeavy` (w=0.61) and `Idle` (w=0.78) overlapping in the same Heartbeat tick — no zero-weight gap frame. Full crossfade trace: `t=2.70 [LandingHeavy w=0.61] [Idle w=0.78]` → `t=2.88 [LandingHeavy w=0.00] [Idle w=1.00]` → `t=2.90 [Idle w=1.00]`.
+
+### Changes to `src/shared/Constants.lua`
+
+- `LANDING_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true` added after `SPRINT_JUMP_LANDING_MOMENTUM_MAX_FORCE` (Stage 3F section comment).
+
+### Changes to `src/client/MovementController.lua`
+
+- `getDesiredStandingLocomotionKey()` moved from Stage 2S section to just before `playLandingAnimation()` (placement comment updated).
+- Duplicate `getDesiredStandingLocomotionKey()` removed from Stage 2S section; section header updated.
+- `landingConn` Stopped callback in `playLandingAnimation()` extended with Stage 3F zero-gap crossfade block.
+
+### No animation ID changes, no speed changes, no camera changes
+
+No animation IDs, animation track loading, speed multipliers, camera CFrame, CameraOffset, FieldOfView, HipHeight, JumpPower, or server-side systems were modified.
+
+---
+
 ## [2026-05-23] — Stage 3E: Natural AutoRotate sprint rotation (replaces Stage 3D directional CFrame snapping)
 
 ### Summary

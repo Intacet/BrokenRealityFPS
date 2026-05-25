@@ -665,6 +665,25 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       MCP unavailable — Studio verification was not performed.
                         --       Needs manual playtest.
                         --
+                        --     Zero-gap landing exit (Stage 3F — 2026-05-25):
+                        --       Eliminates the T-pose / blank-pose flash between a landing one-shot
+                        --       finishing and locomotion resuming. Root cause: landingConn Stopped
+                        --       callback cleared isLandingPlaying (releasing the Heartbeat gate) but
+                        --       did not start the next animation — the gap between callback and next
+                        --       Heartbeat tick (~16ms) had all track weights at zero.
+                        --       Fix: call playMovementAnimation(getDesiredStandingLocomotionKey())
+                        --         directly from the Stopped callback, before the next Heartbeat.
+                        --         Guard: LANDING_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true (master
+                        --         switch) and not isLandingPlaying (prevents override if a second
+                        --         landing started while this callback was queued).
+                        --       getDesiredStandingLocomotionKey() moved to just before
+                        --         playLandingAnimation() (from Stage 2S section) so the Stopped
+                        --         callback can call it without a forward-reference.
+                        --       No new animation IDs. No new remotes. No server changes.
+                        --       New constant: LANDING_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true.
+                        --       MCP Studio verified 2026-05-25: LandingHeavy (w=0.61) and Idle
+                        --         (w=0.78) overlap in same Heartbeat — no zero-weight gap frame.
+                        --
                         --     Sprint FOV stretch (Stage 3A — 2026-05-21):
                         --       TweenService smoothly tweens workspace.CurrentCamera.FieldOfView.
                         --       Normal sprint (LeftShift + moving + not crouching) → SPRINT_CAMERA_FOV (78).
@@ -926,6 +945,13 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --       both must be true for Stage 3E to activate.
              --     SPRINT_NATURAL_AUTOROTATE_DEBUG = true — logs Stage 3E mode entry/exit once per
              --       transition; gated by lastNaturalSprintAutoRotateActive (no per-frame spam).
+             --   Zero-gap landing exit constants (Stage 3F — 2026-05-25):
+             --     LANDING_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true — master switch; when true, the
+             --       landing animation Stopped callback immediately crossfades into the correct
+             --       locomotion animation (walk/run/idle), eliminating the ≥1 frame blank-pose gap
+             --       between landing one-shot end and the next Heartbeat tick. Set false to revert to
+             --       the old behaviour (locomotion resumes on the next Heartbeat). Mirrors
+             --       CROUCH_EXIT_RESUME_LOCOMOTION_IMMEDIATELY (Stage 2S).
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag

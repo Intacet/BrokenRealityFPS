@@ -596,6 +596,15 @@ Constants.SPRINT_JUMP_LANDING_MOMENTUM_DURATION = 0.22    -- seconds
 Constants.SPRINT_JUMP_LANDING_MOMENTUM_SPEED    = 18      -- studs/s (horizontal only)
 Constants.SPRINT_JUMP_LANDING_MOMENTUM_MAX_FORCE = 60000  -- LinearVelocity MaxForce (Magnitude mode)
 
+-- Stage 3F: zero-gap landing exit.
+-- When true, the landing animation's Stopped callback immediately crossfades to the
+-- correct locomotion animation (walk/run/idle) before the next Heartbeat tick fires.
+-- Prevents the brief blank-pose (T-pose) flash that occurs between the landing one-shot
+-- ending and updateMovementAnimation() picking up on the following Heartbeat.
+-- Mirrors Constants.CROUCH_EXIT_RESUME_LOCOMOTION_IMMEDIATELY (Stage 2S).
+-- Set false to revert to the old behaviour (locomotion resumes on the next Heartbeat).
+Constants.LANDING_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true
+
 -- ============================================================
 -- Sprint stop behavior (Movement Stage 3C — 2026-05-22)
 -- Applies a movement lock and short forward momentum carry when normal sprint

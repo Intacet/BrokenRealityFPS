@@ -2659,103 +2659,15 @@ local function getLandingAnimationName(
     end
 end
 
--- Plays the named landing animation (e.g. "LandingLight") for the current animation set.
--- Falls back to Unarmed set if the current set lacks the landing track.
--- Warns once (playLandingAnimWarned) if no track exists even after the Unarmed fallback.
--- Stops Falling and any in-flight landing animation before playing the new one.
--- Uses MOVEMENT_LANDING_ANIMATION_FADE_TIME (shorter than the normal fade) for quick blending.
--- Sets isLandingPlaying = true and connects a Stopped callback to clear it when done.
--- Does NOT freeze WalkSpeed or lock input — movement physics are unaffected.
-local function playLandingAnimation(animationName: string)
-    assert(animationName ~= nil, "[MovementController] playLandingAnimation: animationName is required")
-
-    local setName    = getAnimationSetName()
-    local primaryKey = setName .. "_" .. animationName
-
-    -- Resolve track: try current set first, fall back to Unarmed if set lacks the track.
-    local track: AnimationTrack? = animationTracks[primaryKey]
-    local usedKey: string        = primaryKey
-    if track == nil and setName ~= Constants.MOVEMENT_ANIMATION_SET_UNARMED then
-        local unarmedKey = Constants.MOVEMENT_ANIMATION_SET_UNARMED .. "_" .. animationName
-        if animationTracks[unarmedKey] ~= nil then
-            track   = animationTracks[unarmedKey]
-            usedKey = unarmedKey
-        end
-    end
-
-    if track == nil then
-        if not playLandingAnimWarned[animationName] then
-            playLandingAnimWarned[animationName] = true
-            Logger.warn(
-                "[MovementController] playLandingAnimation: no track for '"
-                .. primaryKey .. "' (no Unarmed fallback either) — skipping"
-            )
-        end
-        return
-    end
-
-    -- Disconnect any old landing Stopped callback (prevents spurious clearLandingConnection
-    -- calls from a previously started but not-yet-finished landing animation).
-    -- This sets isLandingPlaying = false; we re-set it true below after clearing.
-    clearLandingConnection()
-
-    -- Stop whatever is currently playing (typically Falling or idle).
-    -- This also stops any landing track that is currentAnimationName-tracked.
-    stopCurrentMovementAnimation()
-
-    -- Determine speed multiplier for this landing tier.
-    local speedMult: number
-    if animationName == "LandingLight" then
-        speedMult = Constants.MOVEMENT_LANDING_LIGHT_SPEED_MULTIPLIER
-    elseif animationName == "LandingHeavy" then
-        speedMult = Constants.MOVEMENT_LANDING_HEAVY_SPEED_MULTIPLIER
-    else
-        -- LandingMedium or unknown → use medium multiplier as safe default.
-        speedMult = Constants.MOVEMENT_LANDING_MEDIUM_SPEED_MULTIPLIER
-    end
-
-    -- Play the track and set gate state.
-    -- currentAnimationName is set so stopCurrentMovementAnimation() can stop it externally
-    -- (phase exit, destroy, or a second landing before the first finishes).
-    isLandingPlaying     = true
-    currentAnimationName = usedKey
-
-    track:Play(Constants.MOVEMENT_LANDING_ANIMATION_FADE_TIME)
-    track:AdjustSpeed(speedMult)
-
-    -- Connect Stopped callback: releases the gate when the one-shot finishes.
-    -- clearLandingConnection() MUST be called before any external track:Stop() to prevent
-    -- the callback from firing spuriously — mirrors clearCrouchTransitionConnection() pattern.
-    landingConn = track.Stopped:Connect(function()
-        clearLandingConnection()
-        -- Stage 3B: if the animation finished before the fallback timer, release the
-        -- movement lock early — but only when no momentum carry is still active.
-        -- When momentum IS active, the carry's own task.delay (and startLandingMovementLock's
-        -- timer) will clear the lock when the carry ends. Releasing early here would destroy
-        -- the LinearVelocity before the carry duration completes.
-        if isLandingMovementLocked and not landingMomentumActive then
-            clearLandingMovementLock()
-        end
-        if Constants.MOVEMENT_ANIMATION_DEBUG then
-            Logger.debug("[MovementController] " .. animationName .. " finished → resuming locomotion")
-        end
-    end)
-end
-
--- ============================================================
--- Private helpers — Stage 2S: Zero-gap crouch-exit transition
--- These two functions work together to eliminate the brief default-pose flash that
--- occurs when the player releases C while moving or running. The fix is to crossfade
--- directly from CrouchIdle/CrouchWalk into the correct standing animation rather than
--- waiting for ExitCrouch to finish and Heartbeat to pick up on the next tick.
--- ============================================================
-
 -- Returns the full animation track key (e.g. "Unarmed_WalkForward") that
--- updateMovementAnimation would select for the current non-crouching state.
+-- updateMovementAnimation would select for the current non-crouching standing state.
 -- Pure read: does NOT call playMovementAnimation and does NOT modify any state.
--- Returns nil when: phase is not ACTIVE, tracks not loaded, or standing is not applicable.
+-- Returns nil when: phase is not ACTIVE, tracks not loaded, or no valid key exists.
 -- The selection logic mirrors updateMovementAnimation's standing/sprint branch exactly;
 -- any future change to walk/sprint selection must be applied here too.
+-- Placed here (before playLandingAnimation) so the landing Stopped callback can call it
+-- without a forward-reference — mirrors the Stage 3B placement comment at line ~1137.
+-- Also used by resumeStandingLocomotionAfterCrouch (Stage 2S — defined further below).
 local function getDesiredStandingLocomotionKey(): string?
     if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return nil end
     if next(animationTracks) == nil then return nil end
@@ -2847,6 +2759,112 @@ local function getDesiredStandingLocomotionKey(): string?
     end
     return setName .. "_WalkForward"
 end
+
+-- Plays the named landing animation (e.g. "LandingLight") for the current animation set.
+-- Falls back to Unarmed set if the current set lacks the landing track.
+-- Warns once (playLandingAnimWarned) if no track exists even after the Unarmed fallback.
+-- Stops Falling and any in-flight landing animation before playing the new one.
+-- Uses MOVEMENT_LANDING_ANIMATION_FADE_TIME (shorter than the normal fade) for quick blending.
+-- Sets isLandingPlaying = true and connects a Stopped callback to clear it when done.
+-- Does NOT freeze WalkSpeed or lock input — movement physics are unaffected.
+-- Stage 3F: Stopped callback immediately crossfades to the correct locomotion animation
+-- (when LANDING_EXIT_RESUME_LOCOMOTION_IMMEDIATELY is true) to prevent the one-frame
+-- blank-pose flash between the landing one-shot ending and the next Heartbeat tick.
+local function playLandingAnimation(animationName: string)
+    assert(animationName ~= nil, "[MovementController] playLandingAnimation: animationName is required")
+
+    local setName    = getAnimationSetName()
+    local primaryKey = setName .. "_" .. animationName
+
+    -- Resolve track: try current set first, fall back to Unarmed if set lacks the track.
+    local track: AnimationTrack? = animationTracks[primaryKey]
+    local usedKey: string        = primaryKey
+    if track == nil and setName ~= Constants.MOVEMENT_ANIMATION_SET_UNARMED then
+        local unarmedKey = Constants.MOVEMENT_ANIMATION_SET_UNARMED .. "_" .. animationName
+        if animationTracks[unarmedKey] ~= nil then
+            track   = animationTracks[unarmedKey]
+            usedKey = unarmedKey
+        end
+    end
+
+    if track == nil then
+        if not playLandingAnimWarned[animationName] then
+            playLandingAnimWarned[animationName] = true
+            Logger.warn(
+                "[MovementController] playLandingAnimation: no track for '"
+                .. primaryKey .. "' (no Unarmed fallback either) — skipping"
+            )
+        end
+        return
+    end
+
+    -- Disconnect any old landing Stopped callback (prevents spurious clearLandingConnection
+    -- calls from a previously started but not-yet-finished landing animation).
+    -- This sets isLandingPlaying = false; we re-set it true below after clearing.
+    clearLandingConnection()
+
+    -- Stop whatever is currently playing (typically Falling or idle).
+    -- This also stops any landing track that is currentAnimationName-tracked.
+    stopCurrentMovementAnimation()
+
+    -- Determine speed multiplier for this landing tier.
+    local speedMult: number
+    if animationName == "LandingLight" then
+        speedMult = Constants.MOVEMENT_LANDING_LIGHT_SPEED_MULTIPLIER
+    elseif animationName == "LandingHeavy" then
+        speedMult = Constants.MOVEMENT_LANDING_HEAVY_SPEED_MULTIPLIER
+    else
+        -- LandingMedium or unknown → use medium multiplier as safe default.
+        speedMult = Constants.MOVEMENT_LANDING_MEDIUM_SPEED_MULTIPLIER
+    end
+
+    -- Play the track and set gate state.
+    -- currentAnimationName is set so stopCurrentMovementAnimation() can stop it externally
+    -- (phase exit, destroy, or a second landing before the first finishes).
+    isLandingPlaying     = true
+    currentAnimationName = usedKey
+
+    track:Play(Constants.MOVEMENT_LANDING_ANIMATION_FADE_TIME)
+    track:AdjustSpeed(speedMult)
+
+    -- Connect Stopped callback: releases the gate when the one-shot finishes.
+    -- clearLandingConnection() MUST be called before any external track:Stop() to prevent
+    -- the callback from firing spuriously — mirrors clearCrouchTransitionConnection() pattern.
+    landingConn = track.Stopped:Connect(function()
+        clearLandingConnection()
+        -- Stage 3B: if the animation finished before the fallback timer, release the
+        -- movement lock early — but only when no momentum carry is still active.
+        -- When momentum IS active, the carry's own task.delay (and startLandingMovementLock's
+        -- timer) will clear the lock when the carry ends. Releasing early here would destroy
+        -- the LinearVelocity before the carry duration completes.
+        if isLandingMovementLocked and not landingMomentumActive then
+            clearLandingMovementLock()
+        end
+        if Constants.MOVEMENT_ANIMATION_DEBUG then
+            Logger.debug("[MovementController] " .. animationName .. " finished → resuming locomotion")
+        end
+        -- Stage 3F: zero-gap landing exit — crossfade immediately to the correct locomotion
+        -- animation so there is no blank-pose frame between the one-shot ending and the
+        -- next Heartbeat tick. Mirrors the Stage 2S crouch-exit crossfade approach.
+        -- If a second landing started before this callback ran, isLandingPlaying is already
+        -- true again and we skip so we do not interrupt the new landing animation.
+        if Constants.LANDING_EXIT_RESUME_LOCOMOTION_IMMEDIATELY and not isLandingPlaying then
+            local desiredKey = getDesiredStandingLocomotionKey()
+            if desiredKey ~= nil then
+                playMovementAnimation(desiredKey)
+            end
+        end
+    end)
+end
+
+-- ============================================================
+-- Private helpers — Stage 2S: Zero-gap crouch-exit transition
+-- Eliminates the brief default-pose flash that occurs when the player releases C
+-- while moving or running. The fix is to crossfade directly from CrouchIdle/CrouchWalk
+-- into the correct standing animation rather than waiting for ExitCrouch to finish.
+-- getDesiredStandingLocomotionKey() is defined above playLandingAnimation (Stage 3F
+-- placement) so the landing Stopped callback can also use it without a forward-reference.
+-- ============================================================
 
 -- Immediately resumes the correct standing locomotion animation after crouch exit.
 -- Fades ALL crouch tracks out with `fadeTime` while simultaneously fading the target
