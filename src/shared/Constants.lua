@@ -145,7 +145,12 @@ Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 1
 -- Set both false to revert to camera-yaw-only facing (no sprint direction rotation at all).
 -- Set SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED false alone to disable this path
 -- without touching SPRINT_DISABLE_MANUAL_BODY_FACING_WHILE_MOUSE_LOCKED (future-proofing).
-Constants.SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED     = true
+-- DISABLED (Stage 3E-fix 2026-05-25): AutoRotate=true caused camera jerk when changing
+-- sprint direction in shift lock. The camera is pinned to HumanoidRootPart yaw in mouse-lock
+-- mode, so every Roblox-physics body rotation snapped the camera with it. Fix: keep false so
+-- sprint falls through to the camera-yaw CFrame path (same as walking in mouse lock).
+-- Directional sprint animations (RunForwardLeft/Right) already show movement direction visually.
+Constants.SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED     = false
 Constants.SPRINT_DISABLE_MANUAL_BODY_FACING_WHILE_MOUSE_LOCKED = true
 
 -- When true, logs natural-AutoRotate mode entry and exit to Output once per mode change.

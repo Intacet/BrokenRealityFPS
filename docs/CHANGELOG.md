@@ -7,6 +7,27 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-25] — Stage 3E-fix: Disable AutoRotate sprint rotation — fixes camera jerk in shift lock
+
+### Summary
+
+Disables Stage 3E's `Humanoid.AutoRotate = true` sprint path by setting `SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED = false`. When `AutoRotate = true`, Roblox's physics engine rotates `HumanoidRootPart` toward `MoveDirection` at its own rate. In custom mouse lock, the camera is pinned relative to `HumanoidRootPart`'s yaw — so every engine body rotation snapped the camera with it, producing visible left-right camera jerk when changing sprint direction. With the constant false, `shouldUseNaturalSprintAutoRotate()` returns false immediately and sprint falls through to the same camera-yaw CFrame path used during walking in mouse lock (`AutoRotate = false`, `root.CFrame = CFrame.lookAt`). The directional sprint animations (`RunForwardLeft`, `RunForwardRight`) already communicate movement direction visually — no body rotation is needed.
+
+**What changed:**
+
+- `SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED` set `true → false` in `Constants.lua`. No code changes — the constant is the sole kill switch.
+- Stage 3E infrastructure (`shouldUseNaturalSprintAutoRotate()`, `lastNaturalSprintAutoRotateActive`, Stage 3E block in `applyCharacterFacing()`) is retained as dead code for rollback and future use.
+
+### Changes to `src/shared/Constants.lua`
+
+- `SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED = false` (was `true`). Updated comment explains the camera-jerk root cause.
+
+### No animation ID changes, no speed changes, no camera changes
+
+No animation IDs, speed multipliers, camera CFrame, CameraOffset, FieldOfView, HipHeight, JumpPower, or server-side systems were modified.
+
+---
+
 ## [2026-05-25] — Stage 3F: Zero-gap landing exit (mirrors Stage 2S crouch-exit fix)
 
 ### Summary

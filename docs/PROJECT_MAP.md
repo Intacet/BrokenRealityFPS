@@ -938,9 +938,13 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --     SPRINT_DIRECTIONAL_BODY_FACING_DEBUG = true — logs Stage 3D mode changes.
              --     SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = false — Stage 3D LERP toggle.
              --     SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 1 — Stage 3D LERP alpha.
-             --   Natural AutoRotate sprint constants (Stage 3E — 2026-05-23):
-             --     SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED = true — kill switch; when false,
-             --       shouldUseNaturalSprintAutoRotate() returns false immediately.
+             --   Natural AutoRotate sprint constants (Stage 3E — 2026-05-23; fixed 2026-05-25):
+             --     SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED = false — kill switch. Set false
+             --       (2026-05-25 fix) because AutoRotate=true caused camera jerk in shift lock:
+             --       the camera is pinned to HumanoidRootPart yaw, so Roblox physics body rotation
+             --       snapped the camera on each direction change. False = camera-yaw CFrame path for
+             --       all sprint states (same as walking in mouse lock). Stage 3E code is retained as
+             --       dead code for rollback — set true to re-enable AutoRotate sprint (with jerk).
              --     SPRINT_DISABLE_MANUAL_BODY_FACING_WHILE_MOUSE_LOCKED = true — second kill switch;
              --       both must be true for Stage 3E to activate.
              --     SPRINT_NATURAL_AUTOROTATE_DEBUG = true — logs Stage 3E mode entry/exit once per
