@@ -2220,21 +2220,18 @@ local function endSlide()
         )
     end
 
-    -- Stop any still-playing slide tracks.
     local setName       = getAnimationSetName()
     local slideIntoKey  = setName .. "_SlideInto"
     local slideIdleKey  = setName .. "_SlideIdle"
-    for _, k in ipairs({ slideIntoKey, slideIdleKey }) do
-        local t2 = animationTracks[k]
-        if t2 then (t2 :: AnimationTrack):Stop(0) end
-        if currentAnimationName == k then currentAnimationName = "" end
-    end
 
-    -- Play SlideExit one-shot. slideExitConn gates updateMovementAnimation so
-    -- the Heartbeat cannot interrupt the clip before it finishes (see updateMovementAnimation).
+    -- Play SlideExit FIRST so it starts fading in before we stop the loop tracks.
+    -- This gives a smooth cross-fade: SlideExit blends in while SlideIdle blends out,
+    -- instead of snapping to a default pose (Stop(0)) and then starting SlideExit cold.
+    -- slideExitConn gates updateMovementAnimation while SlideExit is playing.
     local slideExitKey   = setName .. "_SlideExit"
     local slideExitTrack = animationTracks[slideExitKey]
     if slideExitTrack then
+        -- Start SlideExit fading in FIRST.
         currentAnimationName = slideExitKey
         slideExitTrack:Play(Constants.MOVEMENT_ANIMATION_FADE_TIME)
         slideExitTrack:AdjustSpeed(Constants.SLIDE_ANIMATION_SPEED_MULTIPLIER)
@@ -2257,8 +2254,26 @@ local function endSlide()
             -- If not crouching: Heartbeat runs updateMovementAnimation() next frame
             -- (slideExitConn is now nil so the guard is lifted) → plays Walk or Idle.
         end)
+        -- NOW fade out the loop tracks while SlideExit is already blending in.
+        -- Using MOVEMENT_ANIMATION_FADE_TIME (not 0) so they cross-fade smoothly
+        -- rather than snapping to a default pose before SlideExit takes over.
+        for _, k in ipairs({ slideIntoKey, slideIdleKey }) do
+            local t2 = animationTracks[k]
+            if t2 and (t2 :: AnimationTrack).IsPlaying then
+                (t2 :: AnimationTrack):Stop(Constants.MOVEMENT_ANIMATION_FADE_TIME)
+            end
+            if currentAnimationName == k then currentAnimationName = "" end
+        end
     else
-        -- No SlideExit track — go directly to CrouchIdle or let Heartbeat recover.
+        -- No SlideExit track — stop loop tracks and go directly to CrouchIdle or
+        -- let the Heartbeat recover to walk/idle.
+        for _, k in ipairs({ slideIntoKey, slideIdleKey }) do
+            local t2 = animationTracks[k]
+            if t2 and (t2 :: AnimationTrack).IsPlaying then
+                (t2 :: AnimationTrack):Stop(Constants.MOVEMENT_ANIMATION_FADE_TIME)
+            end
+            if currentAnimationName == k then currentAnimationName = "" end
+        end
         if movementState.isCrouching then
             local crouchIdleKey = setName .. "_CrouchIdle"
             if animationTracks[crouchIdleKey] ~= nil then
@@ -4834,12 +4849,6 @@ function MovementController:Start()
         movementState.directionName = classifyDirection(moveDir)
 
         applySpeed()
-
-        -- Stage 3O: end slide early if the player stops moving.
-        -- endSlide() sets isCrouching=true and plays SlideExit → CrouchIdle.
-        if isSliding and not movementState.isMoving then
-            endSlide()
-        end
 
         -- Stage 2P: sustain or end tactical sprint based on movement direction each frame.
         -- If the player stops moving or drifts off-forward, tactical sprint ends automatically.
