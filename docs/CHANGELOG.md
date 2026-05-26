@@ -7,6 +7,27 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-25] — Stage 3I: Fix ForwardLeft/Right diagonal sprint body rotation angle
+
+### Summary
+
+RunForwardLeft/Right animations were designed for a camera-facing body — they bake their own visual diagonal lean into the clip. Stage 3G was also rotating the body ≈45° toward raw MoveDirection for these directions, doubling the lean and making the combined visual direction appear nearly backward (90°+ from camera-forward). Fix: for ForwardLeft/ForwardRight, rotate the body by a fixed, smaller angle from camera-forward (`SPRINT_DIAGONAL_BODY_ROTATION_DEGREES = 20`) instead of toward raw MoveDirection. All other sprint directions continue using raw MoveDirection.
+
+**What changed:**
+
+- `SPRINT_DIAGONAL_BODY_ROTATION_DEGREES = 20` added to `Constants.lua` (tunable; range 0–45).
+- Stage 3G block in `applyCharacterFacing()` updated: ForwardLeft/Right branch computes a fixed-angle direction via 2D Y-axis rotation of camera-forward (`cos`/`sin` formula, no CFrame allocation). Non-diagonal branch unchanged (raw MoveDirection).
+
+### Changes to `src/shared/Constants.lua`
+
+- `SPRINT_DIAGONAL_BODY_ROTATION_DEGREES = 20` added in Stage 3G section.
+
+### Changes to `src/client/MovementController.lua`
+
+- Stage 3G block: `dir == "ForwardLeft" or dir == "ForwardRight"` branch added with fixed-angle rotation math. All other directions fall through to the existing `getCameraRelativeMoveDirection()` path.
+
+---
+
 ## [2026-05-25] — Stage 3H: Camera shoulder offset disabled while sprinting in shift lock
 
 ### Summary
