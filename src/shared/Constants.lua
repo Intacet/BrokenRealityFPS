@@ -227,6 +227,10 @@ Constants.SLIDE_TAC_DURATION_MULTIPLIER  = 1.75  -- tac-sprint slide lasts this 
 Constants.SLIDE_TAC_SPEED_MULTIPLIER     = 1.3   -- tac-sprint slides start at SLIDE_SPEED × this (travels faster)
 Constants.SLIDE_ANIMATION_SPEED_MULTIPLIER = 1.0 -- AdjustSpeed value for SlideInto / SlideIdle / SlideExit
 Constants.SLIDE_DEBUG                    = true  -- log slide events via Logger.debug()
+-- Slide momentum carry (LinearVelocity that pushes the player forward regardless of W/A/S/D input).
+-- Same pattern as SPRINT_STOP_MOMENTUM. Set ENABLED = false to revert to WalkSpeed-only slide.
+Constants.SLIDE_MOMENTUM_ENABLED   = true   -- create a LinearVelocity carry during the slide
+Constants.SLIDE_MOMENTUM_MAX_FORCE = 60000  -- LinearVelocity MaxForce (Magnitude mode); matches sprint-stop
 Constants.SPRINT_STAMINA_ENABLED = false -- stamina system not yet implemented (DEBT-042)
 Constants.PRONE_ENABLED          = false -- prone stance not yet implemented (DEBT-043)
 

@@ -612,6 +612,20 @@ local slideIntoConn: RBXScriptConnection? = nil
 -- Disconnected by clearSlideExitConnection() before any external Stop() call.
 local slideExitConn: RBXScriptConnection? = nil
 
+-- Normalised XZ world-space direction the slide is carrying the player toward.
+-- Captured in startSlide() from hum.MoveDirection; falls back to HRP look vector.
+-- NOT updated mid-slide — the player is committed to this direction for the duration.
+local slideDirection: Vector3 = Vector3.new(0, 0, -1)
+
+-- LinearVelocity Attachment parented to HumanoidRootPart during the slide carry.
+-- Nil when no slide is active. Destroyed by clearSlideMomentum().
+local slideMomentumAttachment: Attachment? = nil
+
+-- The LinearVelocity instance pushing the player forward during the slide.
+-- VectorVelocity is updated every Heartbeat to match the speed decay curve.
+-- Nil when no slide is active. Destroyed by clearSlideMomentum().
+local slideMomentumVelocity: LinearVelocity? = nil
+
 -- ============================================================
 -- Private helpers — Stage 1
 -- ============================================================
@@ -658,19 +672,14 @@ local function applySpeed()
         return
     end
 
-    -- Stage 3O: slide speed decay — lerps from start speed to CROUCH_SPEED over the slide
-    -- duration so the player decelerates smoothly. Tac-sprint slides start faster
-    -- (SLIDE_SPEED × SLIDE_TAC_SPEED_MULTIPLIER) AND last longer, so they travel further.
+    -- Stage 3O: suppress Humanoid directional input during a slide.
+    -- WalkSpeed = 0 so the Humanoid applies no movement force from W/A/S/D.
+    -- All forward carry is provided by the LinearVelocity (slideMomentumVelocity)
+    -- which is updated every Heartbeat with a decaying VectorVelocity.
+    -- When SLIDE_MOMENTUM_ENABLED is false this still zeroes WalkSpeed, giving a
+    -- speed-only slide without carry (player stops if W is released).
     if isSliding then
-        local startSpeed = if isTacSprintSlide
-            then Constants.SLIDE_SPEED * Constants.SLIDE_TAC_SPEED_MULTIPLIER
-            else Constants.SLIDE_SPEED
-        local slideDuration = if isTacSprintSlide
-            then Constants.SLIDE_DURATION * Constants.SLIDE_TAC_DURATION_MULTIPLIER
-            else Constants.SLIDE_DURATION
-        local elapsed = math.clamp(os.clock() - slideStartTime, 0, slideDuration)
-        local t = if slideDuration > 0 then elapsed / slideDuration else 1
-        hum.WalkSpeed = startSpeed + (Constants.CROUCH_SPEED - startSpeed) * t
+        hum.WalkSpeed = 0
         return
     end
 
@@ -2146,6 +2155,21 @@ end
 -- Private helpers — Stage 3O: slide system
 -- ============================================================
 
+-- Destroys the active slide LinearVelocity and Attachment if present.
+-- Idempotent — safe to call when no carry is active.
+-- Does NOT touch any other constraints or attachments on HumanoidRootPart.
+-- Mirrors clearSprintStopMomentum().
+local function clearSlideMomentum()
+    if slideMomentumVelocity then
+        slideMomentumVelocity:Destroy()
+        slideMomentumVelocity = nil
+    end
+    if slideMomentumAttachment then
+        slideMomentumAttachment:Destroy()
+        slideMomentumAttachment = nil
+    end
+end
+
 local function clearSlideIntoConnection()
     if slideIntoConn then
         slideIntoConn:Disconnect()
@@ -2167,6 +2191,7 @@ local function clearSlideState()
     if not isSliding then return end
     clearSlideIntoConnection()
     clearSlideExitConnection()
+    clearSlideMomentum()
     isSliding               = false
     movementState.isSliding = false
     isTacSprintSlide        = false
@@ -2197,6 +2222,7 @@ local function endSlide()
     if not isSliding then return end
     clearSlideIntoConnection()
     clearSlideExitConnection()
+    clearSlideMomentum()
     isSliding               = false
     movementState.isSliding = false
     isTacSprintSlide        = false
@@ -2304,6 +2330,32 @@ local function startSlide()
     sprintStartTime           = nil
     movementState.isSprinting = false
 
+    -- Capture slide direction BEFORE clearing sprint state.
+    -- Prefer the Humanoid's current MoveDirection (world-space input direction).
+    -- Fall back to HRP look vector if the player has no directional input right now.
+    do
+        local hum2 = humanoid
+        local captured = false
+        if hum2 then
+            local md = hum2.MoveDirection
+            local flat = Vector3.new(md.X, 0, md.Z)
+            if flat.Magnitude > 0.01 then
+                slideDirection = flat.Unit
+                captured = true
+            end
+        end
+        if not captured then
+            local hrp2 = currentRootPart
+            if hrp2 then
+                local look = (hrp2 :: BasePart).CFrame.LookVector
+                local flat = Vector3.new(look.X, 0, look.Z)
+                if flat.Magnitude > 0.01 then
+                    slideDirection = flat.Unit
+                end
+            end
+        end
+    end
+
     isSliding               = true
     movementState.isSliding = true
     isTacSprintSlide        = wasTac
@@ -2311,15 +2363,41 @@ local function startSlide()
     slideToken             += 1
     local capturedToken     = slideToken
 
-    -- Apply SLIDE_SPEED immediately (start of speed decay lerp).
+    -- applySpeed() now sets WalkSpeed = 0 during slide (LinearVelocity drives movement).
     applySpeed()
     -- FOV: sprint is now off, so updateSprintFov restores default FOV.
     updateSprintFov()
+
+    -- Create the LinearVelocity carry that pushes the player forward at the initial
+    -- slide speed. VectorVelocity is updated each Heartbeat to follow the decay curve.
+    -- The player is committed to slideDirection for the full slide duration.
+    if Constants.SLIDE_MOMENTUM_ENABLED then
+        local hrp = currentRootPart
+        if hrp then
+            clearSlideMomentum()   -- safety: destroy any stale carry
+            local startSpeed = if wasTac
+                then Constants.SLIDE_SPEED * Constants.SLIDE_TAC_SPEED_MULTIPLIER
+                else Constants.SLIDE_SPEED
+            local att = Instance.new("Attachment")
+            att.Name   = "BRSlideMomentumAttachment"
+            att.Parent = hrp
+            slideMomentumAttachment = att
+            local lv = Instance.new("LinearVelocity")
+            lv.Name           = "BRSlideMomentumVelocity"
+            lv.Attachment0    = att
+            lv.RelativeTo     = Enum.ActuatorRelativeTo.World
+            lv.MaxForce       = Constants.SLIDE_MOMENTUM_MAX_FORCE
+            lv.VectorVelocity = slideDirection * startSpeed
+            lv.Parent         = hrp
+            slideMomentumVelocity = lv
+        end
+    end
 
     if Constants.SLIDE_DEBUG then
         Logger.debug(
             "[MovementController] Slide START"
             .. (wasTac and " (tac-sprint → extended distance)" or " (normal sprint)")
+            .. string.format(" dir=(%.2f,0,%.2f)", slideDirection.X, slideDirection.Z)
         )
     end
 
@@ -2747,11 +2825,13 @@ local function loadMovementAnimations(character: Model)
     -- Mirrors the isSprintStopPlaying / crouchHoldTrack direct-clear pattern above.
     clearSlideIntoConnection()
     clearSlideExitConnection()
+    clearSlideMomentum()          -- destroy LinearVelocity + Attachment (safe even if nil)
     isSliding               = false
     movementState.isSliding = false
     isTacSprintSlide        = false
     slideToken             += 1
     lastSlideEndTime        = 0
+    slideDirection          = Vector3.new(0, 0, -1)
     -- Do NOT call clearCrouchBottomHold() here — the previous Animator may already be
     -- destroyed, making the hold track reference unsafe to Stop(). Clear state directly.
     crouchHoldTrack          = nil
@@ -4281,11 +4361,13 @@ function MovementController:destroy()
     -- Same direct-clear pattern as respawn — Animator may already be destroyed.
     clearSlideIntoConnection()
     clearSlideExitConnection()
+    clearSlideMomentum()
     isSliding               = false
     movementState.isSliding = false
     isTacSprintSlide        = false
     slideToken             += 1
     lastSlideEndTime        = 0
+    slideDirection          = Vector3.new(0, 0, -1)
     -- Stage 3M: cancel any in-flight crouch-exit speed lock on destroy.
     isCrouchExitTransitioning   = false
     crouchExitTransitionVersion += 1
@@ -4849,6 +4931,23 @@ function MovementController:Start()
         movementState.directionName = classifyDirection(moveDir)
 
         applySpeed()
+
+        -- Stage 3O: update slide LinearVelocity each Heartbeat so VectorVelocity follows
+        -- the speed decay curve. The speed decays from the initial slide speed to 0 over
+        -- the slide duration. applySpeed() keeps WalkSpeed = 0 throughout so the Humanoid
+        -- contributes no input-based movement — only the LinearVelocity moves the player.
+        if isSliding and slideMomentumVelocity ~= nil then
+            local startSpd = if isTacSprintSlide
+                then Constants.SLIDE_SPEED * Constants.SLIDE_TAC_SPEED_MULTIPLIER
+                else Constants.SLIDE_SPEED
+            local slideDur = if isTacSprintSlide
+                then Constants.SLIDE_DURATION * Constants.SLIDE_TAC_DURATION_MULTIPLIER
+                else Constants.SLIDE_DURATION
+            local elapsed = math.clamp(os.clock() - slideStartTime, 0, slideDur)
+            local t       = if slideDur > 0 then elapsed / slideDur else 1
+            -- Decay speed from startSpd → 0 so the character naturally slows to a stop.
+            slideMomentumVelocity.VectorVelocity = slideDirection * (startSpd * (1 - t))
+        end
 
         -- Stage 2P: sustain or end tactical sprint based on movement direction each frame.
         -- If the player stops moving or drifts off-forward, tactical sprint ends automatically.
