@@ -7,6 +7,43 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-26] — Stage 3M: Fluid crouch enter/exit transitions
+
+### Summary
+
+Three combined changes make the crouch-in and crouch-out feel slower and more physically committed:
+
+1. **Blend fade times doubled (~2×)** — all four crossfade constants increased so the visual blend between standing and crouched poses is noticeably gradual rather than instant.
+2. **ExitCrouch one-shot speed halved (0.9× → 0.5×)** — when standing up from still, the clip plays at half speed, giving a deliberate "getting up" motion.
+3. **Speed lock during crouch-exit** — `WalkSpeed` is held at `CROUCH_SPEED` for the full exit animation window. Without this, speed snapped to `WALK_SPEED` the instant C was released while the body was still blending to standing. Now the speed restores the moment `resumeStandingLocomotionAfterCrouch()` is called (animation blend starts).
+
+**What changed:**
+
+- `isCrouchExitTransitioning: boolean` state variable — true while exit blend is in progress.
+- `crouchExitTransitionVersion: number` — monotonic counter that invalidates any stale `task.delay` callbacks from previous exit cycles.
+- `applySpeed()` — new early-return when `isCrouchExitTransitioning and CROUCH_TRANSITION_SPEED_LOCK_ENABLED`: holds `WalkSpeed = CROUCH_SPEED`.
+- `resumeStandingLocomotionAfterCrouch()` — clears `isCrouchExitTransitioning` and calls `applySpeed()` immediately (speed restores same frame, no Heartbeat gap).
+- `crouchEndConn` — sets `isCrouchExitTransitioning = true` + increments version before Stage 2S exits; adds `task.delay` safety-net for legacy path (inactive by default).
+- `crouchBeginConn` — clears flag + increments version on re-enter (quick C-press after release cancels exit lock).
+- Flag also cleared on: `loadMovementAnimations` respawn, `destroy()`, phase-exit handler.
+
+### Changes to `src/shared/Constants.lua`
+
+| Constant | Old | New |
+|---|---|---|
+| `CROUCH_DIRECT_BLEND_FADE_TIME` | 0.12 | 0.28 |
+| `CROUCH_DIRECT_BLEND_MOVING_FADE_TIME` | 0.10 | 0.22 |
+| `CROUCH_EXIT_DIRECT_BLEND_FADE_TIME` | 0.10 | 0.22 |
+| `CROUCH_EXIT_IDLE_BLEND_FADE_TIME` | 0.12 | 0.28 |
+| `MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER` | 0.9 | 0.5 |
+| `CROUCH_TRANSITION_SPEED_LOCK_ENABLED` | *(new)* | `true` |
+
+### No animation ID changes, no camera.CFrame writes, no HipHeight/FOV/server changes
+
+**Studio verification:** Needs manual Studio playtest — MCP keyboard input does not reach `InputBegan` in Studio play mode.
+
+---
+
 ## [2026-05-26] — Stage 3L: Backpedal turn-around in shift lock
 
 ### Summary

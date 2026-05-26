@@ -67,13 +67,15 @@ Constants.CROUCH_BOTTOM_HOLD_TIME_POSITION_FALLBACK = 0.98
 Constants.CROUCH_USE_ENTER_TRANSITION_ANIMATION = false
 
 -- Crossfade duration (seconds) for the direct-blend when entering crouch and NOT moving.
--- Applied to the CrouchIdle (or fallback) fade-in. Shorter than MOVEMENT_ANIMATION_FADE_TIME
--- (0.15) for a snappier, less floaty feel.
-Constants.CROUCH_DIRECT_BLEND_FADE_TIME = 0.12
+-- Applied to the CrouchIdle (or fallback) fade-in.
+-- Stage 3M (2026-05-26): increased 0.12 → 0.28 s for a slower, more fluid drop into crouch.
+Constants.CROUCH_DIRECT_BLEND_FADE_TIME = 0.28
 
 -- Crossfade duration (seconds) for the direct-blend when entering crouch while MOVING.
--- Slightly shorter than CROUCH_DIRECT_BLEND_FADE_TIME to feel immediate and snappy.
-Constants.CROUCH_DIRECT_BLEND_MOVING_FADE_TIME = 0.10
+-- Slightly shorter than CROUCH_DIRECT_BLEND_FADE_TIME — player is already in motion
+-- so a full-weight pose is needed sooner, but still noticeably slower than before.
+-- Stage 3M (2026-05-26): increased 0.10 → 0.22 s.
+Constants.CROUCH_DIRECT_BLEND_MOVING_FADE_TIME = 0.22
 
 -- When false, the CrouchWalkStart one-shot is skipped when the player first moves while
 -- crouched. The character blends directly from CrouchIdle into the directional CrouchWalk
@@ -96,16 +98,27 @@ Constants.CROUCH_USE_EXIT_TRANSITION_WHILE_MOVING = false
 -- Crossfade duration (seconds) for the direct blend from crouch into walk/run (moving path).
 -- Both the crouch track fade-out and the walk/run fade-in use this value, so the blender
 -- always has non-zero total weight — prevents the default pose flash.
-Constants.CROUCH_EXIT_DIRECT_BLEND_FADE_TIME = 0.10
+-- Stage 3M (2026-05-26): increased 0.10 → 0.22 s for a more fluid stand-up while moving.
+Constants.CROUCH_EXIT_DIRECT_BLEND_FADE_TIME = 0.22
 
 -- Crossfade duration (seconds) for the direct blend from crouch into Idle (not-moving path),
 -- used both when ExitCrouch is absent and when ExitCrouch finishes and Idle should start.
-Constants.CROUCH_EXIT_IDLE_BLEND_FADE_TIME = 0.12
+-- Stage 3M (2026-05-26): increased 0.12 → 0.28 s.
+Constants.CROUCH_EXIT_IDLE_BLEND_FADE_TIME = 0.28
 
 -- When true, the correct standing animation starts immediately inside the ExitCrouch Stopped
 -- callback, rather than waiting for the next Heartbeat tick.
 -- Eliminates the ≥1 frame blank-pose window after the ExitCrouch one-shot ends.
 Constants.CROUCH_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true
+
+-- ── Stage 3M: Crouch-exit speed lock ─────────────────────────────────────────
+-- When true, WalkSpeed is held at CROUCH_SPEED for the full duration of the crouch-exit
+-- animation window (CROUCH_EXIT_DIRECT_BLEND_FADE_TIME or CROUCH_EXIT_IDLE_BLEND_FADE_TIME
+-- depending on the path). Without this, speed snaps to WALK_SPEED the instant C is released
+-- while the stand-up animation is still playing — the character looks crouched but runs at
+-- full speed. With this, the "getting up" motion has physical weight.
+-- Set false to restore the instant-speed-restore behaviour.
+Constants.CROUCH_TRANSITION_SPEED_LOCK_ENABLED = true
 
 -- ── Stage 3D: Sprint directional body-facing ──────────────────────────────────
 -- When true and custom mouse lock is active, sprinting rotates the character body toward
@@ -295,7 +308,7 @@ Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER               = 1.15  -- RunFo
 -- Only affects the Unarmed set. AR15 RunForward is unaffected.
 Constants.MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION               = false -- false = RunForward (current), true = RunForwardTest
 Constants.MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER              = 0.75  -- Idle plays at 0.75× clip speed (Stage 2H)
-Constants.MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.9   -- EnterCrouch/ExitCrouch one-shots play at 0.9× clip speed (Stage 2H)
+Constants.MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.5   -- EnterCrouch/ExitCrouch one-shots play at 0.5× clip speed (Stage 3M: slowed from 0.9 for more fluid stand-up feel)
 Constants.MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER       = 1.0   -- CrouchWalk* directional tracks play at 1.0× clip speed (Stage 2J)
 -- Stage 2O: falling animation playback constant.
 Constants.MOVEMENT_FALLING_ANIMATION_SPEED_MULTIPLIER           = 1.0   -- Falling looped track AdjustSpeed multiplier (Stage 2O)

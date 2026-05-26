@@ -21,6 +21,9 @@
 -- Stage 3L (2026-05-26): Backpedal turn-around in shift lock — character body sweeps to
 --   face the move direction (LERP alpha 0.25) when walking Backward/BackwardLeft/BackwardRight
 --   in mouse lock; reverts to camera-yaw facing the moment backward input is released.
+-- Stage 3M (2026-05-26): Fluid crouch enter/exit — blend fade times doubled (~2×); ExitCrouch
+--   one-shot slowed to 0.5×; WalkSpeed locked at CROUCH_SPEED for the full exit animation
+--   window so speed does not snap back the instant C is released.
 --
 -- Bug fix (2026-05-18): The default Roblox Animate LocalScript inside the character
 -- was overriding custom R6 AnimationTrack objects loaded in Stage 2A. MovementController
@@ -440,6 +443,19 @@ local crouchTransitionPlaying: boolean = false
 -- to prevent the Stopped callback from firing spuriously.
 local crouchTransitionConn: RBXScriptConnection? = nil
 
+-- Stage 3M: crouch-exit speed lock state ────────────────────────────────────
+-- True while the crouch-exit animation window is active (C released, blend in progress).
+-- applySpeed() holds WalkSpeed at CROUCH_SPEED while this is true, so speed does not
+-- snap to WALK_SPEED the instant C is released while the stand-up animation plays.
+-- Cleared by a task.delay callback keyed to crouchExitTransitionVersion, or immediately
+-- on re-enter-crouch, phase exit, respawn, and destroy.
+local isCrouchExitTransitioning: boolean = false
+-- Monotonic counter. Incremented each time a new exit-transition begins OR when the flag
+-- is forcibly cleared (re-enter, respawn, phase exit, destroy). Delayed callbacks compare
+-- their captured version to this counter to confirm they are still the "current" transition
+-- before clearing isCrouchExitTransitioning — prevents stale callbacks from interfering.
+local crouchExitTransitionVersion: number = 0
+
 -- Stage 2I: crouch bottom-hold state ─────────────────────────────────────────
 
 -- True while the EnterCrouch track is held at its final frame to keep the character
@@ -613,6 +629,15 @@ local function applySpeed()
         local t = math.clamp(elapsed / Constants.TACTICAL_SPRINT_ACCELERATION_TIME, 0, 1)
         hum.WalkSpeed = Constants.SPRINT_SPEED
             + (Constants.TACTICAL_SPRINT_SPEED - Constants.SPRINT_SPEED) * t
+        return
+    end
+
+    -- Stage 3M: hold WalkSpeed at CROUCH_SPEED for the duration of the crouch-exit
+    -- animation blend, so speed does not snap back the instant C is released.
+    -- This path runs only when not crouching (isCrouching=false) — isCrouching takes
+    -- priority via the branch below, so a quick re-press of C is handled correctly.
+    if isCrouchExitTransitioning and Constants.CROUCH_TRANSITION_SPEED_LOCK_ENABLED then
+        hum.WalkSpeed = Constants.CROUCH_SPEED
         return
     end
 
@@ -2434,6 +2459,9 @@ local function loadMovementAnimations(character: Model)
     crouchHoldTrack          = nil
     isHoldingCrouchBottomPose = false
     crouchBottomPoseWarned   = false
+    -- Stage 3M: cancel any in-flight crouch-exit speed lock on respawn.
+    isCrouchExitTransitioning   = false
+    crouchExitTransitionVersion += 1
 
     -- Clear stale track references. Do NOT :Stop() them — the previous Animator may
     -- already be destroyed, making those references unsafe to call.
@@ -2953,6 +2981,15 @@ end
 local function resumeStandingLocomotionAfterCrouch(fadeTime: number)
     assert(typeof(fadeTime) == "number",
         "[MovementController] resumeStandingLocomotionAfterCrouch: fadeTime must be a number")
+
+    -- Stage 3M: clear the crouch-exit speed lock. The standing animation is about to
+    -- fade in, so WalkSpeed can return to WALK_SPEED / SPRINT_SPEED as appropriate.
+    -- applySpeed() is called immediately so the speed restores on this same frame
+    -- rather than waiting for the next Heartbeat.
+    if isCrouchExitTransitioning then
+        isCrouchExitTransitioning = false
+        applySpeed()
+    end
 
     local desiredKey = getDesiredStandingLocomotionKey()
 
@@ -3913,6 +3950,9 @@ function MovementController:destroy()
     applyTacticalSprintSensitivity(false)
     lastShiftPressTime                = 0
     clearTacticalSprintStopConnection()
+    -- Stage 3M: cancel any in-flight crouch-exit speed lock on destroy.
+    isCrouchExitTransitioning   = false
+    crouchExitTransitionVersion += 1
     clearCrouchBottomHold()
     -- Stop the active animation if still playing, then clear track references.
     stopCurrentMovementAnimation()
@@ -4064,6 +4104,10 @@ function MovementController:Start()
                 clearTacticalSprintStopConnection()
                 stopCurrentMovementAnimation()
             end
+            -- Stage 3M: cancel any in-flight crouch-exit speed lock on phase exit.
+            -- applySpeed() will set WalkSpeed = 0 immediately after (phase not ACTIVE).
+            isCrouchExitTransitioning   = false
+            crouchExitTransitionVersion += 1
             local hum = humanoid
             if hum then
                 hum.WalkSpeed = 0
@@ -4282,6 +4326,11 @@ function MovementController:Start()
             sprintStartTime = nil
             movementState.isCrouching = true
             movementState.isSprinting = false
+            -- Stage 3M: cancel any in-flight crouch-exit speed lock (player re-crouched
+            -- before the exit transition finished). Increment version so delayed callbacks
+            -- from the previous exit cycle are invalidated.
+            isCrouchExitTransitioning   = false
+            crouchExitTransitionVersion += 1
             applySpeed()
             -- Stage 3A: crouch clears sprint → restore FOV immediately.
             updateSprintFov()
@@ -4308,6 +4357,13 @@ function MovementController:Start()
                 clearCrouchWalkStart()
             end
             wasMovingWhileCrouching = false
+
+            -- Stage 3M: arm the crouch-exit speed lock so WalkSpeed stays at CROUCH_SPEED
+            -- until resumeStandingLocomotionAfterCrouch() clears it.
+            -- Version is incremented so any stale delayed callbacks from a previous
+            -- exit cycle are automatically invalidated.
+            isCrouchExitTransitioning  = true
+            crouchExitTransitionVersion += 1
 
             -- ── Stage 2S: zero-gap crouch-exit transition ─────────────────────────
             if Constants.CROUCH_ZERO_GAP_TRANSITIONS_ENABLED then
@@ -4384,6 +4440,19 @@ function MovementController:Start()
                 -- Legacy path (CROUCH_ZERO_GAP_TRANSITIONS_ENABLED = false).
                 -- Play ExitCrouch via playCrouchTransition; Heartbeat takes over when done.
                 playCrouchTransition(false)
+                -- Stage 3M: legacy path does not call resumeStandingLocomotionAfterCrouch,
+                -- so use task.delay as a safety-net to release the speed lock.
+                -- CROUCH_ZERO_GAP_TRANSITIONS_ENABLED is true by default so this branch
+                -- is normally unreachable, but guard it correctly for robustness.
+                do
+                    local v = crouchExitTransitionVersion
+                    task.delay(Constants.CROUCH_EXIT_IDLE_BLEND_FADE_TIME, function()
+                        if crouchExitTransitionVersion == v then
+                            isCrouchExitTransitioning = false
+                            applySpeed()
+                        end
+                    end)
+                end
             end
             -- ─────────────────────────────────────────────────────────────────────
         end

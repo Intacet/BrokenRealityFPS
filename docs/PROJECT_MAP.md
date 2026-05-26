@@ -1030,6 +1030,18 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --     TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER = 0.5 — fraction of current
              --       UserInputService.MouseDeltaSensitivity applied while tactical sprint is
              --       active. 0.5 = half sensitivity. Tune without code changes.
+             --   Fluid crouch transition constants (Stage 3M — 2026-05-26):
+             --     CROUCH_DIRECT_BLEND_FADE_TIME = 0.28 — enter-crouch blend (not moving).
+             --       Increased from 0.12 for a slower, more physical drop into crouch.
+             --     CROUCH_DIRECT_BLEND_MOVING_FADE_TIME = 0.22 — enter-crouch blend (moving).
+             --     CROUCH_EXIT_DIRECT_BLEND_FADE_TIME = 0.22 — exit-crouch blend (moving).
+             --     CROUCH_EXIT_IDLE_BLEND_FADE_TIME = 0.28 — exit-crouch blend (still).
+             --     MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.5 — ExitCrouch
+             --       one-shot plays at half speed; slowed from 0.9 for deliberate stand-up feel.
+             --     CROUCH_TRANSITION_SPEED_LOCK_ENABLED = true — when true, WalkSpeed is held
+             --       at CROUCH_SPEED until resumeStandingLocomotionAfterCrouch() fires. Prevents
+             --       the speed snapping to WALK_SPEED the instant C is released while the body
+             --       is still blending to standing. Set false to restore instant-speed behaviour.
              --   Backpedal turn-around constants (Stage 3L — 2026-05-26):
              --     BACKPEDAL_TURN_ENABLED = true — master switch. When true, character body
              --       sweeps to face the backward move direction while walking backward in shift

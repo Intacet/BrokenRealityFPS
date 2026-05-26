@@ -536,7 +536,7 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-26 (x26)
+## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-26 (x27)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
@@ -1035,7 +1035,18 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - **Stage 3L risk — LERP alpha tuning:** `BACKPEDAL_TURN_LERP_ALPHA = 0.25` was set without live Studio verification. If the pivot feels too slow or too snappy, tune this constant. At 60 fps, 0.25 gives ~87% completion in 7 frames (~117 ms). Range: 0.1 (slow drift) to 1.0 (instant snap).
 - **Stage 3L risk — immediate camera-yaw snap on release:** When the player releases the backward key, `directionName` leaves the Backward* set and the camera-yaw CFrame write fires immediately (no LERP back). The body will snap to face the camera. If this transition looks harsh in Studio, add a "was-backpedaling" hysteresis flag that smoothly returns the body to camera-yaw over a few frames.
 
-**Trigger:** Any playtesting session where T-pose during idle/jump or missing backward/diagonal animations is noticeable; where crouch bottom-pose hold or CrouchWalk transitions look wrong; where the `getRigDebugSummary` warn appears; where CrouchWalk direction does not match movement direction; where WalkSpeed appears stuck at 0 after a landing; where mouse sensitivity feels wrong or stuck after tactical sprint; where the backpedal body turn looks wrong (leg animation, pivot speed, or snap on release); or where animation speed or input feels wrong after Studio testing.
+**Updated (2026-05-26 — Stage 3M: Fluid crouch enter/exit transitions):**
+- Blend fade times doubled: `CROUCH_DIRECT_BLEND_FADE_TIME` 0.12→0.28, `CROUCH_DIRECT_BLEND_MOVING_FADE_TIME` 0.10→0.22, `CROUCH_EXIT_DIRECT_BLEND_FADE_TIME` 0.10→0.22, `CROUCH_EXIT_IDLE_BLEND_FADE_TIME` 0.12→0.28.
+- `MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER` 0.9→0.5 (ExitCrouch one-shot plays at half speed).
+- New `CROUCH_TRANSITION_SPEED_LOCK_ENABLED = true` constant.
+- New state: `isCrouchExitTransitioning: boolean`, `crouchExitTransitionVersion: number`. `applySpeed()` holds `WalkSpeed = CROUCH_SPEED` while flag is true. `resumeStandingLocomotionAfterCrouch()` clears flag + calls `applySpeed()`. Flag set in `crouchEndConn`; cleared on re-enter crouch, respawn, phase exit, destroy; `task.delay` safety-net for legacy path.
+- MCP unavailable — Studio verification was not performed. Needs manual playtest.
+
+- **Stage 3M risk — blend times may feel too slow in fast-paced play:** 0.28 s enter/exit blend was chosen without live tuning. If the crouch feels floaty or sluggish in fast gameplay, decrease `CROUCH_DIRECT_BLEND_FADE_TIME` and `CROUCH_EXIT_IDLE_BLEND_FADE_TIME` toward 0.18 s. Moving paths (0.22 s) are the most sensitive since the player is in motion.
+- **Stage 3M risk — speed lock duration tied to animation path:** The speed lock ends the moment `resumeStandingLocomotionAfterCrouch` is called, which for the still/ExitCrouch path happens after the entire one-shot plays at 0.5×. If the ExitCrouch clip is long (>0.6 s), the lock duration could exceed 1 s. Verify clip length in Studio; if too long, consider increasing the `MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER` back toward 0.7 or capping with a separate `CROUCH_EXIT_SPEED_LOCK_MAX_DURATION` constant.
+- **Stage 3M risk — ExitCrouch one-shot at 0.5× (still path only):** The one-shot is only active when `CROUCH_ZERO_GAP_TRANSITIONS_ENABLED = true` and the player is NOT moving. If the clip visually looks odd at half speed (jittery or broken pose), increase the multiplier toward 0.7.
+
+**Trigger:** Any playtesting session where T-pose during idle/jump or missing backward/diagonal animations is noticeable; where crouch bottom-pose hold or CrouchWalk transitions look wrong; where the `getRigDebugSummary` warn appears; where CrouchWalk direction does not match movement direction; where WalkSpeed appears stuck at 0 after a landing; where mouse sensitivity feels wrong or stuck after tactical sprint; where the backpedal body turn looks wrong (leg animation, pivot speed, or snap on release); where crouch enter/exit feels too slow or floaty; or where animation speed or input feels wrong after Studio testing.
 **Fix when:** A future movement stage adds idle/jump/fall/climb custom clips, AR15 CrouchWalk IDs, a dedicated CrouchIdle clip, and server-owned equipment integration. Tune speed multipliers after first Studio playtest. Do not build full Scriptable camera system until camera refactor is scheduled. Add the WalkSpeed=0 stuck diagnostic when any live-play test confirms the edge case.
 
 ---
