@@ -884,12 +884,20 @@ local function applyCharacterFacing()
     -- ─────────────────────────────────────────────────────────────────────────
 
     -- ── Stage 3G: Smooth sprint body-facing toward MoveDirection ─────────────
-    -- When sprinting in mouse lock, lerp HumanoidRootPart yaw toward the raw
-    -- Humanoid.MoveDirection each Heartbeat via faceCharacterTowardsDirection().
+    -- When sprinting in mouse lock, lerp HumanoidRootPart yaw toward the movement
+    -- direction each Heartbeat via faceCharacterTowardsDirection().
     -- AutoRotate remains false throughout — only a direct CFrame write is used,
     -- so the camera is NOT dragged by Roblox physics (no Stage 3E camera jerk).
-    -- If the player has no useful movement input (magnitude below threshold or nil),
-    -- falls through to the camera-yaw CFrame write below.
+    --
+    -- Stage 3I (ForwardLeft/ForwardRight): RunForwardLeft/Right animations bake their
+    -- own visual lean into the clip (designed for a camera-facing body). Rotating the
+    -- body toward the full ~45° MoveDirection doubles that lean, pushing the combined
+    -- visual direction past 90° and appearing nearly backward. Fix: for ForwardLeft and
+    -- ForwardRight, rotate the body by SPRINT_DIAGONAL_BODY_ROTATION_DEGREES from
+    -- camera-forward (a smaller fixed angle) rather than toward raw MoveDirection.
+    -- All other directions use raw MoveDirection as before.
+    --
+    -- Falls through to camera-yaw write if no useful movement input.
     if Constants.SPRINT_SMOOTH_BODY_FACING_ENABLED
         and customMouseLocked
         and movementState.isSprinting
@@ -898,12 +906,39 @@ local function applyCharacterFacing()
         and not isSprintStopPlaying
         and not isLandingMovementLocked
     then
-        local moveDir = getCameraRelativeMoveDirection()
-        if moveDir then
-            faceCharacterTowardsDirection(moveDir)
-            return
+        local dir = movementState.directionName
+        if dir == "ForwardLeft" or dir == "ForwardRight" then
+            -- Stage 3I: fixed-angle rotation from camera-forward for diagonal sprint.
+            local cam = workspace.CurrentCamera
+            local camFwd = cam.CFrame.LookVector
+            local camFlat = Vector3.new(camFwd.X, 0, camFwd.Z)
+            if camFlat.Magnitude > 0.001 then
+                local baseDir = camFlat.Unit
+                -- Negative sign = rotate left (ForwardLeft); positive = rotate right.
+                local sign: number = if dir == "ForwardLeft" then -1 else 1
+                local angleRad = math.rad(sign * Constants.SPRINT_DIAGONAL_BODY_ROTATION_DEGREES)
+                local c = math.cos(angleRad)
+                local s = math.sin(angleRad)
+                -- 2D rotation of baseDir (X, Z) around world Y axis.
+                local targetDir = Vector3.new(
+                    baseDir.X * c - baseDir.Z * s,
+                    0,
+                    baseDir.X * s + baseDir.Z * c
+                )
+                if targetDir.Magnitude > 0.001 then
+                    faceCharacterTowardsDirection(targetDir.Unit)
+                    return
+                end
+            end
+        else
+            -- Non-diagonal: rotate toward raw MoveDirection.
+            local moveDir = getCameraRelativeMoveDirection()
+            if moveDir then
+                faceCharacterTowardsDirection(moveDir)
+                return
+            end
         end
-        -- No movement input above threshold — fall through to camera-yaw write.
+        -- Degenerate input or near-vertical camera — fall through to camera-yaw write.
     end
     -- ─────────────────────────────────────────────────────────────────────────
 
