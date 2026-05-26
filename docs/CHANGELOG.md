@@ -7,6 +7,24 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-26] — Stage 3N: Instant backward turn during backward sprint in shift lock
+
+### Summary
+
+When holding S+Shift in shift lock, the character now snaps to face the backward direction on the first Heartbeat instead of slowly lerping there over ~10–15 frames. The normal 0.18 LERP sweep was taking ~170–250 ms to complete the 180° pivot, during which the character ran backward while still visually facing forward. Now the body rotates instantly the moment a backward sprint direction is detected.
+
+**What changed:**
+
+- Stage 3G block in `applyCharacterFacing()` — added a `directionName` check before calling `faceCharacterTowardsDirection`. When `SPRINT_BACKWARD_INSTANT_TURN = true` and direction is Backward/BackwardLeft/BackwardRight, passes `alphaOverride = 1.0` (immediate snap). All other sprint directions continue to use the smooth 0.18 LERP unchanged.
+
+### Changes to `src/shared/Constants.lua`
+
+- `SPRINT_BACKWARD_INSTANT_TURN = true` — master switch. Set false to restore the slow LERP for backward sprint.
+
+### No animation ID changes, no camera.CFrame writes, no HipHeight/FOV/server changes
+
+---
+
 ## [2026-05-26] — Stage 3M: Fluid crouch enter/exit transitions
 
 ### Summary

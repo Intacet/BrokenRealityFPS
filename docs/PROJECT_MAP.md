@@ -1042,6 +1042,12 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --       at CROUCH_SPEED until resumeStandingLocomotionAfterCrouch() fires. Prevents
              --       the speed snapping to WALK_SPEED the instant C is released while the body
              --       is still blending to standing. Set false to restore instant-speed behaviour.
+             --   Instant backward sprint turn constant (Stage 3N — 2026-05-26):
+             --     SPRINT_BACKWARD_INSTANT_TURN = true — when true, sprinting in the Backward /
+             --       BackwardLeft / BackwardRight direction while shift lock is active snaps the
+             --       character body to face the move direction immediately (alpha=1.0, no LERP).
+             --       Forward and diagonal-forward sprint use the normal 0.18 LERP unchanged.
+             --       Set false to restore the original slow LERP for backward sprint.
              --   Backpedal turn-around constants (Stage 3L — 2026-05-26):
              --     BACKPEDAL_TURN_ENABLED = true — master switch. When true, character body
              --       sweeps to face the backward move direction while walking backward in shift

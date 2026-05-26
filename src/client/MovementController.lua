@@ -24,6 +24,9 @@
 -- Stage 3M (2026-05-26): Fluid crouch enter/exit — blend fade times doubled (~2×); ExitCrouch
 --   one-shot slowed to 0.5×; WalkSpeed locked at CROUCH_SPEED for the full exit animation
 --   window so speed does not snap back the instant C is released.
+-- Stage 3N (2026-05-26): Instant backward turn during sprint in shift lock — Backward /
+--   BackwardLeft / BackwardRight sprint directions snap the body to face the move direction
+--   on the first Heartbeat (alpha=1.0) instead of the normal 0.18 LERP sweep.
 --
 -- Bug fix (2026-05-18): The default Roblox Animate LocalScript inside the character
 -- was overriding custom R6 AnimationTrack objects loaded in Stage 2A. MovementController
@@ -943,7 +946,14 @@ local function applyCharacterFacing()
     then
         local moveDir = getCameraRelativeMoveDirection()
         if moveDir then
-            faceCharacterTowardsDirection(moveDir)
+            -- Stage 3N: when sprinting backward (Backward / BackwardLeft / BackwardRight),
+            -- snap the character to face the move direction instantly — no LERP sweep.
+            -- This prevents the ~10–15 frame delay before the character rotates 180°.
+            -- Forward and diagonal-forward sprint continue to use the smooth LERP.
+            local dir = movementState.directionName
+            local isBackwardSprint = Constants.SPRINT_BACKWARD_INSTANT_TURN
+                and (dir == "Backward" or dir == "BackwardLeft" or dir == "BackwardRight")
+            faceCharacterTowardsDirection(moveDir, if isBackwardSprint then 1.0 else nil)
             return
         end
         -- No movement input above threshold — fall through to camera-yaw write.

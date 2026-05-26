@@ -536,7 +536,7 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-26 (x27)
+## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-26 (x28)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
@@ -1034,6 +1034,13 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - **Stage 3L risk — WalkBackward animation on rotated body:** The existing `WalkBackward` clip is designed for a forward-facing character. With Stage 3L the body rotates ~180° to face the move direction, so the "backward" leg motion in the clip will visually look like forward walking from the observer's perspective. This is probably the desired look (character turns and walks away), but needs Studio verification — if the leg animation looks wrong, a separate walk-forward clip may be needed for the turned-backward state.
 - **Stage 3L risk — LERP alpha tuning:** `BACKPEDAL_TURN_LERP_ALPHA = 0.25` was set without live Studio verification. If the pivot feels too slow or too snappy, tune this constant. At 60 fps, 0.25 gives ~87% completion in 7 frames (~117 ms). Range: 0.1 (slow drift) to 1.0 (instant snap).
 - **Stage 3L risk — immediate camera-yaw snap on release:** When the player releases the backward key, `directionName` leaves the Backward* set and the camera-yaw CFrame write fires immediately (no LERP back). The body will snap to face the camera. If this transition looks harsh in Studio, add a "was-backpedaling" hysteresis flag that smoothly returns the body to camera-yaw over a few frames.
+
+**Updated (2026-05-26 — Stage 3N: Instant backward turn during backward sprint in shift lock):**
+- Stage 3G block in `applyCharacterFacing()` modified: when `directionName` ∈ {Backward, BackwardLeft, BackwardRight} and `SPRINT_BACKWARD_INSTANT_TURN = true`, passes `alphaOverride = 1.0` to `faceCharacterTowardsDirection()` for an immediate 1-frame snap.
+- One new constant: `SPRINT_BACKWARD_INSTANT_TURN = true`.
+- Forward and diagonal-forward sprint directions unchanged (still use 0.18 LERP).
+
+- **Stage 3N risk — asymmetric snap feel:** Backward sprint snaps instantly; releasing S to sprint forward again uses the normal 0.18 LERP back to forward. In practice this is fine (the snap is to go backward, the lerp is to settle forward), but if the forward-return feels odd, add a symmetric instant-turn constant for the exit-backward case too.
 
 **Updated (2026-05-26 — Stage 3M: Fluid crouch enter/exit transitions):**
 - Blend fade times doubled: `CROUCH_DIRECT_BLEND_FADE_TIME` 0.12→0.28, `CROUCH_DIRECT_BLEND_MOVING_FADE_TIME` 0.10→0.22, `CROUCH_EXIT_DIRECT_BLEND_FADE_TIME` 0.10→0.22, `CROUCH_EXIT_IDLE_BLEND_FADE_TIME` 0.12→0.28.

@@ -162,6 +162,16 @@ Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 0.18
 -- Walking, idle, crouching, tactical sprint, sprint-stop, and landing use camera-yaw regardless.
 Constants.SPRINT_SMOOTH_BODY_FACING_ENABLED = true
 
+-- ── Stage 3N: Instant backward turn while sprinting in shift lock ─────────────
+-- When true, sprinting in the Backward / BackwardLeft / BackwardRight direction while
+-- shift lock is active snaps the character body to face the move direction on the very
+-- first Heartbeat — no LERP sweep. Without this, the normal 0.18 LERP takes ~10–15
+-- frames (~170–250 ms) to complete the 180° pivot, so the character visually runs
+-- backward while still facing the camera.
+-- Forward and diagonal-forward sprint directions continue to use the smooth LERP.
+-- Set false to restore the slow LERP for backward sprint directions.
+Constants.SPRINT_BACKWARD_INSTANT_TURN = true
+
 -- DEAD CODE (superseded by Stage 3J — 2026-05-25): SPRINT_DIAGONAL_BODY_ROTATION_DEGREES
 -- was used by Stage 3I to rotate the body by a fixed angle from camera-forward when
 -- sprinting in the ForwardLeft or ForwardRight direction. Stage 3J disables RunForwardLeft/
