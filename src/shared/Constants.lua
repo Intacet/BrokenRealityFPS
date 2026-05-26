@@ -446,6 +446,16 @@ Constants.CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_DISTANCE = true
 -- Set false to leave CameraOffset unchanged while mouse lock is on.
 Constants.CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_OFFSET = true
 
+-- ── Stage 3H: Sprint camera offset override ───────────────────────────────────
+-- When true, Humanoid.CameraOffset is zeroed while sprinting in mouse lock,
+-- removing the right-shoulder over-the-shoulder offset and centering the camera
+-- directly behind the character. The offset is restored to CUSTOM_MOUSE_LOCK_CAMERA_OFFSET
+-- the moment sprint ends (next Heartbeat, ≤16ms).
+-- Normal sprint (LeftShift) and tactical sprint both trigger the zero-offset path.
+-- Walking, idle, crouching, sprint-stop, and landing lock all keep the normal offset.
+-- Set false to always use CUSTOM_MOUSE_LOCK_CAMERA_OFFSET regardless of sprint state.
+Constants.SPRINT_DISABLES_CAMERA_OFFSET = true
+
 -- ============================================================
 -- Timing constants
 -- ============================================================

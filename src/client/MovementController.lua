@@ -988,6 +988,30 @@ local function restoreNormalThirdPersonCamera()
     end
 end
 
+-- ── Stage 3H: Sprint camera offset override ──────────────────────────────────
+-- Updates Humanoid.CameraOffset based on sprint state while mouse lock is active.
+-- While sprinting (normal or tactical): CameraOffset = Vector3.zero — camera centers
+-- directly behind the character; the right-shoulder offset is removed.
+-- While not sprinting (mouse lock still on): restores CUSTOM_MOUSE_LOCK_CAMERA_OFFSET.
+-- Guarded by ~= so no redundant writes are issued per Heartbeat frame.
+-- No-ops immediately if SPRINT_DISABLES_CAMERA_OFFSET is false or mouse lock is off.
+-- Called from the Heartbeat loop alongside updateSprintFov() so the offset tracks
+-- sprint state within one frame (≤16ms) of any state change.
+-- Does NOT write camera.CFrame, CameraType, FieldOfView, HipHeight, or JumpPower.
+local function updateSprintCameraOffset()
+    if not Constants.SPRINT_DISABLES_CAMERA_OFFSET then return end
+    if not customMouseLocked then return end
+    local hum = humanoid
+    if not hum then return end
+    local wantZero = movementState.isSprinting or isTacticalSprinting
+    local targetOffset = if wantZero
+        then Vector3.zero
+        else Constants.CUSTOM_MOUSE_LOCK_CAMERA_OFFSET
+    if hum.CameraOffset ~= targetOffset then
+        hum.CameraOffset = targetOffset
+    end
+end
+
 -- ============================================================
 -- Private helpers — Stage 2D: custom mouse lock
 -- ============================================================
@@ -4423,6 +4447,11 @@ function MovementController:Start()
         -- targetFov so redundant tweens are never started. Also called directly from sprint/
         -- crouch input handlers for immediate response — this call covers continuous state.
         updateSprintFov()
+
+        -- Stage 3H: update CameraOffset every frame based on sprint state. Removes the
+        -- right-shoulder offset while sprinting (camera centers behind character) and
+        -- restores it when sprint ends. Guarded internally so no redundant writes occur.
+        updateSprintCameraOffset()
     end)
     table.insert(_connections, heartbeatConn)
 
