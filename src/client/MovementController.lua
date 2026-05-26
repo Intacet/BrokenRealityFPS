@@ -4949,6 +4949,19 @@ function MovementController:Start()
             slideMomentumVelocity.VectorVelocity = slideDirection * (startSpd * (1 - t))
         end
 
+        -- Stage 3O: lock HRP yaw to face slideDirection during slide and SlideExit.
+        -- Prevents the player from steering mid-slide or during the stand-up animation.
+        -- We only write the rotation (yaw); position is untouched so physics still drives
+        -- the character forward via LinearVelocity. The write happens every Heartbeat at
+        -- ~60 Hz, which overrides any Humanoid auto-rotate or player stick input.
+        if isSliding or slideExitConn ~= nil then
+            local hrp = currentRootPart
+            if hrp then
+                local angle = math.atan2(-slideDirection.X, -slideDirection.Z)
+                hrp.CFrame = CFrame.new((hrp :: BasePart).Position) * CFrame.Angles(0, angle, 0)
+            end
+        end
+
         -- Stage 2P: sustain or end tactical sprint based on movement direction each frame.
         -- If the player stops moving or drifts off-forward, tactical sprint ends automatically.
         -- applySpeed() is called again after the state change so WalkSpeed reflects the
