@@ -7,6 +7,61 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-26] — Stage 4A: Vault foundation (Space over valid obstacles — low + medium)
+
+### Summary
+
+Vault prototype implemented. Pressing Space while moving toward a vaultable obstacle (1.5–5.0 studs tall) now attempts a vault instead of a jump. Four raycasts classify the obstacle (low vs medium), confirm clearance, and find a landing position. A TweenService CFrame move carries the character over. LowVault and MediumVault one-shot animations play during the move. DEBT-052 partially resolved; DEBT-054 added for remaining gaps.
+
+### Behaviour
+
+- **Trigger:** Space pressed while `isMoving` and phase is ACTIVE. `canAttemptVault()` checks cooldown, crouching, landing-lock, slide, and sprint-stop guards before raycasting.
+- **Detection:** 4-ray strategy — forward-low probe (obstacle face), downward ray (obstacle top), upward clearance (no ceiling), landing downward (ground exists beyond). Heights outside 1.5–5.0 studs range are rejected.
+- **Vault types:** LowVault (1.5–3.5 studs) uses `VAULT_MOVE_DURATION_LOW` (0.35 s); MediumVault (3.5–5.0 studs) uses `VAULT_MOVE_DURATION_MEDIUM` (0.48 s).
+- **Movement:** `TweenService:Create(hrp, TweenInfo, {CFrame=targetCF})` with `Quad InOut` easing. WalkSpeed zeroed during tween; restored by Completed callback.
+- **Animation:** Unarmed_LowVault / Unarmed_MediumVault one-shots. Falls back gracefully (warn) if track absent (e.g. AR15 set has no vault IDs).
+- **Space fallback:** CAS action only Sinks when a vault starts. Passes through in all other cases so Roblox jump still works normally.
+- **ADS blocked** while vaulting via `IsADSBlocked()`. `GetMoveState()` returns `"Vaulting"`. New public method: `MovementController.IsVaulting()`.
+- **Cleanup:** vault state cleared on respawn, destroy(), and phase-exit (direct-clear, mirrors slide pattern). `vaultCompletionToken` guards stale tween Completed callbacks.
+- **Studio verification:** Pending — MCP verification was not completed at commit time. See DEBT-054 item 6.
+
+### Changes to `src/shared/Constants.lua`
+
+- LowVault / MediumVault animation ID comments updated from "deferred" to Stage 4A active.
+- Full vault constants block added under `-- Stage 4A: Vault foundation` header:
+  - `VAULT_ENABLED`, `VAULT_INPUT_KEY`, `VAULT_REQUIRE_MOVING`, `VAULT_REQUIRE_ACTIVE_PHASE`, `VAULT_COOLDOWN`
+  - `LOW_VAULT_MIN/MAX_HEIGHT`, `MEDIUM_VAULT_MIN/MAX_HEIGHT`
+  - `VAULT_MAX_FORWARD_DISTANCE`, `VAULT_OBSTACLE_RAY_HEIGHT_LOW/MEDIUM`, `VAULT_CLEARANCE_HEIGHT`
+  - `VAULT_LANDING_FORWARD_DISTANCE`, `VAULT_LANDING_UP_OFFSET`
+  - `VAULT_MOVE_DURATION_LOW`, `VAULT_MOVE_DURATION_MEDIUM`
+  - `VAULT_MAX_SLOPE_NORMAL_Y`, `VAULT_LOCKS_MOVEMENT`, `VAULT_BLOCKS_SPRINT`, `VAULT_BLOCKS_CROUCH`
+  - `VAULT_INPUT_PRIORITY` (2500), `VAULT_ANIMATION_SPEED_MULTIPLIER` (1.0), `VAULT_DEBUG`
+
+### Changes to `src/client/MovementController.lua`
+
+- `VAULT_ACTION_NAME` constant added near module top.
+- Vault state variables added: `isVaulting`, `lastVaultTime`, `vaultCompletionToken`, `vaultActiveTween`.
+- `applySpeed()`: Stage 4A block after slide check; WalkSpeed = 0 when `isVaulting and VAULT_LOCKS_MOVEMENT`.
+- `getAnimationSpeedMultiplier()`: LowVault / MediumVault return `VAULT_ANIMATION_SPEED_MULTIPLIER`.
+- Vault helpers added (Stage 4A block before Stage 2I): `clearVaultTween`, `canAttemptVault`, `getVaultMoveDirection`, `detectVault`, `playVaultAnimation`, `moveCharacterThroughVault`, `startVault`.
+- `loadMovementAnimations()`: Unarmed_LowVault and Unarmed_MediumVault loaded; both marked `Looped = false`; respawn direct-clear block added.
+- `updateMovementAnimation()`: `if isVaulting then return end` guard added after slide guards.
+- `Start()`: CAS vault binding added before crouch binding.
+- `destroy()`: `UnbindAction(VAULT_ACTION_NAME)`, `clearVaultTween()`, state reset added after slide cleanup.
+- Phase-exit handler: vault state cleared (mirrors slide pattern).
+- `GetMoveState()`: returns `"Vaulting"` when `isVaulting`.
+- `IsADSBlocked()`: `or isVaulting` added.
+- `MovementController.IsVaulting()`: new public function.
+- Ready log updated to `Stage 1–4A`.
+
+### Technical debt
+
+- **DEBT-052** partially resolved — vault foundation implemented; server validation, camera polish, and AR15 animations remain.
+- **DEBT-044** updated — LowVault + MediumVault now active for Unarmed set.
+- **DEBT-054** added — vault-specific production gaps and Studio verification pending.
+
+---
+
 ## [2026-05-26] — Stage 3O: Slide system (hold C while sprinting or tac-sprinting)
 
 ### Summary

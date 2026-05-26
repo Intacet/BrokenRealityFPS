@@ -536,7 +536,7 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-26 (x28)
+## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-26 (x29)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
@@ -792,7 +792,7 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - TacticalSprintForward2 variation system — `TacticalSprintForward2` is loaded but never selected. A safe alternation system (cooldown, random pick, or distance-based trigger) is needed before it can be used.
 - Jump animations — suppressed along with locomotion when Animate is disabled. Custom replacement needed in a future movement stage.
 - Climb animations — suppressed by Animate disable. Custom replacement needed.
-- Vault animations (LowVault, MediumVault) — IDs reserved in `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed` (2026-05-23). NOT loaded by `loadMovementAnimations()`. Vault system design, obstacle detection, input binding, and state machine integration are all deferred. See DEBT-052.
+- Vault animations (LowVault, MediumVault) — **Unarmed set activated (Stage 4A, 2026-05-26).** IDs loaded in `loadMovementAnimations()`, one-shot markers set, input bound at Space (CAS priority 2500), state machine integrated. AR15-specific vault IDs not yet authored — falls back gracefully (warn + move without animation). See DEBT-052 (partially resolved) and DEBT-054.
 - Slide animations (SlideInto, SlideIdle, SlideExit) — **Unarmed set implemented (Stage 3O, 2026-05-26).** IDs loaded, input bound, state machine integrated. AR15-specific slide IDs not yet authored — falls back gracefully (no-op) when AR15 set is active. See DEBT-053 (resolved).
 - Lower-body / upper-body animation split — not implemented; the full body plays the movement animation.
 - Reload, fire, ADS, and sprint-hold weapon animations — deferred to a weapon-anim stage.
@@ -1158,31 +1158,34 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 
 ---
 
-## [DEBT-052] Vault system not implemented — animation IDs reserved — ADDED 2026-05-23
+## [DEBT-052] Vault system not implemented — animation IDs reserved — ADDED 2026-05-23 — PARTIALLY RESOLVED 2026-05-26
 
-**File:** `src/shared/Constants.lua`, `src/client/MovementController.lua` (future)
-**Severity:** Low (no code gap yet — IDs are reserved only)
-**Studio verification required:** Not applicable until implementation begins
+**File:** `src/shared/Constants.lua`, `src/client/MovementController.lua`
+**Severity:** Medium (foundation implemented; several gaps remain — see DEBT-054)
+**Studio verification required:** Pending (MCP Studio verification required before marking fully resolved)
 
-**What exists:**
-- `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed.LowVault = "rbxassetid://78932004147700"` — reserved, not loaded.
-- `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed.MediumVault = "rbxassetid://98948076922717"` — reserved, not loaded.
-- No vault state, no loading code, no detection code, no input binding exists.
+**What was implemented (Stage 4A — 2026-05-26):**
 
-**What a vault system will require (design checklist for when the system is staged):**
+1. ✅ **Obstacle detection** — 4-ray strategy: forward-low probe detects wall face; downward ray finds obstacle top; upward clearance ray checks overhead; landing ray confirms ground. Height classified into LowVault (1.5–3.5 studs) / MediumVault (3.5–5.0 studs).
+2. ✅ **Input binding** — Space intercepted at `VAULT_INPUT_PRIORITY` (2500) via `ContextActionService:BindActionAtPriority`. Only Sinks when a vault starts; Passes otherwise so Roblox jump still works.
+3. ✅ **Vault state** — `isVaulting` local variable. Gates: `applySpeed()` (WalkSpeed=0), `updateMovementAnimation()` (no interruption), `IsADSBlocked()` (blocks ADS), `GetMoveState()` returns "Vaulting".
+4. ✅ **Character movement** — `TweenService:Create` on `HumanoidRootPart.CFrame` to landing position. Duration: `VAULT_MOVE_DURATION_LOW` (0.35 s) / `VAULT_MOVE_DURATION_MEDIUM` (0.48 s). Token-guarded Completed callback clears `isVaulting` and restores speed.
+5. ✅ **Animation playback** — LowVault and MediumVault loaded in `loadMovementAnimations()` for Unarmed set. Both marked `Looped = false`. `getAnimationSpeedMultiplier()` returns `VAULT_ANIMATION_SPEED_MULTIPLIER` (1.0×).
+6. ✅ **Movement lock** — `applySpeed()` zeroes WalkSpeed while `isVaulting and VAULT_LOCKS_MOVEMENT == true`. Restored by tween Completed callback.
+7. ✅ **AR15 fallback** — vault animation selection uses `getAnimationSetName()`. If AR15 set has no LowVault/MediumVault keys, `playVaultAnimation()` logs a warn and continues — vault still moves without animation.
+8. ✅ **Cleanup paths** — vault state cleared on respawn, destroy(), and phase exit (direct clear, mirrors slide pattern).
+9. ✅ **No magic numbers** — all distances, durations, heights, priorities in `Constants.lua` under Stage 4A block.
+10. ✅ **Cooldown** — `lastVaultTime` + `VAULT_COOLDOWN` (0.65 s) prevents rapid re-vault.
 
-1. **Obstacle detection** — raycast or `GetPartsInBox` to detect vaultable geometry in front of the character. Must distinguish low (≤ ~2.5 studs) from medium (≤ ~5 studs) obstacles. Server-side or client-side? Likely client-side (presentation), with server verifying position after vault.
-2. **Input binding** — a dedicated vault key (common: Space or a dedicated key), or automatic trigger when approaching vaultable geometry while moving. Must not conflict with jump (Space is already the default jump key in Roblox).
-3. **Vault state** — new `isVaulting: boolean` in `movementState`. Must gate: no sprint start, no crouch, no jump, no shooting while vaulting.
-4. **Character movement during vault** — the character must glide over the obstacle. Options: (a) `LinearVelocity` carry over the object (similar to Stage 3B sprint-jump momentum); (b) `Humanoid:MoveTo()` to a calculated landing point; (c) server-authoritative position correction after vault ends.
-5. **Animation playback** — `LowVault` and `MediumVault` are one-shot clips (`Looped = false`). They must be loaded in `loadMovementAnimations()` and gated by `Stopped` callback before normal locomotion resumes — mirrors `LandingMedium` and `TacticalSprintStop` patterns.
-6. **Movement lock during vault** — `WalkSpeed = 0` while vaulting, restored on animation `Stopped` (same token-guard pattern as Stage 3B/3C landing lock).
-7. **AR15 set** — no vault IDs exist for AR15. If vault is enabled while armed, fall back to the Unarmed clip or skip vault entirely. Decide before implementation.
-8. **Server interaction** — if vault teleports or carries the character through collision geometry, the server must accept the resulting position change. `GunService` origin checks (`SHOT_ORIGIN_MAX_DISTANCE`) may need to tolerate a brief post-vault position shift. See DEBT-014.
+**Remaining gaps (tracked in DEBT-054):**
+- No server-side position validation after vault — GunService SHOT_ORIGIN_MAX_DISTANCE may reject shots briefly post-vault.
+- No camera polish (tilt, FOV change) during vault.
+- AR15 vault animation IDs not yet authored.
+- TweenService CFrame tween needs in-Studio tuning for feel and obstacle clipping edge cases.
+- No physics collision suppression during tween (character may clip thin walls mid-vault).
 
-**Trigger:** A movement stage is scheduled to implement vaulting and obstacle interaction.
-
-**Fix when:** Each checklist item above has been designed, staged, and verified in Studio. Do not load the vault IDs in `loadMovementAnimations()` until the animation playback + Stopped callback path is ready.
+**Trigger:** Stage 4B or higher polish pass, or when server-side shot origin tolerance is adjusted.
+**Fix when:** DEBT-054 items are resolved and Studio verification of vault feel, animation sync, and server interaction is complete.
 
 ---
 
@@ -1206,6 +1209,38 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 10. ✅ **Server interaction** — slide uses `WalkSpeed` decay only (no `LinearVelocity`, no teleport, no velocity write). Position change rate stays within normal sprint tolerance. `GunService` origin checks (DEBT-014) are unaffected.
 
 **Remaining gap:** AR15-specific SlideInto/SlideIdle/SlideExit animation IDs not yet authored. Tracked in DEBT-044 (animation set completeness).
+
+---
+
+## [DEBT-054] Vault foundation (Stage 4A) — known gaps and tuning risks — ADDED 2026-05-26
+
+**File:** `src/client/MovementController.lua`, `src/server/GunService.lua`
+**Severity:** Medium (vault works as a prototype; several production gaps remain)
+**Studio verification required:** Yes — vault tween, animation sync, and server interaction all need in-Studio testing
+
+**Gap 1 — No server-side position validation:**
+`TweenService` moves `HumanoidRootPart.CFrame` client-side only. If the vault carries the character more than `SHOT_ORIGIN_MAX_DISTANCE` (12 studs in `GunService`) from the server's last known position, the `GunService` shot-origin check (DEBT-014) will reject shots fired immediately after landing. This window is brief but real.
+**Fix when:** Either increase server tolerance during an active vault window (requires a new remote or a server-readable state flag), or confirm experimentally that the tween distance stays within 12 studs.
+
+**Gap 2 — No physics collision suppression during tween:**
+The TweenService CFrame tween bypasses Roblox physics collision resolution. If the character model intersects a thin wall or a narrow ledge during the tween arc, physics may push the character sideways or the tween may fail to complete normally.
+**Fix when:** Observed in Studio testing. Potential fix: temporarily set `HumanoidRootPart.CanCollide = false` during the tween (requires restoring it in the Completed callback and a cleanup guard for interrupted tweens).
+
+**Gap 3 — No camera polish:**
+No tilt, FOV change, or camera shake during vault. The vault feels mechanical without camera feedback.
+**Fix when:** A camera effects stage is designed. Candidate: brief FOV increase (5–10°) + slight tilt during the tween via `CameraController`.
+
+**Gap 4 — AR15 vault animations missing:**
+`playVaultAnimation()` falls back gracefully (logs warn, vault move still occurs) but the character has no animation while armed.
+**Fix when:** AR15 LowVault and MediumVault animation IDs are authored and added to `MOVEMENT_ANIMATION_IDS.R6.AR15`.
+
+**Gap 5 — TweenService tween may feel floaty or abrupt on edge cases:**
+`Quad InOut` easing over 0.35/0.48 s was chosen as a reasonable starting point. The actual feel depends on the height of the obstacle and how fast the character was moving before the vault. Some obstacle sizes may produce visually jarring arcs.
+**Fix when:** In-Studio tuning pass. Consider: `VAULT_MOVE_DURATION_LOW` and `VAULT_MOVE_DURATION_MEDIUM` are already in Constants.lua and can be adjusted without code changes.
+
+**Gap 6 — Studio verification pending:**
+Stage 4A was not verified in Studio via MCP before commit due to MCP session state at the time of implementation.
+**Fix when:** Open Studio, sync via Rojo, enter play mode, and test vault against blocks at 2, 3, 4, and 5.5+ studs height. Verify animation plays, WalkSpeed locks, and landing position is correct. Log any failures as follow-up sub-items here.
 
 ---
 

@@ -234,6 +234,77 @@ Constants.SLIDE_MOMENTUM_MAX_FORCE = 60000  -- LinearVelocity MaxForce (Magnitud
 Constants.SPRINT_STAMINA_ENABLED = false -- stamina system not yet implemented (DEBT-042)
 Constants.PRONE_ENABLED          = false -- prone stance not yet implemented (DEBT-043)
 
+-- ── Stage 4A: Vault foundation ───────────────────────────────────────────────
+-- Master switch. Set false to disable vault detection and input without removing code.
+Constants.VAULT_ENABLED                  = true
+
+-- Space bar is intercepted by ContextActionService at VAULT_INPUT_PRIORITY.
+-- The action only Sinks when a vault actually begins; otherwise it Passes through
+-- so normal Roblox jump still works.
+Constants.VAULT_INPUT_KEY                = Enum.KeyCode.Space
+
+-- Vault is only allowed when the player is actively moving (MoveDirection magnitude > deadzone).
+Constants.VAULT_REQUIRE_MOVING           = true
+
+-- Vault is only allowed when MatchController:GetPhase() == ACTIVE.
+Constants.VAULT_REQUIRE_ACTIVE_PHASE     = true
+
+-- Seconds after a vault completes before another vault can start.
+Constants.VAULT_COOLDOWN                 = 0.65
+
+-- Obstacle height bands (studs above character feet).
+-- Obstacles outside LOW_VAULT_MIN..MEDIUM_VAULT_MAX are not vaultable.
+Constants.LOW_VAULT_MIN_HEIGHT           = 1.5
+Constants.LOW_VAULT_MAX_HEIGHT           = 3.5
+Constants.MEDIUM_VAULT_MIN_HEIGHT        = 3.5
+Constants.MEDIUM_VAULT_MAX_HEIGHT        = 5.0
+
+-- Maximum forward distance (studs) the forward-probe ray travels.
+Constants.VAULT_MAX_FORWARD_DISTANCE     = 4.0
+
+-- Height above HRP origin the forward-probe ray is cast from for obstacle detection.
+-- Keeps the ray in the lower half of the character body to detect short obstacles.
+Constants.VAULT_OBSTACLE_RAY_HEIGHT_LOW  = 2.0
+-- Height used for the second forward probe (for medium-height obstacles).
+Constants.VAULT_OBSTACLE_RAY_HEIGHT_MEDIUM = 4.0
+
+-- Total height above HRP used for the downward top-of-obstacle ray and the clearance ray.
+Constants.VAULT_CLEARANCE_HEIGHT         = 5.5
+
+-- Forward distance (studs past the obstacle face) the landing ray is cast from.
+Constants.VAULT_LANDING_FORWARD_DISTANCE = 3.0
+
+-- Small upward offset applied to the computed landing position so HRP sits correctly above ground.
+-- R6 HumanoidRootPart is ~3 studs above ground; VAULT_LANDING_UP_OFFSET fine-tunes the final snap.
+Constants.VAULT_LANDING_UP_OFFSET        = 0.25
+
+-- TweenService movement duration for each vault tier (seconds).
+Constants.VAULT_MOVE_DURATION_LOW        = 0.35
+Constants.VAULT_MOVE_DURATION_MEDIUM     = 0.48
+
+-- Surface normal Y-component threshold below which a surface is considered a wall (not a floor).
+-- Forward-ray hits with Normal.Y >= this value are treated as sloped floors and rejected.
+Constants.VAULT_MAX_SLOPE_NORMAL_Y       = 0.65
+
+-- When true, WalkSpeed is set to 0 during the vault tween (mirrors SLIDE_LOCKS_MOVEMENT pattern).
+Constants.VAULT_LOCKS_MOVEMENT           = true
+
+-- When true, tactical sprint state is cleared when a vault starts.
+Constants.VAULT_BLOCKS_SPRINT            = true
+
+-- When true, crouch state blocks vault attempts (player must stand first).
+Constants.VAULT_BLOCKS_CROUCH            = true
+
+-- ContextActionService priority for the Space intercept.
+-- Above CoreScript jump (2000) so we can intercept; below custom mouse-lock (3000).
+Constants.VAULT_INPUT_PRIORITY           = 2500
+
+-- AdjustSpeed multiplier applied to LowVault / MediumVault animation tracks.
+Constants.VAULT_ANIMATION_SPEED_MULTIPLIER = 1.0
+
+-- When true, vault detection and state transitions emit Logger.debug() output.
+Constants.VAULT_DEBUG                    = true
+
 -- ============================================================
 -- Movement animation set names
 -- Used by MovementController to key into MOVEMENT_ANIMATION_IDS and to validate
@@ -299,11 +370,11 @@ Constants.MOVEMENT_ANIMATION_IDS = {
             TacticalSprintForward1 = "rbxassetid://135119369971434", -- tactical sprint forward primary (looped) (Stage 2P)
             TacticalSprintForward2 = "rbxassetid://110008857265859", -- tactical sprint forward alternate; loaded, not yet selected (Stage 2P)
             TacticalSprintStop     = "rbxassetid://81946205769343",  -- tactical sprint stop one-shot; plays when tactical sprint ends (Stage 2P)
-            -- Vault animations (Unarmed only).
-            -- IDs reserved for future implementation. NOT loaded by loadMovementAnimations() yet.
-            -- Do not add loading or selection code until the vault system is designed and staged.
-            LowVault    = "rbxassetid://78932004147700",  -- low-vault one-shot (deferred — vault system not yet implemented)
-            MediumVault = "rbxassetid://98948076922717",  -- medium-vault one-shot (deferred — vault system not yet implemented)
+            -- Vault animations (Unarmed only) — Stage 4A: active.
+            -- Low vault (1.5–3.5 studs): played for shorter obstacles.
+            -- Medium vault (3.5–5.0 studs): played for taller obstacles.
+            LowVault    = "rbxassetid://78932004147700",  -- low-vault one-shot (Stage 4A — active)
+            MediumVault = "rbxassetid://98948076922717",  -- medium-vault one-shot (Stage 4A — active)
             -- Slide animations (Unarmed only).
             -- IDs reserved for future implementation. NOT loaded by loadMovementAnimations() yet.
             -- Do not add loading, input, or state-machine code until the slide system is designed and staged. See DEBT-053.

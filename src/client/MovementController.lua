@@ -242,6 +242,11 @@ local ReplicatedStorage     = game:GetService("ReplicatedStorage")
 -- Used by both Start() (bind) and destroy() (unbind). Must be module-unique.
 local MOUSE_LOCK_ACTION_NAME: string = "MovementController_ToggleCustomMouseLock"
 
+-- Stage 4A: ContextActionService action name for the vault Space intercept.
+-- Bound in Start() at VAULT_INPUT_PRIORITY (2500 — between CoreScript 2000 and mouse-lock 3000).
+-- Only Sinks when a vault actually begins; Passes through so normal jump still works.
+local VAULT_ACTION_NAME: string = "MovementController_VaultAttempt"
+
 -- ============================================================
 -- Dependencies
 -- ============================================================
@@ -626,6 +631,27 @@ local slideMomentumAttachment: Attachment? = nil
 -- Nil when no slide is active. Destroyed by clearSlideMomentum().
 local slideMomentumVelocity: LinearVelocity? = nil
 
+-- Stage 4A: vault state ──────────────────────────────────────────────────────
+
+-- True while a vault TweenService move is in progress.
+-- Set by startVault(); cleared by the tween Completed callback or by vault cleanup.
+-- applySpeed() zeros WalkSpeed while this is true (VAULT_LOCKS_MOVEMENT).
+-- updateMovementAnimation() skips normal selection while this is true.
+local isVaulting: boolean = false
+
+-- os.clock() of the most recent vault completion (or interruption).
+-- Used to enforce VAULT_COOLDOWN before the next vault can start.
+local lastVaultTime: number = 0
+
+-- Monotonic counter incremented each time a vault starts or is cleared.
+-- The tween Completed callback captures this at dispatch time and no-ops if stale.
+-- Mirrors landingLockToken / sprintStopLockToken / slideToken patterns.
+local vaultCompletionToken: number = 0
+
+-- The active TweenService tween moving HumanoidRootPart through the vault arc.
+-- Nil when no vault is in progress. Cancelled and cleared by clearVaultTween().
+local vaultActiveTween: Tween? = nil
+
 -- ============================================================
 -- Private helpers — Stage 1
 -- ============================================================
@@ -679,6 +705,14 @@ local function applySpeed()
     -- When SLIDE_MOMENTUM_ENABLED is false this still zeroes WalkSpeed, giving a
     -- speed-only slide without carry (player stops if W is released).
     if isSliding then
+        hum.WalkSpeed = 0
+        return
+    end
+
+    -- Stage 4A: suppress Humanoid input during the vault TweenService move.
+    -- TweenService drives HRP.CFrame directly; player directional input must not
+    -- interfere. WalkSpeed is restored by applySpeed() once isVaulting clears.
+    if isVaulting and Constants.VAULT_LOCKS_MOVEMENT == true then
         hum.WalkSpeed = 0
         return
     end
@@ -1888,6 +1922,9 @@ local function getAnimationSpeedMultiplier(animationName: string): number
     then
         -- Stage 3O: slide clips play at SLIDE_ANIMATION_SPEED_MULTIPLIER (default 1.0×).
         return Constants.SLIDE_ANIMATION_SPEED_MULTIPLIER
+    elseif animationName == "LowVault" or animationName == "MediumVault" then
+        -- Stage 4A: vault one-shots play at VAULT_ANIMATION_SPEED_MULTIPLIER (default 1.0×).
+        return Constants.VAULT_ANIMATION_SPEED_MULTIPLIER
     end
     return 1.0
 end
@@ -2442,6 +2479,315 @@ local function startSlide()
 end
 
 -- ============================================================
+-- Private helpers — Stage 4A: vault foundation
+-- ============================================================
+
+-- Cancels the active vault TweenService tween (if any) and nils the reference.
+-- Does NOT clear isVaulting — caller is responsible for state cleanup.
+-- Safe to call when no tween is active.
+local function clearVaultTween()
+    local t = vaultActiveTween
+    if t then
+        t:Cancel()
+        vaultActiveTween = nil
+    end
+end
+
+-- Returns true when all preconditions for a vault attempt are met.
+-- Does NOT perform raycasts — only checks movement and game state.
+local function canAttemptVault(): boolean
+    if Constants.VAULT_ENABLED ~= true then return false end
+    if Constants.VAULT_REQUIRE_ACTIVE_PHASE
+        and MatchController:GetPhase() ~= Constants.Phase.ACTIVE
+    then return false end
+    if isVaulting then return false end
+    if os.clock() - lastVaultTime < Constants.VAULT_COOLDOWN then return false end
+    if movementState.isCrouching then return false end
+    if isSprintStopPlaying then return false end
+    if isLandingMovementLocked then return false end
+    if isSliding then return false end
+    local hum = humanoid
+    local hrp = currentRootPart
+    if not hum or not hrp then return false end
+    if Constants.VAULT_REQUIRE_MOVING and not movementState.isMoving then return false end
+    return true
+end
+
+-- Returns the flat XZ world-space unit vector the character should vault toward.
+-- Uses MoveDirection when moving (VAULT_REQUIRE_MOVING = true, so this is always valid
+-- when called from canAttemptVault-gated paths). Falls back to HRP look vector.
+local function getVaultMoveDirection(): Vector3
+    local mv = movementState.moveVector
+    if mv ~= nil then
+        local flat = Vector3.new(mv.X, 0, mv.Z)
+        if flat.Magnitude > 0.001 then
+            return flat.Unit
+        end
+    end
+    local hrp = currentRootPart
+    if hrp then
+        local look = (hrp :: BasePart).CFrame.LookVector
+        local flat = Vector3.new(look.X, 0, look.Z)
+        if flat.Magnitude > 0.001 then
+            return flat.Unit
+        end
+    end
+    return Vector3.new(0, 0, -1)
+end
+
+-- Performs 4-ray vault detection from the character's current position.
+-- Returns a table { vaultType: "LowVault"|"MediumVault", landingPosition: Vector3 }
+-- on success, or nil when no vaultable obstacle is found.
+-- Ray strategy:
+--   1. Forward-low ray — detects an obstacle face in front of the player.
+--   2. Downward ray — finds the top surface of the obstacle.
+--   3. Upward clearance ray — confirms overhead space to pass through.
+--   4. Downward landing ray — confirms ground exists beyond the obstacle.
+local function detectVault(): { vaultType: string, landingPosition: Vector3 }?
+    local hrp = currentRootPart
+    if not hrp then return nil end
+    local hrpPos = (hrp :: BasePart).Position
+    local fwd    = getVaultMoveDirection()
+
+    -- Raycast filter: ignore the character model itself.
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = { currentCharacter :: Instance }
+
+    -- ── Ray 1: forward-low probe — detect obstacle face ──────────────────────
+    -- Cast from head-level (HRP + height offset) toward forward direction.
+    local ray1Origin = hrpPos + Vector3.new(0, Constants.VAULT_OBSTACLE_RAY_HEIGHT_LOW, 0)
+    local ray1Result = workspace:Raycast(
+        ray1Origin,
+        fwd * Constants.VAULT_MAX_FORWARD_DISTANCE,
+        params
+    )
+    if not ray1Result then
+        if Constants.VAULT_DEBUG then
+            Logger.debug("[MovementController] detectVault: no obstacle in forward-low ray")
+        end
+        return nil
+    end
+
+    -- Reject hits whose surface normal points mostly upward (floor/ramp, not a wall face).
+    if ray1Result.Normal.Y >= Constants.VAULT_MAX_SLOPE_NORMAL_Y then
+        if Constants.VAULT_DEBUG then
+            Logger.debug("[MovementController] detectVault: hit surface is a ramp/floor (normalY="
+                .. string.format("%.2f", ray1Result.Normal.Y) .. ") — rejected")
+        end
+        return nil
+    end
+
+    -- ── Ray 2: downward ray — find top of obstacle ────────────────────────────
+    -- Cast from above the hit point downward to find the obstacle's top surface.
+    local hitXZ   = Vector3.new(ray1Result.Position.X, 0, ray1Result.Position.Z)
+    local nudgeXZ = fwd * 0.2   -- small nudge past the face so we land on top, not on the edge
+    local ray2Origin = Vector3.new(
+        hitXZ.X + nudgeXZ.X,
+        hrpPos.Y + Constants.VAULT_CLEARANCE_HEIGHT,
+        hitXZ.Z + nudgeXZ.Z
+    )
+    local ray2Result = workspace:Raycast(
+        ray2Origin,
+        Vector3.new(0, -(Constants.VAULT_CLEARANCE_HEIGHT * 2), 0),
+        params
+    )
+    if not ray2Result then
+        if Constants.VAULT_DEBUG then
+            Logger.debug("[MovementController] detectVault: downward ray found no obstacle top")
+        end
+        return nil
+    end
+
+    -- ── Height classification ─────────────────────────────────────────────────
+    -- R6 HumanoidRootPart sits ~3 studs above the ground plane.
+    -- Obstacle height = top surface Y minus character feet Y.
+    local R6_FOOT_OFFSET: number = 3.0
+    local characterFeetY    = hrpPos.Y - R6_FOOT_OFFSET
+    local obstacleTopY      = ray2Result.Position.Y
+    local estimatedHeight   = obstacleTopY - characterFeetY
+
+    local vaultType: string?
+    if estimatedHeight >= Constants.LOW_VAULT_MIN_HEIGHT
+        and estimatedHeight < Constants.LOW_VAULT_MAX_HEIGHT
+    then
+        vaultType = "LowVault"
+    elseif estimatedHeight >= Constants.MEDIUM_VAULT_MIN_HEIGHT
+        and estimatedHeight <= Constants.MEDIUM_VAULT_MAX_HEIGHT
+    then
+        vaultType = "MediumVault"
+    else
+        if Constants.VAULT_DEBUG then
+            Logger.debug("[MovementController] detectVault: obstacle height "
+                .. string.format("%.2f", estimatedHeight)
+                .. " studs is outside vaultable bands — rejected")
+        end
+        return nil
+    end
+
+    -- ── Ray 3: upward clearance check — confirm no ceiling ───────────────────
+    -- Cast upward from just above the obstacle top, forward of the face.
+    local ray3Origin = Vector3.new(
+        ray1Result.Position.X + fwd.X * 1.5,
+        obstacleTopY + 0.5,
+        ray1Result.Position.Z + fwd.Z * 1.5
+    )
+    local ray3Result = workspace:Raycast(
+        ray3Origin,
+        Vector3.new(0, Constants.VAULT_CLEARANCE_HEIGHT, 0),
+        params
+    )
+    if ray3Result then
+        if Constants.VAULT_DEBUG then
+            Logger.debug("[MovementController] detectVault: clearance blocked overhead — rejected")
+        end
+        return nil
+    end
+
+    -- ── Ray 4: landing ground check — confirm ground beyond obstacle ──────────
+    -- Cast downward from the expected landing position.
+    local landingOriginXZ = Vector3.new(
+        ray1Result.Position.X + fwd.X * Constants.VAULT_LANDING_FORWARD_DISTANCE,
+        obstacleTopY + Constants.VAULT_LANDING_UP_OFFSET + 5,   -- 5 stud search window above expected ground
+        ray1Result.Position.Z + fwd.Z * Constants.VAULT_LANDING_FORWARD_DISTANCE
+    )
+    local ray4Result = workspace:Raycast(
+        landingOriginXZ,
+        Vector3.new(0, -10, 0),
+        params
+    )
+    if not ray4Result then
+        if Constants.VAULT_DEBUG then
+            Logger.debug("[MovementController] detectVault: no landing ground found beyond obstacle — rejected")
+        end
+        return nil
+    end
+
+    -- Landing HRP position: ground hit + R6 foot offset so character stands correctly.
+    local landingPosition = ray4Result.Position + Vector3.new(0, R6_FOOT_OFFSET, 0)
+
+    if Constants.VAULT_DEBUG then
+        Logger.debug("[MovementController] detectVault: "
+            .. vaultType :: string
+            .. " detected (height=" .. string.format("%.2f", estimatedHeight)
+            .. " studs) landing=(" .. string.format("%.1f,%.1f,%.1f",
+                landingPosition.X, landingPosition.Y, landingPosition.Z) .. ")")
+    end
+
+    return { vaultType = vaultType :: string, landingPosition = landingPosition }
+end
+
+-- Plays the vault animation (LowVault or MediumVault) as a one-shot.
+-- Stops any currently playing movement animation first.
+-- Safe to call when the track is absent (logs a warn and continues — vault still moves).
+local function playVaultAnimation(vaultType: string)
+    if not Constants.CUSTOM_MOVEMENT_ANIMATIONS_ENABLED then return end
+    local setName = getAnimationSetName()
+    local key     = setName .. "_" .. vaultType
+    local track   = animationTracks[key]
+
+    if not track then
+        Logger.warn(
+            "[MovementController] playVaultAnimation: track '" .. key
+            .. "' not loaded — vault moves without animation"
+        )
+        return
+    end
+
+    stopCurrentMovementAnimation()
+    -- Play at full speed; AdjustSpeed handles VAULT_ANIMATION_SPEED_MULTIPLIER via playMovementAnimation.
+    -- We call playMovementAnimation so the standard speed-multiplier + logging path runs.
+    playMovementAnimation(key)
+end
+
+-- Moves HumanoidRootPart to landingPosition over `duration` seconds via TweenService.
+-- Preserves the character's current yaw so the body stays forward-facing.
+-- On tween completion, clears isVaulting and calls applySpeed() to restore movement.
+-- Token-guards the Completed callback to discard stale completions if the vault is
+-- interrupted (e.g. by phase exit or character removal) before the tween finishes.
+local function moveCharacterThroughVault(landingPosition: Vector3, duration: number)
+    local hrp = currentRootPart
+    if not hrp then return end
+
+    -- Preserve current yaw — keep the character facing forward through the vault.
+    local _, currentYaw, _ = (hrp :: BasePart).CFrame:ToEulerAnglesYXZ()
+    local targetCF = CFrame.new(landingPosition) * CFrame.Angles(0, currentYaw, 0)
+
+    clearVaultTween()
+
+    local tween = TweenService:Create(
+        hrp :: BasePart,
+        TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut),
+        { CFrame = targetCF }
+    )
+    vaultActiveTween = tween
+
+    local capturedToken = vaultCompletionToken
+    tween.Completed:Connect(function(state: Enum.PlaybackState)
+        -- Discard if a newer vault started or the vault was interrupted.
+        if vaultCompletionToken ~= capturedToken then return end
+        vaultActiveTween = nil
+        if state ~= Enum.PlaybackState.Completed then return end
+        if isVaulting then
+            isVaulting  = false
+            lastVaultTime = os.clock()
+            applySpeed()
+            if Constants.VAULT_DEBUG then
+                Logger.debug("[MovementController] vault complete — movement restored")
+            end
+        end
+    end)
+
+    tween:Play()
+end
+
+-- Entry point for a vault attempt.
+-- Runs canAttemptVault() → detectVault() → sets state → plays animation → starts tween.
+-- Returns true when a vault begins (caller should Sink the Space key),
+-- or false when conditions are not met (caller should Pass the Space key).
+local function startVault(): boolean
+    if not canAttemptVault() then return false end
+
+    local result = detectVault()
+    if not result then return false end
+
+    -- ── Commit to vault ───────────────────────────────────────────────────────
+
+    -- Clear tactical sprint without playing TacticalSprintStop (same pattern as phase exit).
+    if Constants.VAULT_BLOCKS_SPRINT and isTacticalSprinting then
+        isTacticalSprinting               = false
+        movementState.isTacticalSprinting = false
+        tacticalSprintStartTime           = 0
+        applyTacticalSprintSensitivity(false)
+        clearTacticalSprintStopConnection()
+    end
+    -- Clear normal sprint flag so speed is not affected once vault ends.
+    if Constants.VAULT_BLOCKS_SPRINT and movementState.isSprinting then
+        movementState.isSprinting = false
+    end
+
+    vaultCompletionToken += 1
+    isVaulting = true
+    applySpeed()   -- set WalkSpeed = 0 immediately
+
+    local vaultType    = result.vaultType
+    local landingPos   = result.landingPosition
+    local duration     = if vaultType == "LowVault"
+        then Constants.VAULT_MOVE_DURATION_LOW
+        else Constants.VAULT_MOVE_DURATION_MEDIUM
+
+    if Constants.VAULT_DEBUG then
+        Logger.debug("[MovementController] startVault: " .. vaultType
+            .. " duration=" .. string.format("%.2f", duration) .. "s")
+    end
+
+    playVaultAnimation(vaultType)
+    moveCharacterThroughVault(landingPos, duration)
+
+    return true
+end
+
+-- ============================================================
 -- Private helpers — Stage 2I: crouch bottom-hold
 -- ============================================================
 
@@ -2832,6 +3178,12 @@ local function loadMovementAnimations(character: Model)
     slideToken             += 1
     lastSlideEndTime        = 0
     slideDirection          = Vector3.new(0, 0, -1)
+    -- Stage 4A: clear vault state on respawn.
+    -- clearVaultTween() is safe even if vaultActiveTween is nil — just cancels if active.
+    clearVaultTween()
+    isVaulting            = false
+    vaultCompletionToken += 1   -- invalidate any pending tween Completed callbacks
+    -- lastVaultTime is intentionally preserved so cooldown persists across respawns.
     -- Do NOT call clearCrouchBottomHold() here — the previous Animator may already be
     -- destroyed, making the hold track reference unsafe to Stop(). Clear state directly.
     crouchHoldTrack          = nil
@@ -3006,6 +3358,16 @@ local function loadMovementAnimations(character: Model)
         toLoad["Unarmed_SlideExit"] = r6.Unarmed.SlideExit
     end
 
+    -- Stage 4A: Vault animations — Unarmed set only.
+    -- LowVault: one-shot played for obstacles 1.5–3.5 studs tall.
+    -- MediumVault: one-shot played for obstacles 3.5–5.0 studs tall.
+    if r6.Unarmed.LowVault and r6.Unarmed.LowVault ~= "" then
+        toLoad["Unarmed_LowVault"] = r6.Unarmed.LowVault
+    end
+    if r6.Unarmed.MediumVault and r6.Unarmed.MediumVault ~= "" then
+        toLoad["Unarmed_MediumVault"] = r6.Unarmed.MediumVault
+    end
+
     -- CrouchWalk tracks are optional. Only loaded if IDs exist in Constants.
     -- Stage 2J: nine Unarmed directional CrouchWalk* IDs added. All looped.
     -- CrouchWalk and CrouchWalkForward share the same asset ID (forward is the canonical fallback).
@@ -3048,11 +3410,13 @@ local function loadMovementAnimations(character: Model)
             -- Stage 2O: LandingMedium added to the one-shot list.
             -- Stage 2P: TacticalSprintStop added to the one-shot list.
             -- Stage 3O: SlideInto and SlideExit added to the one-shot list (SlideIdle is looped).
+            -- Stage 4A: LowVault and MediumVault added to the one-shot list.
             if key:match("_EnterCrouch$") or key:match("_ExitCrouch$")
                 or key:match("_CrouchWalkStart$")
                 or key:match("_LandingLight$") or key:match("_LandingMedium$") or key:match("_LandingHeavy$")
                 or key:match("_TacticalSprintStop$")
                 or key:match("_SlideInto$") or key:match("_SlideExit$")
+                or key:match("_LowVault$") or key:match("_MediumVault$")     -- Stage 4A
             then
                 track.Looped = false
             else
@@ -3497,6 +3861,8 @@ local function updateMovementAnimation()
     -- one-shot is running — mirrors the tacticalSprintStopConn "is-playing" pattern exactly.
     -- Important: isSliding is already false during SlideExit, so this guard is required.
     if slideExitConn ~= nil then return end
+    -- Stage 4A: do not interrupt vault one-shot while the tween is active.
+    if isVaulting then return end
 
     local setName = getAnimationSetName()   -- "Unarmed" (default) or "AR15" (when weapon equipped)
 
@@ -4186,6 +4552,8 @@ end
 function MovementController:GetMoveState(): string
     if isSliding then                                        -- Stage 3O: sliding is highest priority
         return "Sliding"
+    elseif isVaulting then                                   -- Stage 4A: vaulting
+        return "Vaulting"
     elseif movementState.isSprinting and movementState.isMoving then
         return "Sprinting"
     elseif movementState.isCrouching then
@@ -4197,9 +4565,9 @@ function MovementController:GetMoveState(): string
     end
 end
 
--- True while the player is sprinting or sliding. GunController reads this to block ADS.
+-- True while the player is sprinting, sliding, or vaulting. GunController reads this to block ADS.
 function MovementController:IsADSBlocked(): boolean
-    return movementState.isSprinting or isSliding    -- Stage 3O: block ADS during slide
+    return movementState.isSprinting or isSliding or isVaulting    -- Stage 3O: slide; Stage 4A: vault
 end
 
 -- Stage 1/2A: no viewmodel effects. Returns identity so ViewModelController's
@@ -4296,6 +4664,13 @@ function MovementController.IsTacticalSprinting(): boolean
     return isTacticalSprinting
 end
 
+-- Stage 4A: Returns true while a vault TweenService move is in progress.
+-- External systems (GunController, camera effects) can read this to suppress actions
+-- during the vault. Cleared by the tween Completed callback or cleanup paths.
+function MovementController.IsVaulting(): boolean
+    return isVaulting
+end
+
 -- Disconnects all event connections, stops all animation tracks, destroys Animation
 -- instances, and resets all state.
 -- Safe to call even if Start() was never called (iterates empty tables).
@@ -4368,6 +4743,12 @@ function MovementController:destroy()
     slideToken             += 1
     lastSlideEndTime        = 0
     slideDirection          = Vector3.new(0, 0, -1)
+    -- Stage 4A: clear vault state on destroy.
+    ContextActionService:UnbindAction(VAULT_ACTION_NAME)
+    clearVaultTween()
+    isVaulting            = false
+    vaultCompletionToken += 1
+    lastVaultTime         = 0
     -- Stage 3M: cancel any in-flight crouch-exit speed lock on destroy.
     isCrouchExitTransitioning   = false
     crouchExitTransitionVersion += 1
@@ -4533,6 +4914,14 @@ function MovementController:Start()
                 movementState.isSliding = false
                 isTacSprintSlide        = false
                 slideToken             += 1
+            end
+            -- Stage 4A: interrupt any active vault on phase exit.
+            -- clearVaultTween() cancels the TweenService move so HRP stops immediately.
+            -- lastVaultTime is intentionally preserved for cooldown continuity.
+            if isVaulting then
+                clearVaultTween()
+                isVaulting            = false
+                vaultCompletionToken += 1
             end
             -- Stage 3M: cancel any in-flight crouch-exit speed lock on phase exit.
             -- applySpeed() will set WalkSpeed = 0 immediately after (phase not ACTIVE).
@@ -4727,6 +5116,38 @@ function MovementController:Start()
         false,                                          -- createTouchButton
         Constants.CUSTOM_MOUSE_LOCK_INPUT_PRIORITY,    -- priority (3000)
         Constants.CUSTOM_MOUSE_LOCK_TOGGLE_KEY          -- Enum.KeyCode.LeftControl (Stage 2K)
+    )
+
+    -- ── Input: Vault (Space intercept — Stage 4A) ────────────────────────────
+    -- Space is intercepted at VAULT_INPUT_PRIORITY (2500) — above CoreScript jump (2000).
+    -- Only Sinks when a vault actually starts; Passes through in all other cases
+    -- so normal Roblox jump still works when no valid obstacle is detected.
+    -- NOT stored in _connections — unbound by name via VAULT_ACTION_NAME in destroy().
+    ContextActionService:BindActionAtPriority(
+        VAULT_ACTION_NAME,
+        function(
+            _actionName: string,
+            inputState: Enum.UserInputState,
+            _inputObj: InputObject
+        ): Enum.ContextActionResult
+            -- Only act on Begin; pass End and Change through so jump still registers.
+            if inputState ~= Enum.UserInputState.Begin then
+                return Enum.ContextActionResult.Pass
+            end
+            if UserInputService:GetFocusedTextBox() ~= nil then
+                return Enum.ContextActionResult.Pass
+            end
+            if Constants.VAULT_ENABLED ~= true then
+                return Enum.ContextActionResult.Pass
+            end
+            -- startVault() returns true only when a vault begins; return Sink in that case
+            -- so CoreScripts do not trigger a Roblox jump. Otherwise pass through.
+            local vaulted = startVault()
+            return if vaulted then Enum.ContextActionResult.Sink else Enum.ContextActionResult.Pass
+        end,
+        false,                              -- createTouchButton
+        Constants.VAULT_INPUT_PRIORITY,     -- 2500 (between CoreScript 2000 and mouse-lock 3000)
+        Constants.VAULT_INPUT_KEY           -- Enum.KeyCode.Space
     )
 
     -- ── Input: Crouch (hold-to-crouch — Stage 2I) ────────────────────────────
@@ -5026,7 +5447,7 @@ function MovementController:Start()
     end)
     table.insert(_connections, heartbeatConn)
 
-    Logger.debug("[MovementController] Ready (Stage 1–3C: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals+new IDs, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→directional(2R), CrouchIdle, CrouchWalkStart, Falling+LandingLight/Medium/Heavy, TacticalSprint double-tap+ramp+stop, sprintFOV+landingClassification, landingMovementLock+sprintJumpMomentum, sprintStopLock+momentumCarry)")
+    Logger.debug("[MovementController] Ready (Stage 1–4A: DevMouseLock, CAS 3000, LeftControl toggle, reapply-frame, facing-yaw, zoom-limits 4–14, mouse-lock-cam 8+offset, Unarmed directional/diagonals+new IDs, idle, hold-to-crouch, crouch-bottom-hold, CrouchWalk, sprint→directional(2R), CrouchIdle, CrouchWalkStart, Falling+LandingLight/Medium/Heavy, TacticalSprint double-tap+ramp+stop, sprintFOV+landingClassification, landingMovementLock+sprintJumpMomentum, sprintStopLock+momentumCarry, slide(3O), vault(4A))")
 end
 
 return MovementController

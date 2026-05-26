@@ -206,7 +206,7 @@ FleaMarketService / PlayerMarketplace
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2Q+ + 2R + 3A + 3B + 3O (Animate-disable, R6 detection, animation-set selection,
+MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2Q+ + 2R + 3A + 3B + 3O + 4A (Animate-disable, R6 detection, animation-set selection,
                         --   strafe gating, animation speed multipliers, shift-lock sprint fix,
                         --   custom mouse-lock toggle on LeftControl, character-facing camera yaw,
                         --   third-person zoom limits, mouse-lock camera distance and shoulder offset,
@@ -237,6 +237,16 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --     and last SLIDE_DURATION×1.75 s. Ends naturally (timer), on movement stop,
                         --     or on Freefall. If C released during slide: SlideExit → walk/idle (no
                         --     forced crouch). If C still held: SlideExit → CrouchIdle. DEBT-053 resolved.
+                        --   Vault system (Stage 4A — 2026-05-26): Space pressed while moving toward a
+                        --     vaultable obstacle (1.5–5.0 studs tall) triggers a vault instead of jump.
+                        --     4-ray detection: forward-low probe (wall face), downward (obstacle top),
+                        --     upward clearance, landing ground. LowVault (1.5–3.5 studs, 0.35 s tween);
+                        --     MediumVault (3.5–5.0 studs, 0.48 s tween). TweenService CFrame move to
+                        --     landing position (Quad InOut). WalkSpeed=0 during tween. Unarmed_LowVault /
+                        --     Unarmed_MediumVault one-shots play during move. Space Passes through (normal
+                        --     jump) when no valid obstacle detected. CAS priority 2500. vaultCompletionToken
+                        --     guards stale tween callbacks. DEBT-052 partially resolved; DEBT-054 added.
+                        --     Studio verification pending (see DEBT-054 item 6).
                         --   StarterPlayer.EnableMouseLockOption = false is now set in default.project.json
                         --     (Rojo "Bool" property) — no manual Studio step required for this setting.
                         --   LocalPlayer.DevEnableMouseLock = false is also applied client-side on Start
