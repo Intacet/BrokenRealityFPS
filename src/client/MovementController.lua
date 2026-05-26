@@ -521,6 +521,11 @@ local lastShiftPressTime: number = 0
 -- the one-shot is still running and Heartbeat must not override it.
 local tacticalSprintStopConn: RBXScriptConnection? = nil
 
+-- Stage 3K: stores UserInputService.MouseDeltaSensitivity captured immediately before
+-- tactical sprint applies the reduced sensitivity. Restored on every tactical sprint exit path.
+-- nil when no override is active (tactical sprint not running or feature disabled).
+local tacticalSprintOriginalSensitivity: number? = nil
+
 -- Stage 3C: normal sprint-stop state ─────────────────────────────────────────
 
 -- os.clock() captured when normal sprint (LeftShift) begins.
@@ -1300,6 +1305,36 @@ local function clearLandingMovementLock()
     end
 end
 
+-- ── Stage 3K: Tactical sprint mouse sensitivity override ─────────────────────
+-- Applies (active=true) or restores (active=false) MouseDeltaSensitivity for the
+-- tactical sprint state. Must be called at every isTacticalSprinting=true entry and
+-- at every isTacticalSprinting=false exit so the restore always pairs with the apply.
+--
+-- active=true:  caches UserInputService.MouseDeltaSensitivity, then writes
+--               cached × TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER.
+-- active=false: restores the cached value and clears the cache.
+--
+-- Idempotent in both directions: double-apply is a no-op (cache already set);
+-- double-restore is a no-op (cache already nil).
+-- No-op when TACTICAL_SPRINT_SENSITIVITY_ENABLED is false.
+-- Never uses pcall — MouseDeltaSensitivity is a supported read/write property.
+local function applyTacticalSprintSensitivity(active: boolean)
+    if not Constants.TACTICAL_SPRINT_SENSITIVITY_ENABLED then return end
+    if active then
+        if tacticalSprintOriginalSensitivity ~= nil then return end  -- already applied
+        local current = UserInputService.MouseDeltaSensitivity
+        tacticalSprintOriginalSensitivity = current
+        UserInputService.MouseDeltaSensitivity = current
+            * Constants.TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER
+    else
+        local orig = tacticalSprintOriginalSensitivity
+        if orig == nil then return end  -- already restored
+        tacticalSprintOriginalSensitivity = nil
+        UserInputService.MouseDeltaSensitivity = orig
+    end
+end
+-- ─────────────────────────────────────────────────────────────────────────────
+
 -- Sets isLandingMovementLocked = true and schedules an automatic unlock after `duration`
 -- seconds via task.delay. The unlock only fires if the token still matches (i.e., no
 -- manual clearLandingMovementLock() or respawn has already cleared it).
@@ -1322,6 +1357,8 @@ local function startLandingMovementLock(duration: number)
     movementState.isSprinting         = false
     movementState.isTacticalSprinting = false
     isTacticalSprinting               = false
+    -- Stage 3K: restore sensitivity if tactical sprint was active when we landed.
+    applyTacticalSprintSensitivity(false)
 
     -- Zero WalkSpeed immediately — applySpeed() now sees isLandingMovementLocked = true.
     applySpeed()
@@ -1844,6 +1881,8 @@ local function stopTacticalSprint()
     isTacticalSprinting               = false
     movementState.isTacticalSprinting = false
     tacticalSprintStartTime           = 0
+    -- Stage 3K: restore sensitivity immediately on tactical sprint end.
+    applyTacticalSprintSensitivity(false)
 
     -- Disconnect any existing TacticalSprintStop Stopped callback first.
     clearTacticalSprintStopConnection()
@@ -1905,6 +1944,8 @@ local function playSprintStopWithLock(direction: Vector3?)
     movementState.isSprinting         = false
     movementState.isTacticalSprinting = false
     isTacticalSprinting               = false
+    -- Stage 3K: restore sensitivity — sprint stop begins, tactical sprint is over.
+    applyTacticalSprintSensitivity(false)
 
     -- Increment token for stale-unlock prevention; capture for closures.
     sprintStopLockToken += 1
@@ -2331,6 +2372,8 @@ local function loadMovementAnimations(character: Model)
     isTacticalSprinting               = false
     movementState.isTacticalSprinting = false
     tacticalSprintStartTime           = 0
+    -- Stage 3K: restore sensitivity if tactical sprint was active at respawn.
+    applyTacticalSprintSensitivity(false)
     lastShiftPressTime                = 0
     clearTacticalSprintStopConnection()
     -- Stage 3C: clear sprint-stop state on respawn.
@@ -3821,6 +3864,8 @@ function MovementController:destroy()
     isTacticalSprinting               = false
     movementState.isTacticalSprinting = false
     tacticalSprintStartTime           = 0
+    -- Stage 3K: restore sensitivity on destroy.
+    applyTacticalSprintSensitivity(false)
     lastShiftPressTime                = 0
     clearTacticalSprintStopConnection()
     clearCrouchBottomHold()
@@ -3969,6 +4014,8 @@ function MovementController:Start()
                 isTacticalSprinting               = false
                 movementState.isTacticalSprinting = false
                 tacticalSprintStartTime           = 0
+                -- Stage 3K: restore sensitivity on phase exit.
+                applyTacticalSprintSensitivity(false)
                 clearTacticalSprintStopConnection()
                 stopCurrentMovementAnimation()
             end
@@ -4058,6 +4105,8 @@ function MovementController:Start()
                         isTacticalSprinting               = true
                         movementState.isTacticalSprinting = true
                         tacticalSprintStartTime           = os.clock()
+                        -- Stage 3K: apply reduced sensitivity on tactical sprint entry.
+                        applyTacticalSprintSensitivity(true)
                         if Constants.MOVEMENT_ANIMATION_DEBUG then
                             Logger.debug(
                                 "[MovementController] Tactical sprint START"

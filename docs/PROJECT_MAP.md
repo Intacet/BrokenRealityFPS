@@ -1003,6 +1003,13 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --       offset so the camera centers behind the character. Restores to
              --       CUSTOM_MOUSE_LOCK_CAMERA_OFFSET on the next Heartbeat when sprint ends.
              --       Set false to always use CUSTOM_MOUSE_LOCK_CAMERA_OFFSET.
+             --   Tactical sprint sensitivity override constants (Stage 3K — 2026-05-26):
+             --     TACTICAL_SPRINT_SENSITIVITY_ENABLED = true — master switch. When true,
+             --       applyTacticalSprintSensitivity() halves MouseDeltaSensitivity on tactical
+             --       sprint entry and restores it on every exit path. Set false for no change.
+             --     TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER = 0.5 — fraction of current
+             --       UserInputService.MouseDeltaSensitivity applied while tactical sprint is
+             --       active. 0.5 = half sensitivity. Tune without code changes.
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag

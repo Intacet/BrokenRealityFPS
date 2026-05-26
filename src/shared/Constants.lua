@@ -346,6 +346,19 @@ Constants.TACTICAL_SPRINT_STOP_ANIMATION_ENABLED = true
 -- Only applies to the Shift-release path; direction-change stops (Heartbeat) are unaffected.
 Constants.TACTICAL_SPRINT_STOP_MIN_DURATION = 5.0
 
+-- ── Stage 3K: Tactical sprint mouse sensitivity override ──────────────────────
+-- When true, MovementController reduces UserInputService.MouseDeltaSensitivity by
+-- TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER on tactical sprint entry, and restores
+-- the pre-entry value the moment tactical sprint ends (any exit path).
+-- Prevents players from snapping the camera too quickly while in a committed forward run.
+-- Set false to leave sensitivity unchanged during tactical sprint.
+Constants.TACTICAL_SPRINT_SENSITIVITY_ENABLED = true
+
+-- Fraction of current MouseDeltaSensitivity applied while tactical sprint is active.
+-- 0.5 = half sensitivity (default). Values below 1.0 reduce turn speed; 1.0 = no change.
+-- Has no effect when TACTICAL_SPRINT_SENSITIVITY_ENABLED is false.
+Constants.TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER = 0.5
+
 -- When true, WalkLeft/WalkRight strafe animations only play while mouse lock / shift-lock
 -- style state is active (UserInputService.MouseBehavior == LockCenter).
 -- Left/right/diagonal movement falls back to WalkForward when mouse lock is off.

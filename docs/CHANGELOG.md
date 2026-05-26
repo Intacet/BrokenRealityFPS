@@ -7,6 +7,42 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-25] — Stage 3K: Halve mouse sensitivity while tactical sprinting
+
+### Summary
+
+`UserInputService.MouseDeltaSensitivity` is reduced to 50% of its pre-entry value when tactical sprint activates, and restored immediately the moment tactical sprint ends through any exit path. Prevents players from snapping the camera too quickly during a committed forward run.
+
+**What changed:**
+
+- `applyTacticalSprintSensitivity(active: boolean)` private helper added (before `startLandingMovementLock`). Caches current sensitivity on `active=true`, restores it on `active=false`. Idempotent — double-apply and double-restore are both no-ops via the nil check on `tacticalSprintOriginalSensitivity`.
+- `tacticalSprintOriginalSensitivity: number?` module-level state variable added (nil when no override is active).
+- Called `applyTacticalSprintSensitivity(true)` at tactical sprint entry (InputBegan double-tap path).
+- Called `applyTacticalSprintSensitivity(false)` at all six exit paths:
+  - `stopTacticalSprint()` (direction-change / forward-dot failure / crouch interrupt)
+  - `playSprintStopWithLock()` (Shift release after long sprint)
+  - `startLandingMovementLock()` (landing suppresses sprint flags)
+  - `loadMovementAnimations()` respawn block
+  - Phase exit handler (direct state clear, no animation)
+  - `destroy()`
+
+### Changes to `src/shared/Constants.lua`
+
+- `TACTICAL_SPRINT_SENSITIVITY_ENABLED = true` — master switch.
+- `TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER = 0.5` — fraction of current sensitivity applied on entry.
+
+### Changes to `src/client/MovementController.lua`
+
+- `tacticalSprintOriginalSensitivity: number?` state variable added.
+- `applyTacticalSprintSensitivity(active: boolean)` helper added.
+- 1 entry call + 6 exit calls wired.
+
+### No animation ID changes, no camera.CFrame writes, no HipHeight/FOV/server changes
+
+**Studio verification:** Needs manual Studio playtest — MCP keyboard input does not reach `InputBegan` in Studio play mode.
+
+---
+
 ## [2026-05-25] — Stage 3J: Disable RunForwardLeft/Right — RunForward plays for all sprint directions
 
 ### Summary
