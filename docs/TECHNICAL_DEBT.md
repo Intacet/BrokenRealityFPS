@@ -536,7 +536,7 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-22 (x25)
+## [DEBT-044] MovementController animation system — Unarmed directional animations — UPDATED 2026-05-26 (x26)
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Medium
@@ -1025,7 +1025,17 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - **Stage 3K new risk — multiplier tuning:** `TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER = 0.5` (half sensitivity) was set without live Studio verification. If the reduced sensitivity feels too sluggish or too responsive during tactical sprint, tune only this constant. Range: 0.0 (cursor fully locked) to 1.0 (no change). Do not adjust without live Studio playtest confirming the feel matches the intent.
 - **Stage 3K new risk — MCP unavailable:** Manual Studio test steps: (1) enable mouse lock (LeftControl), double-tap LeftShift → confirm `MouseDeltaSensitivity` drops to 0.5; (2) release Shift → confirm sensitivity restores to original; (3) direction-change stop → confirm sensitivity restores; (4) crouch during tactical sprint → confirm sensitivity restores; (5) respawn during tactical sprint → confirm sensitivity restores; (6) phase exit during tactical sprint → confirm sensitivity restores; (7) confirm `TACTICAL_SPRINT_SENSITIVITY_ENABLED = false` disables all sensitivity writes entirely.
 
-**Trigger:** Any playtesting session where T-pose during idle/jump or missing backward/diagonal animations is noticeable; where crouch bottom-pose hold or CrouchWalk transitions look wrong; where the `getRigDebugSummary` warn appears; where CrouchWalk direction does not match movement direction; where WalkSpeed appears stuck at 0 after a landing; where mouse sensitivity feels wrong or stuck after tactical sprint; or where animation speed or input feels wrong after Studio testing.
+**Updated (2026-05-26 — Stage 3L: Backpedal turn-around in shift lock):**
+- Stage 3L block added in `applyCharacterFacing()` between Stage 3G and the camera-yaw fallback. When `directionName` ∈ {Backward, BackwardLeft, BackwardRight} and shift lock is active (not sprinting, not crouching, not tactical sprint, not sprint-stop, not landing lock), calls `faceCharacterTowardsDirection(moveDir, BACKPEDAL_TURN_LERP_ALPHA)` and returns.
+- `faceCharacterTowardsDirection` accepts optional `alphaOverride: number?` — sprint callers pass nil (uses `SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA`); Stage 3L passes `BACKPEDAL_TURN_LERP_ALPHA = 0.25`.
+- Two new Constants: `BACKPEDAL_TURN_ENABLED = true`, `BACKPEDAL_TURN_LERP_ALPHA = 0.25`.
+- MCP unavailable — Studio verification was not performed. Needs manual playtest.
+
+- **Stage 3L risk — WalkBackward animation on rotated body:** The existing `WalkBackward` clip is designed for a forward-facing character. With Stage 3L the body rotates ~180° to face the move direction, so the "backward" leg motion in the clip will visually look like forward walking from the observer's perspective. This is probably the desired look (character turns and walks away), but needs Studio verification — if the leg animation looks wrong, a separate walk-forward clip may be needed for the turned-backward state.
+- **Stage 3L risk — LERP alpha tuning:** `BACKPEDAL_TURN_LERP_ALPHA = 0.25` was set without live Studio verification. If the pivot feels too slow or too snappy, tune this constant. At 60 fps, 0.25 gives ~87% completion in 7 frames (~117 ms). Range: 0.1 (slow drift) to 1.0 (instant snap).
+- **Stage 3L risk — immediate camera-yaw snap on release:** When the player releases the backward key, `directionName` leaves the Backward* set and the camera-yaw CFrame write fires immediately (no LERP back). The body will snap to face the camera. If this transition looks harsh in Studio, add a "was-backpedaling" hysteresis flag that smoothly returns the body to camera-yaw over a few frames.
+
+**Trigger:** Any playtesting session where T-pose during idle/jump or missing backward/diagonal animations is noticeable; where crouch bottom-pose hold or CrouchWalk transitions look wrong; where the `getRigDebugSummary` warn appears; where CrouchWalk direction does not match movement direction; where WalkSpeed appears stuck at 0 after a landing; where mouse sensitivity feels wrong or stuck after tactical sprint; where the backpedal body turn looks wrong (leg animation, pivot speed, or snap on release); or where animation speed or input feels wrong after Studio testing.
 **Fix when:** A future movement stage adds idle/jump/fall/climb custom clips, AR15 CrouchWalk IDs, a dedicated CrouchIdle clip, and server-owned equipment integration. Tune speed multipliers after first Studio playtest. Do not build full Scriptable camera system until camera refactor is scheduled. Add the WalkSpeed=0 stuck diagnostic when any live-play test confirms the edge case.
 
 ---

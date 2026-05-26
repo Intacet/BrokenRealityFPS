@@ -359,6 +359,23 @@ Constants.TACTICAL_SPRINT_SENSITIVITY_ENABLED = true
 -- Has no effect when TACTICAL_SPRINT_SENSITIVITY_ENABLED is false.
 Constants.TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER = 0.5
 
+-- ── Stage 3L: Backpedal turn-around in shift lock ─────────────────────────────
+-- When true, the character body turns to face the backward move direction while
+-- walking backward in shift lock (Backward / BackwardLeft / BackwardRight directions).
+-- Prevents the jarring look of the character staring forward while backpedaling —
+-- instead the body sweeps around (via LERP) to face where the player is actually going.
+-- Has no effect when customMouseLocked is false, or while sprinting / crouching /
+-- in tactical sprint / during sprint-stop / during landing movement lock.
+-- Set false to revert to the original camera-yaw facing during backward movement.
+Constants.BACKPEDAL_TURN_ENABLED = true
+
+-- LERP alpha applied per Heartbeat for the backpedal body-turn sweep.
+-- Intentionally higher than SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA (0.18) so the
+-- 180° pivot completes in roughly 8–10 frames (~130–170 ms at 60 fps) — quick enough
+-- to feel responsive, slow enough that the body physically turns rather than snapping.
+-- 1.0 = immediate snap. Has no effect when BACKPEDAL_TURN_ENABLED is false.
+Constants.BACKPEDAL_TURN_LERP_ALPHA = 0.25
+
 -- When true, WalkLeft/WalkRight strafe animations only play while mouse lock / shift-lock
 -- style state is active (UserInputService.MouseBehavior == LockCenter).
 -- Left/right/diagonal movement falls back to WalkForward when mouse lock is off.

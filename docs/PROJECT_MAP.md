@@ -702,6 +702,26 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       New constant: SPRINT_DISABLES_CAMERA_OFFSET = true.
                         --       Needs manual Studio playtest (Rojo sync pending at commit time).
                         --
+                        --     Backpedal turn-around in shift lock (Stage 3L — 2026-05-26):
+                        --       New block in applyCharacterFacing() after Stage 3G, before camera-yaw write.
+                        --       Active when BACKPEDAL_TURN_ENABLED=true and customMouseLocked and
+                        --         directionName ∈ {Backward, BackwardLeft, BackwardRight} and not isSprinting
+                        --         and not isCrouching and not isTacticalSprinting and not isSprintStopPlaying
+                        --         and not isLandingMovementLocked.
+                        --       getCameraRelativeMoveDirection() → if moveDir (magnitude >= 0.1):
+                        --         faceCharacterTowardsDirection(moveDir, BACKPEDAL_TURN_LERP_ALPHA) → return.
+                        --       Prevents the "stare-forward while backpedaling" look — body sweeps to face
+                        --         where the player is actually going.
+                        --       BACKPEDAL_TURN_LERP_ALPHA = 0.25: faster than sprint alpha (0.18) so the
+                        --         180° pivot completes in ~8–10 frames at 60 fps (≈130–170 ms).
+                        --       faceCharacterTowardsDirection gains optional alphaOverride: number? param.
+                        --         Sprint callers pass nil (unchanged, still uses SPRINT_...LERP_ALPHA).
+                        --       When backward input is released: directionName leaves Backward* set,
+                        --         block does not run, camera-yaw write resumes next Heartbeat.
+                        --       No camera.CFrame writes. No HipHeight/FOV changes. No new animation IDs.
+                        --       New constants: BACKPEDAL_TURN_ENABLED = true, BACKPEDAL_TURN_LERP_ALPHA = 0.25.
+                        --       Needs manual Studio playtest — MCP unavailable at commit time.
+                        --
                         --     RunForward always — disable RunForwardLeft/Right (Stage 3J — 2026-05-25):
                         --       getSprintAnimationName() simplified: all directional branching removed.
                         --         All sprint directions → getRunForwardSuffix(animSetName) (RunForward or
@@ -1010,6 +1030,13 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --     TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER = 0.5 — fraction of current
              --       UserInputService.MouseDeltaSensitivity applied while tactical sprint is
              --       active. 0.5 = half sensitivity. Tune without code changes.
+             --   Backpedal turn-around constants (Stage 3L — 2026-05-26):
+             --     BACKPEDAL_TURN_ENABLED = true — master switch. When true, character body
+             --       sweeps to face the backward move direction while walking backward in shift
+             --       lock. Set false to revert to original camera-yaw facing during backpedal.
+             --     BACKPEDAL_TURN_LERP_ALPHA = 0.25 — per-Heartbeat LERP alpha for the pivot
+             --       sweep. Higher than sprint (0.18) for a quicker 180° body turn (~8–10
+             --       frames at 60 fps). 1.0 = instant snap. Tune without code changes.
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag

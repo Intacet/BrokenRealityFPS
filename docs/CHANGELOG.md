@@ -7,6 +7,35 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-26] — Stage 3L: Backpedal turn-around in shift lock
+
+### Summary
+
+When the player walks backward (Backward / BackwardLeft / BackwardRight) in shift lock, the character body now sweeps around to face the move direction rather than staring forward while playing the WalkBackward animation. The pivot uses a per-frame LERP (alpha 0.25, ~8–10 frames at 60 fps) so the body visibly rotates rather than snapping.
+
+**What changed:**
+
+- New Stage 3L block added in `applyCharacterFacing()` (after Stage 3G, before camera-yaw fallback). Checks `directionName` ∈ {Backward, BackwardLeft, BackwardRight} while in shift lock, not sprinting, not crouching, not in tactical sprint, not during sprint-stop or landing lock. Calls `faceCharacterTowardsDirection(moveDir, BACKPEDAL_TURN_LERP_ALPHA)` and returns; otherwise falls through to camera-yaw as before.
+- `faceCharacterTowardsDirection(direction, alphaOverride?)` gains an optional second parameter. When non-nil it replaces `SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA` for that call. Sprint paths pass nil (unchanged). Stage 3L passes `BACKPEDAL_TURN_LERP_ALPHA`.
+- When the player stops pressing backward, `directionName` immediately leaves the Backward* set and the camera-yaw CFrame write resumes — character faces camera forward again on the next Heartbeat.
+
+### Changes to `src/shared/Constants.lua`
+
+- `BACKPEDAL_TURN_ENABLED = true` — master switch; set false to revert to original camera-yaw facing during backward movement.
+- `BACKPEDAL_TURN_LERP_ALPHA = 0.25` — per-Heartbeat LERP alpha for the pivot sweep (higher than sprint 0.18 for a faster but still visible body turn).
+
+### Changes to `src/client/MovementController.lua`
+
+- `faceCharacterTowardsDirection` — optional `alphaOverride: number?` parameter added.
+- Stage 3L block added in `applyCharacterFacing()`.
+- File header updated.
+
+### No animation ID changes, no camera.CFrame writes, no HipHeight/FOV/server changes
+
+**Studio verification:** Needs manual Studio playtest — MCP keyboard input does not reach `InputBegan` in Studio play mode.
+
+---
+
 ## [2026-05-25] — Stage 3K: Halve mouse sensitivity while tactical sprinting
 
 ### Summary

@@ -18,6 +18,9 @@
 -- Sprint FOV stretch via TweenService (FieldOfView only — no camera.CFrame) + landing classification light/medium/heavy) —
 -- walk, sprint, crouch speed; 8-direction camera-relative movement state; phase gating;
 -- respawn handling; connection cleanup; R6 animation playback with Unarmed default set.
+-- Stage 3L (2026-05-26): Backpedal turn-around in shift lock — character body sweeps to
+--   face the move direction (LERP alpha 0.25) when walking Backward/BackwardLeft/BackwardRight
+--   in mouse lock; reverts to camera-yaw facing the moment backward input is released.
 --
 -- Bug fix (2026-05-18): The default Roblox Animate LocalScript inside the character
 -- was overriding custom R6 AnimationTrack objects loaded in Stage 2A. MovementController
@@ -718,7 +721,7 @@ end
 -- Does NOT write camera.CFrame. Does NOT change velocity or teleport the character.
 -- Optional LERP: when SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED is true, blends
 -- toward the target over multiple frames using SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA.
-local function faceCharacterTowardsDirection(direction: Vector3)
+local function faceCharacterTowardsDirection(direction: Vector3, alphaOverride: number?)
     assert(typeof(direction) == "Vector3",
         "[MovementController] faceCharacterTowardsDirection: direction must be a Vector3")
     local root = currentRootPart
@@ -740,7 +743,12 @@ local function faceCharacterTowardsDirection(direction: Vector3)
 
     if Constants.SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED then
         -- Smoothed path: LERP between current facing and target direction.
-        local alpha = math.clamp(Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA, 0, 1)
+        -- alphaOverride lets callers (e.g. Stage 3L backpedal) use a different rate
+        -- without changing the sprint tuning constant.
+        local alpha = math.clamp(
+            if alphaOverride ~= nil then alphaOverride else Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA,
+            0, 1
+        )
         local currentLook = root.CFrame.LookVector
         local currentFlat = Vector3.new(currentLook.X, 0, currentLook.Z)
         if currentFlat.Magnitude > 0.001 then
@@ -914,6 +922,43 @@ local function applyCharacterFacing()
             return
         end
         -- No movement input above threshold — fall through to camera-yaw write.
+    end
+    -- ─────────────────────────────────────────────────────────────────────────
+
+    -- ── Stage 3L: Backpedal turn-around ──────────────────────────────────────
+    -- When the player walks backward (Backward / BackwardLeft / BackwardRight) in
+    -- shift lock, rotate the character body to face the movement direction rather
+    -- than the camera direction.  This replaces the jarring look of the character
+    -- staring forward while the WalkBackward animation plays.
+    --
+    -- The turn is smoothed through faceCharacterTowardsDirection using
+    -- BACKPEDAL_TURN_LERP_ALPHA (0.25 > sprint 0.18) so the 180° pivot sweeps
+    -- visibly — roughly 8–10 frames at 60 fps — rather than snapping instantly.
+    --
+    -- Guard list mirrors Stage 3G: shift lock on, not sprinting (forward-only),
+    -- not crouching (CrouchWalk* handles directional crouch), not in tactical
+    -- sprint, not during sprint-stop animation, not during landing lock.
+    --
+    -- When the player releases S the directionName leaves the Backward* set on
+    -- the next Heartbeat; this block no longer runs and the camera-yaw write
+    -- below snaps the character back to face the camera immediately.
+    if Constants.BACKPEDAL_TURN_ENABLED
+        and customMouseLocked
+        and not movementState.isSprinting
+        and not movementState.isCrouching
+        and not isTacticalSprinting
+        and not isSprintStopPlaying
+        and not isLandingMovementLocked
+    then
+        local dir = movementState.directionName
+        if dir == "Backward" or dir == "BackwardLeft" or dir == "BackwardRight" then
+            local moveDir = getCameraRelativeMoveDirection()
+            if moveDir then
+                faceCharacterTowardsDirection(moveDir, Constants.BACKPEDAL_TURN_LERP_ALPHA)
+                return
+            end
+            -- No movement input above threshold — fall through to camera-yaw write.
+        end
     end
     -- ─────────────────────────────────────────────────────────────────────────
 
