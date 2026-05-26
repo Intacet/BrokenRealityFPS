@@ -7,6 +7,35 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-25] — Stage 3J: Disable RunForwardLeft/Right — RunForward plays for all sprint directions
+
+### Summary
+
+RunForwardLeft and RunForwardRight animations were designed for a camera-facing body and baked their own visual diagonal lean into the clip. Combining this with Stage 3G body rotation (which rotated the body ≈20° toward MoveDirection for ForwardLeft/Right) produced a doubled-lean visual that no longer matched the desired look. Stage 3J simplifies the sprint animation system so `RunForward` always plays regardless of direction. Stage 3G body rotation (raw `MoveDirection`) provides all directional information visually — no per-direction animation switching needed.
+
+**What changed:**
+
+- `getSprintAnimationName()` simplified: removed all directional branching. Now always returns `getRunForwardSuffix(animSetName)` for all directions. The `directionName` parameter is still required (API preserved) but unused.
+- Stage 3G block in `applyCharacterFacing()` simplified: ForwardLeft/Right special-case code (Stage 3I fixed-angle rotation) removed. All sprint directions now call `getCameraRelativeMoveDirection()` → `faceCharacterTowardsDirection()` uniformly.
+- `SPRINT_DIAGONAL_BODY_ROTATION_DEGREES` marked as dead code (unused since Stage 3J) in `Constants.lua`. The constant is retained for reference; the value 20 is no longer read at runtime.
+
+### Changes to `src/shared/Constants.lua`
+
+- `SPRINT_DIAGONAL_BODY_ROTATION_DEGREES` comment updated: marked DEAD CODE/UNUSED since Stage 3J.
+
+### Changes to `src/client/MovementController.lua`
+
+- `getSprintAnimationName()`: removed ForwardLeft/Right → RunForwardLeft/Right branching. All directions return `getRunForwardSuffix(animSetName)`.
+- Stage 3G block in `applyCharacterFacing()`: removed Stage 3I ForwardLeft/Right fixed-angle rotation branch. Simplified to single `getCameraRelativeMoveDirection()` → `faceCharacterTowardsDirection()` path for all sprint directions.
+
+### No animation ID changes, no new constants, no camera.CFrame writes, no server changes
+
+`RunForwardLeft` and `RunForwardRight` animation tracks remain loaded in `animationTracks` but are never selected at runtime.
+
+**Studio verification:** Rojo sync needed — needs manual Studio playtest.
+
+---
+
 ## [2026-05-25] — Stage 3I: Fix ForwardLeft/Right diagonal sprint body rotation angle
 
 ### Summary

@@ -149,18 +149,14 @@ Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 0.18
 -- Walking, idle, crouching, tactical sprint, sprint-stop, and landing use camera-yaw regardless.
 Constants.SPRINT_SMOOTH_BODY_FACING_ENABLED = true
 
--- Degrees to rotate the body from camera-forward when sprinting in the ForwardLeft or
--- ForwardRight direction (Stage 3I — 2026-05-25).
--- RunForwardLeft / RunForwardRight animations were designed for a camera-facing body; they
--- bake their own visual diagonal lean into the clip. Stage 3G rotating the body toward the
--- full ~45° MoveDirection ADDS to that built-in lean, pushing the combined visual direction
--- well past 90° (appearing nearly backward from the camera). Using a smaller fixed angle
--- keeps the body + animation total at approximately 45° from camera-forward.
--- 0  = body faces camera-forward for diagonals (animation provides all directional lean).
--- 45 = body rotates to the full MoveDirection angle (doubles the animation lean — too far).
--- Tune in Studio: start at 20 and raise/lower until the diagonal sprint looks naturally ~45°.
--- Has no effect when SPRINT_SMOOTH_BODY_FACING_ENABLED is false.
-Constants.SPRINT_DIAGONAL_BODY_ROTATION_DEGREES = 20
+-- DEAD CODE (superseded by Stage 3J — 2026-05-25): SPRINT_DIAGONAL_BODY_ROTATION_DEGREES
+-- was used by Stage 3I to rotate the body by a fixed angle from camera-forward when
+-- sprinting in the ForwardLeft or ForwardRight direction. Stage 3J disables RunForwardLeft/
+-- RunForwardRight animation selection entirely (getSprintAnimationName always returns RunForward),
+-- so the baked animation lean that Stage 3I was compensating for no longer exists.
+-- All sprint directions now use raw MoveDirection via getCameraRelativeMoveDirection().
+-- This constant is retained for reference and may be removed in a future cleanup pass.
+Constants.SPRINT_DIAGONAL_BODY_ROTATION_DEGREES = 20  -- UNUSED since Stage 3J
 
 -- ── Stage 3E: Natural AutoRotate sprint rotation ──────────────────────────────────────────────
 -- Replaces Stage 3D directional CFrame snapping during sprint + custom mouse lock.

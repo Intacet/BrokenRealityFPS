@@ -277,10 +277,10 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       isMouseLockedForStrafeAnimations() returns customMouseLocked.
                         --     Without custom mouse lock, left/right/diagonal movement falls back to WalkForward.
                         --     Sprint with customMouseLocked OFF: always RunForward regardless of direction.
-                        --     Sprint with customMouseLocked ON, ForwardLeft: RunForwardLeft if loaded, else RunForward. (Stage 2R)
-                        --     Sprint with customMouseLocked ON, ForwardRight: RunForwardRight if loaded, else RunForward. (Stage 2R)
-                        --     Sprint with customMouseLocked ON, other directions: RunForward fallback. (Stage 2R)
-                        --     Directional sprint selection via getSprintAnimationName() helper (Stage 2R). (Stage 2R)
+                        --     Sprint with customMouseLocked ON: always RunForward (all directions). (Stage 3J)
+                        --       Stage 3G body rotation (raw MoveDirection, lerp 0.18) provides directional visual.
+                        --       RunForwardLeft/Right loaded but never selected at runtime.
+                        --     Directional sprint selection via getSprintAnimationName() helper (Stage 2R → simplified Stage 3J).
                         --     Outer gate: MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK (kept, still true).
                         --
                         --   LeftShift sprint + shift-lock fix (Stage 2C — 2026-05-18):
@@ -296,7 +296,7 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --     Humanoid.WalkSpeed. Values from Constants.lua:
                         --       MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER   = 1.3  (WalkForward/Backward/diagonals)
                         --       MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER = 1.4  (WalkLeft, WalkRight)
-                        --       MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15 (RunForward; RunForwardLeft/Right deferred since Stage 2L)
+                        --       MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER    = 1.15 (RunForward; RunForwardLeft/Right loaded but never selected since Stage 3J)
                         --
                         --   Animation set selection (added 2026-05-18):
                         --     Default animation set is Unarmed (no gun) when equippedWeaponName == nil.
@@ -373,8 +373,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Unarmed.WalkBackwardRight = rbxassetid://83443564844340   (Stage 2M)
                         --       Unarmed.WalkForwardLeft   = rbxassetid://137297382056770  (Stage 2M)
                         --       Unarmed.WalkForwardRight  = rbxassetid://133633696854516  (Stage 2M)
-                        --       Unarmed.RunForwardLeft    = rbxassetid://94337945101783   (Stage 2G — active since Stage 2R: plays when customMouseLocked ON + ForwardLeft sprint)
-                        --       Unarmed.RunForwardRight   = rbxassetid://104724352837263  (Stage 2G — active since Stage 2R: plays when customMouseLocked ON + ForwardRight sprint)
+                        --       Unarmed.RunForwardLeft    = rbxassetid://94337945101783   (Stage 2G — loaded but NEVER SELECTED since Stage 3J; RunForward plays for all directions)
+                        --       Unarmed.RunForwardRight   = rbxassetid://104724352837263  (Stage 2G — loaded but NEVER SELECTED since Stage 3J; RunForward plays for all directions)
                         --       Unarmed.Idle              = rbxassetid://132044223555193  (Stage 2H — standing idle, looped)
                         --       Unarmed.EnterCrouch       = rbxassetid://105064599119554  (Stage 2H — enter-crouch one-shot)
                         --       Unarmed.ExitCrouch        = rbxassetid://104596765238289  (Stage 2H — exit-crouch one-shot)
@@ -417,11 +417,11 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Stage 2R (2026-05-21) — directional sprint selection enabled via getSprintAnimationName() helper;
                         --       Stage 3A (2026-05-21) — LandingLight + LandingHeavy IDs added; sprint FOV constants added;
                         --       2026-05-23 — LowVault + MediumVault IDs reserved in Constants; vault system deferred (see DEBT-052))
-                        --     Sprint behavior (Stage 2R — 2026-05-21):
-                        --       customMouseLocked OFF: all sprint directions → RunForward (matches Stage 2L behavior).
-                        --       customMouseLocked ON, ForwardLeft: RunForwardLeft if loaded, else RunForward.
-                        --       customMouseLocked ON, ForwardRight: RunForwardRight if loaded, else RunForward.
-                        --       customMouseLocked ON, other directions (Left, Right, Backward, diagonals): RunForward.
+                        --     Sprint behavior (Stage 3J — 2026-05-25, supersedes Stage 2R/3D):
+                        --       All sprint directions (mouse lock ON or OFF): RunForward always.
+                        --       Stage 3G body rotation (raw MoveDirection, lerp alpha=0.18) provides
+                        --         directional visual — character body faces movement direction during sprint.
+                        --       RunForwardLeft/RunForwardRight: loaded in animationTracks but never selected.
                         --       AR15/gun-equipped: sprinting uses AR15 RunForward in all directions (no AR15 run diagonals).
                         --     Idle behavior (Stage 2H):
                         --       Both sets: Idle (looped) plays when standing still in ACTIVE phase.
@@ -620,12 +620,11 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --           sets AutoRotate = false; optional LERP smoothing via
                         --           SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED / LERP_ALPHA.
                         --
-                        --       Sprint animation selection (getSprintAnimationName extended in Stage 3D):
-                        --         Forward, Left, Right, Backward → RunForward (body faces direction).
-                        --         ForwardLeft  → RunForwardLeft if loaded, else RunForward.
-                        --         ForwardRight → RunForwardRight if loaded, else RunForward.
-                        --         BackwardLeft  → RunForwardLeft if loaded, else RunForward. (Stage 3D new)
-                        --         BackwardRight → RunForwardRight if loaded, else RunForward. (Stage 3D new)
+                        --       Sprint animation selection (getSprintAnimationName — simplified Stage 3J):
+                        --         All directions (Forward, Left, Right, Backward, diagonals):
+                        --           → RunForward (or RunForwardTest if toggle enabled). Always.
+                        --         Stage 3D/2R directional RunForwardLeft/Right branching removed in Stage 3J.
+                        --         Body rotation (Stage 3G, MoveDirection, lerp) handles directional visual.
                         --
                         --       New state: lastSprintFacingMode (module-level, cleared on respawn/destroy).
                         --       New constants (Stage 3D, active via Stage 3G):
@@ -701,6 +700,24 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Called from Heartbeat after updateSprintFov().
                         --       No camera.CFrame writes. No HipHeight/FOV changes. No new animation IDs.
                         --       New constant: SPRINT_DISABLES_CAMERA_OFFSET = true.
+                        --       Needs manual Studio playtest (Rojo sync pending at commit time).
+                        --
+                        --     RunForward always — disable RunForwardLeft/Right (Stage 3J — 2026-05-25):
+                        --       getSprintAnimationName() simplified: all directional branching removed.
+                        --         All sprint directions → getRunForwardSuffix(animSetName) (RunForward or
+                        --         RunForwardTest). The ForwardLeft→RunForwardLeft, ForwardRight→RunForwardRight,
+                        --         BackwardLeft/Right→RunForwardLeft/Right paths from Stages 2R/3D are gone.
+                        --       Stage 3G body rotation (raw MoveDirection, lerp alpha=0.18) provides all
+                        --         directional visual information — no per-direction animation switching needed.
+                        --       Stage 3G block in applyCharacterFacing() simplified: ForwardLeft/Right
+                        --         fixed-angle rotation path (Stage 3I, SPRINT_DIAGONAL_BODY_ROTATION_DEGREES)
+                        --         removed. All sprint directions use getCameraRelativeMoveDirection() →
+                        --         faceCharacterTowardsDirection() uniformly.
+                        --       SPRINT_DIAGONAL_BODY_ROTATION_DEGREES = 20: retained in Constants.lua for
+                        --         reference but marked UNUSED — never read at runtime since Stage 3J.
+                        --       RunForwardLeft and RunForwardRight tracks still loaded in animationTracks
+                        --         but never selected by updateMovementAnimation() or getSprintAnimationName().
+                        --       No new animation IDs. No new constants. No camera.CFrame writes.
                         --       Needs manual Studio playtest (Rojo sync pending at commit time).
                         --
                         --     Sprint FOV stretch (Stage 3A — 2026-05-21):

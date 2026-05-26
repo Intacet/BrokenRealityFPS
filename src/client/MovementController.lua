@@ -889,13 +889,10 @@ local function applyCharacterFacing()
     -- AutoRotate remains false throughout — only a direct CFrame write is used,
     -- so the camera is NOT dragged by Roblox physics (no Stage 3E camera jerk).
     --
-    -- Stage 3I (ForwardLeft/ForwardRight): RunForwardLeft/Right animations bake their
-    -- own visual lean into the clip (designed for a camera-facing body). Rotating the
-    -- body toward the full ~45° MoveDirection doubles that lean, pushing the combined
-    -- visual direction past 90° and appearing nearly backward. Fix: for ForwardLeft and
-    -- ForwardRight, rotate the body by SPRINT_DIAGONAL_BODY_ROTATION_DEGREES from
-    -- camera-forward (a smaller fixed angle) rather than toward raw MoveDirection.
-    -- All other directions use raw MoveDirection as before.
+    -- Stage 3J (2026-05-25): RunForwardLeft/Right animations are no longer selected —
+    -- getSprintAnimationName() always returns RunForward. With the animation baked-in
+    -- diagonal lean gone, all directions use raw MoveDirection uniformly.
+    -- The Stage 3I fixed-angle rotation path has been removed.
     --
     -- Falls through to camera-yaw write if no useful movement input.
     if Constants.SPRINT_SMOOTH_BODY_FACING_ENABLED
@@ -906,39 +903,12 @@ local function applyCharacterFacing()
         and not isSprintStopPlaying
         and not isLandingMovementLocked
     then
-        local dir = movementState.directionName
-        if dir == "ForwardLeft" or dir == "ForwardRight" then
-            -- Stage 3I: fixed-angle rotation from camera-forward for diagonal sprint.
-            local cam = workspace.CurrentCamera
-            local camFwd = cam.CFrame.LookVector
-            local camFlat = Vector3.new(camFwd.X, 0, camFwd.Z)
-            if camFlat.Magnitude > 0.001 then
-                local baseDir = camFlat.Unit
-                -- Negative sign = rotate left (ForwardLeft); positive = rotate right.
-                local sign: number = if dir == "ForwardLeft" then -1 else 1
-                local angleRad = math.rad(sign * Constants.SPRINT_DIAGONAL_BODY_ROTATION_DEGREES)
-                local c = math.cos(angleRad)
-                local s = math.sin(angleRad)
-                -- 2D rotation of baseDir (X, Z) around world Y axis.
-                local targetDir = Vector3.new(
-                    baseDir.X * c - baseDir.Z * s,
-                    0,
-                    baseDir.X * s + baseDir.Z * c
-                )
-                if targetDir.Magnitude > 0.001 then
-                    faceCharacterTowardsDirection(targetDir.Unit)
-                    return
-                end
-            end
-        else
-            -- Non-diagonal: rotate toward raw MoveDirection.
-            local moveDir = getCameraRelativeMoveDirection()
-            if moveDir then
-                faceCharacterTowardsDirection(moveDir)
-                return
-            end
+        local moveDir = getCameraRelativeMoveDirection()
+        if moveDir then
+            faceCharacterTowardsDirection(moveDir)
+            return
         end
-        -- Degenerate input or near-vertical camera — fall through to camera-yaw write.
+        -- No movement input above threshold — fall through to camera-yaw write.
     end
     -- ─────────────────────────────────────────────────────────────────────────
 
@@ -2600,92 +2570,23 @@ local function getRunForwardSuffix(animSetName: string): string
     return "RunForward"
 end
 
--- Stage 2R: Returns the short animation suffix (without set prefix) for the current normal sprint.
--- The caller prepends the animation set name: `setName .. "_" .. getSprintAnimationName(...)`.
--- Only resolves RunForwardLeft/RunForwardRight when customMouseLocked == true AND the track exists.
--- All other directions (Left, Right, Backward, BackwardLeft, BackwardRight, Forward, unknown)
--- return "RunForward" — no dedicated run-left/run-right/run-backward animations exist yet.
--- Warns once per missing directional sprint track via Logger.warn(); never spams per frame.
+-- Stage 2R / Stage 3J: Returns the short animation suffix (without set prefix) for the
+-- current normal sprint. The caller prepends the animation set name.
+-- All sprint directions always return RunForward (or RunForwardTest when toggled).
+-- Stage 3G rotates the body toward the movement direction each Heartbeat so RunForward
+-- plays in the correct world-space direction — matching the standard Roblox game approach
+-- of a single forward-run clip with body rotation handling all directions.
+-- RunForwardLeft/RunForwardRight tracks remain loaded (IDs and AnimationTrack slots are
+-- preserved) but are never selected by this function. They can be re-enabled in a future
+-- stage if a directional-clip approach is revisited.
 -- Does NOT call playMovementAnimation(). Does NOT write camera.CFrame.
---
--- missedSprintAnimWarned: module-level table, keyed by full track key.
--- Intentionally not reset on respawn — the same set of tracks is loaded each character.
 local missedSprintAnimWarned: {[string]: boolean} = {}
 local function getSprintAnimationName(animSetName: string, directionName: string): string
     assert(animSetName ~= nil,   "[MovementController] getSprintAnimationName: animSetName is required")
     assert(directionName ~= nil, "[MovementController] getSprintAnimationName: directionName is required")
 
-    -- Without custom mouse lock, all sprint directions play RunForward (matches Stage 2L behavior).
-    if not customMouseLocked then
-        return getRunForwardSuffix(animSetName)
-    end
-
-    -- Custom mouse lock ON: resolve directional run clips when tracks are loaded.
-    if directionName == "ForwardLeft" then
-        local key = animSetName .. "_RunForwardLeft"
-        if animationTracks[key] ~= nil then
-            return "RunForwardLeft"
-        else
-            if not missedSprintAnimWarned[key] then
-                missedSprintAnimWarned[key] = true
-                Logger.warn("[MovementController] getSprintAnimationName: " .. key .. " not loaded — RunForward fallback")
-            end
-            return getRunForwardSuffix(animSetName)
-        end
-    end
-
-    if directionName == "ForwardRight" then
-        local key = animSetName .. "_RunForwardRight"
-        if animationTracks[key] ~= nil then
-            return "RunForwardRight"
-        else
-            if not missedSprintAnimWarned[key] then
-                missedSprintAnimWarned[key] = true
-                Logger.warn("[MovementController] getSprintAnimationName: " .. key .. " not loaded — RunForward fallback")
-            end
-            return getRunForwardSuffix(animSetName)
-        end
-    end
-
-    -- Stage 3D: backward diagonals reuse forward-diagonal animations when available.
-    -- Body will be rotated toward backward-left/right by faceCharacterTowardsDirection(),
-    -- so RunForwardLeft/RunForwardRight plays in the correct world-space direction.
-    if directionName == "BackwardLeft" then
-        local key = animSetName .. "_RunForwardLeft"
-        if animationTracks[key] ~= nil then
-            return "RunForwardLeft"
-        else
-            if not missedSprintAnimWarned[key] then
-                missedSprintAnimWarned[key] = true
-                Logger.warn(
-                    "[MovementController] getSprintAnimationName: "
-                    .. key .. " not loaded — RunForward fallback (BackwardLeft)"
-                )
-            end
-            return getRunForwardSuffix(animSetName)
-        end
-    end
-
-    if directionName == "BackwardRight" then
-        local key = animSetName .. "_RunForwardRight"
-        if animationTracks[key] ~= nil then
-            return "RunForwardRight"
-        else
-            if not missedSprintAnimWarned[key] then
-                missedSprintAnimWarned[key] = true
-                Logger.warn(
-                    "[MovementController] getSprintAnimationName: "
-                    .. key .. " not loaded — RunForward fallback (BackwardRight)"
-                )
-            end
-            return getRunForwardSuffix(animSetName)
-        end
-    end
-
-    -- Left, Right, Backward, Forward, or unclassified → RunForward (or RunForwardTest when toggled).
-    -- Body is rotated toward movement direction by faceCharacterTowardsDirection(),
-    -- so the run-forward clip plays in the correct world-space direction.
-    -- Dedicated run-left/run-right/run-backward IDs are deferred to a future stage.
+    -- All directions: RunForward (or RunForwardTest). Body rotation (Stage 3G) provides
+    -- the visual direction — no directional clip switching needed.
     return getRunForwardSuffix(animSetName)
 end
 
