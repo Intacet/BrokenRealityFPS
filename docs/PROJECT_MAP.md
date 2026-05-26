@@ -688,6 +688,21 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       MCP Studio verified 2026-05-25: LandingHeavy (w=0.61) and Idle
                         --         (w=0.78) overlap in same Heartbeat — no zero-weight gap frame.
                         --
+                        --     Sprint camera offset override (Stage 3H — 2026-05-25):
+                        --       While sprinting (normal or tactical) + mouse lock: Humanoid.CameraOffset
+                        --         is set to Vector3.zero — camera centers directly behind the character;
+                        --         the right-shoulder offset (1.75, 0, 0) is removed.
+                        --       When sprint ends: CameraOffset restored to CUSTOM_MOUSE_LOCK_CAMERA_OFFSET
+                        --         on the next Heartbeat (≤16ms).
+                        --       Walking, idle, crouching, sprint-stop, landing: keep the normal offset.
+                        --       Mouse lock off: restoreNormalThirdPersonCamera() still applies
+                        --         CUSTOM_MOUSE_LOCK_RESTORE_CAMERA_OFFSET (Vector3.zero) as before.
+                        --       updateSprintCameraOffset() helper: guarded by ~= so no redundant writes.
+                        --       Called from Heartbeat after updateSprintFov().
+                        --       No camera.CFrame writes. No HipHeight/FOV changes. No new animation IDs.
+                        --       New constant: SPRINT_DISABLES_CAMERA_OFFSET = true.
+                        --       Needs manual Studio playtest (Rojo sync pending at commit time).
+                        --
                         --     Sprint FOV stretch (Stage 3A — 2026-05-21):
                         --       TweenService smoothly tweens workspace.CurrentCamera.FieldOfView.
                         --       Normal sprint (LeftShift + moving + not crouching) → SPRINT_CAMERA_FOV (78).
@@ -964,6 +979,13 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --       applyCharacterFacing(). When true, sprint + mouse lock rotates character body
              --       smoothly toward MoveDirection via faceCharacterTowardsDirection() lerp. When false,
              --       sprint falls through to camera-yaw write (character always faces camera).
+             --   Sprint camera offset override constants (Stage 3H — 2026-05-25):
+             --     SPRINT_DISABLES_CAMERA_OFFSET = true — master switch. When true, the Heartbeat
+             --       call to updateSprintCameraOffset() sets Humanoid.CameraOffset = Vector3.zero
+             --       while sprinting (normal or tactical) in mouse lock, removing the right-shoulder
+             --       offset so the camera centers behind the character. Restores to
+             --       CUSTOM_MOUSE_LOCK_CAMERA_OFFSET on the next Heartbeat when sprint ends.
+             --       Set false to always use CUSTOM_MOUSE_LOCK_CAMERA_OFFSET.
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag

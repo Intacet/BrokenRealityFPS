@@ -7,6 +7,33 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-25] — Stage 3H: Camera shoulder offset disabled while sprinting in shift lock
+
+### Summary
+
+Removes the right-shoulder `CameraOffset` (1.75, 0, 0) while sprinting in custom mouse lock so the camera centers directly behind the character, matching the feel of normal third-person sprint. The offset is restored the moment sprint ends (next Heartbeat, ≤16ms). Tactical sprint also triggers the zero-offset path.
+
+**What changed:**
+
+- `SPRINT_DISABLES_CAMERA_OFFSET = true` added to `Constants.lua`.
+- `updateSprintCameraOffset()` helper added to `MovementController.lua` (after `restoreNormalThirdPersonCamera()`): reads `movementState.isSprinting or isTacticalSprinting`; writes `hum.CameraOffset = Vector3.zero` while sprinting, `CUSTOM_MOUSE_LOCK_CAMERA_OFFSET` otherwise. Guarded by `~=` to avoid redundant per-frame writes.
+- `updateSprintCameraOffset()` called in the Heartbeat loop after `updateSprintFov()`.
+
+### Changes to `src/shared/Constants.lua`
+
+- `SPRINT_DISABLES_CAMERA_OFFSET = true` added (Stage 3H section comment added).
+
+### Changes to `src/client/MovementController.lua`
+
+- `updateSprintCameraOffset()` helper added.
+- Heartbeat: `updateSprintCameraOffset()` call added after `updateSprintFov()`.
+
+### No animation ID changes, no camera.CFrame writes, no server changes
+
+**Studio verification:** Rojo sync was pending at commit time — needs manual Studio playtest.
+
+---
+
 ## [2026-05-25] — Stage 3G: Smooth sprint body-facing toward movement direction (restores Stage 3D, no camera jerk)
 
 ### Summary
