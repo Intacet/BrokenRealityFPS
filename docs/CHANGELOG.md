@@ -7,6 +7,24 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-25] — Stage 3E-fix-2: Conditional MouseBehavior reapply — fixes remaining camera jerk in shift lock
+
+### Summary
+
+Fixes residual camera jitter during sprint direction changes in shift lock. Root cause: `CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME` was unconditionally writing `UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter` on every Heartbeat tick (~60 writes/second), even when the value was already `LockCenter`. Roblox's camera system re-centres its cursor-snap reference point each time `MouseBehavior` is written — so 60 redundant writes per second caused 60 per-second micro-resets of the camera's internal state. During sprint direction changes, when the physics position was also changing abruptly, the two events compounded into a visible side-to-side camera jerk. Fix: add a `~=` guard so the write only fires when `MouseBehavior` has actually drifted away from `LockCenter`. MCP verified: 41/41 monitored frames had `MouseBehavior` already `LockCenter` — zero redundant writes under the new guard. CoreScript-theft protection is unchanged (the write fires immediately when the value drifts).
+
+**What changed:**
+
+- `CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME` Heartbeat block in `MovementController.lua`: added `if UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter then` guard around the write. No constant changes.
+
+### Changes to `src/client/MovementController.lua`
+
+- Heartbeat MouseBehavior reapply changed from unconditional to conditional (`~= LockCenter` guard).
+
+### No constant changes, no animation changes, no camera writes
+
+---
+
 ## [2026-05-25] — Stage 3E-fix: Disable AutoRotate sprint rotation — fixes camera jerk in shift lock
 
 ### Summary

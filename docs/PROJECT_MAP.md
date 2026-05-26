@@ -876,7 +876,8 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --     DISABLE_ROBLOX_DEFAULT_MOUSE_LOCK = true — gates disableRobloxDefaultMouseLock()
              --       which sets LocalPlayer.DevEnableMouseLock = false on Start and CharacterAdded.
              --     CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME = true — Heartbeat re-writes MouseBehavior
-             --       = LockCenter every frame while customMouseLocked is true.
+             --       = LockCenter when it has drifted away from LockCenter (conditional since
+             --       Stage 3E-fix-2 2026-05-25; was unconditional — caused camera jerk).
              --     CUSTOM_MOUSE_LOCK_INPUT_PRIORITY = 3000 — ContextActionService priority for LeftAlt
              --       bind; 3000 > CoreScript default 2000 ensures immediate response.
              --   Movement animation playback speed multipliers (updated Stage 2H 2026-05-20):

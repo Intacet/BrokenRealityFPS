@@ -4316,11 +4316,15 @@ function MovementController:Start()
     -- Runs every physics step. Updates movementState, re-applies speed, and drives
     -- the Stage 2A animation layer. No camera writes.
     local heartbeatConn = RunService.Heartbeat:Connect(function(_dt: number)
-        -- Reapply custom mouse lock every frame while it is active.
-        -- Prevents CoreScripts or UI transitions from resetting MouseBehavior after the
-        -- LeftAlt toggle fires. Runs regardless of phase so the lock persists in all states.
+        -- Reapply custom mouse lock if CoreScripts have stolen it.
+        -- Only write when the value has actually changed — unconditional writes caused
+        -- Roblox's camera to re-centre its cursor-snap point every Heartbeat, producing
+        -- a 1-frame camera "reset" jitter that was visible as side-to-side camera jerk
+        -- during sprint direction changes (Stage 3E-fix-2, 2026-05-25).
         if Constants.CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME and customMouseLocked then
-            UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+            if UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter then
+                UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+            end
         end
 
         -- Stage 2E: rotate character to face camera yaw every frame while locked.
