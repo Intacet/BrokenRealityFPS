@@ -206,7 +206,7 @@ FleaMarketService / PlayerMarketplace
 ### Presentation (client only, no server impact)
 
 ```
-MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2Q+ + 2R + 3A + 3B (Animate-disable, R6 detection, animation-set selection,
+MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J + 2K + 2L + 2M + 2N + 2O + 2P + 2Q + 2Q+ + 2R + 3A + 3B + 3O (Animate-disable, R6 detection, animation-set selection,
                         --   strafe gating, animation speed multipliers, shift-lock sprint fix,
                         --   custom mouse-lock toggle on LeftControl, character-facing camera yaw,
                         --   third-person zoom limits, mouse-lock camera distance and shoulder offset,
@@ -230,7 +230,13 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --     sprint FOV stretch; see Sprint FOV section below). Never writes camera.CFrame.
                         --   Does NOT set CameraType to Scriptable.
                         --   Does NOT implement a full custom camera controller.
-                        --   No new remotes. No slide, vault, or camera effects.
+                        --   No new remotes. No vault or camera tilt effects.
+                        --   Slide system (Stage 3O — 2026-05-26): C held while sprinting/tac-sprinting
+                        --     triggers a slide. Speed decays from SLIDE_SPEED (30) to CROUCH_SPEED (10)
+                        --     over SLIDE_DURATION (1.0 s). Tac-sprint slides: start at SLIDE_SPEED×1.3
+                        --     and last SLIDE_DURATION×1.75 s. Ends naturally (timer), on movement stop,
+                        --     or on Freefall. If C released during slide: SlideExit → walk/idle (no
+                        --     forced crouch). If C still held: SlideExit → CrouchIdle. DEBT-053 resolved.
                         --   StarterPlayer.EnableMouseLockOption = false is now set in default.project.json
                         --     (Rojo "Bool" property) — no manual Studio step required for this setting.
                         --   LocalPlayer.DevEnableMouseLock = false is also applied client-side on Start

@@ -268,6 +268,7 @@ local movementState = {
     directionName       = "Idle",         -- one of 9 direction strings (see classifyDirection)
     moveVector          = Vector3.zero,   -- raw Humanoid.MoveDirection each Heartbeat
     isTacticalSprinting = false,          -- true while tactical sprint is active (Stage 2P)
+    isSliding           = false,          -- true while a slide is in progress (Stage 3O)
 }
 
 -- ============================================================
@@ -579,6 +580,38 @@ local sprintStopMomentumAttachment: Attachment? = nil
 -- Nil when no carry is active. Destroyed by clearSprintStopMomentum().
 local sprintStopMomentumVelocity: LinearVelocity? = nil
 
+-- Stage 3O: slide state ──────────────────────────────────────────────────────
+
+-- True while a slide is in progress.
+-- Set by startSlide(); cleared by endSlide() or clearSlideState().
+-- Mirrors movementState.isSliding for local fast-path checks.
+local isSliding: boolean = false
+
+-- True when the slide was started from a tactical sprint (extends duration).
+-- Set by startSlide(); cleared with isSliding.
+local isTacSprintSlide: boolean = false
+
+-- os.clock() captured when the slide began. Used by applySpeed() for speed decay
+-- and by the task.delay callback to know when natural duration has elapsed.
+local slideStartTime: number = 0
+
+-- Monotonic counter. Incremented each time a slide starts or is cleared.
+-- task.delay closures capture this at dispatch time and no-op if stale.
+-- Mirrors landingLockToken / sprintStopLockToken patterns.
+local slideToken: number = 0
+
+-- os.clock() of the most recent slide end (natural or interrupted).
+-- Used to enforce SLIDE_COOLDOWN before the next slide can start.
+local lastSlideEndTime: number = 0
+
+-- Stopped-event connection for the active SlideInto one-shot track.
+-- Disconnected by clearSlideIntoConnection() before any external Stop() call.
+local slideIntoConn: RBXScriptConnection? = nil
+
+-- Stopped-event connection for the active SlideExit one-shot track.
+-- Disconnected by clearSlideExitConnection() before any external Stop() call.
+local slideExitConn: RBXScriptConnection? = nil
+
 -- ============================================================
 -- Private helpers — Stage 1
 -- ============================================================
@@ -592,6 +625,7 @@ local function resetState()
     movementState.directionName       = "Idle"
     movementState.moveVector          = Vector3.zero
     movementState.isTacticalSprinting = false  -- Stage 2P
+    movementState.isSliding           = false  -- Stage 3O
 end
 
 -- Sets Humanoid.WalkSpeed according to the current phase and movementState.
@@ -621,6 +655,22 @@ local function applySpeed()
     -- at 0 regardless of sprint/crouch/walk state. Cleared by clearSprintStopLock().
     if isSprintStopPlaying and Constants.SPRINT_STOP_LOCKS_MOVEMENT == true then
         hum.WalkSpeed = 0
+        return
+    end
+
+    -- Stage 3O: slide speed decay — lerps from start speed to CROUCH_SPEED over the slide
+    -- duration so the player decelerates smoothly. Tac-sprint slides start faster
+    -- (SLIDE_SPEED × SLIDE_TAC_SPEED_MULTIPLIER) AND last longer, so they travel further.
+    if isSliding then
+        local startSpeed = if isTacSprintSlide
+            then Constants.SLIDE_SPEED * Constants.SLIDE_TAC_SPEED_MULTIPLIER
+            else Constants.SLIDE_SPEED
+        local slideDuration = if isTacSprintSlide
+            then Constants.SLIDE_DURATION * Constants.SLIDE_TAC_DURATION_MULTIPLIER
+            else Constants.SLIDE_DURATION
+        local elapsed = math.clamp(os.clock() - slideStartTime, 0, slideDuration)
+        local t = if slideDuration > 0 then elapsed / slideDuration else 1
+        hum.WalkSpeed = startSpeed + (Constants.CROUCH_SPEED - startSpeed) * t
         return
     end
 
@@ -1823,6 +1873,12 @@ local function getAnimationSpeedMultiplier(animationName: string): number
     elseif animationName == "TacticalSprintStop" then
         -- Stage 2P: tactical sprint stop one-shot plays at 1.0× (no speed adjustment needed).
         return 1.0
+    elseif animationName == "SlideInto"
+        or animationName == "SlideIdle"
+        or animationName == "SlideExit"
+    then
+        -- Stage 3O: slide clips play at SLIDE_ANIMATION_SPEED_MULTIPLIER (default 1.0×).
+        return Constants.SLIDE_ANIMATION_SPEED_MULTIPLIER
     end
     return 1.0
 end
@@ -2084,6 +2140,212 @@ local function playSprintStopWithLock(direction: Vector3?)
             .. " lockDuration=" .. string.format("%.2fs", lockDuration)
         )
     end
+end
+
+-- ============================================================
+-- Private helpers — Stage 3O: slide system
+-- ============================================================
+
+local function clearSlideIntoConnection()
+    if slideIntoConn then
+        slideIntoConn:Disconnect()
+        slideIntoConn = nil
+    end
+end
+
+local function clearSlideExitConnection()
+    if slideExitConn then
+        slideExitConn:Disconnect()
+        slideExitConn = nil
+    end
+end
+
+-- Clears slide state without entering crouch. Used for interrupted slides:
+-- phase exit, respawn/destroy (direct-clear path), landing/falling during slide.
+-- Does NOT play SlideExit, does NOT set isCrouching. Stops all slide tracks.
+local function clearSlideState()
+    if not isSliding then return end
+    clearSlideIntoConnection()
+    clearSlideExitConnection()
+    isSliding               = false
+    movementState.isSliding = false
+    isTacSprintSlide        = false
+    slideToken             += 1
+    lastSlideEndTime        = os.clock()
+    local setName = getAnimationSetName()
+    for _, suffix in ipairs({ "_SlideInto", "_SlideIdle", "_SlideExit" }) do
+        local k = setName .. suffix
+        local t2 = animationTracks[k]
+        if t2 then
+            (t2 :: AnimationTrack):Stop(Constants.MOVEMENT_ANIMATION_FADE_TIME)
+        end
+        if currentAnimationName == k then currentAnimationName = "" end
+    end
+    applySpeed()
+    if Constants.SLIDE_DEBUG then
+        Logger.debug("[MovementController] Slide INTERRUPTED (clearSlideState)")
+    end
+end
+
+-- Ends slide naturally. Plays SlideExit one-shot, then:
+--   • If the crouch key is still held at slide end → enter crouch (play CrouchIdle after SlideExit).
+--   • If the crouch key was released during the slide → do NOT enter crouch; Heartbeat resumes
+--     walk/idle animations after SlideExit finishes for a smooth, uninterrupted stand-up.
+-- updateMovementAnimation() is gated by (slideExitConn ~= nil) during SlideExit so the
+-- Heartbeat cannot interrupt the one-shot before it finishes.
+local function endSlide()
+    if not isSliding then return end
+    clearSlideIntoConnection()
+    clearSlideExitConnection()
+    isSliding               = false
+    movementState.isSliding = false
+    isTacSprintSlide        = false
+    lastSlideEndTime        = os.clock()
+    slideToken             += 1
+
+    -- Only force crouch if the player is still holding the crouch key.
+    -- If they released C during the slide, skip crouch entirely so the
+    -- stand-up flows directly out of SlideExit without a jarring crouch snap.
+    local enterCrouch = UserInputService:IsKeyDown(Constants.CROUCH_HOLD_KEY)
+    if enterCrouch then
+        movementState.isCrouching = true
+    end
+    applySpeed()      -- CROUCH_SPEED if entering crouch; WALK_SPEED (or sprint) otherwise
+    updateSprintFov()
+
+    if Constants.SLIDE_DEBUG then
+        Logger.debug(
+            "[MovementController] Slide END → "
+            .. (enterCrouch and "entering crouch (C held)" or "standing up (C released)")
+        )
+    end
+
+    -- Stop any still-playing slide tracks.
+    local setName       = getAnimationSetName()
+    local slideIntoKey  = setName .. "_SlideInto"
+    local slideIdleKey  = setName .. "_SlideIdle"
+    for _, k in ipairs({ slideIntoKey, slideIdleKey }) do
+        local t2 = animationTracks[k]
+        if t2 then (t2 :: AnimationTrack):Stop(0) end
+        if currentAnimationName == k then currentAnimationName = "" end
+    end
+
+    -- Play SlideExit one-shot. slideExitConn gates updateMovementAnimation so
+    -- the Heartbeat cannot interrupt the clip before it finishes (see updateMovementAnimation).
+    local slideExitKey   = setName .. "_SlideExit"
+    local slideExitTrack = animationTracks[slideExitKey]
+    if slideExitTrack then
+        currentAnimationName = slideExitKey
+        slideExitTrack:Play(Constants.MOVEMENT_ANIMATION_FADE_TIME)
+        slideExitTrack:AdjustSpeed(Constants.SLIDE_ANIMATION_SPEED_MULTIPLIER)
+        slideExitConn = slideExitTrack.Stopped:Connect(function()
+            clearSlideExitConnection()
+            if currentAnimationName == slideExitKey then currentAnimationName = "" end
+            -- After SlideExit: land in CrouchIdle if crouching, otherwise let
+            -- the Heartbeat's updateMovementAnimation pick the right walk/idle clip.
+            if movementState.isCrouching then
+                local crouchIdleKey = setName .. "_CrouchIdle"
+                if animationTracks[crouchIdleKey] ~= nil then
+                    playMovementAnimation(crouchIdleKey)
+                else
+                    Logger.warn(
+                        "[MovementController] endSlide: CrouchIdle track absent for set '"
+                        .. setName .. "' — cannot transition to crouch idle"
+                    )
+                end
+            end
+            -- If not crouching: Heartbeat runs updateMovementAnimation() next frame
+            -- (slideExitConn is now nil so the guard is lifted) → plays Walk or Idle.
+        end)
+    else
+        -- No SlideExit track — go directly to CrouchIdle or let Heartbeat recover.
+        if movementState.isCrouching then
+            local crouchIdleKey = setName .. "_CrouchIdle"
+            if animationTracks[crouchIdleKey] ~= nil then
+                playMovementAnimation(crouchIdleKey)
+            else
+                Logger.warn(
+                    "[MovementController] endSlide: CrouchIdle track absent for set '"
+                    .. setName .. "' — cannot transition to crouch idle"
+                )
+            end
+        end
+        -- If not crouching and no SlideExit: Heartbeat resumes normally next frame.
+    end
+end
+
+-- Begins a slide. Called from crouchBeginConn when sprinting or tac-sprinting.
+-- wasTac controls SLIDE_TAC_DURATION_MULTIPLIER for extended distance.
+local function startSlide()
+    local wasTac = isTacticalSprinting
+    -- Cancel tac sprint state (restores sensitivity and FOV).
+    if isTacticalSprinting then
+        stopTacticalSprint()
+    end
+    -- Cancel any in-progress sprint stop.
+    if isSprintStopPlaying then
+        clearSprintStopLock()
+    end
+    sprintStartTime           = nil
+    movementState.isSprinting = false
+
+    isSliding               = true
+    movementState.isSliding = true
+    isTacSprintSlide        = wasTac
+    slideStartTime          = os.clock()
+    slideToken             += 1
+    local capturedToken     = slideToken
+
+    -- Apply SLIDE_SPEED immediately (start of speed decay lerp).
+    applySpeed()
+    -- FOV: sprint is now off, so updateSprintFov restores default FOV.
+    updateSprintFov()
+
+    if Constants.SLIDE_DEBUG then
+        Logger.debug(
+            "[MovementController] Slide START"
+            .. (wasTac and " (tac-sprint → extended distance)" or " (normal sprint)")
+        )
+    end
+
+    local setName      = getAnimationSetName()
+    local slideIntoKey = setName .. "_SlideInto"
+    local slideIdleKey = setName .. "_SlideIdle"
+
+    stopCurrentMovementAnimation()
+
+    -- Play SlideInto one-shot → on Stopped, loop SlideIdle.
+    local intoTrack = animationTracks[slideIntoKey]
+    if intoTrack then
+        currentAnimationName = slideIntoKey
+        intoTrack:Play(Constants.MOVEMENT_ANIMATION_FADE_TIME)
+        intoTrack:AdjustSpeed(Constants.SLIDE_ANIMATION_SPEED_MULTIPLIER)
+        slideIntoConn = intoTrack.Stopped:Connect(function()
+            clearSlideIntoConnection()
+            if currentAnimationName == slideIntoKey then currentAnimationName = "" end
+            if isSliding then
+                local idleTrack = animationTracks[slideIdleKey]
+                if idleTrack then
+                    playMovementAnimation(slideIdleKey)
+                end
+            end
+        end)
+    else
+        -- No SlideInto track — go directly to SlideIdle loop.
+        local idleTrack = animationTracks[slideIdleKey]
+        if idleTrack then
+            playMovementAnimation(slideIdleKey)
+        end
+    end
+
+    -- Natural-end timer. token check prevents stale endSlide() if slide was interrupted.
+    local slideDuration = if wasTac
+        then Constants.SLIDE_DURATION * Constants.SLIDE_TAC_DURATION_MULTIPLIER
+        else Constants.SLIDE_DURATION
+    task.delay(slideDuration, function()
+        if slideToken ~= capturedToken then return end
+        endSlide()
+    end)
 end
 
 -- ============================================================
@@ -2464,6 +2726,17 @@ local function loadMovementAnimations(character: Model)
     clearSprintStopMomentum()        -- destroy any active LinearVelocity/Attachment
     sprintStartTime             = nil
     lastSprintMomentumDirection = nil
+    -- Stage 3O: clear slide state on respawn.
+    -- Do NOT call clearSlideState() or endSlide() — the previous Animator may already be
+    -- destroyed, making track:Stop() unsafe. Clear state variables directly.
+    -- Mirrors the isSprintStopPlaying / crouchHoldTrack direct-clear pattern above.
+    clearSlideIntoConnection()
+    clearSlideExitConnection()
+    isSliding               = false
+    movementState.isSliding = false
+    isTacSprintSlide        = false
+    slideToken             += 1
+    lastSlideEndTime        = 0
     -- Do NOT call clearCrouchBottomHold() here — the previous Animator may already be
     -- destroyed, making the hold track reference unsafe to Stop(). Clear state directly.
     crouchHoldTrack          = nil
@@ -2625,6 +2898,19 @@ local function loadMovementAnimations(character: Model)
         toLoad["Unarmed_TacticalSprintStop"] = r6.Unarmed.TacticalSprintStop
     end
 
+    -- Stage 3O: Slide animations — Unarmed only.
+    -- SlideInto: one-shot entry clip; SlideIdle: looped clip during slide;
+    -- SlideExit: one-shot exit clip played when the slide ends naturally.
+    if r6.Unarmed.SlideInto and r6.Unarmed.SlideInto ~= "" then
+        toLoad["Unarmed_SlideInto"] = r6.Unarmed.SlideInto
+    end
+    if r6.Unarmed.SlideIdle and r6.Unarmed.SlideIdle ~= "" then
+        toLoad["Unarmed_SlideIdle"] = r6.Unarmed.SlideIdle
+    end
+    if r6.Unarmed.SlideExit and r6.Unarmed.SlideExit ~= "" then
+        toLoad["Unarmed_SlideExit"] = r6.Unarmed.SlideExit
+    end
+
     -- CrouchWalk tracks are optional. Only loaded if IDs exist in Constants.
     -- Stage 2J: nine Unarmed directional CrouchWalk* IDs added. All looped.
     -- CrouchWalk and CrouchWalkForward share the same asset ID (forward is the canonical fallback).
@@ -2666,10 +2952,12 @@ local function loadMovementAnimations(character: Model)
             -- One-shot clips play once and stop; all others loop.
             -- Stage 2O: LandingMedium added to the one-shot list.
             -- Stage 2P: TacticalSprintStop added to the one-shot list.
+            -- Stage 3O: SlideInto and SlideExit added to the one-shot list (SlideIdle is looped).
             if key:match("_EnterCrouch$") or key:match("_ExitCrouch$")
                 or key:match("_CrouchWalkStart$")
                 or key:match("_LandingLight$") or key:match("_LandingMedium$") or key:match("_LandingHeavy$")
                 or key:match("_TacticalSprintStop$")
+                or key:match("_SlideInto$") or key:match("_SlideExit$")
             then
                 track.Looped = false
             else
@@ -3108,6 +3396,12 @@ local function updateMovementAnimation()
     if tacticalSprintStopConn ~= nil then return end
     -- Stage 3C: do not interrupt normal SprintStop one-shot (mirrors tacticalSprintStopConn pattern).
     if isSprintStopPlaying then return end
+    -- Stage 3O: do not interrupt SlideInto or SlideIdle (active while isSliding=true).
+    if isSliding then return end
+    -- Stage 3O: do not interrupt SlideExit one-shot. slideExitConn is non-nil only while the
+    -- one-shot is running — mirrors the tacticalSprintStopConn "is-playing" pattern exactly.
+    -- Important: isSliding is already false during SlideExit, so this guard is required.
+    if slideExitConn ~= nil then return end
 
     local setName = getAnimationSetName()   -- "Unarmed" (default) or "AR15" (when weapon equipped)
 
@@ -3580,6 +3874,12 @@ local function onHumanoidStateChanged(
     elseif newState == Enum.HumanoidStateType.Freefall then
         -- ── Entered Freefall ─────────────────────────────────────────────────
         if isFalling then return end   -- already falling; guard against double-fire
+        -- Stage 3O: interrupt any active slide when the player enters freefall
+        -- (walked off a ledge or jumped during a slide). clearSlideState() stops
+        -- slide tracks and clears isSliding without forcing crouch.
+        if isSliding then
+            clearSlideState()
+        end
         isFalling = true
 
         -- Fill in airborne tracking if not already set by the Jumping handler
@@ -3789,7 +4089,9 @@ end
 -- Backward-compatible single-string getter for GunController's spread computation.
 -- Returns "Sprinting", "Crouching", "Walking", or "Idle".
 function MovementController:GetMoveState(): string
-    if movementState.isSprinting and movementState.isMoving then
+    if isSliding then                                        -- Stage 3O: sliding is highest priority
+        return "Sliding"
+    elseif movementState.isSprinting and movementState.isMoving then
         return "Sprinting"
     elseif movementState.isCrouching then
         return "Crouching"
@@ -3800,9 +4102,9 @@ function MovementController:GetMoveState(): string
     end
 end
 
--- True while the player is sprinting. GunController reads this to block ADS.
+-- True while the player is sprinting or sliding. GunController reads this to block ADS.
 function MovementController:IsADSBlocked(): boolean
-    return movementState.isSprinting
+    return movementState.isSprinting or isSliding    -- Stage 3O: block ADS during slide
 end
 
 -- Stage 1/2A: no viewmodel effects. Returns identity so ViewModelController's
@@ -3960,6 +4262,15 @@ function MovementController:destroy()
     applyTacticalSprintSensitivity(false)
     lastShiftPressTime                = 0
     clearTacticalSprintStopConnection()
+    -- Stage 3O: clear slide state on destroy.
+    -- Same direct-clear pattern as respawn — Animator may already be destroyed.
+    clearSlideIntoConnection()
+    clearSlideExitConnection()
+    isSliding               = false
+    movementState.isSliding = false
+    isTacSprintSlide        = false
+    slideToken             += 1
+    lastSlideEndTime        = 0
     -- Stage 3M: cancel any in-flight crouch-exit speed lock on destroy.
     isCrouchExitTransitioning   = false
     crouchExitTransitionVersion += 1
@@ -4113,6 +4424,18 @@ function MovementController:Start()
                 applyTacticalSprintSensitivity(false)
                 clearTacticalSprintStopConnection()
                 stopCurrentMovementAnimation()
+            end
+            -- Stage 3O: interrupt any active slide on phase exit.
+            -- Do NOT call clearSlideState() — it calls applySpeed() which references
+            -- phase state mid-transition. Clear directly so no speed/animation side effects.
+            -- lastSlideEndTime is preserved so cooldown persists across phase transitions.
+            if isSliding then
+                clearSlideIntoConnection()
+                clearSlideExitConnection()
+                isSliding               = false
+                movementState.isSliding = false
+                isTacSprintSlide        = false
+                slideToken             += 1
             end
             -- Stage 3M: cancel any in-flight crouch-exit speed lock on phase exit.
             -- applySpeed() will set WalkSpeed = 0 immediately after (phase not ACTIVE).
@@ -4319,6 +4642,18 @@ function MovementController:Start()
             if UserInputService:GetFocusedTextBox() ~= nil then return end
             if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
             if movementState.isCrouching then return end  -- already crouching; ignore repeat
+            if isSliding then return end                   -- Stage 3O: ignore C input during slide
+
+            -- Stage 3O: if sprinting or tac-sprinting, start a slide instead of crouching.
+            if Constants.SLIDE_ENABLED
+                and (movementState.isSprinting or isTacticalSprinting)
+                and not isLandingMovementLocked
+                and not isSprintStopPlaying
+                and (os.clock() - lastSlideEndTime >= Constants.SLIDE_COOLDOWN)
+            then
+                startSlide()
+                return
+            end
 
             -- Stage 2P/3C: crouch cancels tactical sprint instantly (no stop animation).
             -- stopTacticalSprint() is now a pure state-clear — it stops TacticalSprintForward
@@ -4499,6 +4834,12 @@ function MovementController:Start()
         movementState.directionName = classifyDirection(moveDir)
 
         applySpeed()
+
+        -- Stage 3O: end slide early if the player stops moving.
+        -- endSlide() sets isCrouching=true and plays SlideExit → CrouchIdle.
+        if isSliding and not movementState.isMoving then
+            endSlide()
+        end
 
         -- Stage 2P: sustain or end tactical sprint based on movement direction each frame.
         -- If the player stops moving or drifts off-forward, tactical sprint ends automatically.

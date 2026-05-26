@@ -218,9 +218,15 @@ Constants.WALK_SPEED             = 14    -- default WalkSpeed for all players (s
 Constants.SPRINT_SPEED           = 22    -- WalkSpeed while sprinting
 Constants.CROUCH_SPEED           = 10    -- WalkSpeed while crouching
 Constants.MOVEMENT_DIRECTION_DEADZONE = 0.15 -- Humanoid.MoveDirection magnitude below which the player is "Idle"
-Constants.SLIDE_SPEED            = 30    -- initial WalkSpeed applied at slide start
-Constants.SLIDE_DURATION         = 0.6   -- seconds a slide lasts before returning to crouch
+Constants.SLIDE_SPEED            = 30    -- initial WalkSpeed for a normal-sprint slide
+Constants.SLIDE_DURATION         = 1.0   -- seconds a slide lasts before returning to crouch (was 0.6)
 Constants.SLIDE_COOLDOWN         = 1.5   -- seconds before another slide is allowed after one ends
+-- ── Stage 3O: Slide system ────────────────────────────────────────────────────
+Constants.SLIDE_ENABLED                  = true  -- master switch; set false to disable slide trigger
+Constants.SLIDE_TAC_DURATION_MULTIPLIER  = 1.75  -- tac-sprint slide lasts this × SLIDE_DURATION (goes further)
+Constants.SLIDE_TAC_SPEED_MULTIPLIER     = 1.3   -- tac-sprint slides start at SLIDE_SPEED × this (travels faster)
+Constants.SLIDE_ANIMATION_SPEED_MULTIPLIER = 1.0 -- AdjustSpeed value for SlideInto / SlideIdle / SlideExit
+Constants.SLIDE_DEBUG                    = true  -- log slide events via Logger.debug()
 Constants.SPRINT_STAMINA_ENABLED = false -- stamina system not yet implemented (DEBT-042)
 Constants.PRONE_ENABLED          = false -- prone stance not yet implemented (DEBT-043)
 

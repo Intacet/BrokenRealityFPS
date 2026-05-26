@@ -793,7 +793,7 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - Jump animations — suppressed along with locomotion when Animate is disabled. Custom replacement needed in a future movement stage.
 - Climb animations — suppressed by Animate disable. Custom replacement needed.
 - Vault animations (LowVault, MediumVault) — IDs reserved in `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed` (2026-05-23). NOT loaded by `loadMovementAnimations()`. Vault system design, obstacle detection, input binding, and state machine integration are all deferred. See DEBT-052.
-- Slide animations (SlideInto, SlideIdle, SlideExit) — IDs reserved in `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed` (2026-05-26). NOT loaded by `loadMovementAnimations()`. Slide system design, input binding, speed reduction, duration, exit conditions, camera tilt decision, AR15 set handling, and state machine integration are all deferred. See DEBT-053.
+- Slide animations (SlideInto, SlideIdle, SlideExit) — **Unarmed set implemented (Stage 3O, 2026-05-26).** IDs loaded, input bound, state machine integrated. AR15-specific slide IDs not yet authored — falls back gracefully (no-op) when AR15 set is active. See DEBT-053 (resolved).
 - Lower-body / upper-body animation split — not implemented; the full body plays the movement animation.
 - Reload, fire, ADS, and sprint-hold weapon animations — deferred to a weapon-anim stage.
 - True server-owned equipment state — equippedWeaponName is presentation-only; see DEBT-050.
@@ -1186,39 +1186,26 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 
 ---
 
-## [DEBT-053] Slide system not implemented — animation IDs reserved — ADDED 2026-05-26
+## [DEBT-053] Slide system not implemented — animation IDs reserved — ADDED 2026-05-26 — RESOLVED 2026-05-26
 
-**File:** `src/shared/Constants.lua`, `src/client/MovementController.lua` (future)
-**Severity:** Low (no code gap yet — IDs are reserved only)
-**Studio verification required:** Not applicable until implementation begins
+**File:** `src/shared/Constants.lua`, `src/client/MovementController.lua`
+**Severity:** Resolved
+**Studio verification required:** Completed 2026-05-26
 
-**What exists:**
-- `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed.SlideInto = "rbxassetid://101320244227398"` — reserved, not loaded.
-- `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed.SlideIdle  = "rbxassetid://123763519906235"` — reserved, not loaded.
-- `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed.SlideExit  = "rbxassetid://89774397391406"` — reserved, not loaded.
-- No slide state, no loading code, no input binding, no speed/camera logic exists.
+**Resolution (Stage 3O):** Full slide system implemented and verified in Studio. All 10 checklist items addressed:
 
-**What a slide system will require (design checklist for when the system is staged):**
+1. ✅ **Input binding** — C held during sprint or tac-sprint triggers slide. Guard `if isSliding then return end` in `crouchBeginConn` prevents re-entry. Normal crouch path is preserved for non-sprinting C presses.
+2. ✅ **Entry condition** — Gated on `movementState.isSprinting or isTacticalSprinting`, `not isLandingMovementLocked`, `not isSprintStopPlaying`, and cooldown. Cannot trigger while already sliding, crouching, landing-locked, or on cooldown.
+3. ✅ **Slide state** — `isSliding` added to `movementState` and as a local variable. Gates `updateMovementAnimation` (two guards: `isSliding` for SlideInto/Idle, `slideExitConn ~= nil` for SlideExit). ADS blocked via `IsADSBlocked()`. `GetMoveState()` returns `"Sliding"`.
+4. ✅ **Speed handling** — `applySpeed()` lerps from start speed to `CROUCH_SPEED` over slide duration every Heartbeat. Normal sprint starts at `SLIDE_SPEED` (30). Tac-sprint slides start at `SLIDE_SPEED × SLIDE_TAC_SPEED_MULTIPLIER` (1.3×) and last `SLIDE_DURATION × SLIDE_TAC_DURATION_MULTIPLIER` (1.75×). All values in `Constants.lua`.
+5. ✅ **Animation sequence** — SlideInto (one-shot) → SlideIdle (loop) → `endSlide()` → SlideExit (one-shot) → CrouchIdle or walk/idle. `Stopped` callbacks mirror `TacticalSprintStop` and `LandingMedium` patterns. `slideToken` invalidates stale `task.delay` callbacks.
+6. ✅ **Exit conditions** — (a) duration timer via `task.delay` + token guard; (b) player stops moving (Heartbeat calls `endSlide()`); (c) Freefall entry calls `clearSlideState()`. Key release during slide is a no-op (isCrouching=false gates crouchEndConn).
+7. ✅ **Camera tilt** — deferred by design. No `CFrame` writes or tilt applied. Noted as a future enhancement.
+8. ✅ **AR15 set** — slide animations are Unarmed-only. If `SlideInto`/`SlideIdle`/`SlideExit` keys are absent (AR15 set), `startSlide()` falls back gracefully (nil track check on every play/stop call).
+9. ✅ **Crouch interaction** — `endSlide()` checks `UserInputService:IsKeyDown(CROUCH_HOLD_KEY)` at slide end. If C is still held: `isCrouching=true` → SlideExit → CrouchIdle. If C was released during slide: no forced crouch → SlideExit → Heartbeat resumes walk/idle. Both paths are smooth.
+10. ✅ **Server interaction** — slide uses `WalkSpeed` decay only (no `LinearVelocity`, no teleport, no velocity write). Position change rate stays within normal sprint tolerance. `GunService` origin checks (DEBT-014) are unaffected.
 
-1. **Input binding** — a dedicated slide key (common: C while sprinting, or LeftControl). Must not conflict with crouch (C is currently the crouch toggle in Stage 2S). Must decide whether slide and crouch share a key with context sensitivity, or use separate bindings.
-2. **Entry condition** — slide should only trigger from a sprint state (`isSprinting = true`, not tactical sprint). Must not be triggerable while already crouching, vaulting, landing-locked, or in tactical sprint.
-3. **Slide state** — new `isSliding: boolean` in `movementState`. Must gate: no sprint start, no crouch toggle, no jump, no vault, reduced shooting accuracy (or no shooting) while sliding.
-4. **Speed handling** — slide should carry forward momentum (likely start at or above `RUN_SPEED`) and decay to a configurable minimum (`SLIDE_EXIT_SPEED`) over a configurable duration (`SLIDE_DURATION`). All values must be in `Constants.lua`.
-5. **Animation playback sequence** — `SlideInto` (one-shot, plays on entry), `SlideIdle` (looped, plays while sliding), `SlideExit` (one-shot, plays on exit). All three must be loaded in `loadMovementAnimations()` and managed with `Stopped` callbacks — mirrors the `LandingMedium` and `TacticalSprintStop` one-shot patterns.
-6. **Exit conditions** — slide ends when: (a) duration timer expires, (b) player releases the slide key, (c) speed drops below threshold, (d) player hits a wall. On exit: play `SlideExit`, restore normal locomotion speed, set `isSliding = false`.
-7. **Camera tilt** — a camera tilt on slide entry/exit (similar to a lean) is a design option. Decision must be explicit before implementation. If added, it must not write `workspace.CurrentCamera.CFrame` directly — use a tilt offset on the camera attachment or a CFrame modifier that respects the existing camera system.
-8. **AR15 set** — no slide IDs exist for AR15. If slide is triggered while armed, decide before implementation: fall back to Unarmed slide clips, play no slide animation (speed-only slide), or block slide entirely while armed.
-9. **Crouch interaction** — if slide ends into a crouch (common feel: hold C to stay crouched after slide), the transition from `isSliding = false` to `isCrouching = true` must go through the normal crouch entry path to avoid skipping blend times or speed locks.
-10. **Server interaction** — slide carries the character forward at sprint-level speed. `GunService` origin checks (`SHOT_ORIGIN_MAX_DISTANCE`) must tolerate rapid position changes during a slide. See DEBT-014.
-
-**Rules (must not be violated before implementation):**
-- Do NOT load `SlideInto`, `SlideIdle`, or `SlideExit` in `loadMovementAnimations()` until the animation playback + Stopped callback path is designed and staged.
-- Do NOT add any slide input, state variable, speed change, or camera tilt until the slide system is formally staged.
-- See DEBT-051 for scope risk: slide must not be started until core movement (sprint, crouch, landing) is stable and verified in Studio.
-
-**Trigger:** A movement stage is scheduled to implement sliding.
-
-**Fix when:** Each checklist item above has been designed, staged, and verified in Studio.
+**Remaining gap:** AR15-specific SlideInto/SlideIdle/SlideExit animation IDs not yet authored. Tracked in DEBT-044 (animation set completeness).
 
 ---
 

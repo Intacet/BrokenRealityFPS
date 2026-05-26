@@ -7,6 +7,53 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-26] — Stage 3O: Slide system (hold C while sprinting or tac-sprinting)
+
+### Summary
+
+Full slide system implemented. Holding C while sprinting or tac-sprinting triggers a slide instead of a normal crouch. Tac-sprint slides start faster and travel further. When the slide ends and the player is no longer holding C, they stand up fluidly through the SlideExit animation; if C is still held they land in a crouch. DEBT-053 resolved.
+
+### Behaviour
+
+- **Trigger:** C held while `isSprinting` or `isTacticalSprinting`. Cooldown (`SLIDE_COOLDOWN` = 1.5 s) prevents rapid re-triggering.
+- **Speed decay:** WalkSpeed lerps from `SLIDE_SPEED` (30) to `CROUCH_SPEED` (10) over `SLIDE_DURATION` (1.0 s) every Heartbeat via `applySpeed()`. No separate loop needed.
+- **Tac-sprint slide:** Starts at `SLIDE_SPEED × SLIDE_TAC_SPEED_MULTIPLIER` (1.3×, = 39) and lasts `SLIDE_DURATION × SLIDE_TAC_DURATION_MULTIPLIER` (1.75×, = 1.75 s) — both faster and further.
+- **Animation sequence:** SlideInto (one-shot) → SlideIdle (loop) → SlideExit (one-shot) → CrouchIdle (if C held) or walk/idle (if C released). `slideIntoConn` / `slideExitConn` guard `updateMovementAnimation` to prevent Heartbeat interruption.
+- **Exit conditions:** (a) natural timer (`task.delay` + `slideToken` stale-guard); (b) player stops moving (Heartbeat `endSlide()`); (c) Freefall entry (`clearSlideState()`).
+- **Smooth stand-up:** `endSlide()` checks `UserInputService:IsKeyDown(CROUCH_HOLD_KEY)` — only enters crouch if C is still held. Otherwise SlideExit plays and the Heartbeat resumes walk/idle naturally (no jarring crouch snap).
+- **ADS blocked** while sliding via `IsADSBlocked()`. `GetMoveState()` returns `"Sliding"`.
+- **Respawn / destroy / phase-exit:** all clear slide state directly (no track:Stop calls — mirrors sprint-stop respawn pattern).
+
+### Changes to `src/shared/Constants.lua`
+
+- `SLIDE_DURATION` bumped from `0.6` → `1.0` s for more satisfying distance.
+- Added `SLIDE_TAC_SPEED_MULTIPLIER = 1.3` — tac-sprint slides start at `SLIDE_SPEED × 1.3`.
+- Added `SLIDE_ENABLED = true`, `SLIDE_TAC_DURATION_MULTIPLIER = 1.75`, `SLIDE_ANIMATION_SPEED_MULTIPLIER = 1.0`, `SLIDE_DEBUG = true` under Stage 3O block.
+
+### Changes to `src/client/MovementController.lua`
+
+- `movementState.isSliding` added to the state table and `resetState()`.
+- Private state: `isSliding`, `isTacSprintSlide`, `slideStartTime`, `slideToken`, `lastSlideEndTime`, `slideIntoConn`, `slideExitConn`.
+- `applySpeed()`: Stage 3O block inserted after sprint-stop check; uses `isTacSprintSlide` to pick start speed and duration.
+- Helpers added: `clearSlideIntoConnection`, `clearSlideExitConnection`, `clearSlideState`, `endSlide`, `startSlide`.
+- `getAnimationSpeedMultiplier()`: SlideInto / SlideIdle / SlideExit return `SLIDE_ANIMATION_SPEED_MULTIPLIER`.
+- `loadMovementAnimations()`: SlideInto, SlideIdle, SlideExit loaded for Unarmed set; SlideInto and SlideExit marked as one-shots; respawn direct-clear block added.
+- `updateMovementAnimation()`: two guards added — `if isSliding then return end` (SlideInto/Idle) and `if slideExitConn ~= nil then return end` (SlideExit one-shot).
+- `crouchBeginConn`: slide trigger inserted before normal crouch logic; `if isSliding then return end` guard added.
+- Heartbeat: `if isSliding and not movementState.isMoving then endSlide() end` added.
+- Freefall handler: `clearSlideState()` called on Freefall entry.
+- Phase-exit handler: direct slide state clear (no forced crouch).
+- `destroy()`: direct slide state clear.
+- `GetMoveState()`: `"Sliding"` returned when `isSliding`.
+- `IsADSBlocked()`: `or isSliding` added.
+
+### Technical debt
+
+- **DEBT-053** resolved — all 10 checklist items addressed.
+- **DEBT-044** updated — Unarmed slide set implemented; AR15 slide IDs not yet authored (graceful no-op fallback).
+
+---
+
 ## [2026-05-26] — Reserve slide animation IDs in Constants (deferred — no implementation)
 
 ### Summary
