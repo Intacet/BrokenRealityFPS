@@ -79,13 +79,15 @@ Constants.CROUCH_BOTTOM_HOLD_TIME_POSITION_FALLBACK = 0.98
 Constants.CROUCH_USE_ENTER_TRANSITION_ANIMATION = false
 
 -- Crossfade duration (seconds) for the direct-blend when entering crouch and NOT moving.
--- Applied to the CrouchIdle (or fallback) fade-in. Shorter than MOVEMENT_ANIMATION_FADE_TIME
--- (0.15) for a snappier, less floaty feel.
-Constants.CROUCH_DIRECT_BLEND_FADE_TIME = 0.12
+-- Applied to the CrouchIdle (or fallback) fade-in.
+-- Stage 3M (2026-05-26): increased 0.12 → 0.28 s for a slower, more fluid drop into crouch.
+Constants.CROUCH_DIRECT_BLEND_FADE_TIME = 0.28
 
 -- Crossfade duration (seconds) for the direct-blend when entering crouch while MOVING.
--- Slightly shorter than CROUCH_DIRECT_BLEND_FADE_TIME to feel immediate and snappy.
-Constants.CROUCH_DIRECT_BLEND_MOVING_FADE_TIME = 0.10
+-- Slightly shorter than CROUCH_DIRECT_BLEND_FADE_TIME — player is already in motion
+-- so a full-weight pose is needed sooner, but still noticeably slower than before.
+-- Stage 3M (2026-05-26): increased 0.10 → 0.22 s.
+Constants.CROUCH_DIRECT_BLEND_MOVING_FADE_TIME = 0.22
 
 -- When false, the CrouchWalkStart one-shot is skipped when the player first moves while
 -- crouched. The character blends directly from CrouchIdle into the directional CrouchWalk
@@ -108,16 +110,27 @@ Constants.CROUCH_USE_EXIT_TRANSITION_WHILE_MOVING = false
 -- Crossfade duration (seconds) for the direct blend from crouch into walk/run (moving path).
 -- Both the crouch track fade-out and the walk/run fade-in use this value, so the blender
 -- always has non-zero total weight — prevents the default pose flash.
-Constants.CROUCH_EXIT_DIRECT_BLEND_FADE_TIME = 0.10
+-- Stage 3M (2026-05-26): increased 0.10 → 0.22 s for a more fluid stand-up while moving.
+Constants.CROUCH_EXIT_DIRECT_BLEND_FADE_TIME = 0.22
 
 -- Crossfade duration (seconds) for the direct blend from crouch into Idle (not-moving path),
 -- used both when ExitCrouch is absent and when ExitCrouch finishes and Idle should start.
-Constants.CROUCH_EXIT_IDLE_BLEND_FADE_TIME = 0.12
+-- Stage 3M (2026-05-26): increased 0.12 → 0.28 s.
+Constants.CROUCH_EXIT_IDLE_BLEND_FADE_TIME = 0.28
 
 -- When true, the correct standing animation starts immediately inside the ExitCrouch Stopped
 -- callback, rather than waiting for the next Heartbeat tick.
 -- Eliminates the ≥1 frame blank-pose window after the ExitCrouch one-shot ends.
 Constants.CROUCH_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true
+
+-- ── Stage 3M: Crouch-exit speed lock ─────────────────────────────────────────
+-- When true, WalkSpeed is held at CROUCH_SPEED for the full duration of the crouch-exit
+-- animation window (CROUCH_EXIT_DIRECT_BLEND_FADE_TIME or CROUCH_EXIT_IDLE_BLEND_FADE_TIME
+-- depending on the path). Without this, speed snaps to WALK_SPEED the instant C is released
+-- while the stand-up animation is still playing — the character looks crouched but runs at
+-- full speed. With this, the "getting up" motion has physical weight.
+-- Set false to restore the instant-speed-restore behaviour.
+Constants.CROUCH_TRANSITION_SPEED_LOCK_ENABLED = true
 
 -- ── Stage 3D: Sprint directional body-facing ──────────────────────────────────
 -- When true and custom mouse lock is active, sprinting rotates the character body toward
@@ -139,13 +152,68 @@ Constants.SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE = 0.1
 Constants.SPRINT_DIRECTIONAL_BODY_FACING_DEBUG = true
 
 -- When true, body rotation is smoothed using LERP over multiple Heartbeat frames instead
--- of snapping immediately to the target direction. Default false for instant, responsive feel.
-Constants.SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = false
+-- of snapping immediately to the target direction.
+-- Stage 3G: enabled so the character body smoothly tracks movement direction while sprinting
+-- in mouse lock, eliminating the discrete snap feel from Stage 3D's immediate path.
+Constants.SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = true
 
 -- LERP alpha applied per Heartbeat when smoothing is enabled. 1.0 = immediate (no smoothing).
 -- Values closer to 0 produce slower, heavier-feeling rotation.
+-- Stage 3G: 0.18 — responsive enough to track direction changes within ~3–4 frames,
+-- slow enough to avoid the per-frame CFrame snap that caused the Stage 3E camera jerk.
 -- Has no effect when SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED is false.
-Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 1
+Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 0.18
+
+-- ── Stage 3G: Smooth sprint body-facing toward MoveDirection ──────────────────
+-- Master switch for the Stage 3G smooth body-facing path.
+-- When true and custom mouse lock is active, sprinting rotates the character body smoothly
+-- toward the raw Humanoid.MoveDirection (camera-relative) each Heartbeat using the existing
+-- faceCharacterTowardsDirection() lerp helper (Stage 3D).
+-- AutoRotate remains false — no Roblox-physics rotation is involved, so no camera jerk.
+-- When false, sprint falls through to the camera-yaw CFrame write (character always faces camera).
+-- Walking, idle, crouching, tactical sprint, sprint-stop, and landing use camera-yaw regardless.
+Constants.SPRINT_SMOOTH_BODY_FACING_ENABLED = true
+
+-- ── Stage 3N: Instant backward turn while sprinting in shift lock ─────────────
+-- When true, sprinting in the Backward / BackwardLeft / BackwardRight direction while
+-- shift lock is active snaps the character body to face the move direction on the very
+-- first Heartbeat — no LERP sweep. Without this, the normal 0.18 LERP takes ~10–15
+-- frames (~170–250 ms) to complete the 180° pivot, so the character visually runs
+-- backward while still facing the camera.
+-- Forward and diagonal-forward sprint directions continue to use the smooth LERP.
+-- Set false to restore the slow LERP for backward sprint directions.
+Constants.SPRINT_BACKWARD_INSTANT_TURN = true
+
+-- DEAD CODE (superseded by Stage 3J — 2026-05-25): SPRINT_DIAGONAL_BODY_ROTATION_DEGREES
+-- was used by Stage 3I to rotate the body by a fixed angle from camera-forward when
+-- sprinting in the ForwardLeft or ForwardRight direction. Stage 3J disables RunForwardLeft/
+-- RunForwardRight animation selection entirely (getSprintAnimationName always returns RunForward),
+-- so the baked animation lean that Stage 3I was compensating for no longer exists.
+-- All sprint directions now use raw MoveDirection via getCameraRelativeMoveDirection().
+-- This constant is retained for reference and may be removed in a future cleanup pass.
+Constants.SPRINT_DIAGONAL_BODY_ROTATION_DEGREES = 20  -- UNUSED since Stage 3J
+
+-- ── Stage 3E: Natural AutoRotate sprint rotation ──────────────────────────────────────────────
+-- Replaces Stage 3D directional CFrame snapping during sprint + custom mouse lock.
+-- When both flags below are true, sprinting under custom mouse lock sets Humanoid.AutoRotate = true
+-- so the Roblox physics engine rotates the character naturally toward movement direction,
+-- eliminating the discrete 45°/90° snaps caused by the Stage 3D faceCharacterTowardsDirection() path.
+-- Walking, idle, crouching, tactical sprint, sprint-stop, and landing all continue on the
+-- existing camera-yaw CFrame facing path (AutoRotate = false, root.CFrame = CFrame.lookAt).
+-- Set both false to revert to camera-yaw-only facing (no sprint direction rotation at all).
+-- Set SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED false alone to disable this path
+-- without touching SPRINT_DISABLE_MANUAL_BODY_FACING_WHILE_MOUSE_LOCKED (future-proofing).
+-- DISABLED (Stage 3E-fix 2026-05-25): AutoRotate=true caused camera jerk when changing
+-- sprint direction in shift lock. The camera is pinned to HumanoidRootPart yaw in mouse-lock
+-- mode, so every Roblox-physics body rotation snapped the camera with it. Fix: keep false so
+-- sprint falls through to the camera-yaw CFrame path (same as walking in mouse lock).
+-- Directional sprint animations (RunForwardLeft/Right) already show movement direction visually.
+Constants.SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED     = false
+Constants.SPRINT_DISABLE_MANUAL_BODY_FACING_WHILE_MOUSE_LOCKED = true
+
+-- When true, logs natural-AutoRotate mode entry and exit to Output once per mode change.
+-- Does not spam per frame — gated by lastNaturalSprintAutoRotateActive in applyCharacterFacing().
+Constants.SPRINT_NATURAL_AUTOROTATE_DEBUG = true
 
 -- ============================================================
 -- Objective settings
@@ -193,6 +261,7 @@ Constants.MOVEMENT_ANIMATION_IDS = {
             WalkForward        = "rbxassetid://81276554788940",   -- confirmed-good R6 no-gun walk forward (Stage 2M)
             WalkForwardAlt     = "rbxassetid://97919904114609",   -- alternate forward walk clip; loaded but not yet selected (Stage 2M)
             RunForward         = "rbxassetid://79045069356901",   -- confirmed-good R6 no-gun run forward  (Stage 2L)
+            RunForwardTest     = "rbxassetid://118179559114284",  -- test run-forward clip; toggle via MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION
             WalkLeft           = "rbxassetid://127934481756733",  -- no-gun strafe left  (Stage 2M)
             WalkRight          = "rbxassetid://122034548466839",  -- no-gun strafe right (Stage 2M)
             WalkBackward       = "rbxassetid://140436478515683",  -- no-gun walk backward          (Stage 2M)
@@ -232,6 +301,17 @@ Constants.MOVEMENT_ANIMATION_IDS = {
             TacticalSprintForward1 = "rbxassetid://135119369971434", -- tactical sprint forward primary (looped) (Stage 2P)
             TacticalSprintForward2 = "rbxassetid://110008857265859", -- tactical sprint forward alternate; loaded, not yet selected (Stage 2P)
             TacticalSprintStop     = "rbxassetid://81946205769343",  -- tactical sprint stop one-shot; plays when tactical sprint ends (Stage 2P)
+            -- Vault animations (Unarmed only).
+            -- IDs reserved for future implementation. NOT loaded by loadMovementAnimations() yet.
+            -- Do not add loading or selection code until the vault system is designed and staged.
+            LowVault    = "rbxassetid://78932004147700",  -- low-vault one-shot (deferred — vault system not yet implemented)
+            MediumVault = "rbxassetid://98948076922717",  -- medium-vault one-shot (deferred — vault system not yet implemented)
+            -- Slide animations (Unarmed only).
+            -- IDs reserved for future implementation. NOT loaded by loadMovementAnimations() yet.
+            -- Do not add loading, input, or state-machine code until the slide system is designed and staged. See DEBT-053.
+            SlideInto = "rbxassetid://101320244227398",  -- slide-into one-shot (deferred — slide system not yet implemented)
+            SlideIdle = "rbxassetid://123763519906235",  -- slide-idle loop (deferred — slide system not yet implemented)
+            SlideExit = "rbxassetid://89774397391406",   -- slide-exit one-shot (deferred — slide system not yet implemented)
         },
         AR15 = {
             WalkForward = "rbxassetid://138802532485746",
@@ -251,8 +331,12 @@ Constants.MOVEMENT_ANIMATION_FADE_TIME = 0.15  -- seconds to cross-fade between 
 Constants.MOVEMENT_WALK_ANIMATION_SPEED_MULTIPLIER              = 1.3   -- WalkForward/Backward/diagonals play at 1.3× clip speed
 Constants.MOVEMENT_STRAFE_ANIMATION_SPEED_MULTIPLIER            = 1.4   -- WalkLeft/WalkRight play at 1.4× clip speed
 Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER               = 1.15  -- RunForward plays at 1.15× clip speed; RunForwardLeft/Right IDs retained but deferred (Stage 2L)
+-- Toggle to swap the active run-forward clip between RunForward (current) and RunForwardTest.
+-- Set true to audition the test clip; set false to restore the confirmed RunForward clip.
+-- Only affects the Unarmed set. AR15 RunForward is unaffected.
+Constants.MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION               = false -- false = RunForward (current), true = RunForwardTest
 Constants.MOVEMENT_IDLE_ANIMATION_SPEED_MULTIPLIER              = 0.75  -- Idle plays at 0.75× clip speed (Stage 2H)
-Constants.MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.9   -- EnterCrouch/ExitCrouch one-shots play at 0.9× clip speed (Stage 2H)
+Constants.MOVEMENT_CROUCH_TRANSITION_ANIMATION_SPEED_MULTIPLIER = 0.5   -- EnterCrouch/ExitCrouch one-shots play at 0.5× clip speed (Stage 3M: slowed from 0.9 for more fluid stand-up feel)
 Constants.MOVEMENT_CROUCH_WALK_ANIMATION_SPEED_MULTIPLIER       = 1.0   -- CrouchWalk* directional tracks play at 1.0× clip speed (Stage 2J)
 -- Stage 2O: falling animation playback constant.
 Constants.MOVEMENT_FALLING_ANIMATION_SPEED_MULTIPLIER           = 1.0   -- Falling looped track AdjustSpeed multiplier (Stage 2O)
@@ -302,6 +386,36 @@ Constants.TACTICAL_SPRINT_STOP_ANIMATION_ENABLED = true
 -- Below this threshold, Shift release ends tactical sprint instantly with no animation or lock.
 -- Only applies to the Shift-release path; direction-change stops (Heartbeat) are unaffected.
 Constants.TACTICAL_SPRINT_STOP_MIN_DURATION = 5.0
+
+-- ── Stage 3K: Tactical sprint mouse sensitivity override ──────────────────────
+-- When true, MovementController reduces UserInputService.MouseDeltaSensitivity by
+-- TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER on tactical sprint entry, and restores
+-- the pre-entry value the moment tactical sprint ends (any exit path).
+-- Prevents players from snapping the camera too quickly while in a committed forward run.
+-- Set false to leave sensitivity unchanged during tactical sprint.
+Constants.TACTICAL_SPRINT_SENSITIVITY_ENABLED = true
+
+-- Fraction of current MouseDeltaSensitivity applied while tactical sprint is active.
+-- 0.5 = half sensitivity (default). Values below 1.0 reduce turn speed; 1.0 = no change.
+-- Has no effect when TACTICAL_SPRINT_SENSITIVITY_ENABLED is false.
+Constants.TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER = 0.5
+
+-- ── Stage 3L: Backpedal turn-around in shift lock ─────────────────────────────
+-- When true, the character body turns to face the backward move direction while
+-- walking backward in shift lock (Backward / BackwardLeft / BackwardRight directions).
+-- Prevents the jarring look of the character staring forward while backpedaling —
+-- instead the body sweeps around (via LERP) to face where the player is actually going.
+-- Has no effect when customMouseLocked is false, or while sprinting / crouching /
+-- in tactical sprint / during sprint-stop / during landing movement lock.
+-- Set false to revert to the original camera-yaw facing during backward movement.
+Constants.BACKPEDAL_TURN_ENABLED = true
+
+-- LERP alpha applied per Heartbeat for the backpedal body-turn sweep.
+-- Intentionally higher than SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA (0.18) so the
+-- 180° pivot completes in roughly 8–10 frames (~130–170 ms at 60 fps) — quick enough
+-- to feel responsive, slow enough that the body physically turns rather than snapping.
+-- 1.0 = immediate snap. Has no effect when BACKPEDAL_TURN_ENABLED is false.
+Constants.BACKPEDAL_TURN_LERP_ALPHA = 0.25
 
 -- When true, WalkLeft/WalkRight strafe animations only play while mouse lock / shift-lock
 -- style state is active (UserInputService.MouseBehavior == LockCenter).
@@ -411,6 +525,16 @@ Constants.CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_DISTANCE = true
 -- When true, applyCustomMouseLockCamera() sets Humanoid.CameraOffset = CAMERA_OFFSET.
 -- Set false to leave CameraOffset unchanged while mouse lock is on.
 Constants.CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_OFFSET = true
+
+-- ── Stage 3H: Sprint camera offset override ───────────────────────────────────
+-- When true, Humanoid.CameraOffset is zeroed while sprinting in mouse lock,
+-- removing the right-shoulder over-the-shoulder offset and centering the camera
+-- directly behind the character. The offset is restored to CUSTOM_MOUSE_LOCK_CAMERA_OFFSET
+-- the moment sprint ends (next Heartbeat, ≤16ms).
+-- Normal sprint (LeftShift) and tactical sprint both trigger the zero-offset path.
+-- Walking, idle, crouching, sprint-stop, and landing lock all keep the normal offset.
+-- Set false to always use CUSTOM_MOUSE_LOCK_CAMERA_OFFSET regardless of sprint state.
+Constants.SPRINT_DISABLES_CAMERA_OFFSET = true
 
 -- ============================================================
 -- Timing constants
@@ -580,6 +704,15 @@ Constants.SPRINT_JUMP_LANDING_MOMENTUM_ENABLED  = true
 Constants.SPRINT_JUMP_LANDING_MOMENTUM_DURATION = 0.22    -- seconds
 Constants.SPRINT_JUMP_LANDING_MOMENTUM_SPEED    = 18      -- studs/s (horizontal only)
 Constants.SPRINT_JUMP_LANDING_MOMENTUM_MAX_FORCE = 60000  -- LinearVelocity MaxForce (Magnitude mode)
+
+-- Stage 3F: zero-gap landing exit.
+-- When true, the landing animation's Stopped callback immediately crossfades to the
+-- correct locomotion animation (walk/run/idle) before the next Heartbeat tick fires.
+-- Prevents the brief blank-pose (T-pose) flash that occurs between the landing one-shot
+-- ending and updateMovementAnimation() picking up on the following Heartbeat.
+-- Mirrors Constants.CROUCH_EXIT_RESUME_LOCOMOTION_IMMEDIATELY (Stage 2S).
+-- Set false to revert to the old behaviour (locomotion resumes on the next Heartbeat).
+Constants.LANDING_EXIT_RESUME_LOCOMOTION_IMMEDIATELY = true
 
 -- ============================================================
 -- Sprint stop behavior (Movement Stage 3C — 2026-05-22)
@@ -3263,6 +3396,15 @@ return MatchController
 -- Sprint FOV stretch via TweenService (FieldOfView only — no camera.CFrame) + landing classification light/medium/heavy) —
 -- walk, sprint, crouch speed; 8-direction camera-relative movement state; phase gating;
 -- respawn handling; connection cleanup; R6 animation playback with Unarmed default set.
+-- Stage 3L (2026-05-26): Backpedal turn-around in shift lock — character body sweeps to
+--   face the move direction (LERP alpha 0.25) when walking Backward/BackwardLeft/BackwardRight
+--   in mouse lock; reverts to camera-yaw facing the moment backward input is released.
+-- Stage 3M (2026-05-26): Fluid crouch enter/exit — blend fade times doubled (~2×); ExitCrouch
+--   one-shot slowed to 0.5×; WalkSpeed locked at CROUCH_SPEED for the full exit animation
+--   window so speed does not snap back the instant C is released.
+-- Stage 3N (2026-05-26): Instant backward turn during sprint in shift lock — Backward /
+--   BackwardLeft / BackwardRight sprint directions snap the body to face the move direction
+--   on the first Heartbeat (alpha=1.0) instead of the normal 0.18 LERP sweep.
 --
 -- Bug fix (2026-05-18): The default Roblox Animate LocalScript inside the character
 -- was overriding custom R6 AnimationTrack objects loaded in Stage 2A. MovementController
@@ -3652,6 +3794,11 @@ local originalAutoRotate: boolean? = nil
 -- "move_dir" while sprinting + mouse lock + valid move direction; "camera_yaw" otherwise.
 local lastSprintFacingMode: string = ""
 
+-- Stage 3E: true while natural-AutoRotate sprint is active. Used to detect the transition back
+-- to camera-yaw facing (so AutoRotate is restored to false before the CFrame write).
+-- Reset on respawn (loadMovementAnimations), mouse-lock disable, and destroy().
+local lastNaturalSprintAutoRotateActive: boolean = false
+
 -- Last reason applyCharacterFacing() was skipped, used to deduplicate debug logs.
 -- Reset to "" on each character load.
 local lastFacingSkippedReason: string = ""
@@ -3676,6 +3823,19 @@ local crouchTransitionPlaying: boolean = false
 -- Disconnected by clearCrouchTransitionConnection() BEFORE any external track:Stop() call
 -- to prevent the Stopped callback from firing spuriously.
 local crouchTransitionConn: RBXScriptConnection? = nil
+
+-- Stage 3M: crouch-exit speed lock state ────────────────────────────────────
+-- True while the crouch-exit animation window is active (C released, blend in progress).
+-- applySpeed() holds WalkSpeed at CROUCH_SPEED while this is true, so speed does not
+-- snap to WALK_SPEED the instant C is released while the stand-up animation plays.
+-- Cleared by a task.delay callback keyed to crouchExitTransitionVersion, or immediately
+-- on re-enter-crouch, phase exit, respawn, and destroy.
+local isCrouchExitTransitioning: boolean = false
+-- Monotonic counter. Incremented each time a new exit-transition begins OR when the flag
+-- is forcibly cleared (re-enter, respawn, phase exit, destroy). Delayed callbacks compare
+-- their captured version to this counter to confirm they are still the "current" transition
+-- before clearing isCrouchExitTransitioning — prevents stale callbacks from interfering.
+local crouchExitTransitionVersion: number = 0
 
 -- Stage 2I: crouch bottom-hold state ─────────────────────────────────────────
 
@@ -3761,6 +3921,11 @@ local lastShiftPressTime: number = 0
 -- the one-shot is still running and Heartbeat must not override it.
 local tacticalSprintStopConn: RBXScriptConnection? = nil
 
+-- Stage 3K: stores UserInputService.MouseDeltaSensitivity captured immediately before
+-- tactical sprint applies the reduced sensitivity. Restored on every tactical sprint exit path.
+-- nil when no override is active (tactical sprint not running or feature disabled).
+local tacticalSprintOriginalSensitivity: number? = nil
+
 -- Stage 3C: normal sprint-stop state ─────────────────────────────────────────
 
 -- os.clock() captured when normal sprint (LeftShift) begins.
@@ -3845,6 +4010,15 @@ local function applySpeed()
         local t = math.clamp(elapsed / Constants.TACTICAL_SPRINT_ACCELERATION_TIME, 0, 1)
         hum.WalkSpeed = Constants.SPRINT_SPEED
             + (Constants.TACTICAL_SPRINT_SPEED - Constants.SPRINT_SPEED) * t
+        return
+    end
+
+    -- Stage 3M: hold WalkSpeed at CROUCH_SPEED for the duration of the crouch-exit
+    -- animation blend, so speed does not snap back the instant C is released.
+    -- This path runs only when not crouching (isCrouching=false) — isCrouching takes
+    -- priority via the branch below, so a quick re-press of C is handled correctly.
+    if isCrouchExitTransitioning and Constants.CROUCH_TRANSITION_SPEED_LOCK_ENABLED then
+        hum.WalkSpeed = Constants.CROUCH_SPEED
         return
     end
 
@@ -3953,7 +4127,7 @@ end
 -- Does NOT write camera.CFrame. Does NOT change velocity or teleport the character.
 -- Optional LERP: when SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED is true, blends
 -- toward the target over multiple frames using SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA.
-local function faceCharacterTowardsDirection(direction: Vector3)
+local function faceCharacterTowardsDirection(direction: Vector3, alphaOverride: number?)
     assert(typeof(direction) == "Vector3",
         "[MovementController] faceCharacterTowardsDirection: direction must be a Vector3")
     local root = currentRootPart
@@ -3975,7 +4149,12 @@ local function faceCharacterTowardsDirection(direction: Vector3)
 
     if Constants.SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED then
         -- Smoothed path: LERP between current facing and target direction.
-        local alpha = math.clamp(Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA, 0, 1)
+        -- alphaOverride lets callers (e.g. Stage 3L backpedal) use a different rate
+        -- without changing the sprint tuning constant.
+        local alpha = math.clamp(
+            if alphaOverride ~= nil then alphaOverride else Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA,
+            0, 1
+        )
         local currentLook = root.CFrame.LookVector
         local currentFlat = Vector3.new(currentLook.X, 0, currentLook.Z)
         if currentFlat.Magnitude > 0.001 then
@@ -4011,6 +4190,29 @@ local function restoreCharacterAutoRotate()
     end
 end
 
+-- ── Stage 3E ─────────────────────────────────────────────────────────────────
+
+-- Returns true when the Stage 3E natural-AutoRotate sprint path should be active.
+-- Both SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED and
+-- SPRINT_DISABLE_MANUAL_BODY_FACING_WHILE_MOUSE_LOCKED must be true (independent kill switches).
+-- Requires: custom mouse lock on, actively sprinting, not in tactical sprint, not crouching,
+-- not during sprint-stop animation playback, and not during landing movement lock.
+-- Does NOT check phase — phase is gated at the top of applyCharacterFacing() already.
+-- Does NOT write any state or modify any variables.
+local function shouldUseNaturalSprintAutoRotate(): boolean
+    if not Constants.SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED then return false end
+    if not Constants.SPRINT_DISABLE_MANUAL_BODY_FACING_WHILE_MOUSE_LOCKED then return false end
+    if not customMouseLocked then return false end
+    if not movementState.isSprinting then return false end
+    if isTacticalSprinting then return false end
+    if movementState.isCrouching then return false end
+    if isSprintStopPlaying then return false end
+    if isLandingMovementLocked then return false end
+    return true
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
 -- Rotates the character's HumanoidRootPart to face the camera's yaw direction every
 -- Heartbeat while custom mouse lock is active and FACE_CAMERA_YAW is enabled.
 -- Phase-gated when REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION is true (only runs in ACTIVE).
@@ -4018,6 +4220,8 @@ end
 -- Writes HumanoidRootPart.CFrame with the same position — the character is rotated in place;
 -- it is NOT teleported and its velocity is NOT modified.
 -- Logs skip-reason changes once per reason when CUSTOM_MOUSE_LOCK_ROTATION_DEBUG is true.
+-- Stage 3E: when shouldUseNaturalSprintAutoRotate() is true, sets AutoRotate = true and
+-- returns without writing HumanoidRootPart.CFrame — Roblox physics handles the yaw rotation.
 local function applyCharacterFacing()
     if not Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW then return end
     if not customMouseLocked then return end
@@ -4060,36 +4264,114 @@ local function applyCharacterFacing()
         lastFacingSkippedReason = ""
     end
 
-    -- ── Stage 3D: Sprint directional body-facing ──────────────────────────────
-    -- When sprinting with custom mouse lock active, rotate toward movement input direction
-    -- instead of camera yaw. Walking, idle, and crouching still use camera yaw.
-    -- Tactical sprint always goes camera-forward; exclude it here to avoid interference.
-    if Constants.SPRINT_DIRECTIONAL_BODY_FACING_ENABLED
-        and Constants.SPRINT_FACE_MOVEMENT_DIRECTION_WHILE_MOUSE_LOCKED
+    -- ── Stage 3E: Natural AutoRotate sprint rotation ──────────────────────────
+    -- When sprinting + custom mouse lock active (and both Stage 3E kill switches are true),
+    -- delegate yaw rotation to the Roblox engine by setting AutoRotate = true.
+    -- This eliminates the discrete 45°/90° CFrame snaps produced by Stage 3D's
+    -- faceCharacterTowardsDirection() when the player crosses a directionName boundary.
+    -- Walking, idle, crouching, tactical sprint, sprint-stop, and landing continue on the
+    -- camera-yaw CFrame path below (AutoRotate = false, root.CFrame = CFrame.lookAt).
+    if shouldUseNaturalSprintAutoRotate() then
+        local hum = humanoid
+        if hum then
+            hum.AutoRotate = true
+        end
+        if Constants.SPRINT_NATURAL_AUTOROTATE_DEBUG and not lastNaturalSprintAutoRotateActive then
+            lastNaturalSprintAutoRotateActive = true
+            Logger.debug(
+                "[MovementController] applyCharacterFacing → natural AutoRotate (sprint, Stage 3E)"
+            )
+        end
+        return
+    end
+
+    -- Stage 3E exit: if we just left natural-AutoRotate sprint, re-enforce AutoRotate = false
+    -- before the camera-yaw CFrame write below — otherwise the engine would immediately
+    -- overwrite our CFrame via its own AutoRotate rotation.
+    if lastNaturalSprintAutoRotateActive then
+        lastNaturalSprintAutoRotateActive = false
+        local hum = humanoid
+        if hum then
+            hum.AutoRotate = false
+        end
+        if Constants.SPRINT_NATURAL_AUTOROTATE_DEBUG then
+            Logger.debug(
+                "[MovementController] applyCharacterFacing → camera yaw (AutoRotate restored false, Stage 3E)"
+            )
+        end
+    end
+    -- ─────────────────────────────────────────────────────────────────────────
+
+    -- ── Stage 3G: Smooth sprint body-facing toward MoveDirection ─────────────
+    -- When sprinting in mouse lock, lerp HumanoidRootPart yaw toward the movement
+    -- direction each Heartbeat via faceCharacterTowardsDirection().
+    -- AutoRotate remains false throughout — only a direct CFrame write is used,
+    -- so the camera is NOT dragged by Roblox physics (no Stage 3E camera jerk).
+    --
+    -- Stage 3J (2026-05-25): RunForwardLeft/Right animations are no longer selected —
+    -- getSprintAnimationName() always returns RunForward. With the animation baked-in
+    -- diagonal lean gone, all directions use raw MoveDirection uniformly.
+    -- The Stage 3I fixed-angle rotation path has been removed.
+    --
+    -- Falls through to camera-yaw write if no useful movement input.
+    if Constants.SPRINT_SMOOTH_BODY_FACING_ENABLED
+        and customMouseLocked
         and movementState.isSprinting
         and not isTacticalSprinting
         and not movementState.isCrouching
+        and not isSprintStopPlaying
+        and not isLandingMovementLocked
     then
         local moveDir = getCameraRelativeMoveDirection()
-        if moveDir ~= nil then
-            if Constants.SPRINT_DIRECTIONAL_BODY_FACING_DEBUG
-                and lastSprintFacingMode ~= "move_dir"
-            then
-                lastSprintFacingMode = "move_dir"
-                Logger.debug(
-                    "[MovementController] sprint body-facing → movement input direction"
-                )
-            end
-            faceCharacterTowardsDirection(moveDir)
-            return  -- do not also apply camera-yaw facing this frame
+        if moveDir then
+            -- Stage 3N: when sprinting backward (Backward / BackwardLeft / BackwardRight),
+            -- snap the character to face the move direction instantly — no LERP sweep.
+            -- This prevents the ~10–15 frame delay before the character rotates 180°.
+            -- Forward and diagonal-forward sprint continue to use the smooth LERP.
+            local dir = movementState.directionName
+            local isBackwardSprint = Constants.SPRINT_BACKWARD_INSTANT_TURN
+                and (dir == "Backward" or dir == "BackwardLeft" or dir == "BackwardRight")
+            faceCharacterTowardsDirection(moveDir, if isBackwardSprint then 1.0 else nil)
+            return
         end
-        -- moveDir is nil (below threshold): fall through to camera-yaw facing.
+        -- No movement input above threshold — fall through to camera-yaw write.
     end
+    -- ─────────────────────────────────────────────────────────────────────────
 
-    -- Camera-yaw facing (original behavior) — also reached as sprint-facing fallback.
-    if Constants.SPRINT_DIRECTIONAL_BODY_FACING_DEBUG and lastSprintFacingMode ~= "camera_yaw" then
-        lastSprintFacingMode = "camera_yaw"
-        Logger.debug("[MovementController] sprint body-facing → camera yaw")
+    -- ── Stage 3L: Backpedal turn-around ──────────────────────────────────────
+    -- When the player walks backward (Backward / BackwardLeft / BackwardRight) in
+    -- shift lock, rotate the character body to face the movement direction rather
+    -- than the camera direction.  This replaces the jarring look of the character
+    -- staring forward while the WalkBackward animation plays.
+    --
+    -- The turn is smoothed through faceCharacterTowardsDirection using
+    -- BACKPEDAL_TURN_LERP_ALPHA (0.25 > sprint 0.18) so the 180° pivot sweeps
+    -- visibly — roughly 8–10 frames at 60 fps — rather than snapping instantly.
+    --
+    -- Guard list mirrors Stage 3G: shift lock on, not sprinting (forward-only),
+    -- not crouching (CrouchWalk* handles directional crouch), not in tactical
+    -- sprint, not during sprint-stop animation, not during landing lock.
+    --
+    -- When the player releases S the directionName leaves the Backward* set on
+    -- the next Heartbeat; this block no longer runs and the camera-yaw write
+    -- below snaps the character back to face the camera immediately.
+    if Constants.BACKPEDAL_TURN_ENABLED
+        and customMouseLocked
+        and not movementState.isSprinting
+        and not movementState.isCrouching
+        and not isTacticalSprinting
+        and not isSprintStopPlaying
+        and not isLandingMovementLocked
+    then
+        local dir = movementState.directionName
+        if dir == "Backward" or dir == "BackwardLeft" or dir == "BackwardRight" then
+            local moveDir = getCameraRelativeMoveDirection()
+            if moveDir then
+                faceCharacterTowardsDirection(moveDir, Constants.BACKPEDAL_TURN_LERP_ALPHA)
+                return
+            end
+            -- No movement input above threshold — fall through to camera-yaw write.
+        end
     end
     -- ─────────────────────────────────────────────────────────────────────────
 
@@ -4174,6 +4456,30 @@ local function restoreNormalThirdPersonCamera()
     end
 end
 
+-- ── Stage 3H: Sprint camera offset override ──────────────────────────────────
+-- Updates Humanoid.CameraOffset based on sprint state while mouse lock is active.
+-- While sprinting (normal or tactical): CameraOffset = Vector3.zero — camera centers
+-- directly behind the character; the right-shoulder offset is removed.
+-- While not sprinting (mouse lock still on): restores CUSTOM_MOUSE_LOCK_CAMERA_OFFSET.
+-- Guarded by ~= so no redundant writes are issued per Heartbeat frame.
+-- No-ops immediately if SPRINT_DISABLES_CAMERA_OFFSET is false or mouse lock is off.
+-- Called from the Heartbeat loop alongside updateSprintFov() so the offset tracks
+-- sprint state within one frame (≤16ms) of any state change.
+-- Does NOT write camera.CFrame, CameraType, FieldOfView, HipHeight, or JumpPower.
+local function updateSprintCameraOffset()
+    if not Constants.SPRINT_DISABLES_CAMERA_OFFSET then return end
+    if not customMouseLocked then return end
+    local hum = humanoid
+    if not hum then return end
+    local wantZero = movementState.isSprinting or isTacticalSprinting
+    local targetOffset = if wantZero
+        then Vector3.zero
+        else Constants.CUSTOM_MOUSE_LOCK_CAMERA_OFFSET
+    if hum.CameraOffset ~= targetOffset then
+        hum.CameraOffset = targetOffset
+    end
+end
+
 -- ============================================================
 -- Private helpers — Stage 2D: custom mouse lock
 -- ============================================================
@@ -4225,6 +4531,8 @@ local function applyCustomMouseLock()
             restoreCharacterAutoRotate()
             originalAutoRotate = nil
         end
+        -- Stage 3E: clear natural-AutoRotate sprint flag so the next lock session starts clean.
+        lastNaturalSprintAutoRotateActive = false
     end
 end
 
@@ -4455,6 +4763,36 @@ local function clearLandingMovementLock()
     end
 end
 
+-- ── Stage 3K: Tactical sprint mouse sensitivity override ─────────────────────
+-- Applies (active=true) or restores (active=false) MouseDeltaSensitivity for the
+-- tactical sprint state. Must be called at every isTacticalSprinting=true entry and
+-- at every isTacticalSprinting=false exit so the restore always pairs with the apply.
+--
+-- active=true:  caches UserInputService.MouseDeltaSensitivity, then writes
+--               cached × TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER.
+-- active=false: restores the cached value and clears the cache.
+--
+-- Idempotent in both directions: double-apply is a no-op (cache already set);
+-- double-restore is a no-op (cache already nil).
+-- No-op when TACTICAL_SPRINT_SENSITIVITY_ENABLED is false.
+-- Never uses pcall — MouseDeltaSensitivity is a supported read/write property.
+local function applyTacticalSprintSensitivity(active: boolean)
+    if not Constants.TACTICAL_SPRINT_SENSITIVITY_ENABLED then return end
+    if active then
+        if tacticalSprintOriginalSensitivity ~= nil then return end  -- already applied
+        local current = UserInputService.MouseDeltaSensitivity
+        tacticalSprintOriginalSensitivity = current
+        UserInputService.MouseDeltaSensitivity = current
+            * Constants.TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER
+    else
+        local orig = tacticalSprintOriginalSensitivity
+        if orig == nil then return end  -- already restored
+        tacticalSprintOriginalSensitivity = nil
+        UserInputService.MouseDeltaSensitivity = orig
+    end
+end
+-- ─────────────────────────────────────────────────────────────────────────────
+
 -- Sets isLandingMovementLocked = true and schedules an automatic unlock after `duration`
 -- seconds via task.delay. The unlock only fires if the token still matches (i.e., no
 -- manual clearLandingMovementLock() or respawn has already cleared it).
@@ -4477,6 +4815,8 @@ local function startLandingMovementLock(duration: number)
     movementState.isSprinting         = false
     movementState.isTacticalSprinting = false
     isTacticalSprinting               = false
+    -- Stage 3K: restore sensitivity if tactical sprint was active when we landed.
+    applyTacticalSprintSensitivity(false)
 
     -- Zero WalkSpeed immediately — applySpeed() now sees isLandingMovementLocked = true.
     applySpeed()
@@ -4826,6 +5166,7 @@ local function getAnimationSpeedMultiplier(animationName: string): number
     elseif animationName == "RunForward"
         or animationName == "RunForwardLeft"
         or animationName == "RunForwardRight"
+        or animationName == "RunForwardTest"
     then
         return Constants.MOVEMENT_RUN_ANIMATION_SPEED_MULTIPLIER
     elseif animationName == "Idle" then
@@ -4998,6 +5339,8 @@ local function stopTacticalSprint()
     isTacticalSprinting               = false
     movementState.isTacticalSprinting = false
     tacticalSprintStartTime           = 0
+    -- Stage 3K: restore sensitivity immediately on tactical sprint end.
+    applyTacticalSprintSensitivity(false)
 
     -- Disconnect any existing TacticalSprintStop Stopped callback first.
     clearTacticalSprintStopConnection()
@@ -5059,6 +5402,8 @@ local function playSprintStopWithLock(direction: Vector3?)
     movementState.isSprinting         = false
     movementState.isTacticalSprinting = false
     isTacticalSprinting               = false
+    -- Stage 3K: restore sensitivity — sprint stop begins, tactical sprint is over.
+    applyTacticalSprintSensitivity(false)
 
     -- Increment token for stale-unlock prevention; capture for closures.
     sprintStopLockToken += 1
@@ -5485,6 +5830,8 @@ local function loadMovementAnimations(character: Model)
     isTacticalSprinting               = false
     movementState.isTacticalSprinting = false
     tacticalSprintStartTime           = 0
+    -- Stage 3K: restore sensitivity if tactical sprint was active at respawn.
+    applyTacticalSprintSensitivity(false)
     lastShiftPressTime                = 0
     clearTacticalSprintStopConnection()
     -- Stage 3C: clear sprint-stop state on respawn.
@@ -5500,6 +5847,9 @@ local function loadMovementAnimations(character: Model)
     crouchHoldTrack          = nil
     isHoldingCrouchBottomPose = false
     crouchBottomPoseWarned   = false
+    -- Stage 3M: cancel any in-flight crouch-exit speed lock on respawn.
+    isCrouchExitTransitioning   = false
+    crouchExitTransitionVersion += 1
 
     -- Clear stale track references. Do NOT :Stop() them — the previous Animator may
     -- already be destroyed, making those references unsafe to call.
@@ -5513,7 +5863,9 @@ local function loadMovementAnimations(character: Model)
     -- Stage 2R: reset sprint anim log guard so the first sprint after respawn re-logs.
     lastSprintAnimName     = ""
     -- Stage 3D: reset sprint body-facing mode log guard on respawn.
-    lastSprintFacingMode   = ""
+    lastSprintFacingMode              = ""
+    -- Stage 3E: reset natural-AutoRotate sprint state on respawn.
+    lastNaturalSprintAutoRotateActive = false
     -- Reset custom mouse lock on respawn: release the cursor so the player is not stuck
     -- with a locked mouse if they die or respawn while mouse lock was active.
     customMouseLocked                    = false
@@ -5587,6 +5939,13 @@ local function loadMovementAnimations(character: Model)
     -- and Unarmed_WalkForwardAlt without touching any other logic paths.
     if r6.Unarmed.WalkForwardAlt and r6.Unarmed.WalkForwardAlt ~= "" then
         toLoad["Unarmed_WalkForwardAlt"] = r6.Unarmed.WalkForwardAlt
+    end
+
+    -- Test run-forward clip — loaded alongside RunForward so both are always available.
+    -- Active when MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION == true.
+    -- Toggle the constant to switch without touching any logic code.
+    if r6.Unarmed.RunForwardTest and r6.Unarmed.RunForwardTest ~= "" then
+        toLoad["Unarmed_RunForwardTest"] = r6.Unarmed.RunForwardTest
     end
 
     -- Stage 2N: CrouchIdle (looped idle while crouched+still) — preferred over the
@@ -5701,93 +6060,38 @@ local function loadMovementAnimations(character: Model)
     Logger.debug("[MovementController] R6 movement animations loaded for: " .. character.Name)
 end
 
--- Stage 2R: Returns the short animation suffix (without set prefix) for the current normal sprint.
--- The caller prepends the animation set name: `setName .. "_" .. getSprintAnimationName(...)`.
--- Only resolves RunForwardLeft/RunForwardRight when customMouseLocked == true AND the track exists.
--- All other directions (Left, Right, Backward, BackwardLeft, BackwardRight, Forward, unknown)
--- return "RunForward" — no dedicated run-left/run-right/run-backward animations exist yet.
--- Warns once per missing directional sprint track via Logger.warn(); never spams per frame.
+-- Returns the run-forward animation suffix for a given set name.
+-- When MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION is true and Unarmed_RunForwardTest is loaded,
+-- returns "RunForwardTest" instead of "RunForward". All other sets always return "RunForward".
+-- Called from getSprintAnimationName() and any other code path that selects the run-forward clip.
+local function getRunForwardSuffix(animSetName: string): string
+    if Constants.MOVEMENT_RUN_FORWARD_USE_TEST_ANIMATION
+        and animSetName == Constants.MOVEMENT_ANIMATION_SET_UNARMED
+        and animationTracks[animSetName .. "_RunForwardTest"] ~= nil
+    then
+        return "RunForwardTest"
+    end
+    return "RunForward"
+end
+
+-- Stage 2R / Stage 3J: Returns the short animation suffix (without set prefix) for the
+-- current normal sprint. The caller prepends the animation set name.
+-- All sprint directions always return RunForward (or RunForwardTest when toggled).
+-- Stage 3G rotates the body toward the movement direction each Heartbeat so RunForward
+-- plays in the correct world-space direction — matching the standard Roblox game approach
+-- of a single forward-run clip with body rotation handling all directions.
+-- RunForwardLeft/RunForwardRight tracks remain loaded (IDs and AnimationTrack slots are
+-- preserved) but are never selected by this function. They can be re-enabled in a future
+-- stage if a directional-clip approach is revisited.
 -- Does NOT call playMovementAnimation(). Does NOT write camera.CFrame.
---
--- missedSprintAnimWarned: module-level table, keyed by full track key.
--- Intentionally not reset on respawn — the same set of tracks is loaded each character.
 local missedSprintAnimWarned: {[string]: boolean} = {}
 local function getSprintAnimationName(animSetName: string, directionName: string): string
     assert(animSetName ~= nil,   "[MovementController] getSprintAnimationName: animSetName is required")
     assert(directionName ~= nil, "[MovementController] getSprintAnimationName: directionName is required")
 
-    -- Without custom mouse lock, all sprint directions play RunForward (matches Stage 2L behavior).
-    if not customMouseLocked then
-        return "RunForward"
-    end
-
-    -- Custom mouse lock ON: resolve directional run clips when tracks are loaded.
-    if directionName == "ForwardLeft" then
-        local key = animSetName .. "_RunForwardLeft"
-        if animationTracks[key] ~= nil then
-            return "RunForwardLeft"
-        else
-            if not missedSprintAnimWarned[key] then
-                missedSprintAnimWarned[key] = true
-                Logger.warn("[MovementController] getSprintAnimationName: " .. key .. " not loaded — RunForward fallback")
-            end
-            return "RunForward"
-        end
-    end
-
-    if directionName == "ForwardRight" then
-        local key = animSetName .. "_RunForwardRight"
-        if animationTracks[key] ~= nil then
-            return "RunForwardRight"
-        else
-            if not missedSprintAnimWarned[key] then
-                missedSprintAnimWarned[key] = true
-                Logger.warn("[MovementController] getSprintAnimationName: " .. key .. " not loaded — RunForward fallback")
-            end
-            return "RunForward"
-        end
-    end
-
-    -- Stage 3D: backward diagonals reuse forward-diagonal animations when available.
-    -- Body will be rotated toward backward-left/right by faceCharacterTowardsDirection(),
-    -- so RunForwardLeft/RunForwardRight plays in the correct world-space direction.
-    if directionName == "BackwardLeft" then
-        local key = animSetName .. "_RunForwardLeft"
-        if animationTracks[key] ~= nil then
-            return "RunForwardLeft"
-        else
-            if not missedSprintAnimWarned[key] then
-                missedSprintAnimWarned[key] = true
-                Logger.warn(
-                    "[MovementController] getSprintAnimationName: "
-                    .. key .. " not loaded — RunForward fallback (BackwardLeft)"
-                )
-            end
-            return "RunForward"
-        end
-    end
-
-    if directionName == "BackwardRight" then
-        local key = animSetName .. "_RunForwardRight"
-        if animationTracks[key] ~= nil then
-            return "RunForwardRight"
-        else
-            if not missedSprintAnimWarned[key] then
-                missedSprintAnimWarned[key] = true
-                Logger.warn(
-                    "[MovementController] getSprintAnimationName: "
-                    .. key .. " not loaded — RunForward fallback (BackwardRight)"
-                )
-            end
-            return "RunForward"
-        end
-    end
-
-    -- Left, Right, Backward, Forward, or unclassified → RunForward.
-    -- Body is rotated toward movement direction by faceCharacterTowardsDirection(),
-    -- so RunForward plays in the correct world-space direction.
-    -- Dedicated run-left/run-right/run-backward IDs are deferred to a future stage.
-    return "RunForward"
+    -- All directions: RunForward (or RunForwardTest). Body rotation (Stage 3G) provides
+    -- the visual direction — no directional clip switching needed.
+    return getRunForwardSuffix(animSetName)
 end
 
 -- ============================================================
@@ -5843,6 +6147,107 @@ local function getLandingAnimationName(
     end
 end
 
+-- Returns the full animation track key (e.g. "Unarmed_WalkForward") that
+-- updateMovementAnimation would select for the current non-crouching standing state.
+-- Pure read: does NOT call playMovementAnimation and does NOT modify any state.
+-- Returns nil when: phase is not ACTIVE, tracks not loaded, or no valid key exists.
+-- The selection logic mirrors updateMovementAnimation's standing/sprint branch exactly;
+-- any future change to walk/sprint selection must be applied here too.
+-- Placed here (before playLandingAnimation) so the landing Stopped callback can call it
+-- without a forward-reference — mirrors the Stage 3B placement comment at line ~1137.
+-- Also used by resumeStandingLocomotionAfterCrouch (Stage 2S — defined further below).
+local function getDesiredStandingLocomotionKey(): string?
+    if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return nil end
+    if next(animationTracks) == nil then return nil end
+
+    local setName = getAnimationSetName()
+
+    -- Not moving: Idle.
+    if not movementState.isMoving then
+        local idleKey = setName .. "_Idle"
+        if animationTracks[idleKey] ~= nil then
+            return idleKey
+        end
+        return nil
+    end
+
+    -- Sprinting branch (mirrors updateMovementAnimation sprint block).
+    if movementState.isSprinting then
+        if isTacticalSprinting then
+            local tsKey = setName .. "_TacticalSprintForward1"
+            if animationTracks[tsKey] ~= nil then return tsKey end
+            return setName .. "_" .. getRunForwardSuffix(setName)
+        end
+        local sprintSuffix = getSprintAnimationName(setName, movementState.directionName)
+        return setName .. "_" .. sprintSuffix
+    end
+
+    -- Walking branch (mirrors updateMovementAnimation Unarmed + non-Unarmed selection).
+    local canUseStrafe: boolean
+    if Constants.MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK then
+        canUseStrafe = isMouseLockedForStrafeAnimations()
+    else
+        canUseStrafe = true
+    end
+
+    local dirName = movementState.directionName
+
+    if setName == Constants.MOVEMENT_ANIMATION_SET_UNARMED then
+        if dirName == "Backward" then
+            local k = "Unarmed_WalkBackward"
+            return if animationTracks[k] ~= nil then k else "Unarmed_WalkForward"
+
+        elseif dirName == "ForwardLeft" then
+            local fl = "Unarmed_WalkForwardLeft"
+            local l  = "Unarmed_WalkLeft"
+            if animationTracks[fl] ~= nil then return fl end
+            if canUseStrafe and animationTracks[l] ~= nil then return l end
+            return "Unarmed_WalkForward"
+
+        elseif dirName == "ForwardRight" then
+            local fr = "Unarmed_WalkForwardRight"
+            local r  = "Unarmed_WalkRight"
+            if animationTracks[fr] ~= nil then return fr end
+            if canUseStrafe and animationTracks[r] ~= nil then return r end
+            return "Unarmed_WalkForward"
+
+        elseif dirName == "BackwardLeft" then
+            local bl  = "Unarmed_WalkBackwardLeft"
+            local bwd = "Unarmed_WalkBackward"
+            if animationTracks[bl] ~= nil then return bl end
+            if animationTracks[bwd] ~= nil then return bwd end
+            return "Unarmed_WalkForward"
+
+        elseif dirName == "BackwardRight" then
+            local br  = "Unarmed_WalkBackwardRight"
+            local bwd = "Unarmed_WalkBackward"
+            if animationTracks[br] ~= nil then return br end
+            if animationTracks[bwd] ~= nil then return bwd end
+            return "Unarmed_WalkForward"
+
+        elseif canUseStrafe then
+            if dirName == "Left" then
+                local lk = "Unarmed_WalkLeft"
+                return if animationTracks[lk] ~= nil then lk else "Unarmed_WalkForward"
+            elseif dirName == "Right" then
+                local rk = "Unarmed_WalkRight"
+                return if animationTracks[rk] ~= nil then rk else "Unarmed_WalkForward"
+            end
+        end
+        return "Unarmed_WalkForward"
+
+    elseif canUseStrafe then
+        if dirName == "Left" or dirName == "ForwardLeft" or dirName == "BackwardLeft" then
+            local lk = setName .. "_WalkLeft"
+            return if animationTracks[lk] ~= nil then lk else (setName .. "_WalkForward")
+        elseif dirName == "Right" or dirName == "ForwardRight" or dirName == "BackwardRight" then
+            local rk = setName .. "_WalkRight"
+            return if animationTracks[rk] ~= nil then rk else (setName .. "_WalkForward")
+        end
+    end
+    return setName .. "_WalkForward"
+end
+
 -- Plays the named landing animation (e.g. "LandingLight") for the current animation set.
 -- Falls back to Unarmed set if the current set lacks the landing track.
 -- Warns once (playLandingAnimWarned) if no track exists even after the Unarmed fallback.
@@ -5850,6 +6255,9 @@ end
 -- Uses MOVEMENT_LANDING_ANIMATION_FADE_TIME (shorter than the normal fade) for quick blending.
 -- Sets isLandingPlaying = true and connects a Stopped callback to clear it when done.
 -- Does NOT freeze WalkSpeed or lock input — movement physics are unaffected.
+-- Stage 3F: Stopped callback immediately crossfades to the correct locomotion animation
+-- (when LANDING_EXIT_RESUME_LOCOMOTION_IMMEDIATELY is true) to prevent the one-frame
+-- blank-pose flash between the landing one-shot ending and the next Heartbeat tick.
 local function playLandingAnimation(animationName: string)
     assert(animationName ~= nil, "[MovementController] playLandingAnimation: animationName is required")
 
@@ -5923,114 +6331,28 @@ local function playLandingAnimation(animationName: string)
         if Constants.MOVEMENT_ANIMATION_DEBUG then
             Logger.debug("[MovementController] " .. animationName .. " finished → resuming locomotion")
         end
+        -- Stage 3F: zero-gap landing exit — crossfade immediately to the correct locomotion
+        -- animation so there is no blank-pose frame between the one-shot ending and the
+        -- next Heartbeat tick. Mirrors the Stage 2S crouch-exit crossfade approach.
+        -- If a second landing started before this callback ran, isLandingPlaying is already
+        -- true again and we skip so we do not interrupt the new landing animation.
+        if Constants.LANDING_EXIT_RESUME_LOCOMOTION_IMMEDIATELY and not isLandingPlaying then
+            local desiredKey = getDesiredStandingLocomotionKey()
+            if desiredKey ~= nil then
+                playMovementAnimation(desiredKey)
+            end
+        end
     end)
 end
 
 -- ============================================================
 -- Private helpers — Stage 2S: Zero-gap crouch-exit transition
--- These two functions work together to eliminate the brief default-pose flash that
--- occurs when the player releases C while moving or running. The fix is to crossfade
--- directly from CrouchIdle/CrouchWalk into the correct standing animation rather than
--- waiting for ExitCrouch to finish and Heartbeat to pick up on the next tick.
+-- Eliminates the brief default-pose flash that occurs when the player releases C
+-- while moving or running. The fix is to crossfade directly from CrouchIdle/CrouchWalk
+-- into the correct standing animation rather than waiting for ExitCrouch to finish.
+-- getDesiredStandingLocomotionKey() is defined above playLandingAnimation (Stage 3F
+-- placement) so the landing Stopped callback can also use it without a forward-reference.
 -- ============================================================
-
--- Returns the full animation track key (e.g. "Unarmed_WalkForward") that
--- updateMovementAnimation would select for the current non-crouching state.
--- Pure read: does NOT call playMovementAnimation and does NOT modify any state.
--- Returns nil when: phase is not ACTIVE, tracks not loaded, or standing is not applicable.
--- The selection logic mirrors updateMovementAnimation's standing/sprint branch exactly;
--- any future change to walk/sprint selection must be applied here too.
-local function getDesiredStandingLocomotionKey(): string?
-    if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return nil end
-    if next(animationTracks) == nil then return nil end
-
-    local setName = getAnimationSetName()
-
-    -- Not moving: Idle.
-    if not movementState.isMoving then
-        local idleKey = setName .. "_Idle"
-        if animationTracks[idleKey] ~= nil then
-            return idleKey
-        end
-        return nil
-    end
-
-    -- Sprinting branch (mirrors updateMovementAnimation sprint block).
-    if movementState.isSprinting then
-        if isTacticalSprinting then
-            local tsKey = setName .. "_TacticalSprintForward1"
-            if animationTracks[tsKey] ~= nil then return tsKey end
-            return setName .. "_RunForward"
-        end
-        local sprintSuffix = getSprintAnimationName(setName, movementState.directionName)
-        return setName .. "_" .. sprintSuffix
-    end
-
-    -- Walking branch (mirrors updateMovementAnimation Unarmed + non-Unarmed selection).
-    local canUseStrafe: boolean
-    if Constants.MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK then
-        canUseStrafe = isMouseLockedForStrafeAnimations()
-    else
-        canUseStrafe = true
-    end
-
-    local dirName = movementState.directionName
-
-    if setName == Constants.MOVEMENT_ANIMATION_SET_UNARMED then
-        if dirName == "Backward" then
-            local k = "Unarmed_WalkBackward"
-            return if animationTracks[k] ~= nil then k else "Unarmed_WalkForward"
-
-        elseif dirName == "ForwardLeft" then
-            local fl = "Unarmed_WalkForwardLeft"
-            local l  = "Unarmed_WalkLeft"
-            if animationTracks[fl] ~= nil then return fl end
-            if canUseStrafe and animationTracks[l] ~= nil then return l end
-            return "Unarmed_WalkForward"
-
-        elseif dirName == "ForwardRight" then
-            local fr = "Unarmed_WalkForwardRight"
-            local r  = "Unarmed_WalkRight"
-            if animationTracks[fr] ~= nil then return fr end
-            if canUseStrafe and animationTracks[r] ~= nil then return r end
-            return "Unarmed_WalkForward"
-
-        elseif dirName == "BackwardLeft" then
-            local bl  = "Unarmed_WalkBackwardLeft"
-            local bwd = "Unarmed_WalkBackward"
-            if animationTracks[bl] ~= nil then return bl end
-            if animationTracks[bwd] ~= nil then return bwd end
-            return "Unarmed_WalkForward"
-
-        elseif dirName == "BackwardRight" then
-            local br  = "Unarmed_WalkBackwardRight"
-            local bwd = "Unarmed_WalkBackward"
-            if animationTracks[br] ~= nil then return br end
-            if animationTracks[bwd] ~= nil then return bwd end
-            return "Unarmed_WalkForward"
-
-        elseif canUseStrafe then
-            if dirName == "Left" then
-                local lk = "Unarmed_WalkLeft"
-                return if animationTracks[lk] ~= nil then lk else "Unarmed_WalkForward"
-            elseif dirName == "Right" then
-                local rk = "Unarmed_WalkRight"
-                return if animationTracks[rk] ~= nil then rk else "Unarmed_WalkForward"
-            end
-        end
-        return "Unarmed_WalkForward"
-
-    elseif canUseStrafe then
-        if dirName == "Left" or dirName == "ForwardLeft" or dirName == "BackwardLeft" then
-            local lk = setName .. "_WalkLeft"
-            return if animationTracks[lk] ~= nil then lk else (setName .. "_WalkForward")
-        elseif dirName == "Right" or dirName == "ForwardRight" or dirName == "BackwardRight" then
-            local rk = setName .. "_WalkRight"
-            return if animationTracks[rk] ~= nil then rk else (setName .. "_WalkForward")
-        end
-    end
-    return setName .. "_WalkForward"
-end
 
 -- Immediately resumes the correct standing locomotion animation after crouch exit.
 -- Fades ALL crouch tracks out with `fadeTime` while simultaneously fading the target
@@ -6047,6 +6369,15 @@ end
 local function resumeStandingLocomotionAfterCrouch(fadeTime: number)
     assert(typeof(fadeTime) == "number",
         "[MovementController] resumeStandingLocomotionAfterCrouch: fadeTime must be a number")
+
+    -- Stage 3M: clear the crouch-exit speed lock. The standing animation is about to
+    -- fade in, so WalkSpeed can return to WALK_SPEED / SPRINT_SPEED as appropriate.
+    -- applySpeed() is called immediately so the speed restores on this same frame
+    -- rather than waiting for the next Heartbeat.
+    if isCrouchExitTransitioning then
+        isCrouchExitTransitioning = false
+        applySpeed()
+    end
 
     local desiredKey = getDesiredStandingLocomotionKey()
 
@@ -6454,7 +6785,7 @@ local function updateMovementAnimation()
             if animationTracks[tsKey] ~= nil then
                 playMovementAnimation(tsKey)
             else
-                playMovementAnimation(setName .. "_RunForward")
+                playMovementAnimation(setName .. "_" .. getRunForwardSuffix(setName))
             end
             return  -- no further direction selection while tactical sprinting
         end
@@ -7003,8 +7334,13 @@ function MovementController:destroy()
     isTacticalSprinting               = false
     movementState.isTacticalSprinting = false
     tacticalSprintStartTime           = 0
+    -- Stage 3K: restore sensitivity on destroy.
+    applyTacticalSprintSensitivity(false)
     lastShiftPressTime                = 0
     clearTacticalSprintStopConnection()
+    -- Stage 3M: cancel any in-flight crouch-exit speed lock on destroy.
+    isCrouchExitTransitioning   = false
+    crouchExitTransitionVersion += 1
     clearCrouchBottomHold()
     -- Stop the active animation if still playing, then clear track references.
     stopCurrentMovementAnimation()
@@ -7015,7 +7351,8 @@ function MovementController:destroy()
     lastAnimationSet          = ""
     lastStrafeBlockedState    = false
     lastSprintAnimName        = ""   -- Stage 2R
-    lastSprintFacingMode      = ""   -- Stage 3D
+    lastSprintFacingMode              = ""    -- Stage 3D
+    lastNaturalSprintAutoRotateActive = false -- Stage 3E
     crouchBottomPoseWarned    = false
     -- Stage 2E: restore AutoRotate if mouse lock is active before clearing state.
     if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW and customMouseLocked then
@@ -7150,9 +7487,15 @@ function MovementController:Start()
                 isTacticalSprinting               = false
                 movementState.isTacticalSprinting = false
                 tacticalSprintStartTime           = 0
+                -- Stage 3K: restore sensitivity on phase exit.
+                applyTacticalSprintSensitivity(false)
                 clearTacticalSprintStopConnection()
                 stopCurrentMovementAnimation()
             end
+            -- Stage 3M: cancel any in-flight crouch-exit speed lock on phase exit.
+            -- applySpeed() will set WalkSpeed = 0 immediately after (phase not ACTIVE).
+            isCrouchExitTransitioning   = false
+            crouchExitTransitionVersion += 1
             local hum = humanoid
             if hum then
                 hum.WalkSpeed = 0
@@ -7239,6 +7582,8 @@ function MovementController:Start()
                         isTacticalSprinting               = true
                         movementState.isTacticalSprinting = true
                         tacticalSprintStartTime           = os.clock()
+                        -- Stage 3K: apply reduced sensitivity on tactical sprint entry.
+                        applyTacticalSprintSensitivity(true)
                         if Constants.MOVEMENT_ANIMATION_DEBUG then
                             Logger.debug(
                                 "[MovementController] Tactical sprint START"
@@ -7369,6 +7714,11 @@ function MovementController:Start()
             sprintStartTime = nil
             movementState.isCrouching = true
             movementState.isSprinting = false
+            -- Stage 3M: cancel any in-flight crouch-exit speed lock (player re-crouched
+            -- before the exit transition finished). Increment version so delayed callbacks
+            -- from the previous exit cycle are invalidated.
+            isCrouchExitTransitioning   = false
+            crouchExitTransitionVersion += 1
             applySpeed()
             -- Stage 3A: crouch clears sprint → restore FOV immediately.
             updateSprintFov()
@@ -7395,6 +7745,13 @@ function MovementController:Start()
                 clearCrouchWalkStart()
             end
             wasMovingWhileCrouching = false
+
+            -- Stage 3M: arm the crouch-exit speed lock so WalkSpeed stays at CROUCH_SPEED
+            -- until resumeStandingLocomotionAfterCrouch() clears it.
+            -- Version is incremented so any stale delayed callbacks from a previous
+            -- exit cycle are automatically invalidated.
+            isCrouchExitTransitioning  = true
+            crouchExitTransitionVersion += 1
 
             -- ── Stage 2S: zero-gap crouch-exit transition ─────────────────────────
             if Constants.CROUCH_ZERO_GAP_TRANSITIONS_ENABLED then
@@ -7471,6 +7828,19 @@ function MovementController:Start()
                 -- Legacy path (CROUCH_ZERO_GAP_TRANSITIONS_ENABLED = false).
                 -- Play ExitCrouch via playCrouchTransition; Heartbeat takes over when done.
                 playCrouchTransition(false)
+                -- Stage 3M: legacy path does not call resumeStandingLocomotionAfterCrouch,
+                -- so use task.delay as a safety-net to release the speed lock.
+                -- CROUCH_ZERO_GAP_TRANSITIONS_ENABLED is true by default so this branch
+                -- is normally unreachable, but guard it correctly for robustness.
+                do
+                    local v = crouchExitTransitionVersion
+                    task.delay(Constants.CROUCH_EXIT_IDLE_BLEND_FADE_TIME, function()
+                        if crouchExitTransitionVersion == v then
+                            isCrouchExitTransitioning = false
+                            applySpeed()
+                        end
+                    end)
+                end
             end
             -- ─────────────────────────────────────────────────────────────────────
         end
@@ -7481,11 +7851,15 @@ function MovementController:Start()
     -- Runs every physics step. Updates movementState, re-applies speed, and drives
     -- the Stage 2A animation layer. No camera writes.
     local heartbeatConn = RunService.Heartbeat:Connect(function(_dt: number)
-        -- Reapply custom mouse lock every frame while it is active.
-        -- Prevents CoreScripts or UI transitions from resetting MouseBehavior after the
-        -- LeftAlt toggle fires. Runs regardless of phase so the lock persists in all states.
+        -- Reapply custom mouse lock if CoreScripts have stolen it.
+        -- Only write when the value has actually changed — unconditional writes caused
+        -- Roblox's camera to re-centre its cursor-snap point every Heartbeat, producing
+        -- a 1-frame camera "reset" jitter that was visible as side-to-side camera jerk
+        -- during sprint direction changes (Stage 3E-fix-2, 2026-05-25).
         if Constants.CUSTOM_MOUSE_LOCK_REAPPLY_EVERY_FRAME and customMouseLocked then
-            UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+            if UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter then
+                UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+            end
         end
 
         -- Stage 2E: rotate character to face camera yaw every frame while locked.
@@ -7560,6 +7934,11 @@ function MovementController:Start()
         -- targetFov so redundant tweens are never started. Also called directly from sprint/
         -- crouch input handlers for immediate response — this call covers continuous state.
         updateSprintFov()
+
+        -- Stage 3H: update CameraOffset every frame based on sprint state. Removes the
+        -- right-shoulder offset while sprinting (camera centers behind character) and
+        -- restores it when sprint ends. Guarded internally so no redundant writes occur.
+        updateSprintCameraOffset()
     end)
     table.insert(_connections, heartbeatConn)
 

@@ -399,6 +399,9 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Unarmed.TacticalSprintStop     = rbxassetid://81946205769343  (Stage 2P — one-shot stop clip; plays when tactical sprint ends)
                         --       Unarmed.LowVault    = rbxassetid://78932004147700   (DEFERRED — ID reserved; not loaded or selected; vault system not yet implemented)
                         --       Unarmed.MediumVault = rbxassetid://98948076922717   (DEFERRED — ID reserved; not loaded or selected; vault system not yet implemented)
+                        --       Unarmed.SlideInto   = rbxassetid://101320244227398  (DEFERRED — ID reserved; not loaded or selected; slide system not yet implemented — see DEBT-053)
+                        --       Unarmed.SlideIdle   = rbxassetid://123763519906235  (DEFERRED — ID reserved; not loaded or selected; slide system not yet implemented — see DEBT-053)
+                        --       Unarmed.SlideExit   = rbxassetid://89774397391406   (DEFERRED — ID reserved; not loaded or selected; slide system not yet implemented — see DEBT-053)
                         --       AR15.WalkForward          = rbxassetid://138802532485746
                         --       AR15.RunForward           = rbxassetid://79735501581082
                         --       AR15.Idle                 = rbxassetid://117989834436525  (Stage 2H — standing idle, looped)
@@ -416,7 +419,8 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       Stage 2P (2026-05-21) — TacticalSprintForward1, TacticalSprintForward2, TacticalSprintStop added;
                         --       Stage 2R (2026-05-21) — directional sprint selection enabled via getSprintAnimationName() helper;
                         --       Stage 3A (2026-05-21) — LandingLight + LandingHeavy IDs added; sprint FOV constants added;
-                        --       2026-05-23 — LowVault + MediumVault IDs reserved in Constants; vault system deferred (see DEBT-052))
+                        --       2026-05-23 — LowVault + MediumVault IDs reserved in Constants; vault system deferred (see DEBT-052)
+                        --       2026-05-26 — SlideInto + SlideIdle + SlideExit IDs reserved in Constants; slide system deferred (see DEBT-053))
                         --     Sprint behavior (Stage 3J — 2026-05-25, supersedes Stage 2R/3D):
                         --       All sprint directions (mouse lock ON or OFF): RunForward always.
                         --       Stage 3G body rotation (raw MoveDirection, lerp alpha=0.18) provides

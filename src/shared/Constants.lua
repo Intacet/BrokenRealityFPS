@@ -294,6 +294,12 @@ Constants.MOVEMENT_ANIMATION_IDS = {
             -- Do not add loading or selection code until the vault system is designed and staged.
             LowVault    = "rbxassetid://78932004147700",  -- low-vault one-shot (deferred — vault system not yet implemented)
             MediumVault = "rbxassetid://98948076922717",  -- medium-vault one-shot (deferred — vault system not yet implemented)
+            -- Slide animations (Unarmed only).
+            -- IDs reserved for future implementation. NOT loaded by loadMovementAnimations() yet.
+            -- Do not add loading, input, or state-machine code until the slide system is designed and staged. See DEBT-053.
+            SlideInto = "rbxassetid://101320244227398",  -- slide-into one-shot (deferred — slide system not yet implemented)
+            SlideIdle = "rbxassetid://123763519906235",  -- slide-idle loop (deferred — slide system not yet implemented)
+            SlideExit = "rbxassetid://89774397391406",   -- slide-exit one-shot (deferred — slide system not yet implemented)
         },
         AR15 = {
             WalkForward = "rbxassetid://138802532485746",

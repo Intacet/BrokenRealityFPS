@@ -7,6 +7,32 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-26] — Reserve slide animation IDs in Constants (deferred — no implementation)
+
+### Summary
+
+Three slide animation IDs have been reserved in `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed` for future use. No slide movement, input, state machine, speed logic, or camera changes have been added. IDs follow the same "reserved but not loaded" precedent established for vault animations (DEBT-052).
+
+**What changed:**
+
+- `SlideInto = "rbxassetid://101320244227398"` — slide entry one-shot; reserved, not loaded.
+- `SlideIdle  = "rbxassetid://123763519906235"` — slide idle loop; reserved, not loaded.
+- `SlideExit  = "rbxassetid://89774397391406"` — slide exit one-shot; reserved, not loaded.
+
+### Changes to `src/shared/Constants.lua`
+
+- Added `SlideInto`, `SlideIdle`, `SlideExit` to `Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed`, below the existing vault IDs. Comment block marks all three as deferred and references DEBT-053.
+
+### No client, server, or gameplay changes
+
+`src/client/MovementController.lua`, all server files, `WeaponData.lua`, remotes, and `default.project.json` are **unchanged**. No animation loading, no input binding, no speed changes, no camera tilt, no new remotes.
+
+### New technical debt entry
+
+- **DEBT-053** added to `docs/TECHNICAL_DEBT.md` — documents the full slide system design checklist (input binding, state, speed decay, animation sequence, exit conditions, camera tilt decision, AR15 handling, crouch interaction, server position tolerance).
+
+---
+
 ## [2026-05-26] — Stage 3N: Instant backward turn during backward sprint in shift lock
 
 ### Summary
