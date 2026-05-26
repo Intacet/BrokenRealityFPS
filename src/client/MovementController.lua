@@ -883,6 +883,30 @@ local function applyCharacterFacing()
     end
     -- ─────────────────────────────────────────────────────────────────────────
 
+    -- ── Stage 3G: Smooth sprint body-facing toward MoveDirection ─────────────
+    -- When sprinting in mouse lock, lerp HumanoidRootPart yaw toward the raw
+    -- Humanoid.MoveDirection each Heartbeat via faceCharacterTowardsDirection().
+    -- AutoRotate remains false throughout — only a direct CFrame write is used,
+    -- so the camera is NOT dragged by Roblox physics (no Stage 3E camera jerk).
+    -- If the player has no useful movement input (magnitude below threshold or nil),
+    -- falls through to the camera-yaw CFrame write below.
+    if Constants.SPRINT_SMOOTH_BODY_FACING_ENABLED
+        and customMouseLocked
+        and movementState.isSprinting
+        and not isTacticalSprinting
+        and not movementState.isCrouching
+        and not isSprintStopPlaying
+        and not isLandingMovementLocked
+    then
+        local moveDir = getCameraRelativeMoveDirection()
+        if moveDir then
+            faceCharacterTowardsDirection(moveDir)
+            return
+        end
+        -- No movement input above threshold — fall through to camera-yaw write.
+    end
+    -- ─────────────────────────────────────────────────────────────────────────
+
     -- Rotate character to face camera yaw. Position is unchanged — this is a yaw-only
     -- CFrame replacement, not a teleport and not a velocity change.
     local pos = root.Position

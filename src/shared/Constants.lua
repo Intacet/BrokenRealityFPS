@@ -127,13 +127,27 @@ Constants.SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE = 0.1
 Constants.SPRINT_DIRECTIONAL_BODY_FACING_DEBUG = true
 
 -- When true, body rotation is smoothed using LERP over multiple Heartbeat frames instead
--- of snapping immediately to the target direction. Default false for instant, responsive feel.
-Constants.SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = false
+-- of snapping immediately to the target direction.
+-- Stage 3G: enabled so the character body smoothly tracks movement direction while sprinting
+-- in mouse lock, eliminating the discrete snap feel from Stage 3D's immediate path.
+Constants.SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = true
 
 -- LERP alpha applied per Heartbeat when smoothing is enabled. 1.0 = immediate (no smoothing).
 -- Values closer to 0 produce slower, heavier-feeling rotation.
+-- Stage 3G: 0.18 — responsive enough to track direction changes within ~3–4 frames,
+-- slow enough to avoid the per-frame CFrame snap that caused the Stage 3E camera jerk.
 -- Has no effect when SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED is false.
-Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 1
+Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 0.18
+
+-- ── Stage 3G: Smooth sprint body-facing toward MoveDirection ──────────────────
+-- Master switch for the Stage 3G smooth body-facing path.
+-- When true and custom mouse lock is active, sprinting rotates the character body smoothly
+-- toward the raw Humanoid.MoveDirection (camera-relative) each Heartbeat using the existing
+-- faceCharacterTowardsDirection() lerp helper (Stage 3D).
+-- AutoRotate remains false — no Roblox-physics rotation is involved, so no camera jerk.
+-- When false, sprint falls through to the camera-yaw CFrame write (character always faces camera).
+-- Walking, idle, crouching, tactical sprint, sprint-stop, and landing use camera-yaw regardless.
+Constants.SPRINT_SMOOTH_BODY_FACING_ENABLED = true
 
 -- ── Stage 3E: Natural AutoRotate sprint rotation ──────────────────────────────────────────────
 -- Replaces Stage 3D directional CFrame snapping during sprint + custom mouse lock.

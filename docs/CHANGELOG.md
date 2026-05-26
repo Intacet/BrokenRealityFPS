@@ -7,6 +7,41 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-25] — Stage 3G: Smooth sprint body-facing toward movement direction (restores Stage 3D, no camera jerk)
+
+### Summary
+
+Restores character body-facing toward movement direction during sprint in shift lock, using smooth per-frame lerp rather than Roblox `AutoRotate` (which caused Stage 3E camera jerk) or Stage 3D's immediate CFrame snap.
+
+Root cause of the missing facing: Stage 3E was disabled (`SPRINT_USE_NATURAL_AUTOROTATE_WHILE_MOUSE_LOCKED = false`, fix commit `2c95f42`) and no replacement was installed, so `applyCharacterFacing()` fell through to the camera-yaw CFrame write for all states including sprint — character always faced camera yaw.
+
+Fix (Stage 3G): a new block in `applyCharacterFacing()` after the Stage 3E exit block and before the camera-yaw write. When `SPRINT_SMOOTH_BODY_FACING_ENABLED = true` and the player is sprinting in mouse lock (not tactical sprint, not crouching, not sprint-stop, not landing lock), calls `getCameraRelativeMoveDirection()` → if the magnitude is above threshold, calls `faceCharacterTowardsDirection(moveDir)` and returns. `AutoRotate` stays `false` throughout — this is a direct CFrame write only, no Roblox physics rotation → no camera drag → no camera jerk. Lerp smoothing now active (`SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = true`, `SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 0.18`): body tracks direction changes over ~3–4 Heartbeat frames at 60Hz.
+
+**What changed:**
+
+- `SPRINT_SMOOTH_BODY_FACING_ENABLED = true` added to `Constants.lua` (Stage 3G master switch).
+- `SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED` changed `false → true` (lerp now active for Stage 3G).
+- `SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA` changed `1 → 0.18` (smooth per-Heartbeat tracking; ~3–4 frame response at 60Hz).
+- Stage 3G block added in `MovementController.lua` `applyCharacterFacing()` between Stage 3E exit block and camera-yaw write.
+- Stage 3D helpers `getCameraRelativeMoveDirection()` and `faceCharacterTowardsDirection()` are now called by Stage 3G (were dead code after Stage 3E).
+
+### Changes to `src/shared/Constants.lua`
+
+- `SPRINT_SMOOTH_BODY_FACING_ENABLED = true` added (new constant, Stage 3G master switch).
+- `SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = false → true` (lerp enabled).
+- `SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 1 → 0.18` (smooth alpha).
+- Updated comments on both smoothing constants to explain Stage 3G usage.
+
+### Changes to `src/client/MovementController.lua`
+
+- Stage 3G block added in `applyCharacterFacing()`: `SPRINT_SMOOTH_BODY_FACING_ENABLED` guard + sprint conditions → `getCameraRelativeMoveDirection()` → `faceCharacterTowardsDirection(moveDir)` → return early.
+
+### No animation ID changes, no camera writes, no server changes
+
+No animation IDs, speed multipliers, camera CFrame, CameraOffset, FieldOfView, HipHeight, JumpPower, Humanoid.AutoRotate (stays false), or server-side systems were modified.
+
+---
+
 ## [2026-05-25] — Stage 3E-fix-2: Conditional MouseBehavior reapply — fixes remaining camera jerk in shift lock
 
 ### Summary
