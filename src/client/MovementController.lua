@@ -631,6 +631,13 @@ local slideMomentumAttachment: Attachment? = nil
 -- Nil when no slide is active. Destroyed by clearSlideMomentum().
 local slideMomentumVelocity: LinearVelocity? = nil
 
+-- os.clock() timestamp after which the post-SlideExit direction-lock hold expires.
+-- Set to os.clock() + SLIDE_EXIT_FACING_HOLD_DURATION in the SlideExit Stopped callback.
+-- The Heartbeat facing-lock checks this so the HRP yaw continues to hold slideDirection
+-- for a brief window after SlideExit completes, preventing an instant camera-facing snap.
+-- 0 means the hold is inactive.
+local slideExitFacingHoldEndTime: number = 0
+
 -- Stage 4A: vault state ──────────────────────────────────────────────────────
 
 -- True while a vault TweenService move is in progress.
@@ -1182,16 +1189,58 @@ end
 -- sprint state within one frame (≤16ms) of any state change.
 -- Does NOT write camera.CFrame, CameraType, FieldOfView, HipHeight, or JumpPower.
 local function updateSprintCameraOffset()
-    if not Constants.SPRINT_DISABLES_CAMERA_OFFSET then return end
     if not customMouseLocked then return end
     local hum = humanoid
     if not hum then return end
-    local wantZero = movementState.isSprinting or isTacticalSprinting
-    local targetOffset = if wantZero
-        then Vector3.zero
-        else Constants.CUSTOM_MOUSE_LOCK_CAMERA_OFFSET
-    if hum.CameraOffset ~= targetOffset then
-        hum.CameraOffset = targetOffset
+
+    -- Stage 3H: sprint zeroes the shoulder offset (centered camera behind character).
+    if Constants.SPRINT_DISABLES_CAMERA_OFFSET
+        and (movementState.isSprinting or isTacticalSprinting)
+    then
+        if hum.CameraOffset ~= Vector3.zero then
+            hum.CameraOffset = Vector3.zero
+        end
+        return
+    end
+
+    -- Backpedal camera offset correction (Bug 2 fix):
+    -- Humanoid.CameraOffset is in character LOCAL space, so the 1.75-stud shoulder
+    -- offset rotates with the character body. When the backpedal LERP faces the body
+    -- away from the camera, the offset visually swings to the wrong side and the camera
+    -- appears to orbit oddly during a 360° backward run.
+    -- Correction: set CameraOffset.X = OFFSET.X × dot(cameraRightFlat, bodyRightFlat).
+    -- dot = +1 when body faces camera (normal): correctedX = +1.75 (camera on right). ✓
+    -- dot = -1 when body faces away (backpedal 180°): correctedX = -1.75 (local-left =
+    --   world-right since body is flipped), so camera still appears on the right. ✓
+    -- dot = 0 when body faces perpendicular: correctedX = 0 (centred). ✓
+    if Constants.BACKPEDAL_CAMERA_OFFSET_CORRECTION then
+        local hrp = currentRootPart
+        if hrp then
+            local cam       = workspace.CurrentCamera
+            local camRight  = cam.CFrame.RightVector
+            local bodyRight = (hrp :: BasePart).CFrame.RightVector
+            local camFlat   = Vector3.new(camRight.X,  0, camRight.Z)
+            local bodyFlat  = Vector3.new(bodyRight.X, 0, bodyRight.Z)
+            local baseX = Constants.CUSTOM_MOUSE_LOCK_CAMERA_OFFSET.X
+            local correctedX = baseX
+            if camFlat.Magnitude > 0.01 and bodyFlat.Magnitude > 0.01 then
+                correctedX = baseX * camFlat.Unit:Dot(bodyFlat.Unit)
+            end
+            local target = Vector3.new(correctedX, 0, 0)
+            if hum.CameraOffset ~= target then
+                hum.CameraOffset = target
+            end
+            return
+        end
+    end
+
+    -- Default: restore/maintain the fixed shoulder offset when sprint ends.
+    -- Only runs when SPRINT_DISABLES_CAMERA_OFFSET is true (otherwise CameraOffset was
+    -- set once by applyCustomMouseLockCamera and is not managed per-frame here).
+    if Constants.SPRINT_DISABLES_CAMERA_OFFSET then
+        if hum.CameraOffset ~= Constants.CUSTOM_MOUSE_LOCK_CAMERA_OFFSET then
+            hum.CameraOffset = Constants.CUSTOM_MOUSE_LOCK_CAMERA_OFFSET
+        end
     end
 end
 
@@ -2300,6 +2349,9 @@ local function endSlide()
         slideExitTrack:AdjustSpeed(Constants.SLIDE_ANIMATION_SPEED_MULTIPLIER)
         slideExitConn = slideExitTrack.Stopped:Connect(function()
             clearSlideExitConnection()
+            -- Bug 3 fix: hold slide-direction yaw so the first Heartbeat after SlideExit
+            -- doesn't instantly snap the character to camera-yaw.
+            slideExitFacingHoldEndTime = os.clock() + Constants.SLIDE_EXIT_FACING_HOLD_DURATION
             if currentAnimationName == slideExitKey then currentAnimationName = "" end
             -- After SlideExit: land in CrouchIdle if crouching, otherwise let
             -- the Heartbeat's updateMovementAnimation pick the right walk/idle clip.
@@ -3178,6 +3230,7 @@ local function loadMovementAnimations(character: Model)
     slideToken             += 1
     lastSlideEndTime        = 0
     slideDirection          = Vector3.new(0, 0, -1)
+    slideExitFacingHoldEndTime = 0  -- Bug 3 fix: clear post-slide facing hold on respawn
     -- Stage 4A: clear vault state on respawn.
     -- clearVaultTween() is safe even if vaultActiveTween is nil — just cancels if active.
     clearVaultTween()
@@ -3581,15 +3634,25 @@ local function getDesiredStandingLocomotionKey(): string?
             return "Unarmed_WalkForward"
 
         elseif dirName == "BackwardLeft" then
-            local bl  = "Unarmed_WalkBackwardLeft"
             local bwd = "Unarmed_WalkBackward"
+            if customMouseLocked and Constants.BACKPEDAL_TURN_ENABLED then
+                -- Bug 1 fix: unify to WalkBackward; body-turn LERP handles visual direction.
+                if animationTracks[bwd] ~= nil then return bwd end
+                return "Unarmed_WalkForward"
+            end
+            local bl = "Unarmed_WalkBackwardLeft"
             if animationTracks[bl] ~= nil then return bl end
             if animationTracks[bwd] ~= nil then return bwd end
             return "Unarmed_WalkForward"
 
         elseif dirName == "BackwardRight" then
-            local br  = "Unarmed_WalkBackwardRight"
             local bwd = "Unarmed_WalkBackward"
+            if customMouseLocked and Constants.BACKPEDAL_TURN_ENABLED then
+                -- Bug 1 fix: unify to WalkBackward; body-turn LERP handles visual direction.
+                if animationTracks[bwd] ~= nil then return bwd end
+                return "Unarmed_WalkForward"
+            end
+            local br = "Unarmed_WalkBackwardRight"
             if animationTracks[br] ~= nil then return br end
             if animationTracks[bwd] ~= nil then return bwd end
             return "Unarmed_WalkForward"
@@ -4211,25 +4274,36 @@ local function updateMovementAnimation()
             end
 
         elseif dirName == "BackwardLeft" then
-            local bwdLeft = "Unarmed_WalkBackwardLeft"
-            local bwd     = "Unarmed_WalkBackward"
-            if animationTracks[bwdLeft] ~= nil then
-                animName = bwdLeft
-            elseif animationTracks[bwd] ~= nil then
-                animName = bwd
+            local bwd = "Unarmed_WalkBackward"
+            if customMouseLocked and Constants.BACKPEDAL_TURN_ENABLED then
+                -- Bug 1 fix: body-turn LERP already handles visual direction, so unify
+                -- BackwardLeft → WalkBackward to avoid choppy animation oscillation.
+                animName = if animationTracks[bwd] ~= nil then bwd else "Unarmed_WalkForward"
             else
-                animName = "Unarmed_WalkForward"
+                local bwdLeft = "Unarmed_WalkBackwardLeft"
+                if animationTracks[bwdLeft] ~= nil then
+                    animName = bwdLeft
+                elseif animationTracks[bwd] ~= nil then
+                    animName = bwd
+                else
+                    animName = "Unarmed_WalkForward"
+                end
             end
 
         elseif dirName == "BackwardRight" then
-            local bwdRight = "Unarmed_WalkBackwardRight"
-            local bwd      = "Unarmed_WalkBackward"
-            if animationTracks[bwdRight] ~= nil then
-                animName = bwdRight
-            elseif animationTracks[bwd] ~= nil then
-                animName = bwd
+            local bwd = "Unarmed_WalkBackward"
+            if customMouseLocked and Constants.BACKPEDAL_TURN_ENABLED then
+                -- Bug 1 fix: same unification for BackwardRight → WalkBackward.
+                animName = if animationTracks[bwd] ~= nil then bwd else "Unarmed_WalkForward"
             else
-                animName = "Unarmed_WalkForward"
+                local bwdRight = "Unarmed_WalkBackwardRight"
+                if animationTracks[bwdRight] ~= nil then
+                    animName = bwdRight
+                elseif animationTracks[bwd] ~= nil then
+                    animName = bwd
+                else
+                    animName = "Unarmed_WalkForward"
+                end
             end
 
         elseif canUseStrafeAnimations then
@@ -4743,6 +4817,7 @@ function MovementController:destroy()
     slideToken             += 1
     lastSlideEndTime        = 0
     slideDirection          = Vector3.new(0, 0, -1)
+    slideExitFacingHoldEndTime = 0  -- Bug 3 fix: clear post-slide facing hold on destroy
     -- Stage 4A: clear vault state on destroy.
     ContextActionService:UnbindAction(VAULT_ACTION_NAME)
     clearVaultTween()
@@ -4915,6 +4990,7 @@ function MovementController:Start()
                 isTacSprintSlide        = false
                 slideToken             += 1
             end
+            slideExitFacingHoldEndTime = 0  -- Bug 3 fix: clear post-slide facing hold on phase exit
             -- Stage 4A: interrupt any active vault on phase exit.
             -- clearVaultTween() cancels the TweenService move so HRP stops immediately.
             -- lastVaultTime is intentionally preserved for cooldown continuity.
@@ -5375,7 +5451,7 @@ function MovementController:Start()
         -- We only write the rotation (yaw); position is untouched so physics still drives
         -- the character forward via LinearVelocity. The write happens every Heartbeat at
         -- ~60 Hz, which overrides any Humanoid auto-rotate or player stick input.
-        if isSliding or slideExitConn ~= nil then
+        if isSliding or slideExitConn ~= nil or os.clock() < slideExitFacingHoldEndTime then
             local hrp = currentRootPart
             if hrp then
                 local angle = math.atan2(-slideDirection.X, -slideDirection.Z)

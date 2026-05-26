@@ -1212,6 +1212,26 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 
 ---
 
+## [DEBT-055] Shift-lock backpedal bug fixes (Bugs 1–3) — runtime verification pending — ADDED 2026-05-26
+
+**File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
+**Severity:** Low-Medium (static logic is correct and symbols are confirmed in Studio; observable behavior not yet verified in play mode)
+**Studio verification required:** Yes — all three bugs require in-play-mode shift-lock testing
+
+**Bug 1 — Backward animation unification:**
+`updateMovementAnimation()` and `getDesiredStandingLocomotionKey()` now map `BackwardLeft`/`BackwardRight` → `WalkBackward` when `customMouseLocked and BACKPEDAL_TURN_ENABLED`. The backpedal body-turn LERP handles the visual direction; the dedicated diagonal animations are no longer needed in this path. Risk: if a future stage adds `BACKPEDAL_TURN_ENABLED = false` paths that also set `customMouseLocked = true`, the diagonal animations would still be suppressed. Guard condition is explicit so reviewing this path is straightforward.
+**Fix when:** Verified in play mode — walk backward + rotate camera left/right and confirm no animation flip between WalkBackwardLeft and WalkBackward.
+
+**Bug 2 — Camera offset orbit:**
+`updateSprintCameraOffset()` now computes a dot-product correction for `Humanoid.CameraOffset.X` each Heartbeat. The formula: `correctedX = CAMERA_OFFSET.X * dot(camRightFlat, bodyRightFlat)`. When the body faces the camera (backpedal, no rotation) the dot is +1 and offset stays normal (+1.75). When the body is flipped 180° (360° spin complete), dot is −1 and offset flips to −1.75 in local space, which is still world-right. Risk: during the LERP sweep (0° to 180°), the corrected offset linearly passes through 0 and reverses — there is a brief frame where `CameraOffset.X ≈ 0` (near-centered shoulder). This is a deliberate trade-off vs. a sharp-switch or slerp approach.
+**Fix when:** Verified in play mode — run backward, rotate camera 360°, confirm shoulder offset does not swing to the wrong side.
+
+**Bug 3 — Post-slide direction snap hold:**
+A `slideExitFacingHoldEndTime` timestamp gates `applyCharacterFacing()` for 0.25 s after SlideExit Stopped. Value is tunable via `SLIDE_EXIT_FACING_HOLD_DURATION`. Risk: if the player input-turns the camera sharply during the hold window, the character will face the slide-exit direction for up to 0.25 s despite camera rotation. This is the intended behavior per the bug spec, but could feel wrong if the player moves the camera very quickly right after the slide ends. `SLIDE_EXIT_FACING_HOLD_DURATION` is in Constants.lua and can be shortened if the feel is too sticky.
+**Fix when:** Verified in play mode — start slide, rotate camera 90° mid-slide, let slide end, confirm character stands in slide direction and then turns naturally.
+
+---
+
 ## [DEBT-054] Vault foundation (Stage 4A) — known gaps and tuning risks — ADDED 2026-05-26
 
 **File:** `src/client/MovementController.lua`, `src/server/GunService.lua`

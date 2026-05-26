@@ -7,6 +7,34 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-26] — Bug fixes: shift-lock backpedal animation choppiness, camera offset rotation, post-slide direction snap
+
+### Summary
+
+Three shift-lock movement bugs fixed. (1) Backward-diagonal animation oscillation: when backpedal body-turn is active, `BackwardLeft`/`BackwardRight` now unify to `WalkBackward` instead of toggling between WalkBackwardLeft/WalkBackwardRight, eliminating the choppy animation flicker. (2) Camera offset orbit: `updateSprintCameraOffset()` now dot-product-corrects `Humanoid.CameraOffset.X` each Heartbeat so the right-shoulder offset stays visually locked to the camera's right side regardless of body LERP rotation during backpedal. (3) Post-slide direction snap: a `slideExitFacingHoldEndTime` timestamp keeps the slide-facing yaw locked for `SLIDE_EXIT_FACING_HOLD_DURATION` (0.25 s) after `SlideExit Stopped`, preventing the first Heartbeat from snapping the character to camera-yaw.
+
+### Changes to `src/shared/Constants.lua`
+
+- `BACKPEDAL_UNIFY_BACKWARD_ANIMATION = true` — new flag (Bug 1).
+- `BACKPEDAL_CAMERA_OFFSET_CORRECTION = true` — new flag (Bug 2).
+- `SLIDE_EXIT_FACING_HOLD_DURATION = 0.25` — new constant (Bug 3).
+
+### Changes to `src/client/MovementController.lua`
+
+- `local slideExitFacingHoldEndTime: number = 0` — new state variable (Bug 3).
+- `updateSprintCameraOffset()` — rewritten to apply dot-product camera-offset correction when `BACKPEDAL_CAMERA_OFFSET_CORRECTION` is true (Bug 2).
+- `updateMovementAnimation()` — `BackwardLeft`/`BackwardRight` blocks now unify to `WalkBackward` when `customMouseLocked and BACKPEDAL_TURN_ENABLED` (Bug 1).
+- `getDesiredStandingLocomotionKey()` — same animation-unification change for `BackwardLeft`/`BackwardRight` (Bug 1).
+- `endSlide()` SlideExit Stopped callback — sets `slideExitFacingHoldEndTime = os.clock() + SLIDE_EXIT_FACING_HOLD_DURATION` (Bug 3).
+- Heartbeat facing-lock condition — extended from `isSliding or slideExitConn ~= nil` to also include `os.clock() < slideExitFacingHoldEndTime` (Bug 3).
+- `slideExitFacingHoldEndTime = 0` added to respawn, `destroy()`, and phase-exit cleanup paths (Bug 3).
+
+### Studio verification
+
+MCP confirms all symbols present in Studio (6 occurrences of `slideExitFacingHoldEndTime`; 2 of `unify to WalkBackward`; 2 of `BACKPEDAL_CAMERA_OFFSET_CORRECTION`). Runtime behavior requires in-play-mode verification.
+
+---
+
 ## [2026-05-26] — Stage 4A: Vault foundation (Space over valid obstacles — low + medium)
 
 ### Summary

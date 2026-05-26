@@ -486,6 +486,26 @@ Constants.BACKPEDAL_TURN_ENABLED = true
 -- 1.0 = immediate snap. Has no effect when BACKPEDAL_TURN_ENABLED is false.
 Constants.BACKPEDAL_TURN_LERP_ALPHA = 0.25
 
+-- When true and BACKPEDAL_TURN_ENABLED is active in shift lock, all backward sub-directions
+-- (BackwardLeft, BackwardRight) play WalkBackward instead of WalkBackwardLeft/WalkBackwardRight.
+-- The body LERP handles the visual direction — separate diagonal animations cause choppy
+-- switches as the camera turns between sub-directions.
+-- Set false to restore per-sub-direction animation selection.
+Constants.BACKPEDAL_UNIFY_BACKWARD_ANIMATION = true
+
+-- When true, Humanoid.CameraOffset.X is corrected each Heartbeat so the right-shoulder
+-- offset stays visually on the camera's right side regardless of body rotation from backpedal.
+-- Without this, CameraOffset (in character LOCAL space) swings to the wrong visual side as
+-- the body faces away from camera during the backpedal LERP.
+-- Formula: correctedX = CAMERA_OFFSET.X * dot(cameraRightFlat, bodyRightFlat)
+-- Set false to restore the fixed (1.75, 0, 0) offset.
+Constants.BACKPEDAL_CAMERA_OFFSET_CORRECTION = true
+
+-- Seconds to hold slideDirection yaw after SlideExit completes before releasing to normal
+-- applyCharacterFacing(). Without this hold, the first Heartbeat after SlideExit immediately
+-- snaps the character to face the camera, which is jarring when the camera moved during the slide.
+Constants.SLIDE_EXIT_FACING_HOLD_DURATION = 0.25
+
 -- When true, WalkLeft/WalkRight strafe animations only play while mouse lock / shift-lock
 -- style state is active (UserInputService.MouseBehavior == LockCenter).
 -- Left/right/diagonal movement falls back to WalkForward when mouse lock is off.
