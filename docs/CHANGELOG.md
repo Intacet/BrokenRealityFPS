@@ -7,6 +7,27 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-27] — Fix vault triggering against walls (XZ speed guard + grounded guard)
+
+### Summary
+
+Vault was firing when a player held W against a wall and pressed Space. Root cause: `canAttemptVault()` gated on `movementState.isMoving` (derived from `Humanoid.MoveDirection`, non-zero even when wall-blocked), not on actual velocity. Two guards added: (1) `VAULT_MIN_APPROACH_SPEED = 3.0` — rejects vault when `HRP.AssemblyLinearVelocity.XZ.Magnitude` is below the threshold; (2) `VAULT_REQUIRE_GROUNDED = true` — rejects vault when `Humanoid.FloorMaterial == Enum.Material.Air`, preventing Space from triggering a vault while airborne near a wall.
+
+### Changes to `src/shared/Constants.lua`
+
+- `VAULT_MIN_APPROACH_SPEED = 3.0` — minimum XZ speed (studs/s) to attempt vault.
+- `VAULT_REQUIRE_GROUNDED = true` — blocks vault when character is airborne.
+
+### Changes to `src/client/MovementController.lua`
+
+- `canAttemptVault()`: added XZ speed gate (checks `AssemblyLinearVelocity.XZ.Magnitude < VAULT_MIN_APPROACH_SPEED`) and grounded gate (`FloorMaterial == Air`) after the existing `VAULT_REQUIRE_MOVING` check.
+
+### MCP verification
+
+MCP unavailable at commit time — Studio verification pending (see DEBT-057).
+
+---
+
 ## [2026-05-26] — Fix vault (phase gate + Heartbeat arc) and sprint backward choppiness
 
 ### Summary

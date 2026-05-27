@@ -2583,6 +2583,23 @@ local function canAttemptVault(): boolean
     local hrp = currentRootPart
     if not hum or not hrp then return false end
     if Constants.VAULT_REQUIRE_MOVING and not movementState.isMoving then return false end
+    -- Guard: require minimum XZ speed so vault doesn't fire when the character is
+    -- stationary against a wall (MoveDirection is non-zero but actual velocity is ~0
+    -- because the wall absorbs the movement).
+    if Constants.VAULT_MIN_APPROACH_SPEED > 0 then
+        local vel = (hrp :: BasePart).AssemblyLinearVelocity
+        local flatSpeed = Vector3.new(vel.X, 0, vel.Z).Magnitude
+        if flatSpeed < Constants.VAULT_MIN_APPROACH_SPEED then
+            return false
+        end
+    end
+    -- Guard: require the character to be grounded so vault doesn't steal Space
+    -- while the player is airborne near a wall.
+    if Constants.VAULT_REQUIRE_GROUNDED then
+        if hum.FloorMaterial == Enum.Material.Air then
+            return false
+        end
+    end
     return true
 end
 

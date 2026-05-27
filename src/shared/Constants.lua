@@ -318,6 +318,17 @@ Constants.VAULT_ANIMATION_SPEED_MULTIPLIER = 1.0
 -- When true, vault detection and state transitions emit Logger.debug() output.
 Constants.VAULT_DEBUG                    = true
 
+-- Minimum XZ speed (studs/s) the character must be travelling to attempt a vault.
+-- Prevents vault from firing when the player holds W against a wall: MoveDirection
+-- stays non-zero but AssemblyLinearVelocity.XZ drops to ~0 due to wall contact.
+-- Set to 0 to disable the speed gate entirely.
+Constants.VAULT_MIN_APPROACH_SPEED       = 3.0
+
+-- When true, vault is blocked while the character is airborne
+-- (Humanoid.FloorMaterial == Enum.Material.Air).
+-- Prevents Space from stealing a vault while jumping near a wall.
+Constants.VAULT_REQUIRE_GROUNDED         = true
+
 -- ============================================================
 -- Movement animation set names
 -- Used by MovementController to key into MOVEMENT_ANIMATION_IDS and to validate

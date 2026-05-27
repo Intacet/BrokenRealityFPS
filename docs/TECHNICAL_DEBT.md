@@ -1212,6 +1212,25 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 
 ---
 
+## [DEBT-057] Vault wall-contact guard — runtime verification pending — ADDED 2026-05-27
+
+**File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
+**Severity:** Low-Medium (fix is logically straightforward; needs Studio confirmation that the threshold feels correct in practice)
+**Studio verification required:** Yes — walk into a wall + hold Space, run toward a vaultable obstacle
+
+**What was done:**
+Two guards added to `canAttemptVault()`: (1) XZ speed threshold (`VAULT_MIN_APPROACH_SPEED = 3.0`) blocks vault when actual velocity is too low; (2) grounded check (`VAULT_REQUIRE_GROUNDED = true`) blocks vault while airborne.
+
+**Remaining risk — speed threshold tuning:**
+`VAULT_MIN_APPROACH_SPEED = 3.0` was chosen to be well below normal walk speed (~12 studs/s) and well above the ~0 studs/s seen against a wall. However, the exact wall-impact resting speed depends on floor friction, the wall angle, and latency. If the player runs diagonally into a wall at a glancing angle, the orthogonal component of velocity may remain above 3.0 even while pressed against the wall. Increase this threshold if false vault triggers still occur at wall contact; decrease if legitimate run-up vaults start being rejected.
+
+**Remaining risk — FloorMaterial timing:**
+`Humanoid.FloorMaterial` is updated by the engine each simulation step. On frames immediately after a jump there is a brief window where `FloorMaterial` has not yet transitioned to `Air`. Conversely, on frames just before landing it may already be non-Air. The grounded check should be reliable for the "Space held at wall" scenario (player is grounded throughout), but may filter some edge-case low-jump attempts.
+
+**Fix when:** Verified in Studio: (a) press W into a wall + hold Space — vault must not activate; (b) run at a 1.5–5 stud obstacle + press Space — vault must activate normally. Tune constants if either check fails.
+
+---
+
 ## [DEBT-056] Vault Heartbeat arc + sprint backward choppiness fix — runtime verification pending — ADDED 2026-05-26
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
