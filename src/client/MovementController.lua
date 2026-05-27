@@ -640,8 +640,8 @@ local slideExitFacingHoldEndTime: number = 0
 
 -- Stage 4A: vault state ──────────────────────────────────────────────────────
 
--- True while a vault TweenService move is in progress.
--- Set by startVault(); cleared by the tween Completed callback or by vault cleanup.
+-- True while a vault Heartbeat move is in progress.
+-- Set by startVault(); cleared by the Heartbeat callback or by vault cleanup.
 -- applySpeed() zeros WalkSpeed while this is true (VAULT_LOCKS_MOVEMENT).
 -- updateMovementAnimation() skips normal selection while this is true.
 local isVaulting: boolean = false
@@ -651,13 +651,21 @@ local isVaulting: boolean = false
 local lastVaultTime: number = 0
 
 -- Monotonic counter incremented each time a vault starts or is cleared.
--- The tween Completed callback captures this at dispatch time and no-ops if stale.
+-- The Heartbeat callback captures this at dispatch time and no-ops if stale.
 -- Mirrors landingLockToken / sprintStopLockToken / slideToken patterns.
 local vaultCompletionToken: number = 0
 
--- The active TweenService tween moving HumanoidRootPart through the vault arc.
--- Nil when no vault is in progress. Cancelled and cleared by clearVaultTween().
-local vaultActiveTween: Tween? = nil
+-- Heartbeat connection driving the vault arc movement.
+-- Nil when no vault is in progress. Disconnected and cleared by clearVaultMove().
+local vaultMoveConn: RBXScriptConnection? = nil
+
+-- Vault arc state captured at vault-start; read each Heartbeat tick.
+local vaultMoveStartPos:   Vector3 = Vector3.zero
+local vaultMoveEndPos:     Vector3 = Vector3.zero
+local vaultMoveArcHeight:  number  = 0   -- extra Y above lerped start→end at arc peak
+local vaultMoveStartYaw:   number  = 0   -- yaw (radians) captured at vault start
+local vaultMoveStartTime:  number  = 0   -- os.clock() when Heartbeat arc began
+local vaultMoveDuration:   number  = 0   -- seconds for the full arc
 
 -- ============================================================
 -- Private helpers — Stage 1
@@ -716,8 +724,8 @@ local function applySpeed()
         return
     end
 
-    -- Stage 4A: suppress Humanoid input during the vault TweenService move.
-    -- TweenService drives HRP.CFrame directly; player directional input must not
+    -- Stage 4A: suppress Humanoid input during the vault Heartbeat arc move.
+    -- The Heartbeat drives HRP.CFrame directly; player directional input must not
     -- interfere. WalkSpeed is restored by applySpeed() once isVaulting clears.
     if isVaulting and Constants.VAULT_LOCKS_MOVEMENT == true then
         hum.WalkSpeed = 0
@@ -1053,7 +1061,14 @@ local function applyCharacterFacing()
             local dir = movementState.directionName
             local isBackwardSprint = Constants.SPRINT_BACKWARD_INSTANT_TURN
                 and (dir == "Backward" or dir == "BackwardLeft" or dir == "BackwardRight")
-            faceCharacterTowardsDirection(moveDir, if isBackwardSprint then 1.0 else nil)
+            -- Choppiness fix: use SPRINT_BACKWARD_BODY_FACING_LERP_ALPHA (0.40) instead of
+            -- the old hardcoded 1.0.  0.40 completes a 180° reversal in ~5 frames (still
+            -- fast enough to eliminate the original 10–15 frame delay) while making the
+            -- BackwardLeft ↔ Backward ↔ BackwardRight diagonal transitions smooth.
+            faceCharacterTowardsDirection(moveDir,
+                if isBackwardSprint
+                    then Constants.SPRINT_BACKWARD_BODY_FACING_LERP_ALPHA
+                    else nil)
             return
         end
         -- No movement input above threshold — fall through to camera-yaw write.
@@ -2534,14 +2549,20 @@ end
 -- Private helpers — Stage 4A: vault foundation
 -- ============================================================
 
--- Cancels the active vault TweenService tween (if any) and nils the reference.
+-- Disconnects the active vault Heartbeat arc connection (if any) and nils the reference.
+-- Restores Humanoid.PlatformStand to false if a vault was interrupted mid-move.
 -- Does NOT clear isVaulting — caller is responsible for state cleanup.
--- Safe to call when no tween is active.
-local function clearVaultTween()
-    local t = vaultActiveTween
-    if t then
-        t:Cancel()
-        vaultActiveTween = nil
+-- Safe to call when no vault move is active.
+local function clearVaultMove()
+    local conn = vaultMoveConn
+    if conn then
+        conn:Disconnect()
+        vaultMoveConn = nil
+    end
+    -- If vault was interrupted while PlatformStand was held, restore it now.
+    local hum = humanoid
+    if hum and hum.PlatformStand and isVaulting then
+        hum.PlatformStand = false
     end
 end
 
@@ -2595,7 +2616,7 @@ end
 --   2. Downward ray — finds the top surface of the obstacle.
 --   3. Upward clearance ray — confirms overhead space to pass through.
 --   4. Downward landing ray — confirms ground exists beyond the obstacle.
-local function detectVault(): { vaultType: string, landingPosition: Vector3 }?
+local function detectVault(): { vaultType: string, landingPosition: Vector3, obstacleTopY: number }?
     local hrp = currentRootPart
     if not hrp then return nil end
     local hrpPos = (hrp :: BasePart).Position
@@ -2726,7 +2747,7 @@ local function detectVault(): { vaultType: string, landingPosition: Vector3 }?
                 landingPosition.X, landingPosition.Y, landingPosition.Z) .. ")")
     end
 
-    return { vaultType = vaultType :: string, landingPosition = landingPosition }
+    return { vaultType = vaultType :: string, landingPosition = landingPosition, obstacleTopY = obstacleTopY }
 end
 
 -- Plays the vault animation (LowVault or MediumVault) as a one-shot.
@@ -2752,45 +2773,98 @@ local function playVaultAnimation(vaultType: string)
     playMovementAnimation(key)
 end
 
--- Moves HumanoidRootPart to landingPosition over `duration` seconds via TweenService.
--- Preserves the character's current yaw so the body stays forward-facing.
--- On tween completion, clears isVaulting and calls applySpeed() to restore movement.
--- Token-guards the Completed callback to discard stale completions if the vault is
--- interrupted (e.g. by phase exit or character removal) before the tween finishes.
-local function moveCharacterThroughVault(landingPosition: Vector3, duration: number)
+-- Moves HumanoidRootPart from its current position to landingPosition over `duration`
+-- seconds using a Heartbeat-driven parabolic arc, rising to clear the obstacle at
+-- obstacleTopY.  Replaces the original TweenService approach which was defeated by
+-- physics collision preventing linear movement through the obstacle face.
+--
+-- Arc formula:
+--   lerpXYZ = startPos:Lerp(endPos, easedT)          -- Quad-InOut easing on XYZ lerp
+--   arcY    = arcHeight * sin(π * rawT)               -- natural rise-and-fall peak at t=0.5
+--   finalY  = lerpXYZ.Y + arcY
+--
+-- PlatformStand = true during the arc disables Humanoid floor-sticking so the character
+-- can rise vertically through the arc without the standing logic pulling them back down.
+-- Velocity is zeroed at vault start so carry-over sprint momentum does not interfere.
+-- Token-guards the Heartbeat callback to discard stale calls when vault is interrupted.
+local function moveCharacterThroughVault(landingPosition: Vector3, duration: number, obstacleTopY: number)
     local hrp = currentRootPart
     if not hrp then return end
 
-    -- Preserve current yaw — keep the character facing forward through the vault.
-    local _, currentYaw, _ = (hrp :: BasePart).CFrame:ToEulerAnglesYXZ()
-    local targetCF = CFrame.new(landingPosition) * CFrame.Angles(0, currentYaw, 0)
+    local startPos = (hrp :: BasePart).Position
+    local _, capturedYaw, _ = (hrp :: BasePart).CFrame:ToEulerAnglesYXZ()
 
-    clearVaultTween()
+    -- Zero out velocity so residual sprint momentum does not fight the arc.
+    ;(hrp :: BasePart).AssemblyLinearVelocity = Vector3.zero
 
-    local tween = TweenService:Create(
-        hrp :: BasePart,
-        TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut),
-        { CFrame = targetCF }
-    )
-    vaultActiveTween = tween
+    -- Disable Humanoid floor-sticking so the arc can move the character upward freely.
+    local hum = humanoid
+    if hum then hum.PlatformStand = true end
+
+    -- Arc peak height: rises to (obstacleTopY + VAULT_ARC_PEAK_CLEARANCE) above the
+    -- midpoint of the linear start→end Y interpolation.
+    local midY      = (startPos.Y + landingPosition.Y) / 2
+    local arcHeight = math.max(obstacleTopY + Constants.VAULT_ARC_PEAK_CLEARANCE - midY, 0.5)
+
+    clearVaultMove()  -- disconnect any stale Heartbeat arc
+
+    vaultMoveStartPos  = startPos
+    vaultMoveEndPos    = landingPosition
+    vaultMoveArcHeight = arcHeight
+    vaultMoveStartYaw  = capturedYaw
+    vaultMoveStartTime = os.clock()
+    vaultMoveDuration  = duration
 
     local capturedToken = vaultCompletionToken
-    tween.Completed:Connect(function(state: Enum.PlaybackState)
-        -- Discard if a newer vault started or the vault was interrupted.
-        if vaultCompletionToken ~= capturedToken then return end
-        vaultActiveTween = nil
-        if state ~= Enum.PlaybackState.Completed then return end
-        if isVaulting then
-            isVaulting  = false
-            lastVaultTime = os.clock()
-            applySpeed()
-            if Constants.VAULT_DEBUG then
-                Logger.debug("[MovementController] vault complete — movement restored")
+
+    vaultMoveConn = RunService.Heartbeat:Connect(function()
+        -- Token guard: discard if vault was interrupted (phase exit, respawn, etc.)
+        if vaultCompletionToken ~= capturedToken then
+            local c = vaultMoveConn
+            if c then c:Disconnect(); vaultMoveConn = nil end
+            return
+        end
+
+        local elapsed = os.clock() - vaultMoveStartTime
+        local rawT    = math.min(elapsed / vaultMoveDuration, 1)
+
+        -- Quad InOut easing on the XYZ lerp so movement starts/ends smoothly.
+        local easedT: number
+        if rawT < 0.5 then
+            easedT = 2 * rawT * rawT
+        else
+            easedT = 1 - ((-2 * rawT + 2) ^ 2) / 2
+        end
+
+        local hrpRef = currentRootPart
+        if not hrpRef then
+            local c = vaultMoveConn
+            if c then c:Disconnect(); vaultMoveConn = nil end
+            return
+        end
+
+        -- Parabolic arc peaks at t = 0.5 (sin(π * 0.5) = 1).
+        local arcY    = vaultMoveArcHeight * math.sin(math.pi * rawT)
+        local lerpPos = vaultMoveStartPos:Lerp(vaultMoveEndPos, easedT)
+        local finalPos = Vector3.new(lerpPos.X, lerpPos.Y + arcY, lerpPos.Z)
+
+        ;(hrpRef :: BasePart).CFrame = CFrame.new(finalPos) * CFrame.Angles(0, vaultMoveStartYaw, 0)
+
+        if rawT >= 1 then
+            local c = vaultMoveConn
+            if c then c:Disconnect(); vaultMoveConn = nil end
+            if isVaulting then
+                isVaulting    = false
+                lastVaultTime = os.clock()
+                local humRef  = humanoid
+                if humRef then humRef.PlatformStand = false end
+                applySpeed()
+                if Constants.VAULT_DEBUG then
+                    Logger.debug("[MovementController] vault complete — movement restored")
+                end
             end
         end
     end)
-
-    tween:Play()
 end
 
 -- Entry point for a vault attempt.
@@ -2824,17 +2898,19 @@ local function startVault(): boolean
 
     local vaultType    = result.vaultType
     local landingPos   = result.landingPosition
+    local obstacleTopY = result.obstacleTopY
     local duration     = if vaultType == "LowVault"
         then Constants.VAULT_MOVE_DURATION_LOW
         else Constants.VAULT_MOVE_DURATION_MEDIUM
 
     if Constants.VAULT_DEBUG then
         Logger.debug("[MovementController] startVault: " .. vaultType
-            .. " duration=" .. string.format("%.2f", duration) .. "s")
+            .. " duration=" .. string.format("%.2f", duration) .. "s"
+            .. " obstacleTop=" .. string.format("%.2f", obstacleTopY))
     end
 
     playVaultAnimation(vaultType)
-    moveCharacterThroughVault(landingPos, duration)
+    moveCharacterThroughVault(landingPos, duration, obstacleTopY)
 
     return true
 end
@@ -3232,10 +3308,10 @@ local function loadMovementAnimations(character: Model)
     slideDirection          = Vector3.new(0, 0, -1)
     slideExitFacingHoldEndTime = 0  -- Bug 3 fix: clear post-slide facing hold on respawn
     -- Stage 4A: clear vault state on respawn.
-    -- clearVaultTween() is safe even if vaultActiveTween is nil — just cancels if active.
-    clearVaultTween()
+    -- clearVaultMove() is safe even if vaultMoveConn is nil — just no-ops if inactive.
+    clearVaultMove()
     isVaulting            = false
-    vaultCompletionToken += 1   -- invalidate any pending tween Completed callbacks
+    vaultCompletionToken += 1   -- invalidate any pending Heartbeat arc callbacks
     -- lastVaultTime is intentionally preserved so cooldown persists across respawns.
     -- Do NOT call clearCrouchBottomHold() here — the previous Animator may already be
     -- destroyed, making the hold track reference unsafe to Stop(). Clear state directly.
@@ -4738,9 +4814,9 @@ function MovementController.IsTacticalSprinting(): boolean
     return isTacticalSprinting
 end
 
--- Stage 4A: Returns true while a vault TweenService move is in progress.
+-- Stage 4A: Returns true while a vault Heartbeat arc move is in progress.
 -- External systems (GunController, camera effects) can read this to suppress actions
--- during the vault. Cleared by the tween Completed callback or cleanup paths.
+-- during the vault. Cleared by the Heartbeat callback or cleanup paths.
 function MovementController.IsVaulting(): boolean
     return isVaulting
 end
@@ -4820,7 +4896,7 @@ function MovementController:destroy()
     slideExitFacingHoldEndTime = 0  -- Bug 3 fix: clear post-slide facing hold on destroy
     -- Stage 4A: clear vault state on destroy.
     ContextActionService:UnbindAction(VAULT_ACTION_NAME)
-    clearVaultTween()
+    clearVaultMove()
     isVaulting            = false
     vaultCompletionToken += 1
     lastVaultTime         = 0
@@ -4992,10 +5068,10 @@ function MovementController:Start()
             end
             slideExitFacingHoldEndTime = 0  -- Bug 3 fix: clear post-slide facing hold on phase exit
             -- Stage 4A: interrupt any active vault on phase exit.
-            -- clearVaultTween() cancels the TweenService move so HRP stops immediately.
+            -- clearVaultMove() disconnects the Heartbeat arc so HRP stops immediately.
             -- lastVaultTime is intentionally preserved for cooldown continuity.
             if isVaulting then
-                clearVaultTween()
+                clearVaultMove()
                 isVaulting            = false
                 vaultCompletionToken += 1
             end

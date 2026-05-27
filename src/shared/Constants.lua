@@ -172,6 +172,13 @@ Constants.SPRINT_SMOOTH_BODY_FACING_ENABLED = true
 -- Set false to restore the slow LERP for backward sprint directions.
 Constants.SPRINT_BACKWARD_INSTANT_TURN = true
 
+-- LERP alpha used for the body-facing rotation when sprinting backward
+-- (Backward / BackwardLeft / BackwardRight) and SPRINT_BACKWARD_INSTANT_TURN is true.
+-- Previously hardcoded to 1.0 (instant snap); 0.40 is fast enough for the initial
+-- 180° reversal (~5 frames) while eliminating the visible snap on 45° diagonal
+-- transitions within the backward set (BackwardLeft ↔ Backward ↔ BackwardRight).
+Constants.SPRINT_BACKWARD_BODY_FACING_LERP_ALPHA = 0.40
+
 -- DEAD CODE (superseded by Stage 3J — 2026-05-25): SPRINT_DIAGONAL_BODY_ROTATION_DEGREES
 -- was used by Stage 3I to rotate the body by a fixed angle from camera-forward when
 -- sprinting in the ForwardLeft or ForwardRight direction. Stage 3J disables RunForwardLeft/
@@ -247,10 +254,16 @@ Constants.VAULT_INPUT_KEY                = Enum.KeyCode.Space
 Constants.VAULT_REQUIRE_MOVING           = true
 
 -- Vault is only allowed when MatchController:GetPhase() == ACTIVE.
-Constants.VAULT_REQUIRE_ACTIVE_PHASE     = true
+-- Set false (default) so vault works in all phases, matching slide/sprint behaviour.
+Constants.VAULT_REQUIRE_ACTIVE_PHASE     = false
 
 -- Seconds after a vault completes before another vault can start.
 Constants.VAULT_COOLDOWN                 = 0.65
+
+-- Studs of clearance above the obstacle top surface added to the vault arc peak.
+-- The arc peaks at (obstacleTopY + VAULT_ARC_PEAK_CLEARANCE) above the character's
+-- lerped start→end Y, ensuring the character rises over the obstacle cleanly.
+Constants.VAULT_ARC_PEAK_CLEARANCE       = 1.5
 
 -- Obstacle height bands (studs above character feet).
 -- Obstacles outside LOW_VAULT_MIN..MEDIUM_VAULT_MAX are not vaultable.

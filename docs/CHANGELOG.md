@@ -7,6 +7,34 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-26] — Fix vault (phase gate + Heartbeat arc) and sprint backward choppiness
+
+### Summary
+
+Two issues fixed. (1) **Vault**: `VAULT_REQUIRE_ACTIVE_PHASE` was `true`, blocking vault in LOBBY/PREP (set to `false`). The original `TweenService:Create(hrp, …, {CFrame=target})` approach moved the HRP linearly through the obstacle face, which physics collision prevented from completing; replaced with a Heartbeat-driven parabolic arc that rises over the obstacle. `Humanoid.PlatformStand = true` disables floor-sticking during the arc; `AssemblyLinearVelocity` is zeroed at vault start. `VAULT_ARC_PEAK_CLEARANCE = 1.5` provides the buffer above the obstacle top. (2) **Sprint backward choppiness**: `SPRINT_BACKWARD_INSTANT_TURN` used a hardcoded alpha of `1.0`, causing instant 45° body snaps when transitioning between BackwardLeft ↔ Backward ↔ BackwardRight while sprinting. Replaced with `SPRINT_BACKWARD_BODY_FACING_LERP_ALPHA = 0.40`, which completes the initial 180° reversal in ~5 frames (fast/responsive) while making diagonal transitions smooth.
+
+### Changes to `src/shared/Constants.lua`
+
+- `VAULT_REQUIRE_ACTIVE_PHASE = false` (was `true`).
+- `VAULT_ARC_PEAK_CLEARANCE = 1.5` — studs of clearance above obstacle top for arc peak.
+- `SPRINT_BACKWARD_BODY_FACING_LERP_ALPHA = 0.40` — replaces hardcoded `1.0` for backward sprint body facing.
+
+### Changes to `src/client/MovementController.lua`
+
+- Replaced `vaultActiveTween: Tween?` with Heartbeat arc state vars (`vaultMoveConn`, `vaultMoveStartPos`, `vaultMoveEndPos`, `vaultMoveArcHeight`, `vaultMoveStartYaw`, `vaultMoveStartTime`, `vaultMoveDuration`).
+- `clearVaultTween()` → `clearVaultMove()`: disconnects Heartbeat conn + restores `PlatformStand` on interrupt.
+- `detectVault()` return type extended with `obstacleTopY: number`.
+- `moveCharacterThroughVault()` rewritten: `PlatformStand = true`, zeros velocity, Heartbeat arc with `sin(π*t)` rise + Quad-InOut eased XYZ lerp, restores `PlatformStand = false` on complete.
+- `startVault()` passes `result.obstacleTopY` to `moveCharacterThroughVault()`.
+- `applyCharacterFacing()` sprint backward: `1.0` → `Constants.SPRINT_BACKWARD_BODY_FACING_LERP_ALPHA`.
+- All 4 cleanup paths (`destroy`, respawn, phase exit, inside `moveCharacterThroughVault`) updated to `clearVaultMove()`.
+
+### Studio verification
+
+Rojo build clean. MCP unavailable at commit time — runtime behavior requires in-play-mode Studio verification. See DEBT-055 (updated) and DEBT-056 (new).
+
+---
+
 ## [2026-05-26] — Bug fixes: shift-lock backpedal animation choppiness, camera offset rotation, post-slide direction snap
 
 ### Summary

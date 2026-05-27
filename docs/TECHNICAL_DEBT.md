@@ -1212,6 +1212,26 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 
 ---
 
+## [DEBT-056] Vault Heartbeat arc + sprint backward choppiness fix — runtime verification pending — ADDED 2026-05-26
+
+**File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
+**Severity:** Medium (vault is logically correct; arc tuning and PlatformStand behavior need Studio confirmation)
+**Studio verification required:** Yes — vault over blocks at 1.5–5 stud height, sprint backward diagonal transitions
+
+**Gap 1 — PlatformStand physics interaction:**
+`Humanoid.PlatformStand = true` during the vault arc disables floor-sticking, but the character becomes a freely-simulated rigid body. If the vault arc is too shallow or too slow, the character may slide off the obstacle during the rise phase. `AssemblyLinearVelocity` is zeroed at start but physics forces still apply between Heartbeat writes.
+**Fix when:** Observed in Studio. Tune `VAULT_ARC_PEAK_CLEARANCE` and `VAULT_MOVE_DURATION_LOW/MEDIUM` to adjust arc height and timing.
+
+**Gap 2 — Arc height formula may need tuning:**
+`arcHeight = max(obstacleTopY + VAULT_ARC_PEAK_CLEARANCE - midY, 0.5)`. For tall obstacles (near 5 studs) this produces a large arc (>2.5 studs above midpoint). May look too floaty.
+**Fix when:** Observed in Studio. Increase `VAULT_MOVE_DURATION_MEDIUM` slightly or add an arc-height cap constant.
+
+**Gap 3 — Sprint backward alpha change may alter feel:**
+`SPRINT_BACKWARD_BODY_FACING_LERP_ALPHA = 0.40` was chosen to complete a 180° reversal in ~5 frames. If this still feels laggy for the initial backward entry, increase toward 0.6–0.7. If diagonal transitions still look choppy, decrease toward 0.3.
+**Fix when:** Observed in Studio play. Tune constant directly.
+
+---
+
 ## [DEBT-055] Shift-lock backpedal bug fixes (Bugs 1–3) — runtime verification pending — ADDED 2026-05-26
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
