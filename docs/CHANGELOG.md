@@ -7,6 +7,60 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-28] — Stage 4: Custom mouse-lock camera-yaw body facing + 8-direction animation hysteresis
+
+### Summary
+
+Redesigned the custom mouse-lock walking body-rotation system to eliminate the camera-swing artifact that occurred when walking backward in shift-lock mode. Root cause: Stage 3L was setting `Humanoid.AutoRotate = true` during backward walking, allowing the Roblox physics engine to rotate `HumanoidRootPart` toward `MoveDirection`. In LockCenter mode, this rotation physically dragged the camera and produced a visible arc. Stage 4 removes Stage 3L entirely — the body now always faces camera yaw during walking (including backward). The camera-relative direction name (Backward / BackwardLeft / BackwardRight) drives animation selection only. The Bug 1 animation unification (`BACKPEDAL_UNIFY_BACKWARD_ANIMATION`) is also removed; `WalkBackwardLeft` and `WalkBackwardRight` diagonal animations are restored and protected from jitter by a new time-based hysteresis system.
+
+### Changes to `src/shared/Constants.lua`
+
+**Removed (Stage 3L constants, now dead):**
+- `BACKPEDAL_TURN_ENABLED` — removed (Stage 3L removed)
+- `BACKPEDAL_ENTRY_DEG_PER_FRAME` — removed (Stage 3L removed)
+- `BACKPEDAL_TURN_DEG_PER_FRAME` — removed (Stage 3L removed)
+- `BACKPEDAL_SPEED_THRESHOLD_DEG` — removed (Stage 3L removed)
+- `BACKPEDAL_UNIFY_BACKWARD_ANIMATION` — removed (Bug 1 workaround, no longer needed)
+
+**Added (Stage 4 constants):**
+- `CUSTOM_MOUSE_LOCK_WALK_FACES_CAMERA = true` — master switch for camera-yaw walk facing
+- `CUSTOM_MOUSE_LOCK_WALK_AUTOROTATE = false` — use CFrame write (not AutoRotate) for walk body yaw
+- `CUSTOM_MOUSE_LOCK_SPRINT_AUTOROTATE = true` — AutoRotate mode for sprint (currently unused; Stage 3G active)
+- `CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED = 18` — °/frame for camera-yaw body tracking during walk
+- `MOVEMENT_DIRECTION_MIN_SWITCH_INTERVAL = 0.08` — hysteresis: minimum seconds between accepted direction changes
+- `MOVEMENT_DIRECTION_CROSSFADE_TIME = 0.12` — crossfade (s) for normal walking direction transitions
+- `MOVEMENT_BACK_DIRECTION_CROSSFADE_TIME = 0.10` — crossfade (s) for backward-cluster transitions
+- `MOVEMENT_DIRECTION_HYSTERESIS_DEGREES = 10` — angle threshold (reserved for future angle-based hysteresis)
+- `MOVEMENT_DIRECTION_DEBUG = true` — log each hysteresis hold/accept decision
+
+### Changes to `src/client/MovementController.lua`
+
+**Removed:**
+- `local isBackpedalAutoRotating: boolean` state variable and all 5 reference sites (Stage 3L block, exit block, 3 reset sites)
+- Stage 3L block in `applyCharacterFacing()`: the conditional that set `hum.AutoRotate = true` during backward walking
+- Stage 3L exit block: the cleanup that restored `AutoRotate = false`
+- Bug 1 unification guards in `updateMovementAnimation()`: `if customMouseLocked and BACKPEDAL_TURN_ENABLED` blocks that mapped BackwardLeft/BackwardRight → WalkBackward
+- Bug 1 unification guards in `getDesiredStandingLocomotionKey()`: same two blocks
+
+**Added:**
+- `local lastStableDirectionName: string = ""` and `local lastDirectionSwitchTime: number = 0` — hysteresis state (reset on respawn, mouse-lock disable, destroy)
+- `getFlatCameraYawDirection(): Vector3?` — returns flat XZ camera look unit vector (alias of `getCameraFlatLookVector()` with semantic naming for body-yaw context)
+- `shouldBodyFaceCameraDuringMouseLock(): boolean` — returns true for walk/idle/crouch states; false for sprint, tactical sprint, sprint-stop, landing lock
+- `updateCustomMouseLockBodyYaw()` — calls `rotateCharacterCapped(flatLook, BODY_YAW_LERP_SPEED)` for camera-yaw CFrame write; sprint guard defers to `CUSTOM_MOUSE_LOCK_SPRINT_AUTOROTATE`
+- `chooseDirectionalAnimationWithHysteresis(rawDirectionName, now)` — returns stable direction name, suppressing oscillation faster than `MOVEMENT_DIRECTION_MIN_SWITCH_INTERVAL`; logs hold/accept when `MOVEMENT_DIRECTION_DEBUG` is true
+- `playMovementAnimation(animationName, fadeTime?)` — optional `fadeTime` parameter; `nil` falls back to `MOVEMENT_ANIMATION_FADE_TIME`
+
+**Modified:**
+- `applyCharacterFacing()` Stage 3L block → replaced with single `if shouldBodyFaceCameraDuringMouseLock() then updateCustomMouseLockBodyYaw() end`
+- `updateMovementAnimation()`: dirName reassigned through `chooseDirectionalAnimationWithHysteresis()` before walking branch; `playMovementAnimation(animName)` → `playMovementAnimation(animName, moveFadeTime)` with backward-cluster crossfade selection
+- BackwardLeft/BackwardRight branches in `updateMovementAnimation()` and `getDesiredStandingLocomotionKey()` restored to full diagonal animation selection (WalkBackwardLeft/WalkBackwardRight → WalkBackward fallback)
+
+### Studio verification
+
+Rojo build clean. MCP play-mode test: all 9 new constants confirmed correct values; removed constants confirmed nil; no runtime errors on character load. Observable play-mode behavior (camera-swing absence, diagonal animation correctness, hysteresis) requires manual Studio testing — see DEBT-058.
+
+---
+
 ## [2026-05-27] — Fix vault triggering against walls (XZ speed guard + grounded guard)
 
 ### Summary

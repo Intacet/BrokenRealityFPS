@@ -275,11 +275,15 @@ Constants.MEDIUM_VAULT_MAX_HEIGHT        = 5.0
 -- Maximum forward distance (studs) the forward-probe ray travels.
 Constants.VAULT_MAX_FORWARD_DISTANCE     = 4.0
 
--- Height above HRP origin the forward-probe ray is cast from for obstacle detection.
--- Keeps the ray in the lower half of the character body to detect short obstacles.
-Constants.VAULT_OBSTACLE_RAY_HEIGHT_LOW  = 2.0
--- Height used for the second forward probe (for medium-height obstacles).
-Constants.VAULT_OBSTACLE_RAY_HEIGHT_MEDIUM = 4.0
+-- Y offset from HRP origin the forward-probe ray is cast from.
+-- NEGATIVE = below HRP. Obstacle faces for LowVault (1.5–3.5 studs above feet) sit at
+-- roughly HRP-1.5 to HRP+0.5. Using -2.0 places the ray 1 stud above feet, which is
+-- reliably below every vaultable obstacle face and safely above the ground.
+-- Previous value was +2.0 (above the character's head) which caused the ray to miss
+-- all low obstacles entirely.
+Constants.VAULT_OBSTACLE_RAY_HEIGHT_LOW    = -2.0
+-- Y offset for a second forward probe (reserved for MediumVault detection pass — not yet used).
+Constants.VAULT_OBSTACLE_RAY_HEIGHT_MEDIUM = 1.5
 
 -- Total height above HRP used for the downward top-of-obstacle ray and the clearance ray.
 Constants.VAULT_CLEARANCE_HEIGHT         = 5.5
@@ -319,10 +323,10 @@ Constants.VAULT_ANIMATION_SPEED_MULTIPLIER = 1.0
 Constants.VAULT_DEBUG                    = true
 
 -- Minimum XZ speed (studs/s) the character must be travelling to attempt a vault.
--- Prevents vault from firing when the player holds W against a wall: MoveDirection
--- stays non-zero but AssemblyLinearVelocity.XZ drops to ~0 due to wall contact.
--- Set to 0 to disable the speed gate entirely.
-Constants.VAULT_MIN_APPROACH_SPEED       = 3.0
+-- Set to 0 (disabled) — detectVault() raycasts are the real gate; the velocity guard
+-- was found to block the intended "hold Space against obstacle" input model.
+-- Raise above 0 to re-enable if unintentional vaults recur on fast wall contact.
+Constants.VAULT_MIN_APPROACH_SPEED       = 0
 
 -- When true, vault is blocked while the character is airborne
 -- (Humanoid.FloorMaterial == Enum.Material.Air).
@@ -493,30 +497,6 @@ Constants.TACTICAL_SPRINT_SENSITIVITY_ENABLED = true
 -- Has no effect when TACTICAL_SPRINT_SENSITIVITY_ENABLED is false.
 Constants.TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER = 0.5
 
--- ── Stage 3L: Backpedal turn-around in shift lock ─────────────────────────────
--- When true, the character body turns to face the backward move direction while
--- walking backward in shift lock (Backward / BackwardLeft / BackwardRight directions).
--- Prevents the jarring look of the character staring forward while backpedaling —
--- instead the body sweeps around (via LERP) to face where the player is actually going.
--- Has no effect when customMouseLocked is false, or while sprinting / crouching /
--- in tactical sprint / during sprint-stop / during landing movement lock.
--- Set false to revert to the original camera-yaw facing during backward movement.
-Constants.BACKPEDAL_TURN_ENABLED = true
-
--- LERP alpha applied per Heartbeat for the backpedal body-turn sweep.
--- Intentionally higher than SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA (0.18) so the
--- 180° pivot completes in roughly 8–10 frames (~130–170 ms at 60 fps) — quick enough
--- to feel responsive, slow enough that the body physically turns rather than snapping.
--- 1.0 = immediate snap. Has no effect when BACKPEDAL_TURN_ENABLED is false.
-Constants.BACKPEDAL_TURN_LERP_ALPHA = 0.25
-
--- When true and BACKPEDAL_TURN_ENABLED is active in shift lock, all backward sub-directions
--- (BackwardLeft, BackwardRight) play WalkBackward instead of WalkBackwardLeft/WalkBackwardRight.
--- The body LERP handles the visual direction — separate diagonal animations cause choppy
--- switches as the camera turns between sub-directions.
--- Set false to restore per-sub-direction animation selection.
-Constants.BACKPEDAL_UNIFY_BACKWARD_ANIMATION = true
-
 -- When true, Humanoid.CameraOffset.X is corrected each Heartbeat so the right-shoulder
 -- offset stays visually on the camera's right side regardless of body rotation from backpedal.
 -- Without this, CameraOffset (in character LOCAL space) swings to the wrong visual side as
@@ -529,6 +509,55 @@ Constants.BACKPEDAL_CAMERA_OFFSET_CORRECTION = true
 -- applyCharacterFacing(). Without this hold, the first Heartbeat after SlideExit immediately
 -- snaps the character to face the camera, which is jarring when the camera moved during the slide.
 Constants.SLIDE_EXIT_FACING_HOLD_DURATION = 0.25
+
+-- ── Stage 4: Custom mouse-lock body-yaw and animation direction ───────────────
+-- When true, the character body always faces the camera yaw direction during walking and
+-- idle in custom mouse-lock mode.  The body does NOT rotate toward Humanoid.MoveDirection
+-- during backward movement — the camera-relative direction (Backward / BackwardLeft /
+-- BackwardRight) is used for animation selection only, not for body rotation.
+-- Set false to disable the camera-yaw walk facing (body will not track camera yaw).
+Constants.CUSTOM_MOUSE_LOCK_WALK_FACES_CAMERA = true
+
+-- When true, sets Humanoid.AutoRotate = true during walking in custom mouse-lock instead
+-- of writing HumanoidRootPart.CFrame manually.  False = use rotateCharacterCapped() CFrame
+-- write (recommended — prevents the engine physics from dragging the camera).
+Constants.CUSTOM_MOUSE_LOCK_WALK_AUTOROTATE = false
+
+-- When true, sets Humanoid.AutoRotate = true during sprint in custom mouse-lock.
+-- False = rely on Stage 3G (faceCharacterTowardsDirection LERP) for sprint body rotation.
+-- Currently unused directly — Stage 3G handles sprint; kept for future sprint-path refactor.
+Constants.CUSTOM_MOUSE_LOCK_SPRINT_AUTOROTATE = true
+
+-- Angular speed (degrees per 60-fps frame, dt-normalised) for camera-yaw body tracking
+-- during walking and idle in custom mouse-lock.  18°/frame at 60 fps means the body
+-- completes a 180° flip in ~10 frames (~167 ms) — smooth and free of visible snapping.
+-- Raise carefully: values above ~35°/frame may appear as a single-frame snap at 60 fps.
+Constants.CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED = 18
+
+-- Minimum time (seconds) between accepted animation direction-name changes in
+-- chooseDirectionalAnimationWithHysteresis().  Prevents rapid animation oscillation when
+-- input sits exactly on a direction boundary (e.g. S+A at the BackwardLeft / Backward line).
+-- 0.08 s ≈ 5 frames at 60 fps — long enough to suppress jitter, short enough to feel instant.
+Constants.MOVEMENT_DIRECTION_MIN_SWITCH_INTERVAL = 0.08
+
+-- Crossfade time (seconds) used by playMovementAnimation() for normal walking direction
+-- transitions (Forward, ForwardLeft, ForwardRight, Left, Right).
+-- Shorter than MOVEMENT_ANIMATION_FADE_TIME (0.15) for snappier strafe feel.
+Constants.MOVEMENT_DIRECTION_CROSSFADE_TIME = 0.12
+
+-- Crossfade time (seconds) used by playMovementAnimation() for transitions within or
+-- entering/exiting the backward cluster (Backward / BackwardLeft / BackwardRight).
+-- Slightly shorter than MOVEMENT_DIRECTION_CROSSFADE_TIME to keep diagonal-backward
+-- transitions visually tight while still blending.
+Constants.MOVEMENT_BACK_DIRECTION_CROSSFADE_TIME = 0.10
+
+-- Hysteresis angle (degrees) reserved for future angle-based direction lock — not yet
+-- wired into chooseDirectionalAnimationWithHysteresis() but present for future tuning.
+Constants.MOVEMENT_DIRECTION_HYSTERESIS_DEGREES = 10
+
+-- When true, chooseDirectionalAnimationWithHysteresis() logs each held and accepted
+-- direction change via Logger.debug().  Set false before shipping.
+Constants.MOVEMENT_DIRECTION_DEBUG = true
 
 -- When true, WalkLeft/WalkRight strafe animations only play while mouse lock / shift-lock
 -- style state is active (UserInputService.MouseBehavior == LockCenter).

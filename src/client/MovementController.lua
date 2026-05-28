@@ -427,6 +427,15 @@ local lastSprintFacingMode: string = ""
 -- Reset on respawn (loadMovementAnimations), mouse-lock disable, and destroy().
 local lastNaturalSprintAutoRotateActive: boolean = false
 
+-- Stage 4: hysteresis state for animation direction selection.
+-- lastStableDirectionName: the last direction name accepted by chooseDirectionalAnimationWithHysteresis().
+-- lastDirectionSwitchTime: os.clock() timestamp of the last accepted direction change.
+-- Prevents animation jitter when input sits on a direction boundary (e.g. S+A near
+-- the BackwardLeft / Backward threshold).
+-- Reset on respawn (loadMovementAnimations), mouse-lock disable, and destroy().
+local lastStableDirectionName: string = ""
+local lastDirectionSwitchTime: number = 0
+
 -- Last reason applyCharacterFacing() was skipped, used to deduplicate debug logs.
 -- Reset to "" on each character load.
 local lastFacingSkippedReason: string = ""
@@ -638,6 +647,11 @@ local slideMomentumVelocity: LinearVelocity? = nil
 -- 0 means the hold is inactive.
 local slideExitFacingHoldEndTime: number = 0
 
+-- Delta-time from the most recent Heartbeat tick, used by rotateCharacterCapped() to
+-- normalise the angular rotation speed so it is frame-rate independent.
+-- Initialised to 1/60 (the expected 60-fps step) so the first frame uses a sane default.
+local lastHeartbeatDt: number = 1 / 60
+
 -- Stage 4A: vault state ──────────────────────────────────────────────────────
 
 -- True while a vault Heartbeat move is in progress.
@@ -832,6 +846,16 @@ local function getCameraFlatLookVector(): Vector3?
     return flat.Unit
 end
 
+-- ── Stage 4 ──────────────────────────────────────────────────────────────────
+
+-- Returns the flat XZ unit vector of the camera's current look direction — the camera yaw
+-- direction in world space.  Equivalent to getCameraFlatLookVector(); provided as a
+-- semantically distinct name for the body-yaw tracking subsystem so call sites are
+-- self-documenting.  Returns nil if the camera look is near-vertical (can't compute yaw).
+local function getFlatCameraYawDirection(): Vector3?
+    return getCameraFlatLookVector()
+end
+
 -- ── Stage 3D ─────────────────────────────────────────────────────────────────
 
 -- Returns the flat XZ world-space direction of the player's current movement input,
@@ -879,8 +903,7 @@ local function faceCharacterTowardsDirection(direction: Vector3, alphaOverride: 
 
     if Constants.SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED then
         -- Smoothed path: LERP between current facing and target direction.
-        -- alphaOverride lets callers (e.g. Stage 3L backpedal) use a different rate
-        -- without changing the sprint tuning constant.
+        -- alphaOverride lets callers supply a different LERP rate than the sprint tuning constant.
         local alpha = math.clamp(
             if alphaOverride ~= nil then alphaOverride else Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA,
             0, 1
@@ -904,6 +927,68 @@ end
 
 -- ─────────────────────────────────────────────────────────────────────────────
 
+-- Rotates HumanoidRootPart yaw toward `direction` at a constant angular velocity.
+-- `fastDegPerFrame60` is the cap used when the remaining angle exceeds `thresholdDeg`
+-- (large rotation — entry/exit).  `slowDegPerFrame60`, when provided, is used when the
+-- remaining angle is at or below `thresholdDeg` (small adjustment — within-zone tracking).
+-- Both speeds are normalised by (lastHeartbeatDt × 60) for frame-rate independence.
+-- Snaps to target when remaining ≤ one step.  Sets AutoRotate = false.
+-- Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
+local function rotateCharacterCapped(
+    direction:        Vector3,
+    fastDegPerFrame60: number,
+    slowDegPerFrame60: number?,  -- nil → always use fastDeg
+    thresholdDeg:      number?   -- nil → always use fastDeg (no two-speed logic)
+)
+    assert(typeof(direction)         == "Vector3", "[MovementController] rotateCharacterCapped: direction must be a Vector3")
+    assert(typeof(fastDegPerFrame60) == "number",  "[MovementController] rotateCharacterCapped: fastDegPerFrame60 must be a number")
+    local root = currentRootPart
+    if not root then return end
+    local hum = humanoid
+    if not hum then return end
+
+    local flat = Vector3.new(direction.X, 0, direction.Z)
+    if flat.Magnitude < Constants.SPRINT_DIRECTIONAL_BODY_FACING_MIN_MOVE_MAGNITUDE then
+        return
+    end
+    local targetDir = flat.Unit
+    hum.AutoRotate = false
+
+    local pos         = root.Position
+    local currentLook = root.CFrame.LookVector
+    local currentFlat = Vector3.new(currentLook.X, 0, currentLook.Z)
+    if currentFlat.Magnitude <= 0.001 then
+        root.CFrame = CFrame.lookAt(pos, pos + targetDir)
+        return
+    end
+
+    -- Compute the shortest signed angular difference (-pi ... pi rad).
+    local currentAngle = math.atan2(currentFlat.X, currentFlat.Z)
+    local targetAngle  = math.atan2(targetDir.X,    targetDir.Z)
+    local diff         = ((targetAngle - currentAngle + math.pi) % (2 * math.pi)) - math.pi
+
+    -- Choose speed: slow for small adjustments (within-zone), fast for large flips.
+    local degPerFrame60: number = fastDegPerFrame60
+    if slowDegPerFrame60 ~= nil and thresholdDeg ~= nil then
+        if math.abs(diff) <= math.rad(thresholdDeg) then
+            degPerFrame60 = slowDegPerFrame60
+        end
+    end
+
+    -- Scale by dt so speed is frame-rate independent.
+    -- Clamp multiplier to (0.5, 2) to guard against lag spikes or near-zero dt.
+    local dtScale = math.clamp(lastHeartbeatDt * 60, 0.5, 2)
+    local maxRad  = math.rad(degPerFrame60) * dtScale
+
+    -- Apply capped rotation; snap when within one step to avoid residual drift.
+    local rotation = if math.abs(diff) <= maxRad then diff else (if diff > 0 then maxRad else -maxRad)
+
+    local newAngle = currentAngle + rotation
+    root.CFrame = CFrame.lookAt(pos, pos + Vector3.new(math.sin(newAngle), 0, math.cos(newAngle)))
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
 -- Restores Humanoid.AutoRotate to the cached originalAutoRotate value (defaults to true
 -- if nothing was cached). Does NOT clear originalAutoRotate — callers that need to clear
 -- it (disable path, respawn, destroy) must set it to nil themselves after calling.
@@ -918,6 +1003,61 @@ local function restoreCharacterAutoRotate()
             "[MovementController] AutoRotate restored → " .. tostring(restoreValue)
         )
     end
+end
+
+-- ── Stage 4: Custom mouse-lock body yaw ──────────────────────────────────────
+
+-- Returns true when the character body should be rotated to face the camera yaw direction
+-- during the current frame while custom mouse-lock is active.
+-- False during: sprint (Stage 3G handles sprint body rotation), tactical sprint, sprint-stop
+-- animation, and landing movement lock.  True for all walking, idle, and crouching states.
+-- Does NOT check customMouseLocked — the caller is responsible for that guard.
+-- Does NOT check phase — phase is gated at the top of applyCharacterFacing() already.
+-- Does NOT write any state or modify any variables.
+local function shouldBodyFaceCameraDuringMouseLock(): boolean
+    if not Constants.CUSTOM_MOUSE_LOCK_WALK_FACES_CAMERA then return false end
+    -- Sprint is handled by Stage 3G (faceCharacterTowardsDirection toward MoveDirection).
+    -- Exclude all sprint states so the two systems do not fight over HumanoidRootPart.CFrame.
+    if movementState.isSprinting then return false end
+    if isTacticalSprinting then return false end
+    if isSprintStopPlaying then return false end
+    if isLandingMovementLocked then return false end
+    return true
+end
+
+-- Applies per-frame camera-yaw body tracking for the custom mouse-lock walk path.
+-- When CUSTOM_MOUSE_LOCK_WALK_AUTOROTATE is false (recommended): calls rotateCharacterCapped()
+-- to write HumanoidRootPart.CFrame toward the camera yaw direction at BODY_YAW_LERP_SPEED.
+-- When CUSTOM_MOUSE_LOCK_WALK_AUTOROTATE is true: sets Humanoid.AutoRotate = true instead
+-- (not recommended — can cause the engine physics to drag the camera).
+-- Sprint-mode guard: if somehow called while sprinting, delegates to SPRINT_AUTOROTATE setting.
+-- No-op when getFlatCameraYawDirection() returns nil (camera looking straight up/down).
+-- Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
+-- Does NOT teleport the character or change Humanoid properties other than AutoRotate.
+local function updateCustomMouseLockBodyYaw()
+    -- Sprint guard: Stage 3G owns sprint body rotation, but guard here for safety.
+    if movementState.isSprinting and not isTacticalSprinting then
+        local hum = humanoid
+        if hum then
+            hum.AutoRotate = Constants.CUSTOM_MOUSE_LOCK_SPRINT_AUTOROTATE
+        end
+        return
+    end
+
+    if Constants.CUSTOM_MOUSE_LOCK_WALK_AUTOROTATE then
+        -- AutoRotate path (not recommended): delegate to engine physics.
+        local hum = humanoid
+        if hum then
+            hum.AutoRotate = true
+        end
+        return
+    end
+
+    -- Camera-yaw CFrame write path: rotate toward flat camera look direction.
+    local flatLook = getFlatCameraYawDirection()
+    if not flatLook then return end
+    -- rotateCharacterCapped sets AutoRotate = false internally.
+    rotateCharacterCapped(flatLook, Constants.CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED)
 end
 
 -- ── Stage 3E ─────────────────────────────────────────────────────────────────
@@ -1075,47 +1215,18 @@ local function applyCharacterFacing()
     end
     -- ─────────────────────────────────────────────────────────────────────────
 
-    -- ── Stage 3L: Backpedal turn-around ──────────────────────────────────────
-    -- When the player walks backward (Backward / BackwardLeft / BackwardRight) in
-    -- shift lock, rotate the character body to face the movement direction rather
-    -- than the camera direction.  This replaces the jarring look of the character
-    -- staring forward while the WalkBackward animation plays.
-    --
-    -- The turn is smoothed through faceCharacterTowardsDirection using
-    -- BACKPEDAL_TURN_LERP_ALPHA (0.25 > sprint 0.18) so the 180° pivot sweeps
-    -- visibly — roughly 8–10 frames at 60 fps — rather than snapping instantly.
-    --
-    -- Guard list mirrors Stage 3G: shift lock on, not sprinting (forward-only),
-    -- not crouching (CrouchWalk* handles directional crouch), not in tactical
-    -- sprint, not during sprint-stop animation, not during landing lock.
-    --
-    -- When the player releases S the directionName leaves the Backward* set on
-    -- the next Heartbeat; this block no longer runs and the camera-yaw write
-    -- below snaps the character back to face the camera immediately.
-    if Constants.BACKPEDAL_TURN_ENABLED
-        and customMouseLocked
-        and not movementState.isSprinting
-        and not movementState.isCrouching
-        and not isTacticalSprinting
-        and not isSprintStopPlaying
-        and not isLandingMovementLocked
-    then
-        local dir = movementState.directionName
-        if dir == "Backward" or dir == "BackwardLeft" or dir == "BackwardRight" then
-            local moveDir = getCameraRelativeMoveDirection()
-            if moveDir then
-                faceCharacterTowardsDirection(moveDir, Constants.BACKPEDAL_TURN_LERP_ALPHA)
-                return
-            end
-            -- No movement input above threshold — fall through to camera-yaw write.
-        end
+    -- ── Stage 4: Camera-yaw body tracking for all walking and idle ───────────
+    -- Keep the body facing camera yaw for ALL non-sprint movement directions, including
+    -- backward.  No per-direction rotation toward Humanoid.MoveDirection during walking.
+    -- The camera-relative direction name (Backward / BackwardLeft / BackwardRight) drives
+    -- animation selection only; the body always faces where the camera is looking.
+    -- This prevents the camera swing that occurred when Stage 3L set AutoRotate = true,
+    -- which let the engine physics rotate HumanoidRootPart toward MoveDirection and
+    -- visually dragged the camera in shift-lock mode.
+    if shouldBodyFaceCameraDuringMouseLock() then
+        updateCustomMouseLockBodyYaw()
     end
     -- ─────────────────────────────────────────────────────────────────────────
-
-    -- Rotate character to face camera yaw. Position is unchanged — this is a yaw-only
-    -- CFrame replacement, not a teleport and not a velocity change.
-    local pos = root.Position
-    root.CFrame = CFrame.lookAt(pos, pos + flatLook)
 end
 
 -- ============================================================
@@ -1312,6 +1423,9 @@ local function applyCustomMouseLock()
         end
         -- Stage 3E: clear natural-AutoRotate sprint flag so the next lock session starts clean.
         lastNaturalSprintAutoRotateActive = false
+        -- Stage 4: reset hysteresis state so the next lock session starts fresh.
+        lastStableDirectionName = ""
+        lastDirectionSwitchTime = 0
     end
 end
 
@@ -2010,10 +2124,15 @@ end
 -- If the same track is already playing, AdjustSpeed is still called (no restart).
 -- Logs the switch (with speed multiplier) if MOVEMENT_ANIMATION_DEBUG is true.
 -- Warns and clears currentAnimationName if the requested key is absent.
-local function playMovementAnimation(animationName: string)
+-- fadeTime: optional crossfade duration in seconds.  When nil, falls back to
+-- Constants.MOVEMENT_ANIMATION_FADE_TIME (the global default).  Callers may supply
+-- MOVEMENT_DIRECTION_CROSSFADE_TIME or MOVEMENT_BACK_DIRECTION_CROSSFADE_TIME for
+-- direction transitions that want a tighter blend than the global default.
+local function playMovementAnimation(animationName: string, fadeTime: number?)
     -- Extract the short name from the full key ("Unarmed_WalkForward" → "WalkForward").
     local animShortName = animationName:match("_(.+)$") or animationName
-    local speedMult = getAnimationSpeedMultiplier(animShortName)
+    local speedMult     = getAnimationSpeedMultiplier(animShortName)
+    local actualFade    = if fadeTime ~= nil then fadeTime else Constants.MOVEMENT_ANIMATION_FADE_TIME
 
     if currentAnimationName == animationName then
         -- Same track already playing. Ensure speed is correct without restarting.
@@ -2036,7 +2155,7 @@ local function playMovementAnimation(animationName: string)
     if currentAnimationName ~= "" then
         local prevTrack = animationTracks[currentAnimationName]
         if prevTrack then
-            prevTrack:Stop(Constants.MOVEMENT_ANIMATION_FADE_TIME)
+            prevTrack:Stop(actualFade)
         end
     end
 
@@ -2047,7 +2166,7 @@ local function playMovementAnimation(animationName: string)
         return
     end
 
-    track:Play(Constants.MOVEMENT_ANIMATION_FADE_TIME)
+    track:Play(actualFade)
     track:AdjustSpeed(speedMult)
     currentAnimationName = animationName
 end
@@ -3323,7 +3442,7 @@ local function loadMovementAnimations(character: Model)
     slideToken             += 1
     lastSlideEndTime        = 0
     slideDirection          = Vector3.new(0, 0, -1)
-    slideExitFacingHoldEndTime = 0  -- Bug 3 fix: clear post-slide facing hold on respawn
+    slideExitFacingHoldEndTime = 0     -- Bug 3 fix: clear post-slide facing hold on respawn
     -- Stage 4A: clear vault state on respawn.
     -- clearVaultMove() is safe even if vaultMoveConn is nil — just no-ops if inactive.
     clearVaultMove()
@@ -3354,6 +3473,9 @@ local function loadMovementAnimations(character: Model)
     lastSprintFacingMode              = ""
     -- Stage 3E: reset natural-AutoRotate sprint state on respawn.
     lastNaturalSprintAutoRotateActive = false
+    -- Stage 4: reset hysteresis state on respawn.
+    lastStableDirectionName = ""
+    lastDirectionSwitchTime = 0
     -- Reset custom mouse lock on respawn: release the cursor so the player is not stuck
     -- with a locked mouse if they die or respawn while mouse lock was active.
     customMouseLocked                    = false
@@ -3728,25 +3850,15 @@ local function getDesiredStandingLocomotionKey(): string?
 
         elseif dirName == "BackwardLeft" then
             local bwd = "Unarmed_WalkBackward"
-            if customMouseLocked and Constants.BACKPEDAL_TURN_ENABLED then
-                -- Bug 1 fix: unify to WalkBackward; body-turn LERP handles visual direction.
-                if animationTracks[bwd] ~= nil then return bwd end
-                return "Unarmed_WalkForward"
-            end
-            local bl = "Unarmed_WalkBackwardLeft"
-            if animationTracks[bl] ~= nil then return bl end
+            local bl  = "Unarmed_WalkBackwardLeft"
+            if animationTracks[bl]  ~= nil then return bl end
             if animationTracks[bwd] ~= nil then return bwd end
             return "Unarmed_WalkForward"
 
         elseif dirName == "BackwardRight" then
             local bwd = "Unarmed_WalkBackward"
-            if customMouseLocked and Constants.BACKPEDAL_TURN_ENABLED then
-                -- Bug 1 fix: unify to WalkBackward; body-turn LERP handles visual direction.
-                if animationTracks[bwd] ~= nil then return bwd end
-                return "Unarmed_WalkForward"
-            end
-            local br = "Unarmed_WalkBackwardRight"
-            if animationTracks[br] ~= nil then return br end
+            local br  = "Unarmed_WalkBackwardRight"
+            if animationTracks[br]  ~= nil then return br end
             if animationTracks[bwd] ~= nil then return bwd end
             return "Unarmed_WalkForward"
 
@@ -3975,6 +4087,54 @@ local function resumeStandingLocomotionAfterCrouch(fadeTime: number)
     local shortName = desiredKey:match("_(.+)$") or desiredKey
     targetTrack:AdjustSpeed(getAnimationSpeedMultiplier(shortName))
 end
+
+-- ── Stage 4: Animation direction hysteresis ──────────────────────────────────
+
+-- Returns the stable animation direction name to use this frame, applying time-based
+-- hysteresis to suppress rapid oscillation when input sits exactly on a direction boundary.
+-- rawDirectionName: the direction name from movementState.directionName (e.g. "BackwardLeft").
+-- now: os.clock() timestamp for the current frame.
+-- Hysteresis is applied globally to all direction transitions — when the raw direction name
+-- changes, the function holds the last stable name until MOVEMENT_DIRECTION_MIN_SWITCH_INTERVAL
+-- seconds have elapsed.  This prevents the animation from flickering between two states
+-- at 60+ fps when input magnitude sits at a dot-product threshold.
+-- Updates lastStableDirectionName and lastDirectionSwitchTime as a side effect.
+local function chooseDirectionalAnimationWithHysteresis(rawDirectionName: string, now: number): string
+    -- First call or same direction — no hysteresis needed.
+    if lastStableDirectionName == "" or rawDirectionName == lastStableDirectionName then
+        lastStableDirectionName = rawDirectionName
+        -- Do not update lastDirectionSwitchTime on the same-direction path; only update
+        -- when a NEW direction is first accepted so the clock measures the prior stable dwell.
+        return rawDirectionName
+    end
+
+    -- Direction changed. Apply minimum-switch-interval gate.
+    if (now - lastDirectionSwitchTime) < Constants.MOVEMENT_DIRECTION_MIN_SWITCH_INTERVAL then
+        -- Too soon since the last accepted change — hold the current stable direction.
+        if Constants.MOVEMENT_DIRECTION_DEBUG then
+            Logger.debug(
+                "[MovementController] direction hysteresis: holding ["
+                .. lastStableDirectionName
+                .. "] (raw: " .. rawDirectionName .. ", "
+                .. string.format("%.3f", now - lastDirectionSwitchTime) .. "s elapsed)"
+            )
+        end
+        return lastStableDirectionName
+    end
+
+    -- Interval elapsed — accept the new direction.
+    if Constants.MOVEMENT_DIRECTION_DEBUG then
+        Logger.debug(
+            "[MovementController] direction hysteresis: accepted ["
+            .. rawDirectionName .. "] (was: " .. lastStableDirectionName .. ")"
+        )
+    end
+    lastStableDirectionName = rawDirectionName
+    lastDirectionSwitchTime = now
+    return rawDirectionName
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
 
 -- Selects and triggers the correct movement animation for the current movementState.
 -- Called every Heartbeat tick during ACTIVE phase.
@@ -4306,6 +4466,11 @@ local function updateMovementAnimation()
     end
 
     local dirName = movementState.directionName
+    -- Stage 4: apply hysteresis to walking direction names to suppress animation jitter at
+    -- direction boundaries.  Sprint directions bypass hysteresis (sprint uses a fixed clip).
+    if not movementState.isSprinting then
+        dirName = chooseDirectionalAnimationWithHysteresis(dirName, os.clock())
+    end
     local animName: string
 
     if movementState.isSprinting then
@@ -4367,36 +4532,25 @@ local function updateMovementAnimation()
             end
 
         elseif dirName == "BackwardLeft" then
-            local bwd = "Unarmed_WalkBackward"
-            if customMouseLocked and Constants.BACKPEDAL_TURN_ENABLED then
-                -- Bug 1 fix: body-turn LERP already handles visual direction, so unify
-                -- BackwardLeft → WalkBackward to avoid choppy animation oscillation.
-                animName = if animationTracks[bwd] ~= nil then bwd else "Unarmed_WalkForward"
+            local bwd     = "Unarmed_WalkBackward"
+            local bwdLeft = "Unarmed_WalkBackwardLeft"
+            if animationTracks[bwdLeft] ~= nil then
+                animName = bwdLeft
+            elseif animationTracks[bwd] ~= nil then
+                animName = bwd
             else
-                local bwdLeft = "Unarmed_WalkBackwardLeft"
-                if animationTracks[bwdLeft] ~= nil then
-                    animName = bwdLeft
-                elseif animationTracks[bwd] ~= nil then
-                    animName = bwd
-                else
-                    animName = "Unarmed_WalkForward"
-                end
+                animName = "Unarmed_WalkForward"
             end
 
         elseif dirName == "BackwardRight" then
-            local bwd = "Unarmed_WalkBackward"
-            if customMouseLocked and Constants.BACKPEDAL_TURN_ENABLED then
-                -- Bug 1 fix: same unification for BackwardRight → WalkBackward.
-                animName = if animationTracks[bwd] ~= nil then bwd else "Unarmed_WalkForward"
+            local bwd      = "Unarmed_WalkBackward"
+            local bwdRight = "Unarmed_WalkBackwardRight"
+            if animationTracks[bwdRight] ~= nil then
+                animName = bwdRight
+            elseif animationTracks[bwd] ~= nil then
+                animName = bwd
             else
-                local bwdRight = "Unarmed_WalkBackwardRight"
-                if animationTracks[bwdRight] ~= nil then
-                    animName = bwdRight
-                elseif animationTracks[bwd] ~= nil then
-                    animName = bwd
-                else
-                    animName = "Unarmed_WalkForward"
-                end
+                animName = "Unarmed_WalkForward"
             end
 
         elseif canUseStrafeAnimations then
@@ -4439,7 +4593,20 @@ local function updateMovementAnimation()
         animName = setName .. "_WalkForward"
     end
 
-    playMovementAnimation(animName)
+    -- Stage 4: select crossfade time based on direction cluster.
+    -- Backward cluster transitions (Backward / BackwardLeft / BackwardRight) use a slightly
+    -- shorter fade to keep diagonal animation transitions tight while still blending.
+    -- Sprint and crouching use the default fade (nil → MOVEMENT_ANIMATION_FADE_TIME).
+    local moveFadeTime: number?
+    if not movementState.isSprinting and not movementState.isCrouching then
+        local isBackCluster = dirName == "Backward"
+            or dirName == "BackwardLeft"
+            or dirName == "BackwardRight"
+        moveFadeTime = if isBackCluster
+            then Constants.MOVEMENT_BACK_DIRECTION_CROSSFADE_TIME
+            else Constants.MOVEMENT_DIRECTION_CROSSFADE_TIME
+    end
+    playMovementAnimation(animName, moveFadeTime)
 end
 
 -- ============================================================
@@ -4910,7 +5077,7 @@ function MovementController:destroy()
     slideToken             += 1
     lastSlideEndTime        = 0
     slideDirection          = Vector3.new(0, 0, -1)
-    slideExitFacingHoldEndTime = 0  -- Bug 3 fix: clear post-slide facing hold on destroy
+    slideExitFacingHoldEndTime = 0     -- Bug 3 fix: clear post-slide facing hold on destroy
     -- Stage 4A: clear vault state on destroy.
     ContextActionService:UnbindAction(VAULT_ACTION_NAME)
     clearVaultMove()
@@ -4932,6 +5099,8 @@ function MovementController:destroy()
     lastSprintAnimName        = ""   -- Stage 2R
     lastSprintFacingMode              = ""    -- Stage 3D
     lastNaturalSprintAutoRotateActive = false -- Stage 3E
+    lastStableDirectionName = "" -- Stage 4
+    lastDirectionSwitchTime = 0  -- Stage 4
     crouchBottomPoseWarned    = false
     -- Stage 2E: restore AutoRotate if mouse lock is active before clearing state.
     if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW and customMouseLocked then
@@ -5083,7 +5252,7 @@ function MovementController:Start()
                 isTacSprintSlide        = false
                 slideToken             += 1
             end
-            slideExitFacingHoldEndTime = 0  -- Bug 3 fix: clear post-slide facing hold on phase exit
+            slideExitFacingHoldEndTime = 0     -- Bug 3 fix: clear post-slide facing hold on phase exit
             -- Stage 4A: interrupt any active vault on phase exit.
             -- clearVaultMove() disconnects the Heartbeat arc so HRP stops immediately.
             -- lastVaultTime is intentionally preserved for cooldown continuity.
@@ -5495,6 +5664,9 @@ function MovementController:Start()
     -- Runs every physics step. Updates movementState, re-applies speed, and drives
     -- the Stage 2A animation layer. No camera writes.
     local heartbeatConn = RunService.Heartbeat:Connect(function(_dt: number)
+        -- Capture dt for rotateCharacterCapped() frame-rate normalisation.
+        lastHeartbeatDt = _dt
+
         -- Reapply custom mouse lock if CoreScripts have stolen it.
         -- Only write when the value has actually changed — unconditional writes caused
         -- Roblox's camera to re-centre its cursor-snap point every Heartbeat, producing
@@ -5513,6 +5685,23 @@ function MovementController:Start()
 
         local hum = humanoid
         if not hum then return end
+
+        -- Stage 4A: hold-Space vault retry.
+        -- If Space is held while standing at a vaultable obstacle, trigger vault without
+        -- requiring a fresh key press. This supports the "press W into obstacle + hold Space"
+        -- input model. startVault() self-gates via canAttemptVault() (cooldown, grounded,
+        -- not already vaulting, etc.) and detectVault() (4-ray obstacle check) so this
+        -- loop is near-free when no obstacle is present.
+        -- Placed before the phase gate so vault works in all phases when
+        -- VAULT_REQUIRE_ACTIVE_PHASE = false, matching the CAS Begin handler.
+        if Constants.VAULT_ENABLED and not isVaulting then
+            if UserInputService:IsKeyDown(Constants.VAULT_INPUT_KEY)
+                and UserInputService:GetFocusedTextBox() == nil
+            then
+                startVault()
+            end
+        end
+
         if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
 
         local moveDir               = hum.MoveDirection

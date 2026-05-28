@@ -722,25 +722,63 @@ MovementController      -- Stage 1 + 2A + 2C + 2D + 2E + 2F + 2G + 2H + 2I + 2J 
                         --       New constant: SPRINT_DISABLES_CAMERA_OFFSET = true.
                         --       Needs manual Studio playtest (Rojo sync pending at commit time).
                         --
-                        --     Backpedal turn-around in shift lock (Stage 3L — 2026-05-26):
-                        --       New block in applyCharacterFacing() after Stage 3G, before camera-yaw write.
-                        --       Active when BACKPEDAL_TURN_ENABLED=true and customMouseLocked and
-                        --         directionName ∈ {Backward, BackwardLeft, BackwardRight} and not isSprinting
-                        --         and not isCrouching and not isTacticalSprinting and not isSprintStopPlaying
-                        --         and not isLandingMovementLocked.
-                        --       getCameraRelativeMoveDirection() → if moveDir (magnitude >= 0.1):
-                        --         faceCharacterTowardsDirection(moveDir, BACKPEDAL_TURN_LERP_ALPHA) → return.
-                        --       Prevents the "stare-forward while backpedaling" look — body sweeps to face
-                        --         where the player is actually going.
-                        --       BACKPEDAL_TURN_LERP_ALPHA = 0.25: faster than sprint alpha (0.18) so the
-                        --         180° pivot completes in ~8–10 frames at 60 fps (≈130–170 ms).
-                        --       faceCharacterTowardsDirection gains optional alphaOverride: number? param.
-                        --         Sprint callers pass nil (unchanged, still uses SPRINT_...LERP_ALPHA).
-                        --       When backward input is released: directionName leaves Backward* set,
-                        --         block does not run, camera-yaw write resumes next Heartbeat.
+                        --     Backpedal turn-around in shift lock (Stage 3L — 2026-05-26 — SUPERSEDED 2026-05-28):
+                        --       SUPERSEDED by Stage 4 (see below). Stage 3L's AutoRotate=true approach caused
+                        --       Roblox physics to rotate HumanoidRootPart toward MoveDirection in LockCenter mode,
+                        --       which visually dragged the camera and produced a swinging arc when walking backward.
+                        --       Stage 3L constants (BACKPEDAL_TURN_ENABLED etc.) and isBackpedalAutoRotating state
+                        --       have been removed. The camera-yaw write now handles ALL walking directions.
+                        --
+                        --     Custom mouse-lock camera-yaw body facing + animation hysteresis (Stage 4 — 2026-05-28):
+                        --       Replaces Stage 3L. Body ALWAYS faces camera yaw during walking and idle in
+                        --       custom mouse lock — including Backward, BackwardLeft, BackwardRight.
+                        --       The camera-relative direction name drives animation selection only; body rotation
+                        --       is decoupled from MoveDirection during walking.
+                        --
+                        --       New helpers:
+                        --         getFlatCameraYawDirection(): alias of getCameraFlatLookVector() with a
+                        --           semantically distinct name for the body-yaw subsystem.
+                        --         shouldBodyFaceCameraDuringMouseLock(): returns true for walk/idle/crouch;
+                        --           false for sprint, tactical sprint, sprint-stop, landing lock.
+                        --         updateCustomMouseLockBodyYaw(): calls rotateCharacterCapped(flatLook,
+                        --           CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED) — AutoRotate stays false.
+                        --           Sprint guard delegates to CUSTOM_MOUSE_LOCK_SPRINT_AUTOROTATE if called
+                        --           while sprinting (safety path; Stage 3G normally returns first).
+                        --         chooseDirectionalAnimationWithHysteresis(rawDir, now): returns stable
+                        --           direction name. If rawDir differs from lastStableDirectionName AND
+                        --           (now - lastDirectionSwitchTime) < MOVEMENT_DIRECTION_MIN_SWITCH_INTERVAL,
+                        --           holds lastStableDirectionName. Otherwise accepts rawDir.
+                        --           Logs hold/accept when MOVEMENT_DIRECTION_DEBUG=true.
+                        --
+                        --       applyCharacterFacing(): Stage 3L block replaced with:
+                        --         if shouldBodyFaceCameraDuringMouseLock() then updateCustomMouseLockBodyYaw() end
+                        --
+                        --       updateMovementAnimation(): dirName reassigned through
+                        --         chooseDirectionalAnimationWithHysteresis before walking branch.
+                        --         playMovementAnimation gains optional fadeTime: number? parameter.
+                        --         Backward-cluster transitions use MOVEMENT_BACK_DIRECTION_CROSSFADE_TIME (0.10 s);
+                        --         other walking transitions use MOVEMENT_DIRECTION_CROSSFADE_TIME (0.12 s).
+                        --
+                        --       Bug 1 animation unification removed: BackwardLeft/BackwardRight now select
+                        --         WalkBackwardLeft/WalkBackwardRight directly (→ WalkBackward fallback).
+                        --         BACKPEDAL_UNIFY_BACKWARD_ANIMATION constant removed.
+                        --         Jitter prevention is handled by chooseDirectionalAnimationWithHysteresis().
+                        --
+                        --       Hysteresis state: lastStableDirectionName: string, lastDirectionSwitchTime: number.
+                        --         Reset on respawn, mouse-lock disable, destroy().
+                        --
+                        --       New constants: CUSTOM_MOUSE_LOCK_WALK_FACES_CAMERA, CUSTOM_MOUSE_LOCK_WALK_AUTOROTATE,
+                        --         CUSTOM_MOUSE_LOCK_SPRINT_AUTOROTATE, CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED,
+                        --         MOVEMENT_DIRECTION_MIN_SWITCH_INTERVAL, MOVEMENT_DIRECTION_CROSSFADE_TIME,
+                        --         MOVEMENT_BACK_DIRECTION_CROSSFADE_TIME, MOVEMENT_DIRECTION_HYSTERESIS_DEGREES,
+                        --         MOVEMENT_DIRECTION_DEBUG.
+                        --       Removed constants: BACKPEDAL_TURN_ENABLED, BACKPEDAL_ENTRY_DEG_PER_FRAME,
+                        --         BACKPEDAL_TURN_DEG_PER_FRAME, BACKPEDAL_SPEED_THRESHOLD_DEG,
+                        --         BACKPEDAL_UNIFY_BACKWARD_ANIMATION.
                         --       No camera.CFrame writes. No HipHeight/FOV changes. No new animation IDs.
-                        --       New constants: BACKPEDAL_TURN_ENABLED = true, BACKPEDAL_TURN_LERP_ALPHA = 0.25.
-                        --       Needs manual Studio playtest — MCP unavailable at commit time.
+                        --       No new remotes. No server changes.
+                        --       MCP build clean, constants verified in Studio. Runtime behavior pending
+                        --         manual playtest — see DEBT-058.
                         --
                         --     RunForward always — disable RunForwardLeft/Right (Stage 3J — 2026-05-25):
                         --       getSprintAnimationName() simplified: all directional branching removed.

@@ -1026,15 +1026,25 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 - **Stage 3K new risk — multiplier tuning:** `TACTICAL_SPRINT_SENSITIVITY_MULTIPLIER = 0.5` (half sensitivity) was set without live Studio verification. If the reduced sensitivity feels too sluggish or too responsive during tactical sprint, tune only this constant. Range: 0.0 (cursor fully locked) to 1.0 (no change). Do not adjust without live Studio playtest confirming the feel matches the intent.
 - **Stage 3K new risk — MCP unavailable:** Manual Studio test steps: (1) enable mouse lock (LeftControl), double-tap LeftShift → confirm `MouseDeltaSensitivity` drops to 0.5; (2) release Shift → confirm sensitivity restores to original; (3) direction-change stop → confirm sensitivity restores; (4) crouch during tactical sprint → confirm sensitivity restores; (5) respawn during tactical sprint → confirm sensitivity restores; (6) phase exit during tactical sprint → confirm sensitivity restores; (7) confirm `TACTICAL_SPRINT_SENSITIVITY_ENABLED = false` disables all sensitivity writes entirely.
 
-**Updated (2026-05-26 — Stage 3L: Backpedal turn-around in shift lock):**
-- Stage 3L block added in `applyCharacterFacing()` between Stage 3G and the camera-yaw fallback. When `directionName` ∈ {Backward, BackwardLeft, BackwardRight} and shift lock is active (not sprinting, not crouching, not tactical sprint, not sprint-stop, not landing lock), calls `faceCharacterTowardsDirection(moveDir, BACKPEDAL_TURN_LERP_ALPHA)` and returns.
-- `faceCharacterTowardsDirection` accepts optional `alphaOverride: number?` — sprint callers pass nil (uses `SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA`); Stage 3L passes `BACKPEDAL_TURN_LERP_ALPHA = 0.25`.
-- Two new Constants: `BACKPEDAL_TURN_ENABLED = true`, `BACKPEDAL_TURN_LERP_ALPHA = 0.25`.
-- MCP unavailable — Studio verification was not performed. Needs manual playtest.
+**Updated (2026-05-26 — Stage 3L: Backpedal turn-around in shift lock — SUPERSEDED by Stage 4, 2026-05-28):**
+- ~~Stage 3L block added in `applyCharacterFacing()` between Stage 3G and the camera-yaw fallback. When `directionName` ∈ {Backward, BackwardLeft, BackwardRight} and shift lock is active, called `faceCharacterTowardsDirection(moveDir, BACKPEDAL_TURN_LERP_ALPHA)` and returned. Subsequently replaced (2026-05-27) with `hum.AutoRotate = true` to eliminate discrete angular snaps.~~
+- **SUPERSEDED 2026-05-28:** The entire Stage 3L system (`isBackpedalAutoRotating`, `BACKPEDAL_TURN_ENABLED`, `BACKPEDAL_ENTRY/TURN_DEG_PER_FRAME`, `BACKPEDAL_SPEED_THRESHOLD_DEG`) was removed. Root cause: `AutoRotate = true` during walking in LockCenter mode let Roblox physics rotate HumanoidRootPart toward `MoveDirection`, which visually dragged the camera and caused a swinging arc. Stage 4 replaces Stage 3L — see Stage 4 entry below.
 
-- **Stage 3L risk — WalkBackward animation on rotated body:** The existing `WalkBackward` clip is designed for a forward-facing character. With Stage 3L the body rotates ~180° to face the move direction, so the "backward" leg motion in the clip will visually look like forward walking from the observer's perspective. This is probably the desired look (character turns and walks away), but needs Studio verification — if the leg animation looks wrong, a separate walk-forward clip may be needed for the turned-backward state.
-- **Stage 3L risk — LERP alpha tuning:** `BACKPEDAL_TURN_LERP_ALPHA = 0.25` was set without live Studio verification. If the pivot feels too slow or too snappy, tune this constant. At 60 fps, 0.25 gives ~87% completion in 7 frames (~117 ms). Range: 0.1 (slow drift) to 1.0 (instant snap).
-- **Stage 3L risk — immediate camera-yaw snap on release:** When the player releases the backward key, `directionName` leaves the Backward* set and the camera-yaw CFrame write fires immediately (no LERP back). The body will snap to face the camera. If this transition looks harsh in Studio, add a "was-backpedaling" hysteresis flag that smoothly returns the body to camera-yaw over a few frames.
+**Updated (2026-05-28 — Stage 4: Custom mouse-lock body-yaw redesign + animation direction hysteresis):**
+- **Root-cause fix for camera swing during backward walking.** Stage 3L's `AutoRotate = true` approach caused the engine physics to rotate HumanoidRootPart toward `MoveDirection`, which in LockCenter (shift-lock) mode dragged the camera and produced a visible arc as the body turned. Stage 4 removes Stage 3L entirely and keeps the body facing camera yaw for ALL walking and idle movement — including Backward, BackwardLeft, and BackwardRight.
+- **Body facing change:** `shouldBodyFaceCameraDuringMouseLock()` and `updateCustomMouseLockBodyYaw()` helpers replace Stage 3L. During non-sprint movement in custom mouse lock, `updateCustomMouseLockBodyYaw()` calls `rotateCharacterCapped(flatLook, CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED)` — `AutoRotate` stays false, camera yaw is tracked by a CFrame write, no physics involvement.
+- **Animation diagonal restoration:** The Bug 1 unification (`BACKPEDAL_UNIFY_BACKWARD_ANIMATION`) was the workaround for animation jitter when the body was rotating toward `MoveDirection`. With Stage 4 (body always faces camera), the body no longer rotates between backward sub-directions, so `WalkBackwardLeft` and `WalkBackwardRight` are restored without jitter. The `BACKPEDAL_UNIFY_BACKWARD_ANIMATION` constant and its gating code in `updateMovementAnimation()` and `getDesiredStandingLocomotionKey()` have been removed.
+- **Hysteresis for animation direction:** `chooseDirectionalAnimationWithHysteresis(rawDirectionName, now)` suppresses rapid animation oscillation when input sits exactly on a direction boundary. The function holds the last accepted direction name for `MOVEMENT_DIRECTION_MIN_SWITCH_INTERVAL` (0.08 s) before accepting a new one. State: `lastStableDirectionName: string`, `lastDirectionSwitchTime: number`. Reset on respawn, mouse-lock disable, and destroy().
+- **Per-transition crossfade times:** `playMovementAnimation()` gains an optional `fadeTime: number?` parameter. Walking direction transitions use `MOVEMENT_DIRECTION_CROSSFADE_TIME` (0.12 s); backward-cluster transitions use `MOVEMENT_BACK_DIRECTION_CROSSFADE_TIME` (0.10 s). Sprint and crouch continue using the global `MOVEMENT_ANIMATION_FADE_TIME` default.
+- **New constants (9):** `CUSTOM_MOUSE_LOCK_WALK_FACES_CAMERA`, `CUSTOM_MOUSE_LOCK_WALK_AUTOROTATE`, `CUSTOM_MOUSE_LOCK_SPRINT_AUTOROTATE`, `CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED`, `MOVEMENT_DIRECTION_MIN_SWITCH_INTERVAL`, `MOVEMENT_DIRECTION_CROSSFADE_TIME`, `MOVEMENT_BACK_DIRECTION_CROSSFADE_TIME`, `MOVEMENT_DIRECTION_HYSTERESIS_DEGREES`, `MOVEMENT_DIRECTION_DEBUG`.
+- **Removed constants (5):** `BACKPEDAL_TURN_ENABLED`, `BACKPEDAL_ENTRY_DEG_PER_FRAME`, `BACKPEDAL_TURN_DEG_PER_FRAME`, `BACKPEDAL_SPEED_THRESHOLD_DEG`, `BACKPEDAL_UNIFY_BACKWARD_ANIMATION`.
+- Rojo build clean. MCP Studio verification performed: all 9 new constants confirmed correct, both removed constants confirmed nil, no runtime errors in play mode.
+
+- **Stage 4 risk — body-yaw lerp speed tuning:** `CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED = 18`°/frame was set analytically. At 60 fps a 180° backpedal entry takes ~10 frames (~167 ms). If the body tracks camera yaw too sluggishly during idle or walking, increase toward 25–30°/frame. Values above ~35°/frame may appear as a single-frame snap at 60 fps.
+- **Stage 4 risk — hysteresis interval tuning:** `MOVEMENT_DIRECTION_MIN_SWITCH_INTERVAL = 0.08 s` was set as ~5 frames at 60 fps. If diagonal animation switches feel delayed (player notices a lag when crossing the ForwardLeft/Forward boundary), decrease toward 0.04. If oscillation still occurs at direction thresholds, increase toward 0.12. Only backward-cluster transitions are visually sensitive; forward transitions at this interval should be imperceptible.
+- **Stage 4 risk — crossfade time tuning:** `MOVEMENT_DIRECTION_CROSSFADE_TIME = 0.12 s` and `MOVEMENT_BACK_DIRECTION_CROSSFADE_TIME = 0.10 s` were set without live playtest. If transitions look floaty, decrease both toward 0.06–0.08. If transitions still pop or snap, increase toward 0.15 (the previous global default).
+- **Stage 4 risk — CUSTOM_MOUSE_LOCK_SPRINT_AUTOROTATE = true is currently unused:** Stage 3G (LERP toward MoveDirection) handles sprint body rotation and returns early. `CUSTOM_MOUSE_LOCK_SPRINT_AUTOROTATE` is only used if `updateCustomMouseLockBodyYaw()` is somehow called while sprinting (sprint guard path). If a future stage removes Stage 3G and delegates to `updateCustomMouseLockBodyYaw()` for sprint, this constant will take effect. Review when the sprint body-facing system is refactored.
+- **Stage 4 risk — runtime verification pending:** Observable behaviors requiring in-play-mode Studio verification: (1) walk backward in shift lock → body stays forward (camera-facing), WalkBackward animation plays; (2) walk S+A (BackwardLeft) → WalkBackwardLeft plays without jitter; (3) tap direction keys rapidly at the BackwardLeft/Backward boundary → hysteresis suppresses oscillation; (4) camera swing is absent (body does not rotate toward MoveDirection); (5) sprint backward → Stage 3G still rotates body toward MoveDirection as before (unchanged); (6) camera offset correction still fires correctly during sprint-with-body-turn (BACKPEDAL_CAMERA_OFFSET_CORRECTION); (7) all other movement states (forward, strafe, idle, crouch) unchanged. See DEBT-058.
 
 **Updated (2026-05-26 — Stage 3N: Instant backward turn during backward sprint in shift lock):**
 - Stage 3G block in `applyCharacterFacing()` modified: when `directionName` ∈ {Backward, BackwardLeft, BackwardRight} and `SPRINT_BACKWARD_INSTANT_TURN = true`, passes `alphaOverride = 1.0` to `faceCharacterTowardsDirection()` for an immediate 1-frame snap.
@@ -1251,15 +1261,35 @@ Two guards added to `canAttemptVault()`: (1) XZ speed threshold (`VAULT_MIN_APPR
 
 ---
 
-## [DEBT-055] Shift-lock backpedal bug fixes (Bugs 1–3) — runtime verification pending — ADDED 2026-05-26
+## [DEBT-058] Stage 4 custom mouse-lock body-yaw redesign — runtime verification pending — ADDED 2026-05-28
+
+**File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
+**Severity:** Low-Medium (build clean, symbols confirmed in Studio, no runtime errors in play-mode load; observable movement behavior not yet verified by manual play)
+**Studio verification required:** Yes — requires manual shift-lock walking test in Studio play mode
+
+**Verification checklist:**
+1. **Camera-yaw body facing during backward walk:** enable shift lock (LeftControl), walk backward (S key) → body must face camera yaw (forward), NOT rotate toward MoveDirection. Camera must not swing or arc.
+2. **WalkBackward animation plays correctly:** body faces camera, animation plays the "backward walk" clip naturally with legs moving backward relative to camera-forward body.
+3. **WalkBackwardLeft / WalkBackwardRight play:** hold S+A → WalkBackwardLeft animation plays without jitter; hold S+D → WalkBackwardRight animation plays. Body remains camera-yaw-facing.
+4. **Hysteresis suppresses direction boundary oscillation:** rapidly oscillate input near the S/S+A boundary → animation must not flicker between WalkBackward and WalkBackwardLeft faster than ~0.08 s.
+5. **Sprint backward unchanged:** sprint + S key → Stage 3G still rotates body toward MoveDirection (expected); RunBackward (or RunForward on rotated body) plays. Camera-swing may still occur during sprint; this is pre-existing Stage 3G behavior, not a regression.
+6. **Camera offset correction still fires:** sprint backward (body rotates) → right-shoulder offset stays visually on camera's right side (BACKPEDAL_CAMERA_OFFSET_CORRECTION still active).
+7. **Forward / strafe / idle / crouch unchanged:** all non-backward walking directions unchanged from before this commit.
+8. **No runtime errors:** Output panel shows no errors or unexpected warns from MovementController during any of the above states.
+
+**Fix when:** All 8 checklist items pass in a manual Studio play session. Update this entry with the date of verification. If any item fails, add a sub-item with the failure description and the tuning constant to adjust.
+
+---
+
+## [DEBT-055] Shift-lock backpedal bug fixes (Bugs 1–3) — UPDATED 2026-05-28
 
 **File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
 **Severity:** Low-Medium (static logic is correct and symbols are confirmed in Studio; observable behavior not yet verified in play mode)
-**Studio verification required:** Yes — all three bugs require in-play-mode shift-lock testing
+**Studio verification required:** Yes — Bugs 2 and 3 require in-play-mode shift-lock testing
 
-**Bug 1 — Backward animation unification:**
-`updateMovementAnimation()` and `getDesiredStandingLocomotionKey()` now map `BackwardLeft`/`BackwardRight` → `WalkBackward` when `customMouseLocked and BACKPEDAL_TURN_ENABLED`. The backpedal body-turn LERP handles the visual direction; the dedicated diagonal animations are no longer needed in this path. Risk: if a future stage adds `BACKPEDAL_TURN_ENABLED = false` paths that also set `customMouseLocked = true`, the diagonal animations would still be suppressed. Guard condition is explicit so reviewing this path is straightforward.
-**Fix when:** Verified in play mode — walk backward + rotate camera left/right and confirm no animation flip between WalkBackwardLeft and WalkBackward.
+**Bug 1 — Backward animation unification — SUPERSEDED 2026-05-28:**
+~~`updateMovementAnimation()` and `getDesiredStandingLocomotionKey()` now map `BackwardLeft`/`BackwardRight` → `WalkBackward` when `customMouseLocked and BACKPEDAL_TURN_ENABLED`.~~
+**SUPERSEDED:** The unification approach (Bug 1 fix) was itself a workaround for body-rotation animation jitter caused by Stage 3L. Stage 4 (2026-05-28) removes Stage 3L, removes `BACKPEDAL_UNIFY_BACKWARD_ANIMATION`, and restores `WalkBackwardLeft`/`WalkBackwardRight` diagonal animations. Jitter is now prevented by `chooseDirectionalAnimationWithHysteresis()` — see DEBT-044 Stage 4 entry. Bug 1 is fully resolved by Stage 4.
 
 **Bug 2 — Camera offset orbit:**
 `updateSprintCameraOffset()` now computes a dot-product correction for `Humanoid.CameraOffset.X` each Heartbeat. The formula: `correctedX = CAMERA_OFFSET.X * dot(camRightFlat, bodyRightFlat)`. When the body faces the camera (backpedal, no rotation) the dot is +1 and offset stays normal (+1.75). When the body is flipped 180° (360° spin complete), dot is −1 and offset flips to −1.75 in local space, which is still world-right. Risk: during the LERP sweep (0° to 180°), the corrected offset linearly passes through 0 and reverses — there is a brief frame where `CameraOffset.X ≈ 0` (near-centered shoulder). This is a deliberate trade-off vs. a sharp-switch or slerp approach.
