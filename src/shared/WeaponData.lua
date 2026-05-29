@@ -55,6 +55,9 @@ WeaponData["AKS74"] = {
             idle   = "rbxassetid://79290751562233",
             fire   = "rbxassetid://101346298541907",
             reload = "rbxassetid://82861605710102",
+            adsIn  = "rbxassetid://134918319490586",
+            adsOut = "rbxassetid://132508450718728",
+            adsFire = "rbxassetid://138021695403324",
         },
     },
 }
