@@ -30,7 +30,9 @@
 --   Initialized from Constants.FORCE_FIRST_PERSON on Start() and on each CharacterAdded.
 --   When Constants.CAMERA_PERSPECTIVE_SWITCH_ENABLED is true, the scroll wheel toggles:
 --     Scroll down while first-person → Classic (third-person); viewmodel hidden.
---     Scroll up  while third-person + zoom ≤ CAMERA_FIRST_PERSON_SNAP_THRESHOLD → LockFirstPerson.
+--     Scroll up  while third-person + shift lock ON            → snaps immediately to FP
+--       (shift lock fixes camera at 8 studs; can't zoom further, so any up-scroll returns to FP).
+--     Scroll up  while third-person + shift lock OFF + zoom ≤ SNAP_THRESHOLD → LockFirstPerson.
 --   applyCameraMode() writes LocalPlayer.CameraMode only; no camera.CFrame changes.
 --
 -- Public API:
@@ -664,15 +666,30 @@ function ViewModelController:Start()
                 -- Scroll down in first-person → third-person.
                 setFirstPerson(false)
             elseif not isFirstPerson and delta > 0 then
-                -- Scroll up in third-person; check zoom distance.
+                -- Scroll up in third-person → snap to first-person when appropriate.
                 -- (gp is ignored here: Roblox marks scroll as processed in Classic mode
                 --  for its own zoom system, which would prevent our handler from firing.)
-                local cam = workspace.CurrentCamera
-                if cam then
-                    local zoomDist = (cam.CFrame.Position - cam.Focus.Position).Magnitude
-                    if zoomDist <= Constants.CAMERA_FIRST_PERSON_SNAP_THRESHOLD then
-                        setFirstPerson(true)
+                --
+                -- Two cases:
+                --   1. Shift lock ON: MovementController locks CameraMin=CameraMax=8 studs.
+                --      Camera cannot zoom in any further, so any scroll-up should snap
+                --      straight to first-person regardless of actual zoom distance.
+                --   2. Shift lock OFF: snap only when the player has manually zoomed in
+                --      to within CAMERA_FIRST_PERSON_SNAP_THRESHOLD (5 studs).
+                local shouldSnap: boolean
+                if MovementController:IsCustomMouseLocked() then
+                    shouldSnap = true
+                else
+                    local cam = workspace.CurrentCamera
+                    if cam then
+                        local zoomDist = (cam.CFrame.Position - cam.Focus.Position).Magnitude
+                        shouldSnap = zoomDist <= Constants.CAMERA_FIRST_PERSON_SNAP_THRESHOLD
+                    else
+                        shouldSnap = false
                     end
+                end
+                if shouldSnap then
+                    setFirstPerson(true)
                 end
             end
         end)
