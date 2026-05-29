@@ -2,40 +2,58 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > ViewModelController
 --
--- Owns the client-side viewmodel: clones ReplicatedStorage/ViewModels/AR15 (a Model built
--- from the imported TROY DEFENSE AR rig — HumanoidRootPart as PrimaryPart, full Motor6D arm
--- chain, 49 BaseParts, MuzzleAttachment at barrel tip) and parents it to workspace.CurrentCamera.
--- PivotTo(cam.CFrame * REAL_MODEL_OFFSET) is called every RenderStepped; Motor6Ds maintain
--- arm/gun positions relative to HumanoidRootPart automatically.
--- Falls back to a programmatic placeholder if the AR15 asset is missing from ReplicatedStorage.
+-- Owns the client-side first-person viewmodel.
 --
--- Camera mode and viewmodel visibility are controlled by Constants.FORCE_FIRST_PERSON:
---   true  = locks the local player to first-person (LockFirstPerson) and shows the viewmodel
---           during ACTIVE only. Re-applies the lock on every respawn.
---   false = allows normal Roblox camera (Classic) for development/testing.
---           The viewmodel remains permanently hidden (Transparency = 1) regardless of phase.
---           Useful for movement, map, and zone testing without a floating gun in view.
---           PivotTo still runs every frame so unanchored parts do not fall and get destroyed.
+-- Weapon equip / holster (AKS74 foundation — 2026-05-28):
+--   EquipWeapon(weaponName) clones ReplicatedStorage/ViewModels/<viewModelName> and parents it to
+--   workspace.CurrentCamera.  The weapon stays holstered (self.model == nil) until EquipWeapon is
+--   called.  GunController calls EquipWeapon / HolsterWeapon in response to key 1 input.
+--   PlayEquipAnimation() plays the first-person equip track once, then chains into PlayIdleAnimation().
+--   If the equip track has zero length or is absent, PlayIdleAnimation() starts immediately.
+--   StopWeaponAnimations() stops and destroys all loaded weapon AnimationTracks.
+--   HolsterWeapon() stops animations, destroys the model clone, and clears all equip state.
 --
--- Reads workspace.CurrentCamera.CFrame for PivotTo positioning each RenderStepped.
--- Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
--- Exposes PlayFireAnimation() for GunController to call on each shot.
--- Exposes GetBarrelTipCFrame() so GunController can position the muzzle flash.
+-- PivotTo camera follow (every RenderStepped, only when self.model is non-nil):
+--   m:PivotTo(cam.CFrame * viewRecoilCFrame * moveCF * BASE_OFFSET * CFrame.new(0,0,recoilOffset))
+--   BASE_OFFSET is computed from the rig's FakeCamera CFrame relative to HumanoidRootPart.
+--   Falls back to REAL_MODEL_OFFSET when FakeCamera is absent.
+--   Positional recoil (RECOIL_DIST) and camera-relative recoil CFrame (from GunController) are
+--   both applied here; they operate on whatever model is currently equipped.
+--
+-- Visibility:
+--   shouldShowViewModel() gates on FORCE_FIRST_PERSON + phase ACTIVE + model non-nil.
+--   When no weapon is equipped (model == nil), the viewmodel is always hidden.
+--   setVisibility() is module-level so EquipWeapon and HolsterWeapon can call it directly.
+--
+-- Camera mode:
+--   applyCameraMode() sets CameraMode based on Constants.FORCE_FIRST_PERSON.
+--   Called in Start() and after every CharacterAdded respawn.
+--
+-- Public API:
+--   :Start()                  — init + register event listeners (called once by ClientInit)
+--   :EquipWeapon(name)        — clone & equip a weapon viewmodel, play equip → idle animation
+--   :HolsterWeapon()          — stop animations, destroy model, clear equip state
+--   :IsWeaponEquipped()       — returns true while any weapon is equipped
+--   :PlayEquipAnimation()     — play equip track once, then chain to PlayIdleAnimation()
+--   :PlayIdleAnimation()      — play idle track (looped)
+--   :StopWeaponAnimations()   — stop and destroy all loaded weapon AnimationTracks
+--   :PlayFireAnimation()      — positional recoil kick (called by GunController on fire)
+--   :SetRecoilOffset(cf)      — push a rotational recoil CFrame from GunController
+--   :GetBarrelTipCFrame()     — world CFrame at MuzzleAttachment tip (muzzle-flash placement)
 --
 -- Initialized by ClientInit via loadAndStart() — no PlayerGui needed.
--- init() is called internally from Start() before event listeners are registered.
 
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Modules   = ReplicatedStorage:WaitForChild("Modules")
-local Constants = require(Modules:WaitForChild("Constants"))
-local Logger    = require(Modules:WaitForChild("Logger"))
+local Modules    = ReplicatedStorage:WaitForChild("Modules")
+local Constants  = require(Modules:WaitForChild("Constants"))
+local Logger     = require(Modules:WaitForChild("Logger"))
+local WeaponData = require(Modules:WaitForChild("WeaponData"))
 
--- MovementController provides bob/tilt offsets for the viewmodel each frame.
--- Requiring it here (not GunController) keeps the dependency one-directional:
---   GunController → ViewModelController → MovementController (no circular).
+-- MovementController provides bob/tilt offsets each frame.
+-- ViewModelController → MovementController is one-directional (no circular).
 local MovementController = require(script.Parent:WaitForChild("MovementController"))
 
 local Remotes           = ReplicatedStorage:WaitForChild("Remotes")
@@ -45,75 +63,70 @@ local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEve
 -- Configuration
 -- ============================================================
 
--- REAL_MODEL_OFFSET: fallback used only when FakeCamera cannot be found on the clone.
--- init() computes the live offset from FakeCamera's CFrame relative to HumanoidRootPart so
--- PivotTo(cam.CFrame * BASE_OFFSET) places FakeCamera exactly at the camera's CFrame,
--- which is how the TROY DEFENSE AR rig was designed (FakeCamera = intended camera pivot).
--- This constant was derived with: hrp.CFrame:ToObjectSpace(fc.CFrame):Inverse()
--- and should stay in sync with the rig.  Re-derive it if the rig is ever re-imported.
-local REAL_MODEL_OFFSET : CFrame = CFrame.new(-0.7141, -1.6346, 2.0080)
+-- REAL_MODEL_OFFSET: fallback used when FakeCamera cannot be found on the clone.
+-- Derived with: hrp.CFrame:ToObjectSpace(fc.CFrame):Inverse()
+-- Re-derive if the rig is re-imported.
+local REAL_MODEL_OFFSET: CFrame = CFrame.new(-0.7141, -1.6346, 2.0080)
     * CFrame.Angles(0.055254, 0, 0)
 
--- Programmatic placeholder — the model pivot sits at the visual gun-body centre,
--- so we shift it right/down/forward to appear in the corner of the screen.
-local PLACEHOLDER_OFFSET : CFrame = CFrame.new(0.6, -0.5, -1.5)
+-- Set by EquipWeapon() from the rig's FakeCamera CFrame.
+-- Falls back to REAL_MODEL_OFFSET when FakeCamera is absent.
+local BASE_OFFSET: CFrame = REAL_MODEL_OFFSET
 
--- Set by init() based on which model loaded.  Starts at the placeholder value
--- so any code that runs before init() gets a safe default.
-local BASE_OFFSET : CFrame = PLACEHOLDER_OFFSET
+-- Positional recoil snap distance and decay rate (studs).
+local RECOIL_DIST: number = 0.05
+local RECOIL_RATE: number = RECOIL_DIST / 0.05
 
--- Recoil snap distance and decay rate.
--- recoilOffset starts at RECOIL_DIST on fire and decays to 0 at RECOIL_RATE studs/s,
--- returning the model to rest in 0.05 s.
-local RECOIL_DIST : number = 0.05
-local RECOIL_RATE : number = RECOIL_DIST / 0.05
-
--- Distance in front of the camera used as a muzzle flash fallback when the model
--- has no MuzzleAttachment. Not a gameplay value; kept here rather than Constants.
-local MUZZLE_FALLBACK_DIST : number = 1.5
+-- Fallback muzzle-flash distance when MuzzleAttachment is absent.
+local MUZZLE_FALLBACK_DIST: number = 1.5
 
 -- ============================================================
 -- State
 -- ============================================================
 
-local visible      : boolean = false
-local recoilOffset : number  = 0
+-- Visibility flag and current phase, tracked for the shouldShowViewModel() gate.
+local visible:      boolean = false
+local currentPhase: string  = Constants.Phase.LOBBY
 
--- Tracks the most recently received phase from RoundStateChanged.
--- Used by shouldShowViewModel() so CharacterAdded can evaluate visibility without
--- waiting for the next tick to arrive.
-local currentPhase : string = Constants.Phase.LOBBY
+-- Positional recoil offset (decays toward 0 each RenderStepped).
+local recoilOffset: number = 0
 
--- Recoil CFrame pushed by GunController each frame via SetRecoilOffset().
--- Represents a rotation offset applied to the viewmodel in camera space.
--- Starts as identity; GunController snaps it on shot and lerps it back to identity.
+-- Rotational recoil CFrame pushed by GunController each frame via SetRecoilOffset().
 local viewRecoilCFrame: CFrame = CFrame.new()
 
+-- Name of the currently equipped weapon, or nil when holstered.
+local equippedWeaponName: string? = nil
+
+-- First-person animation tracks for the equipped weapon.
+local weaponEquipTrack: AnimationTrack? = nil
+local weaponIdleTrack:  AnimationTrack? = nil
+
 -- ============================================================
--- Controller
+-- Controller table
 -- ============================================================
 
 local ViewModelController = {}
+-- The current weapon viewmodel Model, parented to workspace.CurrentCamera when equipped.
+-- nil while holstered.
 ViewModelController.model = nil :: Model?
 
--- Parts that must stay Transparent=1 at all times (rig helpers, not visual geometry).
--- Used by init() and setVisibility() to avoid flashing invisible bones.
+-- Parts that must remain Transparent = 1 at all times (rig physics / helper bones).
+-- Applied by setVisibility() to avoid flashing invisible rig bones.
 local HELPER_PARTS: { [string]: boolean } = {
     HumanoidRootPart = true,
     FakeCamera       = true,
     Torso            = true,
     Handcontrol      = true,
     Main             = true,
-    Root             = true,  -- placeholder fallback root part name
+    Root             = true,
 }
 
 -- ============================================================
--- Private helpers
+-- Private helpers (module-level so public methods can call them)
 -- ============================================================
 
 -- Sets the local player's CameraMode based on Constants.FORCE_FIRST_PERSON.
--- Called in Start() and after every CharacterAdded so respawns do not revert to
--- the Roblox default (Classic / third-person) when FORCE_FIRST_PERSON is true.
+-- Called in Start() and after every CharacterAdded.
 local function applyCameraMode()
     local localPlayer = Players.LocalPlayer
     if Constants.FORCE_FIRST_PERSON then
@@ -124,267 +137,447 @@ local function applyCameraMode()
 end
 
 -- Returns true only when all three conditions hold:
---   1. Constants.FORCE_FIRST_PERSON is true (testing mode disables viewmodel when false)
---   2. currentPhase == Constants.Phase.ACTIVE
---   3. ViewModelController.model exists (init() completed successfully)
--- When Constants.FORCE_FIRST_PERSON is false, the viewmodel stays permanently hidden
--- regardless of phase, allowing normal-camera movement/map/zone testing.
+--   1. Constants.FORCE_FIRST_PERSON is true (dev mode hides viewmodel when false)
+--   2. currentPhase == ACTIVE
+--   3. ViewModelController.model is non-nil (weapon is equipped)
 local function shouldShowViewModel(): boolean
     return Constants.FORCE_FIRST_PERSON
         and currentPhase == Constants.Phase.ACTIVE
         and ViewModelController.model ~= nil
 end
 
--- Attempts to clone ReplicatedStorage/ViewModels/AR15 and parent it to the camera.
--- Uses WaitForChild so the LocalScript never clones an empty shell on first load
--- (replication lag could return a model with 0 children from a bare FindFirstChild).
--- Falls back to building a programmatic placeholder if the asset is absent or empty.
--- Destroys any previously built model before creating a new one so re-init is safe.
--- Called internally by Start() before any event listeners are registered.
+-- Sets BasePart Transparency on the current viewmodel.
+-- show=true  → visual geometry parts become opaque; helper parts stay transparent.
+-- show=false → all parts become transparent.
+-- Module-level (not inside Start()) so EquipWeapon and HolsterWeapon can call it.
+local function setVisibility(show: boolean)
+    Logger.debug(string.format("[ViewModelController] setVisibility(%s)", tostring(show)))
+    local m = ViewModelController.model
+    if not m then return end
+    local count = 0
+    for _, desc in ipairs(m:GetDescendants()) do
+        if desc:IsA("BasePart") then
+            if show then
+                if not HELPER_PARTS[desc.Name] then
+                    (desc :: BasePart).Transparency = 0
+                    count += 1
+                end
+            else
+                (desc :: BasePart).Transparency = 1
+                count += 1
+            end
+        end
+    end
+    Logger.debug(string.format("[ViewModelController] setVisibility(%s) — %d parts", tostring(show), count))
+end
+
+-- ============================================================
+-- Public methods — weapon lifecycle
+-- ============================================================
+
+-- Clears all weapon state.  Called by Start() and CharacterAdded.
+-- After init(), self.model is nil (weapon holstered) and no animation tracks are loaded.
 function ViewModelController:init()
+    -- Stop and destroy any playing weapon animation tracks.
+    if weaponEquipTrack then
+        weaponEquipTrack:Stop()
+        weaponEquipTrack:Destroy()
+        weaponEquipTrack = nil
+    end
+    if weaponIdleTrack then
+        weaponIdleTrack:Stop()
+        weaponIdleTrack:Destroy()
+        weaponIdleTrack = nil
+    end
+    -- Destroy any existing weapon model.
     if self.model then
         self.model:Destroy()
         self.model = nil
     end
-
-    local cam = workspace.CurrentCamera
-
-    -- ── Attempt 1: clone AR15 production asset ────────────────────────────────
-    -- WaitForChild (5 s timeout) instead of FindFirstChild so we block until the
-    -- model and its key child (HumanoidRootPart) have replicated to the client.
-    local viewModels = ReplicatedStorage:FindFirstChild("ViewModels")
-    local ar15Asset: Model? = nil
-    if viewModels then
-        local found = viewModels:WaitForChild("AR15", 5)
-        if found and found:IsA("Model") then
-            -- Also wait for HumanoidRootPart so the children have replicated
-            found:WaitForChild("HumanoidRootPart", 5)
-            ar15Asset = found :: Model
-        end
-    end
-
-    if ar15Asset then
-        local clone = ar15Asset:Clone()
-
-        -- Verify the clone is not empty (guards against a very rare race where
-        -- children replicate after WaitForChild returns the Model instance).
-        local clonePartCount = 0
-        for _, d in ipairs(clone:GetDescendants()) do
-            if d:IsA("BasePart") then clonePartCount += 1 end
-        end
-        if clonePartCount == 0 then
-            Logger.warn("[ViewModelController] init: AR15 clone has 0 BaseParts (replication race) — using placeholder")
-            clone:Destroy()
-            ar15Asset = nil
-        else
-            -- Hide only visual parts before parenting; helper parts (HRP, FakeCamera, etc.)
-            -- are already Transparent=1 in the asset and must stay that way permanently.
-            for _, desc in ipairs(clone:GetDescendants()) do
-                if desc:IsA("BasePart") and not HELPER_PARTS[desc.Name] then
-                    (desc :: BasePart).Transparency = 1
-                end
-            end
-            -- Compute BASE_OFFSET dynamically so FakeCamera aligns exactly with
-            -- CurrentCamera every frame.  PivotTo(cam.CFrame * BASE_OFFSET) moves HRP
-            -- to that CFrame; Motor6Ds then place FakeCamera at cam.CFrame exactly.
-            local hrpPart = clone:FindFirstChild("HumanoidRootPart")
-            local fcPart  = clone:FindFirstChild("FakeCamera")
-            if hrpPart and fcPart then
-                BASE_OFFSET = hrpPart.CFrame:ToObjectSpace(fcPart.CFrame):Inverse()
-            else
-                BASE_OFFSET = REAL_MODEL_OFFSET
-                Logger.warn("[ViewModelController] FakeCamera not found on AR15 clone — using hardcoded offset")
-            end
-            clone.Parent = cam
-            self.model  = clone
-            -- Reset visible so the next RoundStateChanged always fires setVisibility,
-            -- even if the phase has not changed since the previous character load.
-            visible = false
-            Logger.debug("[ViewModelController] AR15 model cloned from ReplicatedStorage")
-            return
-        end
-    end
-
-    -- ── Attempt 2: programmatic placeholder ───────────────────────────────────
-    Logger.warn("[ViewModelController] init: ReplicatedStorage/ViewModels/AR15 not found — using placeholder")
-    BASE_OFFSET = PLACEHOLDER_OFFSET
-
-    local container = Instance.new("Model")
-    container.Name = "ViewModelPlaceholder"
-    container.Parent = cam
-
-    local function makePart(name: string, size: Vector3, color: BrickColor, cf: CFrame): Part
-        local p = Instance.new("Part")
-        p.Name        = name
-        p.Size        = size
-        p.BrickColor  = color
-        p.CFrame      = cf
-        p.CanCollide  = false
-        p.CanQuery    = false
-        p.CastShadow  = false
-        p.Anchored    = false
-        p.Transparency = 1
-        p.Parent      = container
-        return p
-    end
-
-    local darkGrey    = BrickColor.new("Dark grey")
-    local pastelBrown = BrickColor.new("Pastel brown")
-
-    -- All offsets are relative to the model pivot (world origin at creation time).
-    -- PivotTo repositions the whole model so relative layout is preserved.
-
-    -- Main gun body centred in view, slightly forward of pivot.
-    makePart("GunBody", Vector3.new(0.25, 0.18, 1.2), darkGrey, CFrame.new(0, 0, -0.3))
-
-    -- Thin barrel extending forward from the gun body, raised slightly.
-    local barrel = makePart("Barrel", Vector3.new(0.07, 0.07, 0.5), darkGrey, CFrame.new(0, 0.04, -0.9))
-
-    -- Right hand at the grip, behind and below the gun body.
-    makePart("RightArm", Vector3.new(0.35, 0.35, 0.9), pastelBrown, CFrame.new(0.12, -0.22, 0.15))
-
-    -- Left hand at the handguard, forward and below the gun body.
-    makePart("LeftArm",  Vector3.new(0.35, 0.35, 0.7), pastelBrown, CFrame.new(-0.05, -0.18, -0.45))
-
-    -- MuzzleAttachment at the front tip of the barrel.
-    -- Barrel length is 0.5, so local tip is at Z = -0.25.
-    local muzzle = Instance.new("Attachment")
-    muzzle.Name     = "MuzzleAttachment"
-    muzzle.Position = Vector3.new(0, 0, -0.25)
-    muzzle.Parent   = barrel
-
-    self.model = container
-    -- Reset visible so the next RoundStateChanged always calls setVisibility,
-    -- even if the phase hasn't changed since the previous character load.
-    visible = false
-    Logger.debug("[ViewModelController] Programmatic placeholder built")
+    equippedWeaponName = nil
+    BASE_OFFSET        = REAL_MODEL_OFFSET
+    visible            = false
+    Logger.debug("[ViewModelController] init: state cleared (weapon holstered)")
 end
 
-function ViewModelController:Start()
-    self:init()
+-- Stops and destroys all loaded weapon AnimationTracks.
+-- Safe to call when no weapon is equipped (no-op in that case).
+function ViewModelController:StopWeaponAnimations()
+    if weaponEquipTrack then
+        weaponEquipTrack:Stop()
+        weaponEquipTrack:Destroy()
+        weaponEquipTrack = nil
+    end
+    if weaponIdleTrack then
+        weaponIdleTrack:Stop()
+        weaponIdleTrack:Destroy()
+        weaponIdleTrack = nil
+    end
+    Logger.debug("[ViewModelController] StopWeaponAnimations: tracks cleared")
+end
 
-    -- init() always sets self.model (either the AR15 clone or the placeholder).
-    -- Guard kept defensively: if init() is extended with a hard-failure path in
-    -- future, this prevents a nil-model crash from propagating to event listeners.
-    if not self.model then
+-- Stops animations, destroys the current weapon model, and clears equip state.
+-- IsWeaponEquipped() returns false after this call.
+function ViewModelController:HolsterWeapon()
+    self:StopWeaponAnimations()
+    if self.model then
+        self.model:Destroy()
+        self.model = nil
+    end
+    equippedWeaponName = nil
+    visible            = false
+    Logger.debug("[ViewModelController] HolsterWeapon: weapon holstered")
+end
+
+-- Returns true while any weapon viewmodel is equipped (self.model ~= nil).
+function ViewModelController:IsWeaponEquipped(): boolean
+    return equippedWeaponName ~= nil
+end
+
+-- Plays the loaded idle AnimationTrack (looped).
+-- No-op when no idle track is loaded.
+function ViewModelController:PlayIdleAnimation()
+    if weaponIdleTrack then
+        weaponIdleTrack:Play()
+        Logger.debug("[ViewModelController] PlayIdleAnimation: idle track started")
+    else
+        Logger.debug("[ViewModelController] PlayIdleAnimation: no idle track loaded — skipped")
+    end
+end
+
+-- Plays the equip AnimationTrack once, then chains to PlayIdleAnimation() via the
+-- Stopped signal.  If the equip track has zero length or is absent, PlayIdleAnimation()
+-- starts immediately without blocking.
+function ViewModelController:PlayEquipAnimation()
+    -- Capture weapon identity so the Stopped callback can guard against stale calls.
+    local capturedWeapon = equippedWeaponName
+
+    if weaponEquipTrack and weaponEquipTrack.Length > 0 then
+        weaponEquipTrack:Play()
+        -- Chain to idle when the equip one-shot ends.
+        -- AnimationTrack:Destroy() disconnects all signals synchronously, so the
+        -- Stopped callback will not fire after StopWeaponAnimations() has run.
+        weaponEquipTrack.Stopped:Connect(function()
+            -- Guard: only start idle if the same weapon is still equipped and
+            -- an idle track was loaded.
+            if equippedWeaponName == capturedWeapon
+                and self.model ~= nil
+                and weaponIdleTrack ~= nil
+            then
+                self:PlayIdleAnimation()
+            end
+        end)
+        Logger.debug("[ViewModelController] PlayEquipAnimation: equip track started")
+    else
+        -- No equip track or zero-length clip — start idle directly.
+        Logger.debug("[ViewModelController] PlayEquipAnimation: no equip track — starting idle directly")
+        self:PlayIdleAnimation()
+    end
+end
+
+-- Clones the weapon viewmodel from ReplicatedStorage/ViewModels/<viewModelName>, parents it
+-- to workspace.CurrentCamera, sets up BasePart properties, computes BASE_OFFSET, loads
+-- animation tracks, and plays the equip → idle sequence.
+--
+-- Guards:
+--   • same weapon already equipped → no-op
+--   • different weapon equipped → holsters current weapon first
+--   • weaponName not in WeaponData → warning, early return
+--   • viewmodel not found or clone is empty → warning, early return
+function ViewModelController:EquipWeapon(weaponName: string)
+    assert(typeof(weaponName) == "string",
+        "[ViewModelController] EquipWeapon: weaponName must be a string")
+
+    -- No-op if the same weapon is already equipped.
+    if equippedWeaponName == weaponName then
+        Logger.debug("[ViewModelController] EquipWeapon: " .. weaponName .. " already equipped — no-op")
         return
     end
 
-    local localPlayer = Players.LocalPlayer
-
-    -- Apply camera mode immediately based on Constants.FORCE_FIRST_PERSON.
-    -- Does NOT unconditionally set LockFirstPerson — Classic is used during testing.
-    applyCameraMode()
-
-    -- Sets Transparency on visual BasePart descendants of the model.
-    -- Hiding (show=false): ALL BaseParts → Transparency 1.
-    -- Showing (show=true): visual BaseParts → Transparency 0.
-    --   Helper parts (HRP, FakeCamera, Torso, Handcontrol, Main, Root) are NEVER
-    --   made visible — they are physics/rig anchors, not rendered geometry.
-    -- Defined before CharacterAdded so the respawn handler can call it directly.
-    -- Reads self.model per-call so re-builds after CharacterAdded are always used.
-    local function setVisibility(show: boolean)
-        Logger.debug(string.format("[ViewModelController] setVisibility(%s)", tostring(show)))
-        local m = self.model
-        if not m then return end
-        local count = 0
-        for _, desc in ipairs(m:GetDescendants()) do
-            if desc:IsA("BasePart") then
-                if show then
-                    -- Only reveal geometry parts; helpers stay permanently transparent.
-                    if not HELPER_PARTS[desc.Name] then
-                        (desc :: BasePart).Transparency = 0
-                        count += 1
-                    end
-                else
-                    (desc :: BasePart).Transparency = 1
-                    count += 1
-                end
-            end
-        end
-        Logger.debug(string.format("[ViewModelController] setVisibility(%s) — %d parts", tostring(show), count))
+    -- Holster any different weapon that is currently equipped.
+    if equippedWeaponName ~= nil then
+        self:HolsterWeapon()
     end
 
-    -- Re-build the viewmodel, re-apply camera mode, and re-evaluate visibility
-    -- after each respawn. TeamService calls player:LoadCharacter() at PREP which
-    -- reverts CameraMode to the default — applyCameraMode() restores it correctly
-    -- based on the current FORCE_FIRST_PERSON flag.
+    -- Look up weapon definition.
+    local rawData = WeaponData[weaponName]
+    if not rawData then
+        Logger.warn("[ViewModelController] EquipWeapon: no WeaponData entry for: " .. weaponName)
+        return
+    end
+    -- Cast to any so we can access displayName, viewModelName, animations without
+    -- strict-mode field-union errors (WeaponData entries have heterogeneous shapes).
+    local data = rawData :: any
+
+    local vmName: string = data.viewModelName :: string
+    if not vmName or vmName == "" then
+        Logger.warn("[ViewModelController] EquipWeapon: viewModelName missing for: " .. weaponName)
+        return
+    end
+
+    -- Locate the viewmodel folder.
+    local vmFolder = ReplicatedStorage:FindFirstChild(Constants.VIEWMODEL_FOLDER_NAME)
+    if not vmFolder then
+        Logger.warn("[ViewModelController] EquipWeapon: ReplicatedStorage/"
+            .. Constants.VIEWMODEL_FOLDER_NAME .. " not found")
+        return
+    end
+
+    -- WaitForChild (5 s) so we block until the model and its children have replicated.
+    local vmAsset = vmFolder:WaitForChild(vmName, 5)
+    if not vmAsset or not vmAsset:IsA("Model") then
+        Logger.warn("[ViewModelController] EquipWeapon: viewmodel not found for weapon: " .. weaponName
+            .. " (looked for: " .. vmName .. ")")
+        return
+    end
+
+    -- Clone the viewmodel.
+    local clone = (vmAsset :: Model):Clone()
+
+    -- Verify the clone is not empty (guards against replication-race returning a shell).
+    local partCount = 0
+    for _, d in ipairs(clone:GetDescendants()) do
+        if d:IsA("BasePart") then partCount += 1 end
+    end
+    if partCount == 0 then
+        Logger.warn("[ViewModelController] EquipWeapon: " .. weaponName
+            .. " clone has 0 BaseParts (replication race) — aborting")
+        clone:Destroy()
+        return
+    end
+
+    -- Configure all BasePart descendants.
+    -- Visual parts start transparent; setVisibility(true) reveals them.
+    -- Helper rig bones (HRP, FakeCamera, etc.) remain permanently transparent.
+    -- Do NOT use Welds or WeldConstraints — Motor6Ds maintain the rig hierarchy.
+    for _, desc in ipairs(clone:GetDescendants()) do
+        if desc:IsA("BasePart") then
+            local p = desc :: BasePart
+            p.CanCollide = false
+            p.CanQuery   = false
+            p.CanTouch   = false
+            p.Massless   = true
+            if not HELPER_PARTS[p.Name] then
+                p.Transparency = 1  -- hidden until setVisibility(true) is called
+            end
+        end
+    end
+
+    -- Compute BASE_OFFSET from the rig's FakeCamera CFrame so PivotTo(cam.CFrame * BASE_OFFSET)
+    -- places FakeCamera exactly at the camera's CFrame each frame.
+    local rootPartName = Constants.VIEWMODEL_DEFAULT_ROOT_PART_NAME
+    local rootPart     = clone:FindFirstChild(rootPartName) :: BasePart?
+    if not rootPart then
+        rootPart = clone:FindFirstChild(Constants.VIEWMODEL_FALLBACK_ROOT_PART_NAME) :: BasePart?
+        if rootPart then
+            Logger.debug("[ViewModelController] EquipWeapon: used fallback root part ("
+                .. Constants.VIEWMODEL_FALLBACK_ROOT_PART_NAME .. ") for " .. weaponName)
+        end
+    end
+    local fcPart = clone:FindFirstChild("FakeCamera") :: BasePart?
+    if rootPart and fcPart then
+        BASE_OFFSET = rootPart.CFrame:ToObjectSpace(fcPart.CFrame):Inverse()
+    else
+        BASE_OFFSET = REAL_MODEL_OFFSET
+        Logger.warn("[ViewModelController] EquipWeapon: FakeCamera or root part not found on "
+            .. weaponName .. " clone — using hardcoded offset")
+    end
+
+    -- Parent the clone to the camera so it follows RenderStepped repositioning.
+    local cam = workspace.CurrentCamera
+    clone.Parent    = cam
+    self.model      = clone
+    equippedWeaponName = weaponName
+    visible         = false  -- will be updated by setVisibility below
+
+    Logger.debug("[ViewModelController] EquipWeapon: " .. weaponName
+        .. " cloned (" .. tostring(partCount) .. " parts) and parented to camera")
+
+    -- Load animation tracks on the clone's Animator.
+    self:_setupWeaponAnimations(weaponName, data)
+
+    -- Apply current phase-based visibility.
+    local show = shouldShowViewModel()
+    visible    = show
+    setVisibility(show)
+
+    -- Begin equip → idle animation sequence.
+    self:PlayEquipAnimation()
+end
+
+-- Private: finds or creates AnimationController + Animator on the cloned viewmodel, then
+-- loads the firstPerson equip and idle animation tracks from WeaponData.
+-- Does NOT use Welds or WeldConstraints.
+function ViewModelController:_setupWeaponAnimations(weaponName: string, data: any)
+    local clone = self.model
+    if not clone then return end
+
+    -- Resolve Animator: prefer Humanoid (if the rig has one), then AnimationController.
+    -- If neither exists, create AnimationController + Animator programmatically.
+    local animator: Animator? = nil
+
+    local humanoid = clone:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        animator = humanoid:FindFirstChildOfClass("Animator")
+        if not animator then
+            local a = Instance.new("Animator")
+            a.Parent = humanoid
+            animator  = a
+        end
+    else
+        local animCtrl = clone:FindFirstChildOfClass("AnimationController")
+        if not animCtrl then
+            local ac = Instance.new("AnimationController")
+            ac.Parent = clone
+            animCtrl  = ac
+        end
+        animator = animCtrl:FindFirstChildOfClass("Animator")
+        if not animator then
+            local a = Instance.new("Animator")
+            a.Parent = animCtrl :: AnimationController
+            animator  = a
+        end
+    end
+
+    if not animator then
+        Logger.warn("[ViewModelController] _setupWeaponAnimations: could not find/create Animator for: "
+            .. weaponName)
+        return
+    end
+
+    -- Retrieve first-person animation IDs from WeaponData.
+    local anims = data.animations
+    if not anims then
+        Logger.warn("[ViewModelController] _setupWeaponAnimations: WeaponData.animations missing for: "
+            .. weaponName)
+        return
+    end
+    local fp = anims.firstPerson
+    if not fp then
+        Logger.warn("[ViewModelController] _setupWeaponAnimations: animations.firstPerson missing for: "
+            .. weaponName)
+        return
+    end
+
+    -- Load equip track (one-shot).
+    local equipId: string = tostring(fp.equip or "")
+    if equipId ~= "" and equipId ~= "rbxassetid://0" then
+        local equipAnim = Instance.new("Animation")
+        equipAnim.AnimationId = equipId
+        local track = (animator :: Animator):LoadAnimation(equipAnim)
+        track.Looped   = false
+        weaponEquipTrack = track
+    else
+        Logger.debug("[ViewModelController] _setupWeaponAnimations: no equip animation ID for: "
+            .. weaponName)
+    end
+
+    -- Load idle track (looped).
+    local idleId: string = tostring(fp.idle or "")
+    if idleId ~= "" and idleId ~= "rbxassetid://0" then
+        local idleAnim = Instance.new("Animation")
+        idleAnim.AnimationId = idleId
+        local track = (animator :: Animator):LoadAnimation(idleAnim)
+        track.Looped  = true
+        weaponIdleTrack = track
+    else
+        Logger.debug("[ViewModelController] _setupWeaponAnimations: no idle animation ID for: "
+            .. weaponName)
+    end
+
+    Logger.debug("[ViewModelController] _setupWeaponAnimations: tracks loaded for: " .. weaponName)
+end
+
+-- ============================================================
+-- Start — registers event listeners, sets up camera follow loop
+-- ============================================================
+
+function ViewModelController:Start()
+    -- Clear any stale state from a previous session / double-start.
+    self:init()
+
+    -- self.model is nil after init() — this is expected.
+    -- Unlike the previous AR15 auto-equip behavior, the viewmodel starts holstered.
+    -- GunController calls EquipWeapon("AKS74") when key 1 is pressed.
+
+    local localPlayer = Players.LocalPlayer
+
+    -- Apply initial camera mode.
+    applyCameraMode()
+
+    -- Re-init and re-apply camera mode on respawn.
+    -- init() holsters the weapon and clears animations.  The player must press key 1 again
+    -- to re-equip after respawning (DEBT-059: equip state is not persisted across death).
     localPlayer.CharacterAdded:Connect(function(_character: Model)
         self:init()
         applyCameraMode()
+        -- After init(), model is nil → shouldShowViewModel() is false.
         local show = shouldShowViewModel()
-        visible = show
+        visible    = show
         setVisibility(show)
-        Logger.debug("[ViewModelController] Model rebuilt on character respawn")
+        Logger.debug("[ViewModelController] State reset on character respawn (weapon holstered)")
     end)
 
-    -- Phase listener: update currentPhase and show only when shouldShowViewModel() is true.
-    -- shouldShowViewModel() gates on both currentPhase == ACTIVE and FORCE_FIRST_PERSON == true.
-    -- When FORCE_FIRST_PERSON is false, show is always false — viewmodel stays hidden.
-    -- Guard on visible intentionally removed: after CharacterAdded re-runs init(), visible is
-    -- reset to false, so the next RoundStateChanged must always call setVisibility even when
-    -- the phase hasn't changed (e.g. ACTIVE fires again after respawn in ACTIVE).
+    -- Phase listener: update currentPhase and re-evaluate visibility every tick.
+    -- Guard on visible intentionally absent: after CharacterAdded re-runs init(), visible
+    -- is reset to false, so the next RoundStateChanged must always call setVisibility even
+    -- when the phase has not changed since the previous respawn.
     RoundStateChanged.OnClientEvent:Connect(function(raw: any)
         local payload = raw :: { phase: string }
-        currentPhase  = payload.phase
-        local show    = shouldShowViewModel()
-        visible = show
+        currentPhase   = payload.phase
+        local show     = shouldShowViewModel()
+        visible        = show
         setVisibility(show)
     end)
 
-    -- RenderStepped: reposition the model pivot every frame to follow the camera.
-    -- PivotTo is called unconditionally — never skipped based on visibility or FORCE_FIRST_PERSON.
-    -- The model must track the camera at all times (even during PREP/RESULTS, or when
-    -- FORCE_FIRST_PERSON is false) because all parts are Anchored=false. Without PivotTo,
-    -- gravity pulls the assembly below FallenPartsDestroyHeight and Roblox destroys the parts.
-    -- Visibility is controlled by Transparency=1 (set in setVisibility), not by skipping PivotTo.
+    -- RenderStepped: reposition viewmodel every frame when a weapon is equipped.
+    -- Returns immediately when self.model is nil (holstered), preventing any gravity drop.
     -- Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
-    -- Reads self.model per-call so re-builds after CharacterAdded are always used.
     RunService.RenderStepped:Connect(function(dt: number)
         local m = self.model
         if not m then return end
 
-        -- Decay positional recoil offset back to zero at RECOIL_RATE studs/second.
+        -- Decay positional recoil back to zero.
         if recoilOffset > 0 then
             recoilOffset = math.max(0, recoilOffset - dt * RECOIL_RATE)
         end
 
-        local cam = workspace.CurrentCamera
-
-        -- Compose: camera → recoil rotation (from GunController) → bob/tilt (from MovementController)
-        --          → model base offset → positional recoil kick.
-        -- viewRecoilCFrame rotates the whole assembly from camera space (gun kick/recovery).
-        -- moveCF adds vertical bob and slide roll to the viewmodel independently.
+        local cam   = workspace.CurrentCamera
         local moveCF = MovementController:GetViewmodelAddCFrame()
-        m:PivotTo(cam.CFrame * viewRecoilCFrame * moveCF * BASE_OFFSET * CFrame.new(0, 0, recoilOffset))
+        m:PivotTo(
+            cam.CFrame
+            * viewRecoilCFrame
+            * moveCF
+            * BASE_OFFSET
+            * CFrame.new(0, 0, recoilOffset)
+        )
     end)
 
     Logger.debug("[ViewModelController] Ready")
 end
 
+-- ============================================================
+-- Public methods — fire, recoil, muzzle (called by GunController)
+-- ============================================================
+
 -- Called by GunController immediately after WeaponFired:FireServer().
--- Nudges the model back by RECOIL_DIST and begins the decay back to rest position.
+-- Nudges the model back by RECOIL_DIST and lets RenderStepped decay it to zero.
 function ViewModelController:PlayFireAnimation()
     local model = self.model
-    if not model then
-        return
-    end
+    if not model then return end
     recoilOffset = RECOIL_DIST
-    -- Apply the snap immediately so the first rendered frame shows the kicked position.
     model:PivotTo(model:GetPivot() * CFrame.new(0, 0, recoilOffset))
 end
 
--- Receives the current recoil CFrame from GunController each RenderStepped.
--- GunController pushes this every frame (not just on shots) so recovery is smooth.
--- Using a setter (push pattern) keeps the dependency one-directional:
--- GunController → ViewModelController, never the reverse.
+-- Receives the rotational recoil CFrame from GunController each RenderStepped.
+-- Push pattern keeps the dependency one-directional: GunController → ViewModelController.
 function ViewModelController:SetRecoilOffset(cf: CFrame)
     viewRecoilCFrame = cf
 end
 
--- Returns a CFrame at the barrel muzzle tip for muzzle flash placement.
--- Reads WorldPosition from MuzzleAttachment if the model has one.
--- Falls back to a point 1.5 studs in front of the camera with a warning.
+-- Returns a CFrame at the barrel muzzle tip for muzzle-flash placement.
+-- Reads WorldPosition from MuzzleAttachment if present; falls back to a point in front of
+-- the camera with a warning.
 function ViewModelController:GetBarrelTipCFrame(): CFrame
     local model = self.model
     if model then

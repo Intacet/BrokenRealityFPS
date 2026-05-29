@@ -33,4 +33,28 @@ WeaponData["AR15"] = {
     reloadTime   = 2.2,
 }
 
+-- AKS74 — first-person equip/holster foundation (2026-05-28).
+-- displayName / viewModelName / animations are read by ViewModelController only.
+-- damage / fireRate / range / magazineSize / reserveAmmo are NOT yet read by GunService for
+-- this weapon — GunService continues to use Constants.DEFAULT_WEAPON ("AR15") for all server
+-- validation.  See DEBT-013 and DEBT-059.  Third-person animation IDs stored for future use.
+WeaponData["AKS74"] = {
+    displayName   = "AKS-74",
+    viewModelName = "AKS74",
+    animations = {
+        firstPerson = {
+            equip  = "rbxassetid://139265999638776",
+            idle   = "rbxassetid://75961893882956",
+            fire   = "rbxassetid://116185608269786",
+            reload = "rbxassetid://0",
+        },
+        thirdPerson = {
+            equip  = "rbxassetid://124808012153849",
+            idle   = "rbxassetid://79290751562233",
+            fire   = "rbxassetid://101346298541907",
+            reload = "rbxassetid://82861605710102",
+        },
+    },
+}
+
 return WeaponData

@@ -938,12 +938,22 @@ HUD                     -- driven by HealthChanged, TeamStatusUpdate, AmmoChange
 ObjectiveUI             -- driven by ObjectiveUpdated, ObjectiveComplete
 MatchUI                 -- driven by RoundStateChanged
 CrosshairUI             -- driven by RoundStateChanged; exposes ShowHitmarker()
-ViewModelController     -- driven by RoundStateChanged; exposes PlayFireAnimation(),
-                        --   GetBarrelTipCFrame(), SetRecoilOffset(); reads MovementController.
+ViewModelController     -- driven by RoundStateChanged; reads MovementController and WeaponData.
+                        --   Fire / recoil / muzzle API: PlayFireAnimation(), SetRecoilOffset(),
+                        --   GetBarrelTipCFrame().
+                        --   Equip / holster API (AKS74 foundation — 2026-05-28):
+                        --     EquipWeapon(name)      — clone viewmodel, load tracks, equip → idle seq.
+                        --     HolsterWeapon()        — stop tracks, destroy clone, clear state.
+                        --     IsWeaponEquipped()     — true while model is non-nil.
+                        --     PlayEquipAnimation()   — play equip one-shot then chain to idle.
+                        --     PlayIdleAnimation()    — play idle track (looped).
+                        --     StopWeaponAnimations() — stop and destroy all loaded tracks.
+                        --   Weapon is holstered (model == nil) by default; GunController calls
+                        --   EquipWeapon("AKS74") when key 1 is pressed.
                         --   Camera mode and viewmodel visibility are controlled by
                         --   Constants.FORCE_FIRST_PERSON (src/shared/Constants.lua):
-                        --     true  = LockFirstPerson camera, AR15 viewmodel shown during ACTIVE.
-                        --     false = Classic camera for testing, viewmodel permanently hidden.
+                        --     true  = LockFirstPerson camera; viewmodel shown during ACTIVE when equipped.
+                        --     false = Classic camera for testing; viewmodel permanently hidden.
                         --   Reads workspace.CurrentCamera.CFrame for PivotTo each RenderStepped.
                         --   Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
 DeathScreen             -- driven by RagdollApplied (death trigger), RoundStateChanged (PREP cleanup)
@@ -1156,8 +1166,10 @@ ClientInit.client.lua
   4.  DeathScreen:init()+Start()      -- no controller deps; connects RagdollApplied, RoundStateChanged; needs PlayerGui
   5.  KillFeedUI:init()+Start()       -- no controller deps; connects KillFeed; needs PlayerGui
   6.  CrosshairUI:init()+Start()      -- no controller deps; exposes ShowHitmarker(); needs PlayerGui
-  7.  ViewModelController:Start()     -- requires MovementController (no circular); exposes PlayFireAnimation(),
-                                      --   GetBarrelTipCFrame(), SetRecoilOffset()
+  7.  ViewModelController:Start()     -- requires MovementController, WeaponData (no circular);
+                                      --   exposes PlayFireAnimation(), GetBarrelTipCFrame(), SetRecoilOffset(),
+                                      --   EquipWeapon(), HolsterWeapon(), IsWeaponEquipped(),
+                                      --   PlayEquipAnimation(), PlayIdleAnimation(), StopWeaponAnimations()
   8.  SoundController:init()+Start()  -- no controller deps; no PlayerGui; must start before GunController
   9.  MovementController:Start()      -- reads RoundStateChanged; reads MatchController:GetPhase(); owns
                                       --   movementState and Humanoid.WalkSpeed; reads camera.CFrame for

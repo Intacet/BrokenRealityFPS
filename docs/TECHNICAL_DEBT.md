@@ -1333,6 +1333,67 @@ Stage 4A was not verified in Studio via MCP before commit due to MCP session sta
 
 ---
 
+## [DEBT-059] AKS74 first-person equip/holster is client-only; server fires as AR15 — ADDED 2026-05-28
+
+**Files:** `src/client/GunController.lua`, `src/client/ViewModelController.lua`, `src/shared/Constants.lua`, `src/shared/WeaponData.lua`
+**Severity:** Medium
+**Studio verification required:** Yes
+
+**Risk:** `GunController.equippedWeaponName` and `ViewModelController`'s internal equip state are presentation-only. When the player presses key 1 and equips the AKS74 viewmodel:
+- `WeaponFired:FireServer()` still fires with the AR15-mapped stats (GunService validates against `Constants.DEFAULT_WEAPON = "AR15"`).
+- The `AmmoChanged` remote returns AR15 magazine / reserve counts.
+- AKS74 `damage`, `fireRate`, and `range` values in `WeaponData` are not yet read by GunService.
+- Third-person world model animations are not implemented.
+
+This worsens DEBT-013 (weapon name not sent in `WeaponFired` payload) by adding a second equipped weapon whose identity is completely invisible to the server.
+
+**Safe for this stage:** A single-weapon prototype where AR15 and AKS74 stats are similar is acceptable. Players cannot gain any advantage — the server validates every shot with AR15 constraints.
+
+**Trigger:** A second weapon with meaningfully different stats (e.g. a slower, higher-damage bolt-action) is added and players expect the server to use the correct stats.
+
+**Fix when:** A server-owned loadout / equipment system is built (see DEBT-013). The fix requires:
+1. `WeaponFired` and `ReloadRequest` payloads carry the equipped weapon name.
+2. GunService reads the equipped weapon from a server-authoritative loadout table (not from a client-sent field).
+3. `Constants.DEFAULT_WEAPON` is retired; weapon identity flows from inventory/loadout state.
+
+**Studio verification checklist (2026-05-28 — MCP unavailable at commit time):**
+1. In Studio play mode, confirm `rojo serve` syncs all four changed files without error.
+2. Press key 1 → AKS74 viewmodel should clone and appear (when `FORCE_FIRST_PERSON = true` and phase is ACTIVE).
+3. Equip animation `rbxassetid://139265999638776` should play once; idle `rbxassetid://75961893882956` should loop after.
+4. Press key 1 again → viewmodel disappears (holstered); fire and reload should be blocked.
+5. In ACTIVE phase with AKS74 equipped, left-click should fire (WeaponFired sent), R should reload (ReloadRequest sent).
+6. Check Output for any `[ViewModelController]` or `[GunController]` errors.
+7. Respawn → weapon should auto-holster; press key 1 to re-equip.
+8. Confirm `FORCE_FIRST_PERSON = false` (default dev mode) keeps viewmodel hidden even when equipped.
+**Resolve when:** Steps 1–8 pass in a live Studio session.
+
+---
+
+## [DEBT-060] AKS74 equip / idle animation playback not verified in Studio — ADDED 2026-05-28
+
+**Files:** `src/client/ViewModelController.lua`, `src/shared/WeaponData.lua`
+**Severity:** Medium
+**Studio verification required:** Yes
+
+**Risk:** `ViewModelController:_setupWeaponAnimations()` creates an `AnimationController + Animator` programmatically if the AKS74 viewmodel has no `Humanoid`. If the viewmodel's Motor6D hierarchy requires the Animator to be under a `Humanoid` (not an `AnimationController`), the tracks will load without error but may not drive the correct joints. This is a common mismatch with imported rig assets.
+
+**Secondary risk:** Animation IDs `rbxassetid://139265999638776` (equip) and `rbxassetid://75961893882956` (idle) were provided in the task spec but have not been tested against the AKS74 rig in Studio. If the IDs target a different rig type (e.g. R15 arms), `LoadAnimation` will succeed but the animation will look wrong or play on wrong joints.
+
+**Trigger:** First Studio play-mode test of the AKS74 equip system.
+
+**Runtime test required:**
+1. Ensure `FORCE_FIRST_PERSON = true` in `Constants.lua` (or test at `Constants.Phase.ACTIVE`).
+2. Enter play mode. Press key 1 to equip.
+3. Confirm the equip animation plays visually (arms/gun move).
+4. After equip completes, confirm idle loops correctly.
+5. Check Output for `[ViewModelController] _setupWeaponAnimations` logs — confirm "tracks loaded" appears, no LoadAnimation errors.
+6. If animations do not play: inspect the AKS74 model hierarchy in Explorer; confirm whether it has a `Humanoid` or not. If not, confirm `AnimationController` was created under the clone by this code.
+7. If the wrong joints move: the animation IDs may target a different rig. Request correct animation IDs or re-rig the viewmodel.
+
+**Resolve when:** Steps 1–7 pass in a live Studio session with no visual glitches.
+
+---
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.lua`

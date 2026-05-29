@@ -914,4 +914,27 @@ Constants.SPRINT_STOP_MIN_HORIZONTAL_SPEED = 8
 -- See ViewModelController.lua and DEBT-048 for full context.
 Constants.FORCE_FIRST_PERSON = false
 
+-- ============================================================
+-- Viewmodel equip / holster (AKS74 first-person foundation — 2026-05-28)
+-- Key 1 toggles the AKS74 viewmodel on / off in GunController.
+-- No fire animation, no reload animation, no ADS, no recoil, no sprint-lowered,
+-- no third-person world-model logic — smallest equip/holster scaffold only.
+-- ============================================================
+
+-- Name of the weapon to equip when key 1 is pressed.
+-- Maps to a WeaponData entry that must have viewModelName and animations.firstPerson.
+Constants.DEFAULT_VIEWMODEL_WEAPON = "AKS74"
+
+-- Key that toggles the first-person viewmodel equip / holster state.
+Constants.VIEWMODEL_EQUIP_KEY = Enum.KeyCode.One
+
+-- Name of the ReplicatedStorage folder that holds viewmodel Model assets.
+Constants.VIEWMODEL_FOLDER_NAME = "ViewModels"
+
+-- Primary root-part name on a viewmodel rig (used for BASE_OFFSET computation).
+Constants.VIEWMODEL_DEFAULT_ROOT_PART_NAME = "HumanoidRootPart"
+
+-- Fallback root-part name when HumanoidRootPart is absent on a viewmodel rig.
+Constants.VIEWMODEL_FALLBACK_ROOT_PART_NAME = "RootPart"
+
 return Constants

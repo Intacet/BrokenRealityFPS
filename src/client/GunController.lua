@@ -86,6 +86,19 @@ local LocalPlayer = Players.LocalPlayer
 -- State
 -- ============================================================
 
+-- Presentation-only flag: name of the currently equipped viewmodel weapon, or nil
+-- when holstered.  Gates left-click fire and reload — no weapon means no shots.
+-- Does NOT affect server validation; GunService continues to use Constants.DEFAULT_WEAPON.
+-- See DEBT-013 and DEBT-059.
+local equippedWeaponName: string? = nil
+
+-- Cleanup table for new RBXScriptConnections added by this task.
+-- Existing connections (fire, reload, ammo, health) pre-date this table and are not
+-- stored here — they follow the existing unmanaged pattern.
+-- DEBT-059: no cleanup/destroy path exists for GunController yet; connections stored
+-- here are disconnected when / if a destroy() method is added in a future task.
+local _connections: { RBXScriptConnection } = {}
+
 -- Client-side rate limiting (mirrors GunService).
 local lastShotTime: number = 0
 
@@ -187,11 +200,42 @@ function GunController:Start()
         ViewModelController:SetRecoilOffset(recoilCFrame)
     end)
 
+    -- ── Input: Key 1 — equip / holster AKS74 viewmodel ─────────────────────
+    -- Toggles the first-person viewmodel on / off.  Presentation-only: the server
+    -- continues to use Constants.DEFAULT_WEAPON for all authoritative validation.
+    -- Using UserInputService.InputBegan to match the existing input style in this controller.
+    local equipConn = UserInputService.InputBegan:Connect(function(input: InputObject, gp: boolean)
+        if gp then return end
+        if input.KeyCode ~= Constants.VIEWMODEL_EQUIP_KEY then return end
+        if equippedWeaponName == nil then
+            ViewModelController:EquipWeapon(Constants.DEFAULT_VIEWMODEL_WEAPON)
+            equippedWeaponName = Constants.DEFAULT_VIEWMODEL_WEAPON
+            Logger.debug("[GunController] Equipped: " .. Constants.DEFAULT_VIEWMODEL_WEAPON)
+        else
+            ViewModelController:HolsterWeapon()
+            equippedWeaponName = nil
+            Logger.debug("[GunController] Holstered weapon")
+        end
+    end)
+    table.insert(_connections, equipConn)
+
+    -- Sync equippedWeaponName with ViewModelController on character respawn.
+    -- ViewModelController:init() holsters the weapon on CharacterAdded; this listener
+    -- ensures GunController's local state matches so fire / reload remain gated.
+    local respawnConn = LocalPlayer.CharacterAdded:Connect(function(_character: Model)
+        equippedWeaponName = nil
+        Logger.debug("[GunController] equippedWeaponName cleared on respawn (weapon holstered)")
+    end)
+    table.insert(_connections, respawnConn)
+
     -- ── Input: Fire ───────────────────────────────────────────────────────────
 
     UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
         if gameProcessed then return end
         if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+
+        -- Block fire while holstered (no weapon in hand).
+        if equippedWeaponName == nil then return end
 
         if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
 
@@ -312,6 +356,8 @@ function GunController:Start()
     UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
         if gameProcessed then return end
         if input.KeyCode ~= Enum.KeyCode.R then return end
+        -- Block reload while holstered (no weapon in hand).
+        if equippedWeaponName == nil then return end
         if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
         -- Stage 2P: block reload while tactical sprint is active.
         if Constants.TACTICAL_SPRINT_BLOCKS_GUN_USE

@@ -7,6 +7,79 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-28] — AKS74 first-person equip / holster foundation
+
+### Summary
+
+Adds the smallest possible first-person equip / holster scaffold for the AKS74.  Key 1 toggles the weapon on and off.  Equipping clones `ReplicatedStorage/ViewModels/AKS74`, plays the first-person equip animation once (`rbxassetid://139265999638776`), then loops the idle animation (`rbxassetid://75961893882956`).  Holstering stops all animations and destroys the clone.  Left-click fire and R reload are now gated on the weapon being equipped.  No fire animation, no reload animation, no sprint-lowered, no ADS, no recoil, no muzzle flash, no third-person world model animation, no new remotes.  Server-side weapon identity (`Constants.DEFAULT_WEAPON = "AR15"`) and all damage / hit / ammo / health logic are unchanged.
+
+The AR15 viewmodel no longer auto-equips on spawn.  The viewmodel starts holstered; the player must press key 1 to equip the AKS74.  This replaces the previous `init()` AR15 auto-clone behavior.
+
+MCP/Studio verification not yet performed — see DEBT-059 and DEBT-060 for required verification checklist.
+
+### Changes to `src/shared/WeaponData.lua`
+
+- Added `WeaponData["AKS74"]` entry: `displayName`, `viewModelName = "AKS74"`, `animations.firstPerson` (equip / idle / fire / reload IDs), `animations.thirdPerson` (stored for future use, not used at runtime).
+
+### Changes to `src/shared/Constants.lua`
+
+- Added `Constants.DEFAULT_VIEWMODEL_WEAPON = "AKS74"` — weapon equipped by key 1.
+- Added `Constants.VIEWMODEL_EQUIP_KEY = Enum.KeyCode.One` — toggle key.
+- Added `Constants.VIEWMODEL_FOLDER_NAME = "ViewModels"` — ReplicatedStorage folder name.
+- Added `Constants.VIEWMODEL_DEFAULT_ROOT_PART_NAME = "HumanoidRootPart"` — primary rig root name.
+- Added `Constants.VIEWMODEL_FALLBACK_ROOT_PART_NAME = "RootPart"` — fallback if HRP absent.
+
+### Changes to `src/client/ViewModelController.lua`
+
+**Architecture:**
+- `init()` now clears all state without cloning any weapon (weapon starts holstered).  The previous AR15 auto-clone on `init()` / `CharacterAdded` is removed.
+- `setVisibility()` moved from a closure inside `Start()` to module level so `EquipWeapon` and `HolsterWeapon` can call it directly.
+- `WeaponData` added as a required dependency (no circular: ViewModelController → WeaponData only).
+- `shouldShowViewModel()` unchanged — still gates on `FORCE_FIRST_PERSON + ACTIVE phase + model ~= nil`.
+- The `if not self.model then return end` guard in `Start()` is removed (nil model is now normal).
+
+**New state (module-level):**
+- `equippedWeaponName: string?` — nil while holstered.
+- `weaponEquipTrack: AnimationTrack?` — first-person equip one-shot.
+- `weaponIdleTrack: AnimationTrack?` — first-person idle loop.
+
+**New public methods:**
+- `EquipWeapon(weaponName: string)` — clone, configure, compute BASE_OFFSET, load tracks, apply visibility, play equip → idle sequence.
+- `HolsterWeapon()` — stop tracks, destroy clone, clear state.
+- `IsWeaponEquipped(): boolean` — returns true while equipped.
+- `PlayEquipAnimation()` — play equip track once; chain to PlayIdleAnimation() via Stopped.
+- `PlayIdleAnimation()` — play idle track (looped).
+- `StopWeaponAnimations()` — stop and destroy all loaded weapon tracks.
+
+**New private helper:**
+- `_setupWeaponAnimations(weaponName, data)` — finds or creates `AnimationController + Animator`, loads equip and idle tracks from `WeaponData.animations.firstPerson`.
+
+**Preserved:**
+- `PlayFireAnimation()`, `SetRecoilOffset()`, `GetBarrelTipCFrame()` — unchanged.
+- `RoundStateChanged` listener and `RenderStepped` PivotTo loop — unchanged.
+- `HELPER_PARTS`, `RECOIL_DIST / RATE`, `MUZZLE_FALLBACK_DIST` — unchanged.
+- `applyCameraMode()` and `CharacterAdded` respawn handler — unchanged behavior; `init()` now called instead of AR15 clone path.
+
+### Changes to `src/client/GunController.lua`
+
+- Added `local equippedWeaponName: string? = nil` — presentation-only equip gate.
+- Added `local _connections: { RBXScriptConnection } = {}` — cleanup table for new connections.
+- Added `UserInputService.InputBegan` handler for `Constants.VIEWMODEL_EQUIP_KEY` (key 1): toggles `ViewModelController:EquipWeapon` / `HolsterWeapon` and mirrors state in `equippedWeaponName`. Connection stored in `_connections`.
+- Added `LocalPlayer.CharacterAdded` handler: clears `equippedWeaponName` on respawn (keeps GunController in sync with ViewModelController's `init()` holster). Connection stored in `_connections`.
+- Left-click fire handler: added `if equippedWeaponName == nil then return end` guard after MouseButton1 check.
+- Reload handler: added `if equippedWeaponName == nil then return end` guard after KeyCode.R check.
+
+### Changes to `docs/TECHNICAL_DEBT.md`
+
+- Added DEBT-059: AKS74 equip/holster is client-only; server fires as AR15 (worsens DEBT-013).
+- Added DEBT-060: AKS74 animation playback not verified in Studio.
+
+### Studio verification
+
+MCP unavailable at commit time. See DEBT-059 verification checklist (items 1–8) before marking this entry resolved.
+
+---
+
 ## [2026-05-28] — Stage 4: Custom mouse-lock camera-yaw body facing + 8-direction animation hysteresis
 
 ### Summary
