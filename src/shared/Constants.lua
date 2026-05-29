@@ -946,6 +946,6 @@ Constants.VIEWMODEL_FALLBACK_ROOT_PART_NAME = "RootPart"
 -- Tune in Studio: equip AKS74 in ACTIVE phase, adjust until the weapon fills the
 -- lower portion of the screen as in the reference Blender viewport.
 -- Starting value: 1.2 studs forward (closer) with no lateral or vertical shift.
-Constants.VIEWMODEL_CAMERA_EXTRA_OFFSET = CFrame.new(0, 0, -1.2)
+Constants.VIEWMODEL_CAMERA_EXTRA_OFFSET = CFrame.new(-0.1, 0.25, 0.7)
 
 return Constants

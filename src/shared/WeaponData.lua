@@ -46,7 +46,7 @@ WeaponData["AKS74"] = {
             equip  = "rbxassetid://139265999638776",
             idle   = "rbxassetid://75961893882956",
             fire   = "rbxassetid://116185608269786",
-            reload = "rbxassetid://116675003285739",
+            reload = "rbxassetid://127212878966691",
             run    = "rbxassetid://111133092181267",
         },
         thirdPerson = {
