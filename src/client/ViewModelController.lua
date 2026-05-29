@@ -83,6 +83,11 @@ local RECOIL_RATE: number = RECOIL_DIST / 0.05
 -- Fallback muzzle-flash distance when MuzzleAttachment is absent.
 local MUZZLE_FALLBACK_DIST: number = 1.5
 
+-- Extra offset applied in camera space before the recoil/bob/BASE_OFFSET chain.
+-- Negative Z brings the model closer to the camera (weapon fills more of the screen).
+-- Read once at module load; change Constants.VIEWMODEL_CAMERA_EXTRA_OFFSET to retune.
+local CAMERA_EXTRA_OFFSET: CFrame = Constants.VIEWMODEL_CAMERA_EXTRA_OFFSET
+
 -- ============================================================
 -- State
 -- ============================================================
@@ -640,10 +645,11 @@ function ViewModelController:Start()
             recoilOffset = math.max(0, recoilOffset - dt * RECOIL_RATE)
         end
 
-        local cam   = workspace.CurrentCamera
+        local cam    = workspace.CurrentCamera
         local moveCF = MovementController:GetViewmodelAddCFrame()
         m:PivotTo(
             cam.CFrame
+            * CAMERA_EXTRA_OFFSET   -- shifts entire model in camera space (tune via Constants)
             * viewRecoilCFrame
             * moveCF
             * BASE_OFFSET

@@ -937,4 +937,15 @@ Constants.VIEWMODEL_DEFAULT_ROOT_PART_NAME = "HumanoidRootPart"
 -- Fallback root-part name when HumanoidRootPart is absent on a viewmodel rig.
 Constants.VIEWMODEL_FALLBACK_ROOT_PART_NAME = "RootPart"
 
+-- Extra CFrame offset applied to the viewmodel in camera space every RenderStepped,
+-- inserted between cam.CFrame and the recoil/bob/BASE_OFFSET chain.
+-- Negative Z moves the model toward the camera (weapon appears larger/closer).
+-- Positive Z pushes it away (weapon appears smaller/farther).
+-- X shifts the model right (+) or left (-) in camera space.
+-- Y shifts the model up (+) or down (-) in camera space.
+-- Tune in Studio: equip AKS74 in ACTIVE phase, adjust until the weapon fills the
+-- lower portion of the screen as in the reference Blender viewport.
+-- Starting value: 1.2 studs forward (closer) with no lateral or vertical shift.
+Constants.VIEWMODEL_CAMERA_EXTRA_OFFSET = CFrame.new(0, 0, -1.2)
+
 return Constants

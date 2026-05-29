@@ -7,6 +7,25 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-29] — Viewmodel camera depth offset (weapon closer to camera)
+
+### Summary
+
+Adds `Constants.VIEWMODEL_CAMERA_EXTRA_OFFSET` (a tunable `CFrame`) that shifts the entire viewmodel in camera space before the recoil/bob/BASE_OFFSET chain. Starting value: `CFrame.new(0, 0, -1.2)` — moves the model 1.2 studs toward the camera so the weapon fills the lower portion of the screen closer to the reference Blender viewport. Tune the Z component in Constants.lua; negative = closer, positive = farther. X/Y shift the model laterally/vertically in camera space if needed.
+
+No animation changes. No server changes. No camera.CFrame writes. MCP/Studio verification required to confirm the Z value feels right in play mode.
+
+### Changes to `src/shared/Constants.lua`
+
+- Added `Constants.VIEWMODEL_CAMERA_EXTRA_OFFSET = CFrame.new(0, 0, -1.2)`.
+
+### Changes to `src/client/ViewModelController.lua`
+
+- Added module-level `CAMERA_EXTRA_OFFSET` local (reads `Constants.VIEWMODEL_CAMERA_EXTRA_OFFSET` once at load).
+- Applied it in the RenderStepped `PivotTo` chain: `cam.CFrame * CAMERA_EXTRA_OFFSET * viewRecoilCFrame * moveCF * BASE_OFFSET * recoilOffset`.
+
+---
+
 ## [2026-05-29] — AKS74 first-person fire, reload, and run viewmodel animations
 
 ### Summary
