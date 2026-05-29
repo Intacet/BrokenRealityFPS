@@ -912,7 +912,7 @@ Constants.SPRINT_STOP_MIN_HORIZONTAL_SPEED = 8
 -- true  = lock first person and show first-person viewmodel during gameplay.
 -- Set to true before shipping or playtesting the FPS experience.
 -- See ViewModelController.lua and DEBT-048 for full context.
-Constants.FORCE_FIRST_PERSON = false
+Constants.FORCE_FIRST_PERSON = true
 
 -- ============================================================
 -- Viewmodel equip / holster (AKS74 first-person foundation — 2026-05-28)
