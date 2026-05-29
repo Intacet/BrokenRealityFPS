@@ -941,13 +941,21 @@ CrosshairUI             -- driven by RoundStateChanged; exposes ShowHitmarker()
 ViewModelController     -- driven by RoundStateChanged; reads MovementController and WeaponData.
                         --   Fire / recoil / muzzle API: PlayFireAnimation(), SetRecoilOffset(),
                         --   GetBarrelTipCFrame().
-                        --   Equip / holster API (AKS74 foundation — 2026-05-28):
-                        --     EquipWeapon(name)      — clone viewmodel, load tracks, equip → idle seq.
-                        --     HolsterWeapon()        — stop tracks, destroy clone, clear state.
-                        --     IsWeaponEquipped()     — true while model is non-nil.
-                        --     PlayEquipAnimation()   — play equip one-shot then chain to idle.
-                        --     PlayIdleAnimation()    — play idle track (looped).
-                        --     StopWeaponAnimations() — stop and destroy all loaded tracks.
+                        --   Equip / holster / animation API (AKS74 — updated 2026-05-29):
+                        --     EquipWeapon(name)         — clone viewmodel, load all tracks, equip → run/idle.
+                        --     HolsterWeapon()           — stop all tracks, destroy clone, clear state.
+                        --     IsWeaponEquipped()        — true while model is non-nil.
+                        --     PlayEquipAnimation()      — play equip one-shot then chain to run or idle.
+                        --     PlayIdleAnimation()       — play idle track (looped, Idle priority).
+                        --     PlayRunAnimation()        — play run track (looped, Movement priority).
+                        --     PlayFireAnimation()       — positional recoil snap + fire one-shot (Action priority);
+                        --                                 restartable per shot; blocked by reload.
+                        --     PlayReloadAnimation()     — one-shot reload (Action priority); not restartable;
+                        --                                 blocks fire + run; resumes run or idle on end.
+                        --     SetRunning(isSprinting)   — called by GunController each RenderStepped;
+                        --                                 manages run ↔ idle transition while equipped.
+                        --     StopWeaponAnimations()    — stop/destroy all tracks; reset isReloading + isRunning.
+                        --   Animation priority order (highest to lowest): Reload ≥ Fire > Run > Idle.
                         --   Weapon is holstered (model == nil) by default; GunController calls
                         --   EquipWeapon("AKS74") when key 1 is pressed.
                         --   Camera mode and viewmodel visibility are controlled by
@@ -1167,9 +1175,11 @@ ClientInit.client.lua
   5.  KillFeedUI:init()+Start()       -- no controller deps; connects KillFeed; needs PlayerGui
   6.  CrosshairUI:init()+Start()      -- no controller deps; exposes ShowHitmarker(); needs PlayerGui
   7.  ViewModelController:Start()     -- requires MovementController, WeaponData (no circular);
-                                      --   exposes PlayFireAnimation(), GetBarrelTipCFrame(), SetRecoilOffset(),
+                                      --   exposes PlayFireAnimation(), PlayReloadAnimation(), SetRunning(),
+                                      --   PlayRunAnimation(), PlayIdleAnimation(), PlayEquipAnimation(),
+                                      --   GetBarrelTipCFrame(), SetRecoilOffset(),
                                       --   EquipWeapon(), HolsterWeapon(), IsWeaponEquipped(),
-                                      --   PlayEquipAnimation(), PlayIdleAnimation(), StopWeaponAnimations()
+                                      --   StopWeaponAnimations()
   8.  SoundController:init()+Start()  -- no controller deps; no PlayerGui; must start before GunController
   9.  MovementController:Start()      -- reads RoundStateChanged; reads MatchController:GetPhase(); owns
                                       --   movementState and Humanoid.WalkSpeed; reads camera.CFrame for

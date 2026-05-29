@@ -7,6 +7,52 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-29] — AKS74 first-person fire, reload, and run viewmodel animations
+
+### Summary
+
+Extends the AKS74 first-person viewmodel animation system with fire, reload, and sprint/run animation playback.  The equip → idle foundation from 2026-05-28 is unchanged; this task adds the remaining three animation states.
+
+**Animation priority order (highest to lowest):** Reload ≥ Fire > Run > Idle.
+- Left-click / fire: plays fire one-shot (`rbxassetid://116185608269786`) over the current base layer (idle or run).  Restartable per shot.  Blocked during reload.
+- R / reload: plays reload one-shot (`rbxassetid://116675003285739`).  Not restartable while playing.  Stops run; resumes run (if still sprinting) or idle on completion.
+- Sprint: GunController polls `MovementController:GetMoveState()` every RenderStepped and calls `ViewModelController:SetRunning(isSprinting)`.  While sprinting and equipped, run track (`rbxassetid://111133092181267`) replaces idle; run stops and idle resumes when sprinting ends.
+
+No ADS, no recoil changes, no muzzle flash changes, no camera changes, no movement speed changes, no new remotes, no server changes.  MCP/Studio verification not yet performed — see DEBT-061.
+
+### Changes to `src/shared/WeaponData.lua`
+
+- Updated `WeaponData["AKS74"].animations.firstPerson.reload`: `"rbxassetid://0"` → `"rbxassetid://116675003285739"`.
+- Added `WeaponData["AKS74"].animations.firstPerson.run = "rbxassetid://111133092181267"`.
+
+### Changes to `src/client/ViewModelController.lua`
+
+**New state variables:**
+- `weaponFireTrack: AnimationTrack?` — one-shot fire; Action priority.
+- `weaponReloadTrack: AnimationTrack?` — one-shot reload; Action priority.
+- `weaponRunTrack: AnimationTrack?` — looped run/sprint; Movement priority.
+- `isReloading: boolean` — true while reload one-shot is playing; blocks fire and run.
+- `isRunning: boolean` — true while GunController reports sprint with weapon equipped.
+
+**Extended existing methods:**
+- `init()`: clears the three new tracks and resets `isReloading`, `isRunning`.
+- `StopWeaponAnimations()`: stops/destroys the three new tracks; resets `isReloading`, `isRunning`.
+- `_setupWeaponAnimations()`: loads fire, reload, and run tracks with correct `Looped` and `Priority` values.  Sets priorities on equip (Action) and idle (Idle) tracks too.
+- `PlayFireAnimation()`: adds actual fire track play (stop+restart for per-shot restartability); now returns early while `isReloading`.
+- `PlayEquipAnimation()`: Stopped callback now chains to run (if `isRunning`) or idle (fallback) instead of always idle.
+
+**New public methods:**
+- `PlayRunAnimation()` — plays run track; no-op if none loaded.
+- `PlayReloadAnimation()` — one-shot reload with spam guard; stops fire/run/idle, plays reload, resumes run or idle in Stopped callback.
+- `SetRunning(isSprinting: boolean)` — called each frame by GunController; manages run ↔ idle transition; no-op while holstered, while `isSprinting == isRunning`, or while reloading (deferred to Stopped callback).
+
+### Changes to `src/client/GunController.lua`
+
+- Reload `InputBegan` handler: added `ViewModelController:PlayReloadAnimation()` call after `SoundController:PlayReload()`.
+- `RenderStepped` loop: added sprint detection — when `equippedWeaponName ~= nil`, reads `MovementController:GetMoveState() == "Sprinting"` and calls `ViewModelController:SetRunning(isSprinting)` each frame.  No new module dependency (MovementController already required).
+
+---
+
 ## [2026-05-28] — AKS74 first-person equip / holster foundation
 
 ### Summary

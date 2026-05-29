@@ -1394,6 +1394,38 @@ This worsens DEBT-013 (weapon name not sent in `WeaponFired` payload) by adding 
 
 ---
 
+## [DEBT-061] AKS74 fire / reload / run viewmodel animation playback not verified in Studio — ADDED 2026-05-29
+
+**Files:** `src/client/ViewModelController.lua`, `src/client/GunController.lua`, `src/shared/WeaponData.lua`
+**Severity:** Medium
+**Studio verification required:** Yes
+
+**Risk:** The fire, reload, and run animation tracks are loaded programmatically with explicit `AnimationTrack.Priority` assignments (Action / Action / Movement). If Roblox does not honour `Priority` on tracks loaded under an `AnimationController` Animator (versus a `Humanoid` Animator), the three new tracks may blend instead of override, producing visual artifacts when fire plays over idle or run plays over idle.
+
+**Secondary risk:** Animation IDs `rbxassetid://116185608269786` (fire), `rbxassetid://116675003285739` (reload), and `rbxassetid://111133092181267` (run) were provided in the task spec but have not been tested against the AKS74 rig in Studio. If any ID targets a different rig type, `LoadAnimation` will succeed but the animation will look wrong.
+
+**Sprint detection risk:** `GunController` calls `MovementController:GetMoveState() == "Sprinting"` every RenderStepped. If the state is never "Sprinting" (e.g. sprint key does not fire correctly in Studio play mode due to MCP limitations), `SetRunning(true)` will never be called and the run animation cannot be tested via MCP. Manual sprint in Studio play mode is required.
+
+**Trigger:** First Studio play-mode test after this commit.
+
+**Studio verification checklist (MCP unavailable at commit time):**
+1. `FORCE_FIRST_PERSON = true` in Constants.lua; phase must be ACTIVE for viewmodel to show.
+2. Press key 1 → AKS74 equip animation plays; idle loops after.
+3. Left-click → fire animation plays once per click; rapid clicking restarts from frame 0 each shot.
+4. Left-click during reload → fire is silently blocked (no visual, no error).
+5. Press R → reload animation plays; fire and run are blocked while it plays; idle (or run if sprinting) resumes on reload completion.
+6. Press R while already reloading → reload does NOT restart (spam guard — no-op).
+7. Sprint (hold LeftShift) while weapon is equipped → run animation plays in place of idle.
+8. Stop sprinting → idle resumes cleanly (no blend artifact).
+9. Sprint, then press R → reload plays; sprint state is remembered; run resumes after reload if still sprinting.
+10. Sprint, then left-click → fire plays on top of run; run continues after fire one-shot ends.
+11. Holster (key 1) while running → all animations stop; no run or idle track continues after holster.
+12. Check Output → no errors from `[ViewModelController]` or `[GunController]` during any of the above states.
+
+**Resolve when:** All 12 checklist items pass in a live Studio session.
+
+---
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.lua`

@@ -34,10 +34,13 @@
 --   :EquipWeapon(name)        — clone & equip a weapon viewmodel, play equip → idle animation
 --   :HolsterWeapon()          — stop animations, destroy model, clear equip state
 --   :IsWeaponEquipped()       — returns true while any weapon is equipped
---   :PlayEquipAnimation()     — play equip track once, then chain to PlayIdleAnimation()
+--   :PlayEquipAnimation()     — play equip track once, then chain to run or idle
 --   :PlayIdleAnimation()      — play idle track (looped)
---   :StopWeaponAnimations()   — stop and destroy all loaded weapon AnimationTracks
---   :PlayFireAnimation()      — positional recoil kick (called by GunController on fire)
+--   :PlayRunAnimation()       — play run track (looped, called by SetRunning)
+--   :PlayFireAnimation()      — positional recoil snap + one-shot fire track (blocked by reload)
+--   :PlayReloadAnimation()    — one-shot reload track; blocks fire/run; resumes run or idle on end
+--   :SetRunning(isSprinting)  — called by GunController each frame; manages run ↔ idle transition
+--   :StopWeaponAnimations()   — stop and destroy all loaded weapon AnimationTracks, reset flags
 --   :SetRecoilOffset(cf)      — push a rotational recoil CFrame from GunController
 --   :GetBarrelTipCFrame()     — world CFrame at MuzzleAttachment tip (muzzle-flash placement)
 --
@@ -98,8 +101,19 @@ local viewRecoilCFrame: CFrame = CFrame.new()
 local equippedWeaponName: string? = nil
 
 -- First-person animation tracks for the equipped weapon.
-local weaponEquipTrack: AnimationTrack? = nil
-local weaponIdleTrack:  AnimationTrack? = nil
+-- equip and idle are the base-layer tracks (loaded and cleared by _setupWeaponAnimations).
+-- fire, reload, and run are the action/movement overlay tracks (same lifetime).
+local weaponEquipTrack:  AnimationTrack? = nil
+local weaponIdleTrack:   AnimationTrack? = nil
+local weaponFireTrack:   AnimationTrack? = nil
+local weaponReloadTrack: AnimationTrack? = nil
+local weaponRunTrack:    AnimationTrack? = nil
+
+-- Animation state flags.
+-- isReloading: true while reload one-shot is playing; blocks fire and run.
+-- isRunning:   true while GunController reports sprint state and a weapon is equipped.
+local isReloading: boolean = false
+local isRunning:   boolean = false
 
 -- ============================================================
 -- Controller table
@@ -178,7 +192,7 @@ end
 -- Clears all weapon state.  Called by Start() and CharacterAdded.
 -- After init(), self.model is nil (weapon holstered) and no animation tracks are loaded.
 function ViewModelController:init()
-    -- Stop and destroy any playing weapon animation tracks.
+    -- Stop and destroy all weapon animation tracks.
     if weaponEquipTrack then
         weaponEquipTrack:Stop()
         weaponEquipTrack:Destroy()
@@ -189,6 +203,23 @@ function ViewModelController:init()
         weaponIdleTrack:Destroy()
         weaponIdleTrack = nil
     end
+    if weaponFireTrack then
+        weaponFireTrack:Stop()
+        weaponFireTrack:Destroy()
+        weaponFireTrack = nil
+    end
+    if weaponReloadTrack then
+        weaponReloadTrack:Stop()
+        weaponReloadTrack:Destroy()
+        weaponReloadTrack = nil
+    end
+    if weaponRunTrack then
+        weaponRunTrack:Stop()
+        weaponRunTrack:Destroy()
+        weaponRunTrack = nil
+    end
+    isReloading = false
+    isRunning   = false
     -- Destroy any existing weapon model.
     if self.model then
         self.model:Destroy()
@@ -200,7 +231,9 @@ function ViewModelController:init()
     Logger.debug("[ViewModelController] init: state cleared (weapon holstered)")
 end
 
--- Stops and destroys all loaded weapon AnimationTracks.
+-- Stops and destroys all loaded weapon AnimationTracks and resets all animation state flags.
+-- AnimationTrack:Destroy() severs Stopped signals synchronously, so no deferred callbacks
+-- (reload chain, equip chain) will fire after this returns.
 -- Safe to call when no weapon is equipped (no-op in that case).
 function ViewModelController:StopWeaponAnimations()
     if weaponEquipTrack then
@@ -213,7 +246,24 @@ function ViewModelController:StopWeaponAnimations()
         weaponIdleTrack:Destroy()
         weaponIdleTrack = nil
     end
-    Logger.debug("[ViewModelController] StopWeaponAnimations: tracks cleared")
+    if weaponFireTrack then
+        weaponFireTrack:Stop()
+        weaponFireTrack:Destroy()
+        weaponFireTrack = nil
+    end
+    if weaponReloadTrack then
+        weaponReloadTrack:Stop()
+        weaponReloadTrack:Destroy()
+        weaponReloadTrack = nil
+    end
+    if weaponRunTrack then
+        weaponRunTrack:Stop()
+        weaponRunTrack:Destroy()
+        weaponRunTrack = nil
+    end
+    isReloading = false
+    isRunning   = false
+    Logger.debug("[ViewModelController] StopWeaponAnimations: all tracks cleared, flags reset")
 end
 
 -- Stops animations, destroys the current weapon model, and clears equip state.
@@ -254,24 +304,28 @@ function ViewModelController:PlayEquipAnimation()
 
     if weaponEquipTrack and weaponEquipTrack.Length > 0 then
         weaponEquipTrack:Play()
-        -- Chain to idle when the equip one-shot ends.
+        -- Chain to run or idle when the equip one-shot ends.
         -- AnimationTrack:Destroy() disconnects all signals synchronously, so the
         -- Stopped callback will not fire after StopWeaponAnimations() has run.
         weaponEquipTrack.Stopped:Connect(function()
-            -- Guard: only start idle if the same weapon is still equipped and
-            -- an idle track was loaded.
-            if equippedWeaponName == capturedWeapon
-                and self.model ~= nil
-                and weaponIdleTrack ~= nil
-            then
+            -- Guard: only proceed if same weapon is still equipped.
+            if equippedWeaponName ~= capturedWeapon or self.model == nil then return end
+            -- Resume run if GunController already flagged sprint, else start idle.
+            if isRunning and weaponRunTrack ~= nil then
+                self:PlayRunAnimation()
+            elseif weaponIdleTrack ~= nil then
                 self:PlayIdleAnimation()
             end
         end)
         Logger.debug("[ViewModelController] PlayEquipAnimation: equip track started")
     else
-        -- No equip track or zero-length clip — start idle directly.
-        Logger.debug("[ViewModelController] PlayEquipAnimation: no equip track — starting idle directly")
-        self:PlayIdleAnimation()
+        -- No equip track or zero-length clip — start run or idle directly.
+        Logger.debug("[ViewModelController] PlayEquipAnimation: no equip track — starting base directly")
+        if isRunning and weaponRunTrack ~= nil then
+            self:PlayRunAnimation()
+        else
+            self:PlayIdleAnimation()
+        end
     end
 end
 
@@ -459,29 +513,73 @@ function ViewModelController:_setupWeaponAnimations(weaponName: string, data: an
         return
     end
 
-    -- Load equip track (one-shot).
+    -- Load equip track (one-shot, Action priority — overrides idle on entry).
     local equipId: string = tostring(fp.equip or "")
     if equipId ~= "" and equipId ~= "rbxassetid://0" then
         local equipAnim = Instance.new("Animation")
         equipAnim.AnimationId = equipId
         local track = (animator :: Animator):LoadAnimation(equipAnim)
-        track.Looped   = false
+        track.Looped    = false
+        track.Priority  = Enum.AnimationPriority.Action
         weaponEquipTrack = track
     else
         Logger.debug("[ViewModelController] _setupWeaponAnimations: no equip animation ID for: "
             .. weaponName)
     end
 
-    -- Load idle track (looped).
+    -- Load idle track (looped, Idle priority — base layer).
     local idleId: string = tostring(fp.idle or "")
     if idleId ~= "" and idleId ~= "rbxassetid://0" then
         local idleAnim = Instance.new("Animation")
         idleAnim.AnimationId = idleId
         local track = (animator :: Animator):LoadAnimation(idleAnim)
-        track.Looped  = true
+        track.Looped   = true
+        track.Priority = Enum.AnimationPriority.Idle
         weaponIdleTrack = track
     else
         Logger.debug("[ViewModelController] _setupWeaponAnimations: no idle animation ID for: "
+            .. weaponName)
+    end
+
+    -- Load fire track (one-shot, Action priority — overrides run and idle per shot).
+    local fireId: string = tostring(fp.fire or "")
+    if fireId ~= "" and fireId ~= "rbxassetid://0" then
+        local fireAnim = Instance.new("Animation")
+        fireAnim.AnimationId = fireId
+        local track = (animator :: Animator):LoadAnimation(fireAnim)
+        track.Looped   = false
+        track.Priority = Enum.AnimationPriority.Action
+        weaponFireTrack = track
+    else
+        Logger.debug("[ViewModelController] _setupWeaponAnimations: no fire animation ID for: "
+            .. weaponName)
+    end
+
+    -- Load reload track (one-shot, Action priority — blocks fire and run while playing).
+    local reloadId: string = tostring(fp.reload or "")
+    if reloadId ~= "" and reloadId ~= "rbxassetid://0" then
+        local reloadAnim = Instance.new("Animation")
+        reloadAnim.AnimationId = reloadId
+        local track = (animator :: Animator):LoadAnimation(reloadAnim)
+        track.Looped   = false
+        track.Priority = Enum.AnimationPriority.Action
+        weaponReloadTrack = track
+    else
+        Logger.debug("[ViewModelController] _setupWeaponAnimations: no reload animation ID for: "
+            .. weaponName)
+    end
+
+    -- Load run track (looped, Movement priority — replaces idle while sprinting).
+    local runId: string = tostring(fp.run or "")
+    if runId ~= "" and runId ~= "rbxassetid://0" then
+        local runAnim = Instance.new("Animation")
+        runAnim.AnimationId = runId
+        local track = (animator :: Animator):LoadAnimation(runAnim)
+        track.Looped   = true
+        track.Priority = Enum.AnimationPriority.Movement
+        weaponRunTrack = track
+    else
+        Logger.debug("[ViewModelController] _setupWeaponAnimations: no run animation ID for: "
             .. weaponName)
     end
 
@@ -561,12 +659,119 @@ end
 -- ============================================================
 
 -- Called by GunController immediately after WeaponFired:FireServer().
--- Nudges the model back by RECOIL_DIST and lets RenderStepped decay it to zero.
+-- Applies a positional recoil snap and plays the fire one-shot animation.
+-- Blocked while reloading (reload priority > fire).
+-- Restartable: each shot re-plays the fire track from the start, even if it is still playing.
 function ViewModelController:PlayFireAnimation()
     local model = self.model
     if not model then return end
+    -- Reload takes priority over fire; do not play fire during a reload.
+    if isReloading then return end
+    -- Positional recoil snap — decays back to zero in RenderStepped.
     recoilOffset = RECOIL_DIST
     model:PivotTo(model:GetPivot() * CFrame.new(0, 0, recoilOffset))
+    -- One-shot fire track: stop immediately (no fade) and restart for each shot so rapid
+    -- fire plays the full fire animation kick from frame 0 every time.
+    if weaponFireTrack then
+        if weaponFireTrack.IsPlaying then
+            weaponFireTrack:Stop(0)
+        end
+        weaponFireTrack:Play()
+        Logger.debug("[ViewModelController] PlayFireAnimation: fire track started")
+    end
+end
+
+-- Plays the run AnimationTrack (looped, Movement priority).
+-- Called by SetRunning when sprint begins and the base state transitions from idle to run.
+-- No-op when no run track is loaded.
+function ViewModelController:PlayRunAnimation()
+    if weaponRunTrack then
+        weaponRunTrack:Play()
+        Logger.debug("[ViewModelController] PlayRunAnimation: run track started")
+    else
+        Logger.debug("[ViewModelController] PlayRunAnimation: no run track loaded — skipped")
+    end
+end
+
+-- Plays the reload AnimationTrack (one-shot).  Called by GunController when R is pressed.
+-- Guards:
+--   • no weapon equipped  → no-op
+--   • already reloading   → no-op (spam protection; reload is not restartable)
+--   • no reload track     → no-op
+-- While reload plays: fire and run are blocked.
+-- When reload ends: resumes run if isRunning, else resumes idle.
+function ViewModelController:PlayReloadAnimation()
+    if not self.model then return end
+    if isReloading then
+        Logger.debug("[ViewModelController] PlayReloadAnimation: already reloading — ignored")
+        return
+    end
+    if not weaponReloadTrack then
+        Logger.debug("[ViewModelController] PlayReloadAnimation: no reload track loaded — skipped")
+        return
+    end
+    -- Capture weapon identity so the Stopped callback can guard against stale calls.
+    local capturedWeapon = equippedWeaponName
+    isReloading = true
+    -- Stop fire and run so reload plays unobstructed.
+    if weaponFireTrack and weaponFireTrack.IsPlaying then
+        weaponFireTrack:Stop(0)
+    end
+    if weaponRunTrack and weaponRunTrack.IsPlaying then
+        weaponRunTrack:Stop()
+    end
+    if weaponIdleTrack and weaponIdleTrack.IsPlaying then
+        weaponIdleTrack:Stop()
+    end
+    weaponReloadTrack:Play()
+    -- Resume the correct base animation when reload finishes.
+    -- AnimationTrack:Destroy() (called by StopWeaponAnimations / HolsterWeapon) severs this
+    -- connection synchronously before it can fire on a stale weapon.
+    weaponReloadTrack.Stopped:Connect(function()
+        if equippedWeaponName ~= capturedWeapon or self.model == nil then return end
+        isReloading = false
+        -- If the player is still sprinting, resume run; otherwise return to idle.
+        if isRunning and weaponRunTrack ~= nil then
+            self:PlayRunAnimation()
+        else
+            self:PlayIdleAnimation()
+        end
+        Logger.debug("[ViewModelController] PlayReloadAnimation: reload complete, resumed "
+            .. (isRunning and "run" or "idle"))
+    end)
+    Logger.debug("[ViewModelController] PlayReloadAnimation: reload track started")
+end
+
+-- Called by GunController each RenderStepped with the current sprint flag.
+-- Manages the run ↔ idle base-layer transition.
+-- Guards:
+--   • no weapon equipped  → no-op (holstered)
+--   • isSprinting unchanged → no-op (state unchanged)
+--   • isReloading         → update flag only; reload Stopped callback will resume correctly
+function ViewModelController:SetRunning(isSprinting: boolean)
+    assert(typeof(isSprinting) == "boolean",
+        "[ViewModelController] SetRunning: isSprinting must be a boolean")
+    -- No-op while holstered — tracks are not loaded.
+    if equippedWeaponName == nil then return end
+    -- No-op when state has not changed.
+    if isSprinting == isRunning then return end
+    isRunning = isSprinting
+    -- While reloading, update the flag but let the Stopped callback resume the correct track.
+    if isReloading then return end
+    if isSprinting then
+        -- Stop idle and start run.
+        if weaponIdleTrack and weaponIdleTrack.IsPlaying then
+            weaponIdleTrack:Stop()
+        end
+        self:PlayRunAnimation()
+    else
+        -- Stop run and return to idle.
+        if weaponRunTrack and weaponRunTrack.IsPlaying then
+            weaponRunTrack:Stop()
+        end
+        self:PlayIdleAnimation()
+    end
+    Logger.debug("[ViewModelController] SetRunning: isRunning=" .. tostring(isRunning))
 end
 
 -- Receives the rotational recoil CFrame from GunController each RenderStepped.

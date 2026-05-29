@@ -198,6 +198,15 @@ function GunController:Start()
         -- Push the current recoil CFrame to ViewModelController every frame
         -- so the viewmodel smoothly returns to rest as recoilCFrame decays.
         ViewModelController:SetRecoilOffset(recoilCFrame)
+
+        -- Sprint detection: inform ViewModelController of current sprint state so it can
+        -- manage the run ↔ idle base-layer animation transition.
+        -- Only sent while a weapon is equipped (SetRunning no-ops while holstered).
+        -- GunController already requires MovementController so no new dependency is added.
+        if equippedWeaponName ~= nil then
+            local isSprinting = MovementController:GetMoveState() == "Sprinting"
+            ViewModelController:SetRunning(isSprinting)
+        end
     end)
 
     -- ── Input: Key 1 — equip / holster AKS74 viewmodel ─────────────────────
@@ -367,6 +376,7 @@ function GunController:Start()
         end
         ReloadRequest:FireServer()
         SoundController:PlayReload()
+        ViewModelController:PlayReloadAnimation()
         Logger.debug("[GunController] Reload requested")
     end)
 
