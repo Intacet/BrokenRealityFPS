@@ -134,6 +134,16 @@ local weaponRunTrack:    AnimationTrack? = nil
 local isReloading: boolean = false
 local isRunning:   boolean = false
 
+-- Third-person character weapon AnimationTracks.
+-- Loaded on the local player's Humanoid.Animator when a weapon is equipped.
+-- Priority: equip/idle = Action (overlays movement), fire/reload = Action2 (overlays idle).
+-- Cleared (nil, no Stop) in init() because CharacterAdded may fire after the old Animator
+-- is already destroyed.  Stopped and Destroyed in StopWeaponAnimations() during normal play.
+local tpEquipTrack:  AnimationTrack? = nil
+local tpIdleTrack:   AnimationTrack? = nil
+local tpFireTrack:   AnimationTrack? = nil
+local tpReloadTrack: AnimationTrack? = nil
+
 -- ============================================================
 -- Controller table
 -- ============================================================
@@ -205,6 +215,36 @@ local function setVisibility(show: boolean)
     Logger.debug(string.format("[ViewModelController] setVisibility(%s) — %d parts", tostring(show), count))
 end
 
+-- Returns the Animator under the local player's character Humanoid, or nil if unavailable.
+-- Used to load third-person weapon animation tracks onto the character's existing rig.
+local function getCharacterAnimator(): Animator?
+    local char = Players.LocalPlayer.Character
+    if not char then return nil end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return nil end
+    return hum:FindFirstChildOfClass("Animator")
+end
+
+-- Plays the third-person equip one-shot then chains to the TP idle loop.
+-- Mirrors PlayEquipAnimation() but for the character-body TP tracks.
+-- No-op when tpEquipTrack / tpIdleTrack are nil (weapon has no TP animations).
+local function startThirdPersonEquipSequence()
+    local capturedWeapon = equippedWeaponName
+    if tpEquipTrack and tpEquipTrack.Length > 0 then
+        tpEquipTrack:Play()
+        tpEquipTrack.Stopped:Connect(function()
+            if equippedWeaponName ~= capturedWeapon then return end
+            if tpIdleTrack then
+                tpIdleTrack:Play()
+            end
+        end)
+    else
+        if tpIdleTrack then
+            tpIdleTrack:Play()
+        end
+    end
+end
+
 -- Switches the active camera perspective and updates viewmodel visibility accordingly.
 -- fp = true  → LockFirstPerson; viewmodel shown when equipped + ACTIVE.
 -- fp = false → Classic third-person; viewmodel always hidden.
@@ -254,6 +294,14 @@ function ViewModelController:init()
     end
     isReloading = false
     isRunning   = false
+    -- Third-person character tracks: nil references only — do NOT call Stop/Destroy.
+    -- init() is called from CharacterAdded where the old Humanoid.Animator may already be
+    -- destroyed, making track method calls unsafe.  Same pattern as MovementController's
+    -- loadMovementAnimations() respawn cleanup (table.clear without Stop).
+    tpEquipTrack  = nil
+    tpIdleTrack   = nil
+    tpFireTrack   = nil
+    tpReloadTrack = nil
     -- Destroy any existing weapon model.
     if self.model then
         self.model:Destroy()
@@ -297,6 +345,29 @@ function ViewModelController:StopWeaponAnimations()
     end
     isReloading = false
     isRunning   = false
+    -- Third-person character tracks: stop and destroy (character is alive in this path).
+    -- AnimationTrack:Destroy() severs Stopped connections synchronously, preventing any
+    -- deferred equip-chain or reload-chain callback from firing after holster.
+    if tpEquipTrack then
+        tpEquipTrack:Stop()
+        tpEquipTrack:Destroy()
+        tpEquipTrack = nil
+    end
+    if tpIdleTrack then
+        tpIdleTrack:Stop()
+        tpIdleTrack:Destroy()
+        tpIdleTrack = nil
+    end
+    if tpFireTrack then
+        tpFireTrack:Stop()
+        tpFireTrack:Destroy()
+        tpFireTrack = nil
+    end
+    if tpReloadTrack then
+        tpReloadTrack:Stop()
+        tpReloadTrack:Destroy()
+        tpReloadTrack = nil
+    end
     Logger.debug("[ViewModelController] StopWeaponAnimations: all tracks cleared, flags reset")
 end
 
@@ -481,16 +552,24 @@ function ViewModelController:EquipWeapon(weaponName: string)
     Logger.debug("[ViewModelController] EquipWeapon: " .. weaponName
         .. " cloned (" .. tostring(partCount) .. " parts) and parented to camera")
 
-    -- Load animation tracks on the clone's Animator.
+    -- Load first-person animation tracks on the viewmodel clone's Animator.
     self:_setupWeaponAnimations(weaponName, data)
+
+    -- Load third-person animation tracks on the character's Humanoid.Animator.
+    -- These overlay movement animations on the character body (visible in third-person
+    -- and by other players).  Runs regardless of current camera perspective.
+    self:_setupThirdPersonWeaponAnimations(weaponName, data)
 
     -- Apply current phase-based visibility.
     local show = shouldShowViewModel()
     visible    = show
     setVisibility(show)
 
-    -- Begin equip → idle animation sequence.
+    -- Begin first-person equip → idle animation sequence.
     self:PlayEquipAnimation()
+
+    -- Begin third-person equip → idle sequence on the character body.
+    startThirdPersonEquipSequence()
 end
 
 -- Private: finds or creates AnimationController + Animator on the cloned viewmodel, then
@@ -618,6 +697,46 @@ function ViewModelController:_setupWeaponAnimations(weaponName: string, data: an
     end
 
     Logger.debug("[ViewModelController] _setupWeaponAnimations: tracks loaded for: " .. weaponName)
+end
+
+-- Private: loads third-person weapon AnimationTracks onto the character's Humanoid.Animator.
+-- All tracks overlay movement animations via animation priority:
+--   equip / idle — Action   (overlays MovementController's Idle/Movement-priority tracks)
+--   fire / reload — Action2 (overlays the TP idle while shooting or reloading)
+-- Safe to call when thirdPerson animations are absent from WeaponData — silently skips.
+function ViewModelController:_setupThirdPersonWeaponAnimations(weaponName: string, data: any)
+    local animator = getCharacterAnimator()
+    if not animator then
+        Logger.debug("[ViewModelController] _setupThirdPersonWeaponAnimations: no character animator — skipped")
+        return
+    end
+
+    local anims = data.animations
+    if not anims then return end
+    local tp = anims.thirdPerson
+    if not tp then
+        Logger.debug("[ViewModelController] _setupThirdPersonWeaponAnimations: no thirdPerson block for: " .. weaponName)
+        return
+    end
+
+    -- Helper to load one track.
+    local function loadTp(id: string, looped: boolean, priority: Enum.AnimationPriority): AnimationTrack?
+        local idStr = tostring(id or "")
+        if idStr == "" or idStr == "rbxassetid://0" then return nil end
+        local anim = Instance.new("Animation")
+        anim.AnimationId = idStr
+        local track = (animator :: Animator):LoadAnimation(anim)
+        track.Looped   = looped
+        track.Priority = priority
+        return track
+    end
+
+    tpEquipTrack  = loadTp(tp.equip  or "", false, Enum.AnimationPriority.Action)
+    tpIdleTrack   = loadTp(tp.idle   or "", true,  Enum.AnimationPriority.Action)
+    tpFireTrack   = loadTp(tp.fire   or "", false, Enum.AnimationPriority.Action2)
+    tpReloadTrack = loadTp(tp.reload or "", false, Enum.AnimationPriority.Action2)
+
+    Logger.debug("[ViewModelController] _setupThirdPersonWeaponAnimations: tracks loaded for: " .. weaponName)
 end
 
 -- ============================================================
@@ -750,14 +869,20 @@ function ViewModelController:PlayFireAnimation()
     -- Positional recoil snap — decays back to zero in RenderStepped.
     recoilOffset = RECOIL_DIST
     model:PivotTo(model:GetPivot() * CFrame.new(0, 0, recoilOffset))
-    -- One-shot fire track: stop immediately (no fade) and restart for each shot so rapid
-    -- fire plays the full fire animation kick from frame 0 every time.
+    -- First-person: stop immediately and restart for per-shot restartability.
     if weaponFireTrack then
         if weaponFireTrack.IsPlaying then
             weaponFireTrack:Stop(0)
         end
         weaponFireTrack:Play()
-        Logger.debug("[ViewModelController] PlayFireAnimation: fire track started")
+        Logger.debug("[ViewModelController] PlayFireAnimation: FP fire track started")
+    end
+    -- Third-person: same pattern — restart per shot so rapid fire always plays from frame 0.
+    if tpFireTrack then
+        if tpFireTrack.IsPlaying then
+            tpFireTrack:Stop(0)
+        end
+        tpFireTrack:Play()
     end
 end
 
@@ -803,14 +928,33 @@ function ViewModelController:PlayReloadAnimation()
     if weaponIdleTrack and weaponIdleTrack.IsPlaying then
         weaponIdleTrack:Stop()
     end
+    -- Third-person: stop TP fire/idle and play TP reload alongside the FP reload.
+    -- TP idle resumes via its own Stopped callback, independent of the FP chain.
+    if tpFireTrack and tpFireTrack.IsPlaying then
+        tpFireTrack:Stop(0)
+    end
+    if tpIdleTrack and tpIdleTrack.IsPlaying then
+        tpIdleTrack:Stop()
+    end
+    if tpReloadTrack then
+        tpReloadTrack:Play()
+        tpReloadTrack.Stopped:Connect(function()
+            -- Guard: resume TP idle only if the same weapon is still equipped.
+            if equippedWeaponName ~= capturedWeapon then return end
+            if tpIdleTrack then
+                tpIdleTrack:Play()
+            end
+        end)
+    end
+
     weaponReloadTrack:Play()
-    -- Resume the correct base animation when reload finishes.
+    -- Resume the correct FP base animation when reload finishes.
     -- AnimationTrack:Destroy() (called by StopWeaponAnimations / HolsterWeapon) severs this
     -- connection synchronously before it can fire on a stale weapon.
     weaponReloadTrack.Stopped:Connect(function()
         if equippedWeaponName ~= capturedWeapon or self.model == nil then return end
         isReloading = false
-        -- If the player is still sprinting, resume run; otherwise return to idle.
+        -- If the player is still sprinting, resume FP run; otherwise return to FP idle.
         if isRunning and weaponRunTrack ~= nil then
             self:PlayRunAnimation()
         else
@@ -819,7 +963,7 @@ function ViewModelController:PlayReloadAnimation()
         Logger.debug("[ViewModelController] PlayReloadAnimation: reload complete, resumed "
             .. (isRunning and "run" or "idle"))
     end)
-    Logger.debug("[ViewModelController] PlayReloadAnimation: reload track started")
+    Logger.debug("[ViewModelController] PlayReloadAnimation: reload track started (FP + TP)")
 end
 
 -- Called by GunController each RenderStepped with the current sprint flag.
