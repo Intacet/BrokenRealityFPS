@@ -69,6 +69,9 @@ makeEvent("KillFeed")           -- server → all clients | killer + victim name
 makeEvent("PartDestroyed")      -- server → all clients | trigger destruction VFX
 makeEvent("ZoneEffectApplied")  -- server → all clients | trigger visual overlay
 
+-- World weapon model (third-person attachment)
+makeEvent("WeaponEquipState")   -- client → server | request equip/holster of world weapon model
+
 -- ============================================================
 -- RemoteFunctions (client asks server for data; server replies)
 -- ============================================================

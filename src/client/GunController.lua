@@ -63,12 +63,15 @@ local MovementController  = require(script.Parent:WaitForChild("MovementControll
 local CrosshairUI         = require(script.Parent:WaitForChild("UI"):WaitForChild("CrosshairUI"))
 local SoundController     = require(script.Parent:WaitForChild("SoundController"))
 
-local Remotes       = ReplicatedStorage:WaitForChild("Remotes")
-local WeaponFired   = Remotes:WaitForChild("WeaponFired")   :: RemoteEvent
-local HitConfirmed  = Remotes:WaitForChild("HitConfirmed")  :: RemoteEvent
-local HealthChanged = Remotes:WaitForChild("HealthChanged") :: RemoteEvent
-local AmmoChanged   = Remotes:WaitForChild("AmmoChanged")   :: RemoteEvent
-local ReloadRequest = Remotes:WaitForChild("ReloadRequest") :: RemoteEvent
+local Remotes          = ReplicatedStorage:WaitForChild("Remotes")
+local WeaponFired      = Remotes:WaitForChild("WeaponFired")      :: RemoteEvent
+local HitConfirmed     = Remotes:WaitForChild("HitConfirmed")     :: RemoteEvent
+local HealthChanged    = Remotes:WaitForChild("HealthChanged")    :: RemoteEvent
+local AmmoChanged      = Remotes:WaitForChild("AmmoChanged")      :: RemoteEvent
+local ReloadRequest    = Remotes:WaitForChild("ReloadRequest")    :: RemoteEvent
+-- Tells WorldWeaponService to attach or remove the AKS74 world model on the character.
+-- Payload: weaponName: string, isEquipped: boolean
+local WeaponEquipState = Remotes:WaitForChild("WeaponEquipState") :: RemoteEvent
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -219,10 +222,16 @@ function GunController:Start()
         if equippedWeaponName == nil then
             ViewModelController:EquipWeapon(Constants.DEFAULT_VIEWMODEL_WEAPON)
             equippedWeaponName = Constants.DEFAULT_VIEWMODEL_WEAPON
+            -- Inform WorldWeaponService so it attaches the gun-only world model
+            -- to the character's Right Arm (visible to self in third-person and
+            -- to other players regardless of camera mode).
+            WeaponEquipState:FireServer(Constants.DEFAULT_VIEWMODEL_WEAPON, true)
             Logger.debug("[GunController] Equipped: " .. Constants.DEFAULT_VIEWMODEL_WEAPON)
         else
             ViewModelController:HolsterWeapon()
             equippedWeaponName = nil
+            -- Inform WorldWeaponService to remove the world model.
+            WeaponEquipState:FireServer(Constants.DEFAULT_VIEWMODEL_WEAPON, false)
             Logger.debug("[GunController] Holstered weapon")
         end
     end)

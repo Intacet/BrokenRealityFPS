@@ -1356,4 +1356,5 @@ Add a row here **before** implementing any new remote. Every row must have exact
 | `ObjectiveComplete` | RemoteEvent | `ObjectiveService.server.lua` | pending (ObjectiveUI) | An objective was finished |
 | `PartDestroyed` | RemoteEvent | pending | pending | Trigger destruction VFX on all clients |
 | `ZoneEffectApplied` | RemoteEvent | pending | pending | Trigger visual overlay on all clients |
+| `WeaponEquipState` | RemoteEvent | `GunController.lua` | `WorldWeaponService.server.lua` | Client requests equip/holster of world weapon model; payload: `weaponName: string, isEquipped: boolean` |
 | `GetMatchConfig` | RemoteFunction | `MatchController.lua` | `MatchService.server.lua` | Client fetches current match state on join |

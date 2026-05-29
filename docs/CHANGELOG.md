@@ -7,6 +7,62 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-29] — AKS74 third-person world weapon model attachment (WorldWeaponService)
+
+### Summary
+
+Adds server-side attachment of a gun-only AKS74 world model to the player's R6 Right Arm when equipped. The model is visible in third-person and to other players. Motor6D (not Weld/WeldConstraint) is used so character animations drive the arm correctly. Attachment is controlled by the new `WeaponEquipState` RemoteEvent.
+
+No animation playback changes. No camera changes. No combat, damage, ammo, or movement changes. MCP/Studio verification required — see DEBT-062.
+
+**Asset precondition:** `ReplicatedStorage/WorldModels/AKS74` must be created manually in Studio as a gun-only Model with a BasePart named Handle. If missing, WorldWeaponService logs with Logger.warn() and returns without attaching; gameplay continues normally.
+
+### New file: `src/server/WorldWeaponService.server.lua`
+
+Self-starting server Script following the existing `.server.lua` service pattern. No central ServerInit.lua exists in this project.
+
+Public API:
+- `WorldWeaponService:Init()` — connects remote handler, PlayerAdded/PlayerRemoving, CharacterAdded/CharacterRemoving
+- `WorldWeaponService:EquipWeapon(player, weaponName)` — validates, clones WorldModels/AKS74, attaches Handle to Right Arm via Motor6D
+- `WorldWeaponService:HolsterWeapon(player)` — removes EquippedWorldWeapon model and WorldWeaponGrip Motor6D
+- `WorldWeaponService:IsWeaponEquipped(player): boolean`
+- `WorldWeaponService:CleanupPlayer(player)` — called on PlayerRemoving; disconnects all lifecycle connections
+
+Remote validation: non-string weaponName, non-boolean isEquipped, unknown weapon name, and any weapon other than AKS74 all log via Logger.warn() and return early without crashing.
+
+Character lifecycle: CharacterRemoving removes world weapon from departing character; CharacterAdded resets state for new character; PlayerRemoving calls CleanupPlayer.
+
+### Changes to `src/server/RemoteSetup.server.lua`
+
+- Added `makeEvent("WeaponEquipState")`.
+
+### Changes to `src/client/GunController.lua`
+
+- Added `WeaponEquipState` remote reference (WaitForChild).
+- Key 1 equip: fires `WeaponEquipState:FireServer("AKS74", true)` after equipping viewmodel.
+- Key 1 holster: fires `WeaponEquipState:FireServer("AKS74", false)` after holstering viewmodel.
+- No new equip state created; existing `equippedWeaponName` variable preserved.
+
+### Changes to `src/shared/Constants.lua`
+
+- `WORLD_WEAPON_FOLDER_NAME = "WorldModels"`
+- `WORLD_WEAPON_HANDLE_PART_NAME = "Handle"`
+- `WORLD_WEAPON_CHARACTER_MODEL_NAME = "EquippedWorldWeapon"`
+- `WORLD_WEAPON_GRIP_MOTOR_NAME = "WorldWeaponGrip"`
+- `WORLD_WEAPON_R6_RIGHT_ARM_NAME = "Right Arm"`
+- `WORLD_AKS74_GRIP_C0 = CFrame.new(0, -1, -0.5) * CFrame.Angles(0, math.rad(90), 0)` (initial tuning value)
+- `WORLD_AKS74_GRIP_C1 = CFrame.new(0, 0, 0)` (initial tuning value)
+
+### Changes to `src/shared/WeaponData.lua`
+
+- Added `worldModelName = "AKS74"` to `WeaponData["AKS74"]`.
+
+### Changes to `docs/PROJECT_MAP.md`
+
+- Added `WeaponEquipState` to the remote registry: fired by `GunController.lua`, listened by `WorldWeaponService.server.lua`.
+
+---
+
 ## [2026-05-29] — Viewmodel bob, sway, landing dip, slide tilt + slide/vault guards
 
 ### Summary

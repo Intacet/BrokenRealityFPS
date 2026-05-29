@@ -1016,4 +1016,32 @@ Constants.VIEWMODEL_SLIDE_TILT_MAX        = 5      -- maximum roll in degrees
 -- Per-second lerp speed for tilt entering and leaving slide. Higher = snappier.
 Constants.VIEWMODEL_SLIDE_TILT_SPEED      = 8
 
+-- ============================================================
+-- World weapon model (third-person / server-side attachment)
+-- WorldWeaponService clones ReplicatedStorage/<WORLD_WEAPON_FOLDER_NAME>/<worldModelName>
+-- into the player's character and attaches Handle to R6 Right Arm via Motor6D.
+-- Grip CFrames are initial tuning values only — adjust in Studio without touching code.
+-- ============================================================
+
+-- ReplicatedStorage folder that holds gun-only world model assets.
+Constants.WORLD_WEAPON_FOLDER_NAME            = "WorldModels"
+
+-- Name of the BasePart inside the world model that the Motor6D is attached to.
+Constants.WORLD_WEAPON_HANDLE_PART_NAME       = "Handle"
+
+-- Name given to the cloned world model when parented to the character.
+Constants.WORLD_WEAPON_CHARACTER_MODEL_NAME   = "EquippedWorldWeapon"
+
+-- Name of the Motor6D created on the R6 Right Arm.
+Constants.WORLD_WEAPON_GRIP_MOTOR_NAME        = "WorldWeaponGrip"
+
+-- R6 right arm part name (per R6 canonical body-part names in PROJECT_RULES.md).
+Constants.WORLD_WEAPON_R6_RIGHT_ARM_NAME      = "Right Arm"
+
+-- AKS74 grip offsets for the Motor6D (C0 on Right Arm, C1 on Handle).
+-- Tune these constants in Studio if the gun appears offset in the player's hands.
+-- Do not hardcode offsets inside WorldWeaponService.
+Constants.WORLD_AKS74_GRIP_C0 = CFrame.new(0, -1, -0.5) * CFrame.Angles(math.rad(0), math.rad(90), math.rad(0))
+Constants.WORLD_AKS74_GRIP_C1 = CFrame.new(0, 0, 0)
+
 return Constants

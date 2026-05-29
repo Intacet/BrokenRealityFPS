@@ -1333,9 +1333,9 @@ Stage 4A was not verified in Studio via MCP before commit due to MCP session sta
 
 ---
 
-## [DEBT-059] AKS74 first-person equip/holster is client-only; server fires as AR15 — ADDED 2026-05-28
+## [DEBT-059] AKS74 first-person equip/holster is client-only; server fires as AR15 — ADDED 2026-05-28 — PARTIALLY UPDATED 2026-05-29
 
-**Files:** `src/client/GunController.lua`, `src/client/ViewModelController.lua`, `src/shared/Constants.lua`, `src/shared/WeaponData.lua`
+**Files:** `src/client/GunController.lua`, `src/client/ViewModelController.lua`, `src/shared/Constants.lua`, `src/shared/WeaponData.lua`, `src/server/WorldWeaponService.server.lua`
 **Severity:** Medium
 **Studio verification required:** Yes
 
@@ -1343,29 +1343,30 @@ Stage 4A was not verified in Studio via MCP before commit due to MCP session sta
 - `WeaponFired:FireServer()` still fires with the AR15-mapped stats (GunService validates against `Constants.DEFAULT_WEAPON = "AR15"`).
 - The `AmmoChanged` remote returns AR15 magazine / reserve counts.
 - AKS74 `damage`, `fireRate`, and `range` values in `WeaponData` are not yet read by GunService.
-- Third-person world model animations are not implemented.
 
 This worsens DEBT-013 (weapon name not sent in `WeaponFired` payload) by adding a second equipped weapon whose identity is completely invisible to the server.
 
+**Partially resolved (2026-05-29):** WorldWeaponService now owns server-side world weapon attachment state. Key 1 fires `WeaponEquipState` to the server; the server validates and attaches the world model. Server now knows when a player has the AKS74 equipped (for the visual layer). GunService still validates shots as AR15 (DEBT-013 unchanged).
+
+**Remaining:** The bullet point "AKS74 third-person world model not visible" is resolved by this task. The "server fires as AR15" risk (GunService, AmmoChanged) remains open and requires DEBT-013 to be resolved.
+
 **Safe for this stage:** A single-weapon prototype where AR15 and AKS74 stats are similar is acceptable. Players cannot gain any advantage — the server validates every shot with AR15 constraints.
 
-**Trigger:** A second weapon with meaningfully different stats (e.g. a slower, higher-damage bolt-action) is added and players expect the server to use the correct stats.
+**Trigger:** A second weapon with meaningfully different stats is added and players expect the server to use the correct stats.
 
 **Fix when:** A server-owned loadout / equipment system is built (see DEBT-013). The fix requires:
 1. `WeaponFired` and `ReloadRequest` payloads carry the equipped weapon name.
 2. GunService reads the equipped weapon from a server-authoritative loadout table (not from a client-sent field).
 3. `Constants.DEFAULT_WEAPON` is retired; weapon identity flows from inventory/loadout state.
 
-**Studio verification checklist (2026-05-28 — MCP unavailable at commit time):**
-1. In Studio play mode, confirm `rojo serve` syncs all four changed files without error.
-2. Press key 1 → AKS74 viewmodel should clone and appear (when `FORCE_FIRST_PERSON = true` and phase is ACTIVE).
-3. Equip animation `rbxassetid://139265999638776` should play once; idle `rbxassetid://75961893882956` should loop after.
-4. Press key 1 again → viewmodel disappears (holstered); fire and reload should be blocked.
-5. In ACTIVE phase with AKS74 equipped, left-click should fire (WeaponFired sent), R should reload (ReloadRequest sent).
-6. Check Output for any `[ViewModelController]` or `[GunController]` errors.
-7. Respawn → weapon should auto-holster; press key 1 to re-equip.
-8. Confirm `FORCE_FIRST_PERSON = false` (default dev mode) keeps viewmodel hidden even when equipped.
-**Resolve when:** Steps 1–8 pass in a live Studio session.
+**Studio verification checklist (updated 2026-05-29 — MCP unavailable at commit time):**
+1. In Studio play mode, confirm `rojo serve` syncs all changed files without error.
+2. Press key 1 → AKS74 viewmodel should clone and appear (when `FORCE_FIRST_PERSON = true` and phase is ACTIVE). WeaponEquipState fires to server.
+3. Confirm EquippedWorldWeapon Model appears on character; WorldWeaponGrip Motor6D exists on Right Arm.
+4. Press key 1 again → viewmodel disappears; EquippedWorldWeapon and Motor6D are removed.
+5. Reset/die → EquippedWorldWeapon and Motor6D are cleaned up via CharacterRemoving.
+6. Check Output for `[WorldWeaponService]` logs — no errors.
+**Resolve when:** Steps 1–6 pass plus original items for GunService AR15 fix (loadout system).
 
 ---
 
@@ -1423,6 +1424,41 @@ This worsens DEBT-013 (weapon name not sent in `WeaponFired` payload) by adding 
 12. Check Output → no errors from `[ViewModelController]` or `[GunController]` during any of the above states.
 
 **Resolve when:** All 12 checklist items pass in a live Studio session.
+
+---
+
+## [DEBT-062] WorldWeaponService world model attachment not verified in Studio — ADDED 2026-05-29
+
+**Files:** `src/server/WorldWeaponService.server.lua`, `src/client/GunController.lua`, `src/shared/Constants.lua`
+**Severity:** Medium
+**Studio verification required:** Yes
+
+**Risk 1 — WorldModels asset missing:** `WorldWeaponService.EquipWeapon()` guards against a missing `ReplicatedStorage/WorldModels/AKS74` folder and a missing `Handle` BasePart. If the asset is not created in Studio, key 1 logs `Logger.warn()` but does NOT crash. Gameplay (shooting, ammo, damage) continues normally. The world model simply does not appear.
+
+**Risk 2 — Grip CFrame tuning:** `Constants.WORLD_AKS74_GRIP_C0 = CFrame.new(0, -1, -0.5) * CFrame.Angles(0, math.rad(90), 0)` and `WORLD_AKS74_GRIP_C1 = CFrame.new(0, 0, 0)` are initial values chosen without live Studio verification. The gun may appear offset, rotated, or clipping into the arm in-game. Tune only these two Constants; do not hardcode offsets inside WorldWeaponService.
+
+**Risk 3 — Motor6D vs animation interaction:** Motor6D attachment must be done with `Part0 = Right Arm, Part1 = Handle`. If the AKS74 world model's third-person animations drive a different part (not Handle), the gun will not follow the expected attachment point. Verify in Studio that the Motor6D causes the gun to track the arm correctly during idle and fire animations.
+
+**Risk 4 — WorldWeaponService.server.lua vs .lua extension:** The task spec said `WorldWeaponService.lua` (ModuleScript), but this project has no central ServerInit.lua and all self-owning server services are `.server.lua` Scripts. A bare ModuleScript in `ServerScriptService/Services/` would never execute unless required. The file was created as `WorldWeaponService.server.lua` to match the existing self-starting pattern. Document this deviation if the filename matters for future tooling.
+
+**Studio verification checklist (MCP unavailable at commit time):**
+1. Create `ReplicatedStorage/WorldModels/AKS74` as a gun-only Model with a BasePart named Handle.
+2. Start server (`rojo serve`); confirm `WeaponEquipState` remote exists in `ReplicatedStorage/Remotes`.
+3. Enter play mode; confirm no Output errors from `[WorldWeaponService]` on startup.
+4. Player spawns → confirm no `EquippedWorldWeapon` in character.
+5. Press key 1 → confirm `WeaponEquipState` fires (check `[WorldWeaponService] EquipWeapon:` debug log).
+6. Confirm `EquippedWorldWeapon` Model appears in character; `WorldWeaponGrip` Motor6D on Right Arm.
+7. Confirm AKS74 world model is visible in character hands in third-person view.
+8. Tune `WORLD_AKS74_GRIP_C0` / `C1` in Constants.lua until gun position and rotation look correct.
+9. Press key 1 again → confirm `EquippedWorldWeapon` and `WorldWeaponGrip` are removed.
+10. Reset/die → confirm `CharacterRemoving` fires and world weapon is cleaned up.
+11. Rejoin (PlayerRemoving) → confirm no stale references in WorldWeaponService state.
+12. Confirm no Welds or WeldConstraints were created.
+13. Confirm no camera behavior changed.
+14. Confirm no server combat, damage, ammo, reload, health, or raycast behavior changed.
+15. Check Output → no errors from `[WorldWeaponService]` or `[GunController]` throughout.
+
+**Resolve when:** All 15 checklist items pass in a live Studio session and the grip CFrames produce a correct gun position in the player's hands.
 
 ---
 

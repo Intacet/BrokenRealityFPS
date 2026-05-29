@@ -41,6 +41,7 @@ WeaponData["AR15"] = {
 WeaponData["AKS74"] = {
     displayName   = "AKS-74",
     viewModelName = "AKS74",
+    worldModelName = "AKS74",   -- gun-only model in ReplicatedStorage/WorldModels/AKS74
     animations = {
         firstPerson = {
             equip  = "rbxassetid://139265999638776",
