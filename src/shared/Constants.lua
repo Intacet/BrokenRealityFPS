@@ -1033,15 +1033,19 @@ Constants.WORLD_WEAPON_HANDLE_PART_NAME       = "Handle"
 Constants.WORLD_WEAPON_CHARACTER_MODEL_NAME   = "EquippedWorldWeapon"
 
 -- Name of the Motor6D created on the R6 Right Arm.
-Constants.WORLD_WEAPON_GRIP_MOTOR_NAME        = "WorldWeaponGrip"
+-- Must match the Motor6D name used in the animation pack rig so the Animator can
+-- find and drive this joint when third-person weapon animations play.
+Constants.WORLD_WEAPON_GRIP_MOTOR_NAME        = "Handle"
 
 -- R6 right arm part name (per R6 canonical body-part names in PROJECT_RULES.md).
 Constants.WORLD_WEAPON_R6_RIGHT_ARM_NAME      = "Right Arm"
 
 -- AKS74 grip offsets for the Motor6D (C0 on Right Arm, C1 on Handle).
--- Tune these constants in Studio if the gun appears offset in the player's hands.
--- Do not hardcode offsets inside WorldWeaponService.
-Constants.WORLD_AKS74_GRIP_C0 = CFrame.new(0, -1, -0.5) * CFrame.Angles(math.rad(0), math.rad(90), math.rad(0))
-Constants.WORLD_AKS74_GRIP_C1 = CFrame.new(0, 0, 0)
+-- Both are identity so the animation pack's keyframes drive Handle directly
+-- from the Right Arm origin — exactly matching the animation pack rig.
+-- The third-person animations (equip/idle/fire/reload) contain the full
+-- Handle positioning data; C0/C1 offsets here would shift everything wrong.
+Constants.WORLD_AKS74_GRIP_C0 = CFrame.new()
+Constants.WORLD_AKS74_GRIP_C1 = CFrame.new()
 
 return Constants
