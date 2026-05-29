@@ -937,6 +937,19 @@ Constants.VIEWMODEL_DEFAULT_ROOT_PART_NAME = "HumanoidRootPart"
 -- Fallback root-part name when HumanoidRootPart is absent on a viewmodel rig.
 Constants.VIEWMODEL_FALLBACK_ROOT_PART_NAME = "RootPart"
 
+-- When true, the player can scroll the mouse wheel to toggle between first-person
+-- (LockFirstPerson) and third-person (Classic) camera modes.
+-- Scroll down while in first-person  → switch to third-person.
+-- Scroll up  while in third-person and zoom distance ≤ CAMERA_FIRST_PERSON_SNAP_THRESHOLD
+--   → snap back to first-person.
+-- FORCE_FIRST_PERSON still controls the STARTING mode; this adds the ability to switch.
+Constants.CAMERA_PERSPECTIVE_SWITCH_ENABLED = true
+
+-- Zoom distance (studs) at which scrolling up while in third-person snaps back to
+-- first-person.  Should be slightly above THIRD_PERSON_MIN_ZOOM_DISTANCE (4) so the
+-- snap happens reliably at full zoom-in without requiring pixel-perfect alignment.
+Constants.CAMERA_FIRST_PERSON_SNAP_THRESHOLD = 5
+
 -- Extra CFrame offset applied to the viewmodel in camera space every RenderStepped,
 -- inserted between cam.CFrame and the recoil/bob/BASE_OFFSET chain.
 -- Negative Z moves the model toward the camera (weapon appears larger/closer).

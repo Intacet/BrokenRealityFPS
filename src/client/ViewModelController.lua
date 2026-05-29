@@ -25,9 +25,13 @@
 --   When no weapon is equipped (model == nil), the viewmodel is always hidden.
 --   setVisibility() is module-level so EquipWeapon and HolsterWeapon can call it directly.
 --
--- Camera mode:
---   applyCameraMode() sets CameraMode based on Constants.FORCE_FIRST_PERSON.
---   Called in Start() and after every CharacterAdded respawn.
+-- Camera mode / perspective switching:
+--   isFirstPerson (module-level bool) drives CameraMode and viewmodel visibility.
+--   Initialized from Constants.FORCE_FIRST_PERSON on Start() and on each CharacterAdded.
+--   When Constants.CAMERA_PERSPECTIVE_SWITCH_ENABLED is true, the scroll wheel toggles:
+--     Scroll down while first-person → Classic (third-person); viewmodel hidden.
+--     Scroll up  while third-person + zoom ≤ CAMERA_FIRST_PERSON_SNAP_THRESHOLD → LockFirstPerson.
+--   applyCameraMode() writes LocalPlayer.CameraMode only; no camera.CFrame changes.
 --
 -- Public API:
 --   :Start()                  — init + register event listeners (called once by ClientInit)
@@ -49,6 +53,7 @@
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService  = game:GetService("UserInputService")
 
 local Modules    = ReplicatedStorage:WaitForChild("Modules")
 local Constants  = require(Modules:WaitForChild("Constants"))
@@ -95,6 +100,13 @@ local CAMERA_EXTRA_OFFSET: CFrame = Constants.VIEWMODEL_CAMERA_EXTRA_OFFSET
 -- Visibility flag and current phase, tracked for the shouldShowViewModel() gate.
 local visible:      boolean = false
 local currentPhase: string  = Constants.Phase.LOBBY
+
+-- Current camera perspective mode.
+-- true  = LockFirstPerson (viewmodel visible in ACTIVE).
+-- false = Classic third-person (viewmodel always hidden).
+-- Initialized from Constants.FORCE_FIRST_PERSON; toggled by the scroll wheel when
+-- Constants.CAMERA_PERSPECTIVE_SWITCH_ENABLED is true.
+local isFirstPerson: boolean = Constants.FORCE_FIRST_PERSON
 
 -- Positional recoil offset (decays toward 0 each RenderStepped).
 local recoilOffset: number = 0
@@ -144,11 +156,12 @@ local HELPER_PARTS: { [string]: boolean } = {
 -- Private helpers (module-level so public methods can call them)
 -- ============================================================
 
--- Sets the local player's CameraMode based on Constants.FORCE_FIRST_PERSON.
--- Called in Start() and after every CharacterAdded.
+-- Sets the local player's CameraMode based on the isFirstPerson state variable.
+-- Called on Start(), CharacterAdded, and whenever the perspective is switched.
+-- Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
 local function applyCameraMode()
     local localPlayer = Players.LocalPlayer
-    if Constants.FORCE_FIRST_PERSON then
+    if isFirstPerson then
         localPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
     else
         localPlayer.CameraMode = Enum.CameraMode.Classic
@@ -156,11 +169,11 @@ local function applyCameraMode()
 end
 
 -- Returns true only when all three conditions hold:
---   1. Constants.FORCE_FIRST_PERSON is true (dev mode hides viewmodel when false)
+--   1. isFirstPerson is true (third-person mode always hides the viewmodel)
 --   2. currentPhase == ACTIVE
 --   3. ViewModelController.model is non-nil (weapon is equipped)
 local function shouldShowViewModel(): boolean
-    return Constants.FORCE_FIRST_PERSON
+    return isFirstPerson
         and currentPhase == Constants.Phase.ACTIVE
         and ViewModelController.model ~= nil
 end
@@ -188,6 +201,20 @@ local function setVisibility(show: boolean)
         end
     end
     Logger.debug(string.format("[ViewModelController] setVisibility(%s) — %d parts", tostring(show), count))
+end
+
+-- Switches the active camera perspective and updates viewmodel visibility accordingly.
+-- fp = true  → LockFirstPerson; viewmodel shown when equipped + ACTIVE.
+-- fp = false → Classic third-person; viewmodel always hidden.
+-- Also called from Start() to initialize, and from CharacterAdded to reset.
+local function setFirstPerson(fp: boolean)
+    if isFirstPerson == fp then return end  -- no-op on unchanged state
+    isFirstPerson = fp
+    applyCameraMode()
+    local show = shouldShowViewModel()
+    visible    = show
+    setVisibility(show)
+    Logger.debug("[ViewModelController] Perspective → " .. (fp and "first-person" or "third-person"))
 end
 
 -- ============================================================
@@ -611,8 +638,11 @@ function ViewModelController:Start()
     -- Re-init and re-apply camera mode on respawn.
     -- init() holsters the weapon and clears animations.  The player must press key 1 again
     -- to re-equip after respawning (DEBT-059: equip state is not persisted across death).
+    -- isFirstPerson is reset to FORCE_FIRST_PERSON on respawn so the starting perspective
+    -- is always consistent regardless of what the player had switched to before dying.
     localPlayer.CharacterAdded:Connect(function(_character: Model)
         self:init()
+        isFirstPerson = Constants.FORCE_FIRST_PERSON  -- reset to default on respawn
         applyCameraMode()
         -- After init(), model is nil → shouldShowViewModel() is false.
         local show = shouldShowViewModel()
@@ -620,6 +650,33 @@ function ViewModelController:Start()
         setVisibility(show)
         Logger.debug("[ViewModelController] State reset on character respawn (weapon holstered)")
     end)
+
+    -- Scroll wheel: toggle between first-person and third-person.
+    -- Scroll down while first-person  → switch to third-person (Classic camera).
+    -- Scroll up  while third-person + near min zoom → snap back to first-person.
+    -- Only active when Constants.CAMERA_PERSPECTIVE_SWITCH_ENABLED is true.
+    if Constants.CAMERA_PERSPECTIVE_SWITCH_ENABLED then
+        UserInputService.InputChanged:Connect(function(input: InputObject, gp: boolean)
+            if input.UserInputType ~= Enum.UserInputType.MouseWheel then return end
+            local delta: number = input.Position.Z  -- positive = up, negative = down
+
+            if isFirstPerson and not gp and delta < 0 then
+                -- Scroll down in first-person → third-person.
+                setFirstPerson(false)
+            elseif not isFirstPerson and delta > 0 then
+                -- Scroll up in third-person; check zoom distance.
+                -- (gp is ignored here: Roblox marks scroll as processed in Classic mode
+                --  for its own zoom system, which would prevent our handler from firing.)
+                local cam = workspace.CurrentCamera
+                if cam then
+                    local zoomDist = (cam.CFrame.Position - cam.Focus.Position).Magnitude
+                    if zoomDist <= Constants.CAMERA_FIRST_PERSON_SNAP_THRESHOLD then
+                        setFirstPerson(true)
+                    end
+                end
+            end
+        end)
+    end
 
     -- Phase listener: update currentPhase and re-evaluate visibility every tick.
     -- Guard on visible intentionally absent: after CharacterAdded re-runs init(), visible
