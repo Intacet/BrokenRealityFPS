@@ -948,4 +948,59 @@ Constants.VIEWMODEL_FALLBACK_ROOT_PART_NAME = "RootPart"
 -- Starting value: 1.2 studs forward (closer) with no lateral or vertical shift.
 Constants.VIEWMODEL_CAMERA_EXTRA_OFFSET = CFrame.new(-0.1, 0.25, 0.7)
 
+-- ============================================================
+-- Viewmodel effects (bob, sway, landing dip, slide tilt)
+-- All effects are viewmodel-only — they affect the weapon model's PivotTo offset only.
+-- No camera.CFrame, CameraOffset, FieldOfView, or CameraType changes.
+-- Composed by MovementController:GetViewmodelAddCFrame() each Heartbeat.
+-- ============================================================
+
+-- Master switch. Set false to disable all viewmodel effects at once.
+Constants.VIEWMODEL_EFFECTS_ENABLED = true
+
+-- ── Bob ───────────────────────────────────────────────────────
+-- Sinusoidal up/down + lateral sway of the weapon while moving.
+-- Amplitude in studs; frequency in cycles per second.
+Constants.VIEWMODEL_BOB_ENABLED           = true
+Constants.VIEWMODEL_BOB_WALK_AMPLITUDE    = 0.035  -- max vertical displacement (studs) while walking
+Constants.VIEWMODEL_BOB_WALK_FREQUENCY    = 2.2    -- cycles per second while walking
+Constants.VIEWMODEL_BOB_SPRINT_AMPLITUDE  = 0.055  -- stronger bob while sprinting
+Constants.VIEWMODEL_BOB_SPRINT_FREQUENCY  = 3.0
+Constants.VIEWMODEL_BOB_CROUCH_AMPLITUDE  = 0.015  -- reduced bob while crouching
+Constants.VIEWMODEL_BOB_CROUCH_FREQUENCY  = 1.8
+-- Lateral (X) bob as a fraction of the vertical (Y) bob amplitude.
+Constants.VIEWMODEL_BOB_LATERAL_FACTOR    = 0.35
+-- Subtle roll tilt applied as (lateralBobOffset × this). Units: radians per stud.
+-- At sprint amplitude 0.055 × 0.35 = 0.019 studs lateral → 0.019 × 0.9 ≈ 0.017 rad ≈ ~1°.
+Constants.VIEWMODEL_BOB_TILT_FACTOR       = 0.9
+-- Lerp speed for fading bob in when movement starts and out when it stops (per second).
+Constants.VIEWMODEL_BOB_FADE_SPEED        = 6
+
+-- ── Sway ──────────────────────────────────────────────────────
+-- Slight weapon lag/swing driven by mouse movement.
+Constants.VIEWMODEL_SWAY_ENABLED          = true
+-- Degrees of yaw/pitch sway accumulated per pixel of mouse delta.
+Constants.VIEWMODEL_SWAY_HORIZONTAL_FACTOR = 0.005
+Constants.VIEWMODEL_SWAY_VERTICAL_FACTOR   = 0.003
+-- Maximum sway magnitude in degrees (clamps accumulation).
+Constants.VIEWMODEL_SWAY_MAX              = 3.0
+-- Per-second exponential decay rate back to zero when mouse stops moving.
+Constants.VIEWMODEL_SWAY_DECAY            = 5
+
+-- ── Landing dip ───────────────────────────────────────────────
+-- Short downward Y impulse applied to the viewmodel on landing.
+Constants.VIEWMODEL_LANDING_DIP_ENABLED   = true
+Constants.VIEWMODEL_LANDING_DIP_LIGHT     = 0.06   -- studs (barely felt)
+Constants.VIEWMODEL_LANDING_DIP_MEDIUM    = 0.14   -- studs (noticeable; matches LandingMedium anim)
+Constants.VIEWMODEL_LANDING_DIP_HEAVY     = 0.28   -- studs (clearly felt; matches LandingHeavy anim)
+-- Per-second exponential decay rate; dip fully recovers in ~0.4 s at rate 10.
+Constants.VIEWMODEL_LANDING_DIP_DECAY     = 10
+
+-- ── Slide tilt ────────────────────────────────────────────────
+-- Roll tilt applied while sliding; direction driven by slide direction relative to camera.
+Constants.VIEWMODEL_SLIDE_TILT_ENABLED    = true
+Constants.VIEWMODEL_SLIDE_TILT_MAX        = 5      -- maximum roll in degrees
+-- Per-second lerp speed for tilt entering and leaving slide. Higher = snappier.
+Constants.VIEWMODEL_SLIDE_TILT_SPEED      = 8
+
 return Constants

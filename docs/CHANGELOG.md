@@ -7,6 +7,37 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-05-29] — Viewmodel bob, sway, landing dip, slide tilt + slide/vault guards
+
+### Summary
+
+Implements all viewmodel motion effects through `MovementController:GetViewmodelAddCFrame()`, which ViewModelController already multiplies into its PivotTo chain. All effects are viewmodel-only — no `camera.CFrame`, `CameraOffset`, `FieldOfView`, or `CameraType` changes. MCP/Studio verification required.
+
+Also adds `isFalling` guard to slide entry (blocks slide while airborne).
+
+### Effects implemented (all in `MovementController`)
+
+**Camera bob (3 tiers):** sinusoidal Y + lateral X bob while moving; walk (0.035 stud / 2.2 Hz), sprint (0.055 / 3.0 Hz), crouch (0.015 / 1.8 Hz). Subtle roll derived from lateral displacement. Fades in/out on movement start/stop. Suppressed during slide, vault, fall, and landing-lock.
+
+**Camera sway:** accumulates `UserInputService:GetMouseDelta()` each Heartbeat. Yaw sway 0.005 deg/px; pitch 0.003 deg/px. Max 3°; exponential decay rate 5/s. Gun lags opposite to camera rotation, giving a natural follow-through feel.
+
+**Landing camera dip:** Y impulse set inside `playLandingAnimation()` based on tier — Light 0.06 stud, Medium 0.14, Heavy 0.28. Exponential decay rate 10/s (~0.4 s recovery). Matches landing animation tiers.
+
+**Slide tilt:** roll tilt during slide; direction driven by dot(camera-right, slideDirection) × 5°. Lerps in/out at speed 8/s.
+
+### Guards added
+
+- **Slide airborne block:** `isFalling` guard added to `crouchBeginConn` slide path. Players cannot trigger a slide while airborne (pressing C at the apex of a jump no longer queues a slide on landing).
+
+### Vault (existing guards confirmed sufficient)
+`canAttemptVault()` already checks: cooldown (0.65 s), `movementState.isCrouching`, `isLandingMovementLocked`, `isSliding`, `isSprintStopPlaying`. No additional guards needed for the requested scope.
+
+### New constants (all in `Constants.lua` under "Viewmodel effects")
+
+`VIEWMODEL_EFFECTS_ENABLED`, `VIEWMODEL_BOB_ENABLED`, 6 bob values (amplitude/frequency × 3 tiers), `VIEWMODEL_BOB_LATERAL_FACTOR`, `VIEWMODEL_BOB_TILT_FACTOR`, `VIEWMODEL_BOB_FADE_SPEED`, `VIEWMODEL_SWAY_ENABLED`, `VIEWMODEL_SWAY_HORIZONTAL_FACTOR`, `VIEWMODEL_SWAY_VERTICAL_FACTOR`, `VIEWMODEL_SWAY_MAX`, `VIEWMODEL_SWAY_DECAY`, `VIEWMODEL_LANDING_DIP_ENABLED`, 3 landing dip values, `VIEWMODEL_LANDING_DIP_DECAY`, `VIEWMODEL_SLIDE_TILT_ENABLED`, `VIEWMODEL_SLIDE_TILT_MAX`, `VIEWMODEL_SLIDE_TILT_SPEED`.
+
+---
+
 ## [2026-05-29] — Viewmodel camera depth offset (weapon closer to camera)
 
 ### Summary

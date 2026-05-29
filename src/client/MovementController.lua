@@ -682,6 +682,19 @@ local vaultMoveStartTime:  number  = 0   -- os.clock() when Heartbeat arc began
 local vaultMoveDuration:   number  = 0   -- seconds for the full arc
 
 -- ============================================================
+-- Viewmodel effects state (Stage 5A — bob / sway / landing dip / slide tilt)
+-- Pre-computed each Heartbeat by updateViewmodelEffects().
+-- Read by GetViewmodelAddCFrame() which ViewModelController calls each RenderStepped.
+-- ============================================================
+local viewmodelAddCFrame: CFrame = CFrame.new()  -- result returned by GetViewmodelAddCFrame()
+local vmBobPhase:         number = 0             -- sine phase accumulator (radians)
+local vmBobAlpha:         number = 0             -- bob fade multiplier: 0 = stopped, 1 = full
+local vmSwayX:            number = 0             -- horizontal yaw sway (degrees)
+local vmSwayY:            number = 0             -- vertical pitch sway (degrees)
+local vmLandingDip:       number = 0             -- downward Y impulse (studs); set on landing
+local vmSlideTilt:        number = 0             -- Z roll tilt (degrees); lerps while sliding
+
+-- ============================================================
 -- Private helpers — Stage 1
 -- ============================================================
 
@@ -3463,6 +3476,14 @@ local function loadMovementAnimations(character: Model)
     table.clear(animationTracks)
     currentAnimationName = ""
     rigTypeWarned        = false
+    -- Stage 5A: reset viewmodel effects state on respawn so bob/sway/dip don't carry over.
+    viewmodelAddCFrame = CFrame.new()
+    vmBobPhase         = 0
+    vmBobAlpha         = 0
+    vmSwayX            = 0
+    vmSwayY            = 0
+    vmLandingDip       = 0
+    vmSlideTilt        = 0
     -- Reset set-change log guard so the first movement after respawn re-logs the active set.
     lastAnimationSet       = ""
     -- Reset strafe-blocked log guard so the first movement after respawn re-logs the state.
@@ -3941,6 +3962,18 @@ local function playLandingAnimation(animationName: string)
     else
         -- LandingMedium or unknown → use medium multiplier as safe default.
         speedMult = Constants.MOVEMENT_LANDING_MEDIUM_SPEED_MULTIPLIER
+    end
+
+    -- Stage 5A: set viewmodel landing dip so the weapon visually dips on impact.
+    -- vmLandingDip decays back to zero in updateViewmodelEffects() via exponential decay.
+    if Constants.VIEWMODEL_EFFECTS_ENABLED and Constants.VIEWMODEL_LANDING_DIP_ENABLED then
+        if animationName == "LandingLight" then
+            vmLandingDip = Constants.VIEWMODEL_LANDING_DIP_LIGHT
+        elseif animationName == "LandingHeavy" then
+            vmLandingDip = Constants.VIEWMODEL_LANDING_DIP_HEAVY
+        else
+            vmLandingDip = Constants.VIEWMODEL_LANDING_DIP_MEDIUM
+        end
     end
 
     -- Play the track and set gate state.
@@ -4904,11 +4937,11 @@ function MovementController:IsADSBlocked(): boolean
     return movementState.isSprinting or isSliding or isVaulting    -- Stage 3O: slide; Stage 4A: vault
 end
 
--- Stage 1/2A: no viewmodel effects. Returns identity so ViewModelController's
--- PivotTo composition is unaffected. Future stages compose bob, tilt, and sway
--- here without changing ViewModelController's call site.
+-- Stage 5A: returns the viewmodel offset CFrame pre-computed each Heartbeat.
+-- Composes walk/sprint/crouch bob, mouse sway, landing dip, and slide tilt.
+-- All effects are viewmodel-only; no camera.CFrame, CameraOffset, or FOV writes.
 function MovementController:GetViewmodelAddCFrame(): CFrame
-    return CFrame.new()
+    return viewmodelAddCFrame
 end
 
 -- ── Animation set selection — presentation only ────────────────────────────────
@@ -5102,6 +5135,14 @@ function MovementController:destroy()
     lastStableDirectionName = "" -- Stage 4
     lastDirectionSwitchTime = 0  -- Stage 4
     crouchBottomPoseWarned    = false
+    -- Stage 5A: reset viewmodel effects state on destroy.
+    viewmodelAddCFrame = CFrame.new()
+    vmBobPhase         = 0
+    vmBobAlpha         = 0
+    vmSwayX            = 0
+    vmSwayY            = 0
+    vmLandingDip       = 0
+    vmSlideTilt        = 0
     -- Stage 2E: restore AutoRotate if mouse lock is active before clearing state.
     if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW and customMouseLocked then
         restoreCharacterAutoRotate()
@@ -5501,10 +5542,13 @@ function MovementController:Start()
             if isSliding then return end                   -- Stage 3O: ignore C input during slide
 
             -- Stage 3O: if sprinting or tac-sprinting, start a slide instead of crouching.
+            -- Also blocked when airborne (isFalling) so the player cannot trigger a slide
+            -- by pressing C at the last moment before landing.
             if Constants.SLIDE_ENABLED
                 and (movementState.isSprinting or isTacticalSprinting)
                 and not isLandingMovementLocked
                 and not isSprintStopPlaying
+                and not isFalling
                 and (os.clock() - lastSlideEndTime >= Constants.SLIDE_COOLDOWN)
             then
                 startSlide()
@@ -5660,6 +5704,115 @@ function MovementController:Start()
     )
     table.insert(_connections, crouchEndConn)
 
+    -- ── Stage 5A: viewmodel effects ──────────────────────────────────────────────
+    -- Computes bob, sway, landing dip, and slide tilt into viewmodelAddCFrame each
+    -- Heartbeat.  ViewModelController reads it via GetViewmodelAddCFrame().
+    -- No camera.CFrame, CameraOffset, FieldOfView, or CameraType writes.
+    local function updateViewmodelEffects(dt: number)
+        if not Constants.VIEWMODEL_EFFECTS_ENABLED then
+            viewmodelAddCFrame = CFrame.new()
+            return
+        end
+
+        -- ── Bob ───────────────────────────────────────────────
+        local bobX:    number = 0
+        local bobY:    number = 0
+        local bobRoll: number = 0
+
+        if Constants.VIEWMODEL_BOB_ENABLED then
+            local canBob = movementState.isMoving
+                and not isSliding
+                and not isVaulting
+                and not isFalling
+                and not isLandingMovementLocked
+
+            -- Select amplitude / frequency based on current movement state.
+            local amp:  number
+            local freq: number
+            if movementState.isCrouching then
+                amp  = Constants.VIEWMODEL_BOB_CROUCH_AMPLITUDE
+                freq = Constants.VIEWMODEL_BOB_CROUCH_FREQUENCY
+            elseif movementState.isSprinting or isTacticalSprinting then
+                amp  = Constants.VIEWMODEL_BOB_SPRINT_AMPLITUDE
+                freq = Constants.VIEWMODEL_BOB_SPRINT_FREQUENCY
+            else
+                amp  = Constants.VIEWMODEL_BOB_WALK_AMPLITUDE
+                freq = Constants.VIEWMODEL_BOB_WALK_FREQUENCY
+            end
+
+            -- Fade bob alpha in when moving, out when stopping.
+            local targetAlpha: number = if canBob then 1 else 0
+            vmBobAlpha = vmBobAlpha
+                + (targetAlpha - vmBobAlpha) * math.min(1, Constants.VIEWMODEL_BOB_FADE_SPEED * dt)
+
+            -- Advance phase only while moving so bob resumes smoothly after a stop.
+            if canBob then
+                vmBobPhase = vmBobPhase + dt * freq * math.pi * 2
+            end
+
+            local rawY = math.sin(vmBobPhase)       * amp * vmBobAlpha
+            local rawX = math.sin(vmBobPhase * 0.5) * amp * Constants.VIEWMODEL_BOB_LATERAL_FACTOR * vmBobAlpha
+            bobY    = rawY
+            bobX    = rawX
+            bobRoll = rawX * Constants.VIEWMODEL_BOB_TILT_FACTOR   -- radians per stud of lateral displacement
+        end
+
+        -- ── Mouse sway ────────────────────────────────────────
+        local swayYaw:   number = 0
+        local swayPitch: number = 0
+
+        if Constants.VIEWMODEL_SWAY_ENABLED then
+            local delta   = UserInputService:GetMouseDelta()
+            local maxSway = Constants.VIEWMODEL_SWAY_MAX
+
+            vmSwayX = vmSwayX + delta.X * Constants.VIEWMODEL_SWAY_HORIZONTAL_FACTOR
+            vmSwayY = vmSwayY + delta.Y * Constants.VIEWMODEL_SWAY_VERTICAL_FACTOR
+            vmSwayX = math.clamp(vmSwayX, -maxSway, maxSway)
+            vmSwayY = math.clamp(vmSwayY, -maxSway, maxSway)
+
+            -- Exponential decay: sway fades when the mouse stops.
+            local decay = math.max(0, 1 - Constants.VIEWMODEL_SWAY_DECAY * dt)
+            vmSwayX = vmSwayX * decay
+            vmSwayY = vmSwayY * decay
+
+            swayYaw   = -vmSwayX   -- gun lags opposite to camera yaw
+            swayPitch = -vmSwayY   -- gun lags opposite to camera pitch
+        end
+
+        -- ── Landing dip (impulse set by playLandingAnimation) ─
+        if Constants.VIEWMODEL_LANDING_DIP_ENABLED and vmLandingDip ~= 0 then
+            vmLandingDip = vmLandingDip * math.max(0, 1 - Constants.VIEWMODEL_LANDING_DIP_DECAY * dt)
+            if math.abs(vmLandingDip) < 0.0001 then
+                vmLandingDip = 0
+            end
+        end
+
+        -- ── Slide tilt ────────────────────────────────────────
+        local targetTilt: number = 0
+        if Constants.VIEWMODEL_SLIDE_TILT_ENABLED and isSliding then
+            local cam = workspace.CurrentCamera
+            if cam then
+                local camRight  = cam.CFrame.RightVector
+                local flatRight = Vector3.new(camRight.X, 0, camRight.Z)
+                if flatRight.Magnitude > 0.01 then
+                    -- Positive dot = slide going camera-right = positive roll.
+                    targetTilt = flatRight.Unit:Dot(slideDirection) * Constants.VIEWMODEL_SLIDE_TILT_MAX
+                end
+            end
+        end
+        vmSlideTilt = vmSlideTilt
+            + (targetTilt - vmSlideTilt) * math.min(1, Constants.VIEWMODEL_SLIDE_TILT_SPEED * dt)
+
+        -- ── Compose ───────────────────────────────────────────
+        viewmodelAddCFrame =
+            CFrame.new(bobX, bobY - vmLandingDip, 0)
+            * CFrame.Angles(
+                math.rad(swayPitch),
+                math.rad(swayYaw),
+                bobRoll + math.rad(vmSlideTilt)
+            )
+    end
+
     -- ── Heartbeat: direction detection, speed maintenance, animation update ────
     -- Runs every physics step. Updates movementState, re-applies speed, and drives
     -- the Stage 2A animation layer. No camera writes.
@@ -5802,6 +5955,10 @@ function MovementController:Start()
         -- right-shoulder offset while sprinting (camera centers behind character) and
         -- restores it when sprint ends. Guarded internally so no redundant writes occur.
         updateSprintCameraOffset()
+
+        -- Stage 5A: update viewmodel bob, sway, landing dip, and slide tilt.
+        -- Result stored in viewmodelAddCFrame; read by GetViewmodelAddCFrame().
+        updateViewmodelEffects(_dt)
     end)
     table.insert(_connections, heartbeatConn)
 
