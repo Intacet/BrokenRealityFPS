@@ -11,6 +11,14 @@
       "Modules": {
         "$className": "Folder",
         "$path": "src/shared"
+      },
+      "ViewModels": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true
+      },
+      "WorldModels": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true
       }
     },
 
