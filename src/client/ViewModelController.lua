@@ -1153,15 +1153,15 @@ function ViewModelController:SetTPADS(entering: boolean)
         end
         if tpAdsInTrack then
             tpAdsInTrack:Play()
-            -- When adsIn one-shot ends, freeze it at the last frame so the ADS pose holds.
+            -- When adsIn one-shot ends, freeze it at the EXACT last frame.
             -- AnimationTrack:Destroy() (in StopWeaponAnimations) severs this connection
             -- synchronously, so it cannot fire after holster.
             tpAdsInTrack.Stopped:Connect(function()
                 if equippedWeaponName ~= capturedWeapon or not isTPADS then return end
                 if tpAdsInTrack and tpAdsInTrack.Length > 0 then
-                    tpAdsInTrack:Play(0)
-                    tpAdsInTrack:AdjustSpeed(0)
-                    tpAdsInTrack.TimePosition = tpAdsInTrack.Length - 0.001
+                    tpAdsInTrack:Play(0)                        -- replay with 0 fade
+                    tpAdsInTrack.TimePosition = tpAdsInTrack.Length  -- seek to final frame
+                    tpAdsInTrack:AdjustSpeed(0)                 -- freeze
                 end
             end)
             Logger.debug("[ViewModelController] SetTPADS: adsIn started")
@@ -1221,13 +1221,13 @@ function ViewModelController:SetADS(entering: boolean)
         end
         if weaponAdsInTrack then
             weaponAdsInTrack:Play()
-            -- When adsIn ends, freeze at last frame (same pattern as TP).
+            -- When adsIn ends, freeze at the EXACT last frame (no -0.001 offset).
             weaponAdsInTrack.Stopped:Connect(function()
                 if equippedWeaponName ~= capturedWeapon or not isADS then return end
                 if weaponAdsInTrack and weaponAdsInTrack.Length > 0 then
-                    weaponAdsInTrack:Play(0)
-                    weaponAdsInTrack:AdjustSpeed(0)
-                    weaponAdsInTrack.TimePosition = weaponAdsInTrack.Length - 0.001
+                    weaponAdsInTrack:Play(0)  -- replay with 0 fade
+                    weaponAdsInTrack.TimePosition = weaponAdsInTrack.Length  -- seek to final frame
+                    weaponAdsInTrack:AdjustSpeed(0)  -- freeze
                 end
             end)
             Logger.debug("[ViewModelController] SetADS: FP adsIn started")
