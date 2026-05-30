@@ -151,6 +151,12 @@ local tpAdsFireTrack: AnimationTrack? = nil
 -- Cleared when adsOut completes, or when StopWeaponAnimations / PlayReloadAnimation runs.
 local isTPADS: boolean = false
 
+-- First-person ADS state (camera FOV + viewmodel offset lerp).
+-- Target values driven by SetADS(); actual values lerped in RenderStepped.
+local isADS:       boolean = false   -- target state (set by GunController via SetADS)
+local adsAlpha:    number  = 0       -- lerp alpha 0→1 during transition (drives FOV + offset)
+local defaultFOV:  number  = 70      -- captured on Start(); restored when ADS ends
+
 -- ============================================================
 -- Controller table
 -- ============================================================
@@ -313,6 +319,9 @@ function ViewModelController:init()
     tpAdsOutTrack  = nil
     tpAdsFireTrack = nil
     isTPADS        = false
+    -- First-person ADS state: reset on respawn.
+    isADS          = false
+    adsAlpha       = 0
     -- Destroy any existing weapon model.
     if self.model then
         self.model:Destroy()
@@ -858,9 +867,9 @@ function ViewModelController:Start()
         setVisibility(show)
     end)
 
-    -- RenderStepped: reposition viewmodel every frame when a weapon is equipped.
+    -- RenderStepped: reposition viewmodel + lerp first-person ADS every frame when equipped.
     -- Returns immediately when self.model is nil (holstered), preventing any gravity drop.
-    -- Does NOT write camera.CFrame, CameraOffset, or FieldOfView.
+    -- Writes camera.FieldOfView for ADS zoom; does NOT write camera.CFrame or CameraOffset.
     RunService.RenderStepped:Connect(function(dt: number)
         local m = self.model
         if not m then return end
@@ -870,17 +879,45 @@ function ViewModelController:Start()
             recoilOffset = math.max(0, recoilOffset - dt * RECOIL_RATE)
         end
 
+        -- First-person ADS: lerp adsAlpha toward target (0 = hip, 1 = ADS).
+        -- FOV and viewmodel offset are driven by this alpha.
+        if Constants.ADS_ENABLED then
+            local targetAlpha = isADS and 1 or 0
+            adsAlpha = adsAlpha + (targetAlpha - adsAlpha) * math.min(1, Constants.ADS_TRANSITION_SPEED * dt)
+        end
+
         local cam    = workspace.CurrentCamera
         local moveCF = MovementController:GetViewmodelAddCFrame()
+
+        -- Lerp camera FOV when ADS (70° → 50° by default).
+        if Constants.ADS_ENABLED and adsAlpha > 0 then
+            local targetFOV = defaultFOV + (Constants.ADS_FOV - defaultFOV) * adsAlpha
+            cam.FieldOfView = targetFOV
+        elseif cam.FieldOfView ~= defaultFOV then
+            cam.FieldOfView = defaultFOV  -- restore when not ADS
+        end
+
+        -- Pick viewmodel offset: lerp between CAMERA_EXTRA_OFFSET (hip) and ADS_VIEWMODEL_OFFSET (ADS).
+        local vmOffset = CAMERA_EXTRA_OFFSET
+        if Constants.ADS_ENABLED and adsAlpha > 0 then
+            vmOffset = CAMERA_EXTRA_OFFSET:Lerp(Constants.ADS_VIEWMODEL_OFFSET, adsAlpha)
+        end
+
         m:PivotTo(
             cam.CFrame
-            * CAMERA_EXTRA_OFFSET   -- shifts entire model in camera space (tune via Constants)
+            * vmOffset           -- lerps from hip to ADS offset when aiming
             * viewRecoilCFrame
             * moveCF
             * BASE_OFFSET
             * CFrame.new(0, 0, recoilOffset)
         )
     end)
+
+    -- Capture default FOV so ADS can restore it on exit.
+    local cam = workspace.CurrentCamera
+    if cam then
+        defaultFOV = cam.FieldOfView
+    end
 
     Logger.debug("[ViewModelController] Ready")
 end
@@ -960,6 +997,7 @@ function ViewModelController:PlayReloadAnimation()
             tpAdsInTrack:Stop()
         end
     end
+    isADS = false  -- also clear first-person ADS state
     -- Stop fire and run so reload plays unobstructed.
     if weaponFireTrack and weaponFireTrack.IsPlaying then
         weaponFireTrack:Stop(0)
@@ -1103,6 +1141,23 @@ function ViewModelController:SetTPADS(entering: boolean)
             end
         end
     end
+end
+
+-- Called by GunController when first-person ADS state changes (MB2 press/release).
+-- Sets the target state; adsAlpha is lerped in RenderStepped to drive FOV + viewmodel offset.
+-- Guards: holstered or reloading → clears ADS instead of entering.
+function ViewModelController:SetADS(entering: boolean)
+    assert(typeof(entering) == "boolean",
+        "[ViewModelController] SetADS: entering must be a boolean")
+    if equippedWeaponName == nil then
+        isADS = false
+        return
+    end
+    if entering and isReloading then
+        isADS = false  -- reload takes priority; block ADS entry
+        return
+    end
+    isADS = entering
 end
 
 -- Receives the rotational recoil CFrame from GunController each RenderStepped.

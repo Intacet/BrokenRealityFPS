@@ -1048,4 +1048,17 @@ Constants.WORLD_WEAPON_R6_RIGHT_ARM_NAME      = "Right Arm"
 Constants.WORLD_AKS74_GRIP_C0 = CFrame.new()
 Constants.WORLD_AKS74_GRIP_C1 = CFrame.new()
 
+-- ============================================================
+-- First-person ADS (aim down sights)
+-- Camera FOV zoom and viewmodel offset lerp when MB2 is held.
+-- Transitions are driven by ViewModelController's RenderStepped loop.
+-- ============================================================
+
+Constants.ADS_ENABLED                = true
+Constants.ADS_FOV                    = 50      -- degrees (from default 70)
+Constants.ADS_TRANSITION_SPEED       = 12      -- lerp speed per second (in + out)
+-- Viewmodel offset applied during ADS (replaces VIEWMODEL_CAMERA_EXTRA_OFFSET while aiming).
+-- Brings the gun to camera center; tune in Studio if the sights don't align.
+Constants.ADS_VIEWMODEL_OFFSET       = CFrame.new(0, 0, 0.5)
+
 return Constants

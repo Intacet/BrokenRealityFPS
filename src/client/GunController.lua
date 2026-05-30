@@ -355,21 +355,24 @@ function GunController:Start()
     end)
 
     -- ── Input: ADS ────────────────────────────────────────────────────────────
-    -- isADS tracks state for spread. Third-person visual transition is managed by
-    -- ViewModelController:SetTPADS() which drives the adsIn/adsOut animation sequence.
+    -- isADS tracks state for spread calculation.
+    -- SetADS drives first-person FOV + viewmodel offset lerp.
+    -- SetTPADS drives third-person adsIn/adsOut/adsFire animation sequence.
     UserInputService.InputBegan:Connect(function(input: InputObject, gp: boolean)
         if gp then return end
         if input.UserInputType ~= Enum.UserInputType.MouseButton2 then return end
         if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
         if MovementController:IsADSBlocked() then return end
         isADS = true
-        ViewModelController:SetTPADS(true)  -- start adsIn → freeze at last frame
+        ViewModelController:SetADS(true)    -- FP: lerp FOV + viewmodel offset
+        ViewModelController:SetTPADS(true)  -- TP: start adsIn → freeze at last frame
     end)
 
     UserInputService.InputEnded:Connect(function(input: InputObject, _gp: boolean)
         if input.UserInputType ~= Enum.UserInputType.MouseButton2 then return end
         isADS = false
-        ViewModelController:SetTPADS(false) -- unfreeze adsIn → play adsOut → resume idle
+        ViewModelController:SetADS(false)   -- FP: restore FOV + hip offset
+        ViewModelController:SetTPADS(false) -- TP: unfreeze adsIn → play adsOut → resume idle
     end)
 
     -- ── Input: Reload ─────────────────────────────────────────────────────────
