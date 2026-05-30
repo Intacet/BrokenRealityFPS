@@ -127,10 +127,8 @@ local weaponIdleTrack:    AnimationTrack? = nil
 local weaponFireTrack:    AnimationTrack? = nil
 local weaponReloadTrack:  AnimationTrack? = nil
 local weaponRunTrack:     AnimationTrack? = nil
--- FP ADS tracks: adsIn/adsOut at Action priority, adsFire at Action2 (overlay ADS pose).
-local weaponAdsInTrack:   AnimationTrack? = nil
-local weaponAdsOutTrack:  AnimationTrack? = nil
-local weaponAdsFireTrack: AnimationTrack? = nil
+-- FP ADS track: looped Action-priority pose that plays while MB2 is held.
+local weaponAdsTrack: AnimationTrack? = nil
 
 -- Animation state flags.
 -- isReloading: true while reload one-shot is playing; blocks fire and run.
@@ -309,20 +307,10 @@ function ViewModelController:init()
         weaponRunTrack:Destroy()
         weaponRunTrack = nil
     end
-    if weaponAdsInTrack then
-        weaponAdsInTrack:Stop()
-        weaponAdsInTrack:Destroy()
-        weaponAdsInTrack = nil
-    end
-    if weaponAdsOutTrack then
-        weaponAdsOutTrack:Stop()
-        weaponAdsOutTrack:Destroy()
-        weaponAdsOutTrack = nil
-    end
-    if weaponAdsFireTrack then
-        weaponAdsFireTrack:Stop()
-        weaponAdsFireTrack:Destroy()
-        weaponAdsFireTrack = nil
+    if weaponAdsTrack then
+        weaponAdsTrack:Stop()
+        weaponAdsTrack:Destroy()
+        weaponAdsTrack = nil
     end
     isReloading = false
     isRunning   = false
@@ -752,35 +740,15 @@ function ViewModelController:_setupWeaponAnimations(weaponName: string, data: an
             .. weaponName)
     end
 
-    -- Load FP ADS tracks (adsIn/adsOut at Action, adsFire at Action2).
-    local adsInId: string = tostring(fp.adsIn or "")
-    if adsInId ~= "" and adsInId ~= "rbxassetid://0" then
-        local adsInAnim = Instance.new("Animation")
-        adsInAnim.AnimationId = adsInId
-        local track = (animator :: Animator):LoadAnimation(adsInAnim)
-        track.Looped   = false
+    -- Load FP ADS track (looped Action — overlays idle while MB2 is held).
+    local adsId: string = tostring(fp.ads or "")
+    if adsId ~= "" and adsId ~= "rbxassetid://0" then
+        local adsAnim = Instance.new("Animation")
+        adsAnim.AnimationId = adsId
+        local track = (animator :: Animator):LoadAnimation(adsAnim)
+        track.Looped   = true
         track.Priority = Enum.AnimationPriority.Action
-        weaponAdsInTrack = track
-    end
-
-    local adsOutId: string = tostring(fp.adsOut or "")
-    if adsOutId ~= "" and adsOutId ~= "rbxassetid://0" then
-        local adsOutAnim = Instance.new("Animation")
-        adsOutAnim.AnimationId = adsOutId
-        local track = (animator :: Animator):LoadAnimation(adsOutAnim)
-        track.Looped   = false
-        track.Priority = Enum.AnimationPriority.Action
-        weaponAdsOutTrack = track
-    end
-
-    local adsFireId: string = tostring(fp.adsFire or "")
-    if adsFireId ~= "" and adsFireId ~= "rbxassetid://0" then
-        local adsFireAnim = Instance.new("Animation")
-        adsFireAnim.AnimationId = adsFireId
-        local track = (animator :: Animator):LoadAnimation(adsFireAnim)
-        track.Looped   = false
-        track.Priority = Enum.AnimationPriority.Action2
-        weaponAdsFireTrack = track
+        weaponAdsTrack = track
     end
 
     Logger.debug("[ViewModelController] _setupWeaponAnimations: tracks loaded for: " .. weaponName)
@@ -988,16 +956,14 @@ function ViewModelController:PlayFireAnimation()
     -- Positional recoil snap — decays back to zero in RenderStepped.
     recoilOffset = RECOIL_DIST
     model:PivotTo(model:GetPivot() * CFrame.new(0, 0, recoilOffset))
-    -- First-person: pick adsFire (Action2) when ADS, or regular fire (Action) otherwise.
+    -- First-person: fire track plays on top of whatever is active (idle or ADS loop).
     -- Stop immediately and restart for per-shot restartability.
-    local fpFireTrackToUse = (isADS and weaponAdsFireTrack) or weaponFireTrack
-    if fpFireTrackToUse then
-        if fpFireTrackToUse.IsPlaying then
-            fpFireTrackToUse:Stop(0)
+    if weaponFireTrack then
+        if weaponFireTrack.IsPlaying then
+            weaponFireTrack:Stop(0)
         end
-        fpFireTrackToUse:Play()
-        Logger.debug("[ViewModelController] PlayFireAnimation: FP "
-            .. (isADS and "adsFire" or "fire") .. " track started")
+        weaponFireTrack:Play()
+        Logger.debug("[ViewModelController] PlayFireAnimation: FP fire track started")
     end
     -- Third-person: pick adsFire (Action3) when ADS, or regular fire (Action2) otherwise.
     -- Same pattern — restart per shot so rapid fire always plays from frame 0.
@@ -1195,7 +1161,7 @@ function ViewModelController:SetTPADS(entering: boolean)
 end
 
 -- Called by GunController when first-person ADS state changes (MB2 press/release).
--- Plays FP adsIn/adsOut animations + sets isADS which drives FOV/offset lerp in RenderStepped.
+-- Plays looped FP ADS animation + sets isADS which drives FOV/offset lerp in RenderStepped.
 -- Guards: holstered or reloading → clears ADS instead of entering.
 function ViewModelController:SetADS(entering: boolean)
     assert(typeof(entering) == "boolean",
@@ -1209,47 +1175,24 @@ function ViewModelController:SetADS(entering: boolean)
         return
     end
 
-    local capturedWeapon = equippedWeaponName
     isADS = entering
 
     if entering then
-        -- Stop idle so adsIn is unobstructed.
+        -- Stop idle, play looped ADS track (Action priority — overlays idle).
         if weaponIdleTrack and weaponIdleTrack.IsPlaying then
             weaponIdleTrack:Stop()
         end
-        if weaponAdsInTrack then
-            weaponAdsInTrack:Play()
-            -- When adsIn completes, freeze it in place (don't replay/seek, just freeze).
-            -- Using task.delay instead of Stopped event to ensure animation fully completes.
-            local adsInLength = weaponAdsInTrack.Length
-            task.delay(adsInLength, function()
-                if equippedWeaponName ~= capturedWeapon or not isADS then return end
-                if weaponAdsInTrack and weaponAdsInTrack.IsPlaying then
-                    weaponAdsInTrack:AdjustSpeed(0)  -- freeze wherever it stopped
-                end
-            end)
-            Logger.debug("[ViewModelController] SetADS: FP adsIn started")
+        if weaponAdsTrack then
+            weaponAdsTrack:Play()
+            Logger.debug("[ViewModelController] SetADS: FP ADS loop started")
         end
     else
-        -- Unfreeze adsIn (restore speed before stopping).
-        if weaponAdsInTrack and weaponAdsInTrack.IsPlaying then
-            weaponAdsInTrack:AdjustSpeed(1)
-            weaponAdsInTrack:Stop()
+        -- Stop ADS loop, resume idle.
+        if weaponAdsTrack and weaponAdsTrack.IsPlaying then
+            weaponAdsTrack:Stop()
         end
-        -- Play adsOut then resume idle.
-        if weaponAdsOutTrack then
-            weaponAdsOutTrack:Play()
-            weaponAdsOutTrack.Stopped:Connect(function()
-                if equippedWeaponName ~= capturedWeapon or isADS then return end
-                if not isReloading and weaponIdleTrack then
-                    weaponIdleTrack:Play()
-                end
-            end)
-            Logger.debug("[ViewModelController] SetADS: FP adsOut started")
-        else
-            if not isReloading and weaponIdleTrack then
-                weaponIdleTrack:Play()
-            end
+        if not isReloading and weaponIdleTrack then
+            weaponIdleTrack:Play()
         end
     end
 end
