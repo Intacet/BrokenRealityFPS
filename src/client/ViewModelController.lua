@@ -1185,11 +1185,11 @@ function ViewModelController:SetADS(entering: boolean)
         if weaponAdsTrack then
             weaponAdsTrack:Play()
             weaponAdsTrack.Stopped:Once(function()
-                -- When animation finishes, loop it at speed 0 to freeze the final pose.
+                -- When animation finishes, replay and freeze at the FINAL frame.
                 if isADS and weaponAdsTrack then
-                    weaponAdsTrack.TimePosition = 0
                     weaponAdsTrack:Play()
-                    weaponAdsTrack:AdjustSpeed(0)
+                    weaponAdsTrack.TimePosition = weaponAdsTrack.Length  -- seek to end
+                    weaponAdsTrack:AdjustSpeed(0)                         -- freeze
                 end
             end)
             Logger.debug("[ViewModelController] SetADS: FP ADS started")
