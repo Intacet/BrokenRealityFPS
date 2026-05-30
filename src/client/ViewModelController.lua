@@ -740,13 +740,13 @@ function ViewModelController:_setupWeaponAnimations(weaponName: string, data: an
             .. weaponName)
     end
 
-    -- Load FP ADS track (looped Action — overlays idle while MB2 is held).
+    -- Load FP ADS track (one-shot transition, then frozen at final frame).
     local adsId: string = tostring(fp.ads or "")
     if adsId ~= "" and adsId ~= "rbxassetid://0" then
         local adsAnim = Instance.new("Animation")
         adsAnim.AnimationId = adsId
         local track = (animator :: Animator):LoadAnimation(adsAnim)
-        track.Looped   = true
+        track.Looped   = false  -- plays once, then we freeze it
         track.Priority = Enum.AnimationPriority.Action
         weaponAdsTrack = track
     end
@@ -1178,17 +1178,26 @@ function ViewModelController:SetADS(entering: boolean)
     isADS = entering
 
     if entering then
-        -- Stop idle, play looped ADS track (Action priority — overlays idle).
+        -- Stop idle, play ADS transition, freeze when it ends.
         if weaponIdleTrack and weaponIdleTrack.IsPlaying then
             weaponIdleTrack:Stop()
         end
         if weaponAdsTrack then
             weaponAdsTrack:Play()
-            Logger.debug("[ViewModelController] SetADS: FP ADS loop started")
+            weaponAdsTrack.Stopped:Once(function()
+                -- When animation finishes, loop it at speed 0 to freeze the final pose.
+                if isADS and weaponAdsTrack then
+                    weaponAdsTrack.TimePosition = 0
+                    weaponAdsTrack:Play()
+                    weaponAdsTrack:AdjustSpeed(0)
+                end
+            end)
+            Logger.debug("[ViewModelController] SetADS: FP ADS started")
         end
     else
-        -- Stop ADS loop, resume idle.
+        -- Stop ADS (frozen or playing), resume idle.
         if weaponAdsTrack and weaponAdsTrack.IsPlaying then
+            weaponAdsTrack:AdjustSpeed(1)  -- unfreeze if frozen
             weaponAdsTrack:Stop()
         end
         if not isReloading and weaponIdleTrack then
