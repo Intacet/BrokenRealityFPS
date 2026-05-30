@@ -355,18 +355,21 @@ function GunController:Start()
     end)
 
     -- ── Input: ADS ────────────────────────────────────────────────────────────
-    -- Visual ADS transition is deferred (DEBT-040). This tracks state for spread.
+    -- isADS tracks state for spread. Third-person visual transition is managed by
+    -- ViewModelController:SetTPADS() which drives the adsIn/adsOut animation sequence.
     UserInputService.InputBegan:Connect(function(input: InputObject, gp: boolean)
         if gp then return end
         if input.UserInputType ~= Enum.UserInputType.MouseButton2 then return end
         if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
         if MovementController:IsADSBlocked() then return end
         isADS = true
+        ViewModelController:SetTPADS(true)  -- start adsIn → freeze at last frame
     end)
 
     UserInputService.InputEnded:Connect(function(input: InputObject, _gp: boolean)
         if input.UserInputType ~= Enum.UserInputType.MouseButton2 then return end
         isADS = false
+        ViewModelController:SetTPADS(false) -- unfreeze adsIn → play adsOut → resume idle
     end)
 
     -- ── Input: Reload ─────────────────────────────────────────────────────────

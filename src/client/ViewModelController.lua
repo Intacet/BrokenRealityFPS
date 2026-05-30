@@ -143,6 +143,13 @@ local tpEquipTrack:  AnimationTrack? = nil
 local tpIdleTrack:   AnimationTrack? = nil
 local tpFireTrack:   AnimationTrack? = nil
 local tpReloadTrack: AnimationTrack? = nil
+-- ADS tracks: adsIn/adsOut at Action2 (overlay idle), adsFire at Action3 (overlay ADS hold).
+local tpAdsInTrack:  AnimationTrack? = nil
+local tpAdsOutTrack: AnimationTrack? = nil
+local tpAdsFireTrack: AnimationTrack? = nil
+-- True while the ADS-in animation is playing or frozen at its last frame.
+-- Cleared when adsOut completes, or when StopWeaponAnimations / PlayReloadAnimation runs.
+local isTPADS: boolean = false
 
 -- ============================================================
 -- Controller table
@@ -298,10 +305,14 @@ function ViewModelController:init()
     -- init() is called from CharacterAdded where the old Humanoid.Animator may already be
     -- destroyed, making track method calls unsafe.  Same pattern as MovementController's
     -- loadMovementAnimations() respawn cleanup (table.clear without Stop).
-    tpEquipTrack  = nil
-    tpIdleTrack   = nil
-    tpFireTrack   = nil
-    tpReloadTrack = nil
+    tpEquipTrack   = nil
+    tpIdleTrack    = nil
+    tpFireTrack    = nil
+    tpReloadTrack  = nil
+    tpAdsInTrack   = nil
+    tpAdsOutTrack  = nil
+    tpAdsFireTrack = nil
+    isTPADS        = false
     -- Destroy any existing weapon model.
     if self.model then
         self.model:Destroy()
@@ -368,6 +379,23 @@ function ViewModelController:StopWeaponAnimations()
         tpReloadTrack:Destroy()
         tpReloadTrack = nil
     end
+    if tpAdsInTrack then
+        tpAdsInTrack:AdjustSpeed(1)  -- unfreeze before stopping
+        tpAdsInTrack:Stop()
+        tpAdsInTrack:Destroy()
+        tpAdsInTrack = nil
+    end
+    if tpAdsOutTrack then
+        tpAdsOutTrack:Stop()
+        tpAdsOutTrack:Destroy()
+        tpAdsOutTrack = nil
+    end
+    if tpAdsFireTrack then
+        tpAdsFireTrack:Stop()
+        tpAdsFireTrack:Destroy()
+        tpAdsFireTrack = nil
+    end
+    isTPADS = false
     Logger.debug("[ViewModelController] StopWeaponAnimations: all tracks cleared, flags reset")
 end
 
@@ -731,10 +759,14 @@ function ViewModelController:_setupThirdPersonWeaponAnimations(weaponName: strin
         return track
     end
 
-    tpEquipTrack  = loadTp(tp.equip  or "", false, Enum.AnimationPriority.Action)
-    tpIdleTrack   = loadTp(tp.idle   or "", true,  Enum.AnimationPriority.Action)
-    tpFireTrack   = loadTp(tp.fire   or "", false, Enum.AnimationPriority.Action2)
-    tpReloadTrack = loadTp(tp.reload or "", false, Enum.AnimationPriority.Action2)
+    tpEquipTrack   = loadTp(tp.equip   or "", false, Enum.AnimationPriority.Action)
+    tpIdleTrack    = loadTp(tp.idle    or "", true,  Enum.AnimationPriority.Action)
+    tpFireTrack    = loadTp(tp.fire    or "", false, Enum.AnimationPriority.Action2)
+    tpReloadTrack  = loadTp(tp.reload  or "", false, Enum.AnimationPriority.Action2)
+    -- ADS: adsIn/adsOut overlay idle (Action2); adsFire overrides the frozen ADS pose (Action3).
+    tpAdsInTrack   = loadTp(tp.adsIn   or "", false, Enum.AnimationPriority.Action2)
+    tpAdsOutTrack  = loadTp(tp.adsOut  or "", false, Enum.AnimationPriority.Action2)
+    tpAdsFireTrack = loadTp(tp.adsFire or "", false, Enum.AnimationPriority.Action3)
 
     Logger.debug("[ViewModelController] _setupThirdPersonWeaponAnimations: tracks loaded for: " .. weaponName)
 end
@@ -877,12 +909,14 @@ function ViewModelController:PlayFireAnimation()
         weaponFireTrack:Play()
         Logger.debug("[ViewModelController] PlayFireAnimation: FP fire track started")
     end
-    -- Third-person: same pattern — restart per shot so rapid fire always plays from frame 0.
-    if tpFireTrack then
-        if tpFireTrack.IsPlaying then
-            tpFireTrack:Stop(0)
+    -- Third-person: pick adsFire (Action3) when ADS, or regular fire (Action2) otherwise.
+    -- Same pattern — restart per shot so rapid fire always plays from frame 0.
+    local fireTrackToUse = (isTPADS and tpAdsFireTrack) or tpFireTrack
+    if fireTrackToUse then
+        if fireTrackToUse.IsPlaying then
+            fireTrackToUse:Stop(0)
         end
-        tpFireTrack:Play()
+        fireTrackToUse:Play()
     end
 end
 
@@ -918,6 +952,14 @@ function ViewModelController:PlayReloadAnimation()
     -- Capture weapon identity so the Stopped callback can guard against stale calls.
     local capturedWeapon = equippedWeaponName
     isReloading = true
+    -- Reload clears ADS state — can't reload while aiming.
+    if isTPADS then
+        isTPADS = false
+        if tpAdsInTrack and tpAdsInTrack.IsPlaying then
+            tpAdsInTrack:AdjustSpeed(1)
+            tpAdsInTrack:Stop()
+        end
+    end
     -- Stop fire and run so reload plays unobstructed.
     if weaponFireTrack and weaponFireTrack.IsPlaying then
         weaponFireTrack:Stop(0)
@@ -996,6 +1038,71 @@ function ViewModelController:SetRunning(isSprinting: boolean)
         self:PlayIdleAnimation()
     end
     Logger.debug("[ViewModelController] SetRunning: isRunning=" .. tostring(isRunning))
+end
+
+-- Called by GunController when MouseButton2 is pressed (entering=true) or released (false).
+-- Manages the third-person ADS animation sequence:
+--   entering=true:  stop TP idle → play adsIn one-shot → freeze at last frame while held.
+--   entering=false: unfreeze adsIn → play adsOut one-shot → resume TP idle on completion.
+-- Guards: holstered, already in target state, or reloading in progress → no-op.
+function ViewModelController:SetTPADS(entering: boolean)
+    assert(typeof(entering) == "boolean",
+        "[ViewModelController] SetTPADS: entering must be a boolean")
+    if equippedWeaponName == nil then return end
+    if entering == isTPADS then return end
+    if entering and isReloading then return end  -- reload takes priority; block ADS entry
+
+    local capturedWeapon = equippedWeaponName
+
+    if entering then
+        isTPADS = true
+        -- Stop base layer so adsIn is unobstructed.
+        if tpIdleTrack and tpIdleTrack.IsPlaying then
+            tpIdleTrack:Stop()
+        end
+        if tpAdsInTrack then
+            tpAdsInTrack:Play()
+            -- When adsIn one-shot ends, freeze it at the last frame so the ADS pose holds.
+            -- AnimationTrack:Destroy() (in StopWeaponAnimations) severs this connection
+            -- synchronously, so it cannot fire after holster.
+            tpAdsInTrack.Stopped:Connect(function()
+                if equippedWeaponName ~= capturedWeapon or not isTPADS then return end
+                if tpAdsInTrack and tpAdsInTrack.Length > 0 then
+                    tpAdsInTrack:Play(0)
+                    tpAdsInTrack:AdjustSpeed(0)
+                    tpAdsInTrack.TimePosition = tpAdsInTrack.Length - 0.001
+                end
+            end)
+            Logger.debug("[ViewModelController] SetTPADS: adsIn started")
+        end
+    else
+        isTPADS = false
+        -- Unfreeze adsIn (restore speed before stopping so the fade works correctly).
+        if tpAdsInTrack and tpAdsInTrack.IsPlaying then
+            tpAdsInTrack:AdjustSpeed(1)
+            tpAdsInTrack:Stop()
+        end
+        -- Play adsOut then resume idle.
+        if tpAdsOutTrack then
+            tpAdsOutTrack:Play()
+            tpAdsOutTrack.Stopped:Connect(function()
+                if equippedWeaponName ~= capturedWeapon or isTPADS then return end
+                if not isReloading then
+                    if isRunning and weaponRunTrack ~= nil then
+                        -- Resume run if player is still sprinting.
+                        if tpIdleTrack and tpIdleTrack.IsPlaying then tpIdleTrack:Stop() end
+                    else
+                        if tpIdleTrack then tpIdleTrack:Play() end
+                    end
+                end
+            end)
+            Logger.debug("[ViewModelController] SetTPADS: adsOut started")
+        else
+            if not isReloading and tpIdleTrack then
+                tpIdleTrack:Play()
+            end
+        end
+    end
 end
 
 -- Receives the rotational recoil CFrame from GunController each RenderStepped.
