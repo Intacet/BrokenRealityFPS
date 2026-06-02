@@ -153,11 +153,8 @@ local tpAdsFireTrack: AnimationTrack? = nil
 -- Cleared when adsOut completes, or when StopWeaponAnimations / PlayReloadAnimation runs.
 local isTPADS: boolean = false
 
--- First-person ADS state (camera FOV + viewmodel offset lerp).
--- Target values driven by SetADS(); actual values lerped in RenderStepped.
-local isADS:       boolean = false   -- target state (set by GunController via SetADS)
-local adsAlpha:    number  = 0       -- lerp alpha 0→1 during transition (drives FOV + offset)
-local defaultFOV:  number  = 70      -- captured on Start(); restored when ADS ends
+-- First-person ADS state (animation-driven only).
+local isADS: boolean = false   -- target state (set by GunController via SetADS)
 
 -- ============================================================
 -- Controller table
@@ -328,7 +325,6 @@ function ViewModelController:init()
     isTPADS        = false
     -- First-person ADS state: reset on respawn.
     isADS          = false
-    adsAlpha       = 0
     -- Destroy any existing weapon model.
     if self.model then
         self.model:Destroy()
@@ -897,45 +893,18 @@ function ViewModelController:Start()
             recoilOffset = math.max(0, recoilOffset - dt * RECOIL_RATE)
         end
 
-        -- First-person ADS: lerp adsAlpha toward target (0 = hip, 1 = ADS).
-        -- FOV and viewmodel offset are driven by this alpha.
-        if Constants.ADS_ENABLED then
-            local targetAlpha = isADS and 1 or 0
-            adsAlpha = adsAlpha + (targetAlpha - adsAlpha) * math.min(1, Constants.ADS_TRANSITION_SPEED * dt)
-        end
-
         local cam    = workspace.CurrentCamera
         local moveCF = MovementController:GetViewmodelAddCFrame()
 
-        -- Lerp camera FOV when ADS (70° → 50° by default).
-        if Constants.ADS_ENABLED and adsAlpha > 0 then
-            local targetFOV = defaultFOV + (Constants.ADS_FOV - defaultFOV) * adsAlpha
-            cam.FieldOfView = targetFOV
-        elseif cam.FieldOfView ~= defaultFOV then
-            cam.FieldOfView = defaultFOV  -- restore when not ADS
-        end
-
-        -- Pick viewmodel offset: lerp between CAMERA_EXTRA_OFFSET (hip) and ADS_VIEWMODEL_OFFSET (ADS).
-        local vmOffset = CAMERA_EXTRA_OFFSET
-        if Constants.ADS_ENABLED and adsAlpha > 0 then
-            vmOffset = CAMERA_EXTRA_OFFSET:Lerp(Constants.ADS_VIEWMODEL_OFFSET, adsAlpha)
-        end
-
         m:PivotTo(
             cam.CFrame
-            * vmOffset           -- lerps from hip to ADS offset when aiming
+            * CAMERA_EXTRA_OFFSET
             * viewRecoilCFrame
             * moveCF
             * BASE_OFFSET
             * CFrame.new(0, 0, recoilOffset)
         )
     end)
-
-    -- Capture default FOV so ADS can restore it on exit.
-    local cam = workspace.CurrentCamera
-    if cam then
-        defaultFOV = cam.FieldOfView
-    end
 
     Logger.debug("[ViewModelController] Ready")
 end
