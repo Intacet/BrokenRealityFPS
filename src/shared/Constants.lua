@@ -1062,7 +1062,8 @@ Constants.VIEWMODEL_ADS_TRANSITION_FADE_TIME = 0.05
 -- Epsilon for holding ADS-in final frame (TimePosition >= Length - epsilon triggers freeze).
 -- Used when adsIdle is rbxassetid://0; fake idle by freezing the final ADS-in pose.
 -- Monitored in RenderStepped, not via Stopped callback (avoids replay pop).
-Constants.VIEWMODEL_ADS_HOLD_FRAME_EPSILON = 0.03
+-- Reduced to 0.001 so animation plays all the way to actual final frame before freezing.
+Constants.VIEWMODEL_ADS_HOLD_FRAME_EPSILON = 0.001
 
 -- Fake ADS idle movement toggles and parameters.
 -- When adsIdle is rbxassetid://0, ViewModelController applies subtle procedural
