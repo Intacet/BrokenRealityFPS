@@ -7,6 +7,121 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-03 — REPAIR] — Fix broken AKS74 first-person ADS animation system
+
+### Summary
+
+**This is a repair pass.** The ADS system added earlier today was causing the viewmodel to pop, jump, and clip into bad poses. The root cause was the Stopped callback freeze logic: replaying adsIn after it stopped caused a visual pop. Normal idle/run tracks were also fighting the ADS pose.
+
+**Fixed by:**
+- Replacing boolean `isAiming` with explicit `ADSState` type (`"Hip" | "Entering" | "Aiming" | "Exiting"`)
+- Removing the fragile `adsInTrack.Stopped:Once` callback that replayed the track
+- Monitoring `adsInTrack.TimePosition` in the existing RenderStepped loop instead
+- Freezing adsIn at final frame when `TimePosition >= Length - epsilon` (no replay, no pop)
+- Suppressing normal idle/run tracks while `adsState ~= "Hip"` via new Constants flags
+- Reducing fake ADS idle amplitudes to extremely subtle values (was too distracting)
+
+**No new features added.** This is a focused repair of the existing ADS animation state machine to eliminate visual popping and pose fighting.
+
+**MCP/Studio verification required** — see 27-step checklist at end of this entry.
+
+### Changes to `src/client/ViewModelController.lua`
+
+**ADS state machine:**
+- Replaced `local isAiming: boolean` with `type ADSState = "Hip" | "Entering" | "Aiming" | "Exiting"` and `local adsState: ADSState = "Hip"`
+- `init()` and `StopWeaponAnimations()` now reset `adsState = "Hip"` instead of `isAiming = false`
+
+**SetAiming(entering: boolean) — completely rewritten:**
+- No longer uses `adsInTrack.Stopped:Once` callback
+- `entering == true`: stops idle/run (if suppress flags enabled), stops any active adsOut, plays adsIn from TimePosition 0, sets `adsState = "Entering"`
+- `entering == false`: unfreezes and stops adsIn, plays adsOut, sets `adsState = "Exiting"`, uses adsOut.Stopped to return to "Hip" and resume idle/run
+- Guards: no-op if already in target state; blocks entry while reloading
+
+**RenderStepped loop — new ADS-in freeze monitoring:**
+- When `adsState == "Entering"` and `weaponAdsInTrack.TimePosition >= Length - epsilon`:
+  - Seeks to `Length - epsilon`
+  - Calls `AdjustSpeed(0)` to freeze
+  - Sets `adsState = "Aiming"`
+  - No track replay, no Stopped callback, no visual pop
+
+**Fake ADS idle — now only applies when `adsState == "Aiming"`:**
+- Changed condition from `if isAiming and ...` to `if adsState == "Aiming" and ...`
+- Only runs while in the frozen held ADS pose (not during Entering or Exiting)
+
+**IsAiming() — updated:**
+- Changed from `return isAiming` to `return adsState ~= "Hip"`
+- Returns true while Entering, Aiming, or Exiting
+
+**PlayADSFireAnimation() — stricter guard:**
+- Added `if adsState ~= "Aiming" then return end` guard
+- Only plays ADS fire while in the held ADS pose (not during Entering or Exiting)
+
+**PlayReloadAnimation() — updated:**
+- Changed ADS exit check from `if isAiming then` to `if adsState ~= "Hip" then`
+
+### Changes to `src/shared/Constants.lua`
+
+**Updated ADS constants (repaired for stability):**
+- `VIEWMODEL_ADS_TRANSITION_FADE_TIME = 0.05` (was `VIEWMODEL_ADS_FADE_TIME = 0.08`, renamed for clarity)
+- `VIEWMODEL_ADS_HOLD_FRAME_EPSILON = 0.03` (was `0.01`, increased for earlier freeze trigger in RenderStepped)
+- `VIEWMODEL_ADS_FAKE_IDLE_POSITION_X = 0.001` (was `0.003`, reduced to extremely subtle)
+- `VIEWMODEL_ADS_FAKE_IDLE_POSITION_Y = 0.0015` (was `0.004`, reduced to extremely subtle)
+- `VIEWMODEL_ADS_FAKE_IDLE_ROTATION_DEGREES = 0.04` (was `0.12`, reduced to extremely subtle)
+- `VIEWMODEL_ADS_FAKE_IDLE_FREQUENCY = 0.85` (was `1.15`, slower for more natural breathing)
+
+**New ADS suppress flags:**
+- `VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING = true` — stops run track when ADS enters
+- `VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true` — stops idle track when ADS enters
+- These prevent idle/run from fighting the ADS pose
+
+**Updated sway multipliers:**
+- `VIEWMODEL_ADS_MOUSE_SWAY_MULTIPLIER = 0.1` (was `0.25`, more aggressive reduction)
+- `VIEWMODEL_ADS_MOVE_SWAY_MULTIPLIER = 0.05` (was `0.2`, more aggressive reduction)
+
+### Technical debt affected
+
+**DEBT-013** (High severity) — Weapon name hardcoded — **STABLE**. This repair changes only ADS animation playback. No server changes, no weapon identity changes. Debt remains stable.
+
+**DEBT-034** (Low-Medium severity) — MCP verification — **APPLIES TO THIS REPAIR**. This repair requires MCP/Studio verification to confirm the visual pop/jump is fixed and ADS pose is stable.
+
+**No new debt introduced.** Clean repair following existing patterns.
+
+### MCP/Studio verification steps (27 steps)
+
+When MCP is available, verify the following in Roblox Studio play mode:
+
+1. Start a client playtest
+2. Confirm AKS74 holstered before pressing 1
+3. Press right mouse while holstered → confirm ADS does not activate, no errors
+4. Press 1 to equip AKS74
+5. Confirm equip animation (rbxassetid://139265999638776) plays
+6. Confirm idle animation (rbxassetid://75961893882956) loops
+7. Right mouse to ADS → confirm AKS_ADS (rbxassetid://134918319490586) plays once
+8. **CRITICAL:** Confirm ADS does NOT pop, jump, clip massively, or snap to wrong pose
+9. **CRITICAL:** Confirm after adsIn reaches final frame, pose is held without replaying adsIn
+10. **CRITICAL:** Confirm normal idle/run does NOT fight the held ADS pose
+11. Confirm fake ADS idle is extremely subtle (barely noticeable breathing/sway)
+12. Fire while ADS → confirm AKS_ADS_FIRE (rbxassetid://138021695403324) plays
+13. Fire multiple shots while ADS → confirm adsFire restarts cleanly, ADS pose stays stable
+14. Right mouse to exit ADS → confirm AKS_UNADS (rbxassetid://132508450718728) plays
+15. Confirm after adsOut, normal idle (rbxassetid://75961893882956) resumes
+16. Enter ADS, press R → confirm ADS exits cleanly, reload plays
+17. Enter ADS, holster (press 1) → confirm all ADS tracks stop, no stuck pose
+18. Re-equip → confirm adsState reset to Hip
+19. Confirm camera.CFrame unchanged
+20. Confirm no FOV zoom
+21. Confirm no new remotes created
+22. Confirm no server combat/damage/ammo/reload/health/raycast behavior changed
+23. Confirm no errors in Output
+24. Sprint (LeftShift) while ADS → confirm run animation does not override ADS
+25. Enter RESULTS phase while ADS → confirm viewmodel hides cleanly
+26. Toggle ADS multiple times rapidly → confirm no stuck states, pose always returns to Hip correctly
+27. Fire during adsIn "Entering" state → confirm ADS fire does NOT play (only plays when "Aiming")
+
+**If MCP unavailable:** Perform all 27 steps manually in Studio before deploying.
+
+---
+
 ## [2026-06-03] — AKS74 first-person ADS animation system foundation
 
 ### Summary

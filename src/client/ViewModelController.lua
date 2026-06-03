@@ -141,9 +141,16 @@ local isRunning:   boolean = false
 local weaponAdsInTrack:  AnimationTrack? = nil
 local weaponAdsOutTrack: AnimationTrack? = nil
 local weaponAdsFireTrack: AnimationTrack? = nil
--- ADS state: true while aiming, false while not.
-local isAiming: boolean = false
--- Fake ADS idle: accumulator for sine-based breathing/sway when adsIn is frozen.
+
+-- ADS state machine: explicit state to prevent idle/run from fighting ADS pose.
+-- "Hip" = normal viewmodel idle/run/fire behavior
+-- "Entering" = adsIn is playing forward
+-- "Aiming" = adsIn is held at final frame, fake ADS idle active
+-- "Exiting" = adsOut is playing
+type ADSState = "Hip" | "Entering" | "Aiming" | "Exiting"
+local adsState: ADSState = "Hip"
+
+-- Fake ADS idle: accumulator for sine-based breathing/sway when adsState == "Aiming".
 local adsIdleTime: number = 0
 
 -- Third-person character weapon AnimationTracks.
@@ -322,7 +329,7 @@ function ViewModelController:init()
     end
     isReloading = false
     isRunning   = false
-    isAiming    = false
+    adsState    = "Hip"
     adsIdleTime = 0
     -- Third-person character tracks: nil references only — do NOT call Stop/Destroy.
     -- init() is called from CharacterAdded where the old Humanoid.Animator may already be
@@ -391,7 +398,7 @@ function ViewModelController:StopWeaponAnimations()
     end
     isReloading = false
     isRunning   = false
-    isAiming    = false
+    adsState    = "Hip"
     adsIdleTime = 0
     -- Third-person character tracks: stop and destroy (character is alive in this path).
     -- AnimationTrack:Destroy() severs Stopped connections synchronously, preventing any
@@ -922,9 +929,24 @@ function ViewModelController:Start()
         local cam    = workspace.CurrentCamera
         local moveCF = MovementController:GetViewmodelAddCFrame()
 
-        -- Fake ADS idle: when aiming and adsIn is frozen, apply subtle procedural movement.
+        -- ADS state machine: monitor adsIn progress and freeze at final frame.
+        -- When adsState == "Entering" and adsIn reaches near its end, freeze it and transition to "Aiming".
+        if adsState == "Entering" and weaponAdsInTrack and weaponAdsInTrack.IsPlaying then
+            local len = weaponAdsInTrack.Length
+            local pos = weaponAdsInTrack.TimePosition
+            if len > 0 and pos >= (len - Constants.VIEWMODEL_ADS_HOLD_FRAME_EPSILON) then
+                -- Freeze at final frame: seek to near-end, adjust speed to 0.
+                weaponAdsInTrack.TimePosition = math.max(0, len - Constants.VIEWMODEL_ADS_HOLD_FRAME_EPSILON)
+                weaponAdsInTrack:AdjustSpeed(0)
+                adsState = "Aiming"
+                adsIdleTime = 0
+                Logger.debug("[ViewModelController] RenderStepped: adsIn frozen at final frame (state = Aiming)")
+            end
+        end
+
+        -- Fake ADS idle: when adsState == "Aiming" and fake idle enabled, apply subtle procedural movement.
         local adsIdleCF = CFrame.new()
-        if isAiming and Constants.VIEWMODEL_ADS_FAKE_IDLE_ENABLED then
+        if adsState == "Aiming" and Constants.VIEWMODEL_ADS_FAKE_IDLE_ENABLED then
             adsIdleTime = adsIdleTime + dt
             local freq = Constants.VIEWMODEL_ADS_FAKE_IDLE_FREQUENCY
             local t = adsIdleTime * freq * 2 * math.pi
@@ -1017,7 +1039,7 @@ function ViewModelController:PlayReloadAnimation()
     local capturedWeapon = equippedWeaponName
     isReloading = true
     -- Exit ADS if active (reload takes priority).
-    if isAiming then
+    if adsState ~= "Hip" then
         self:StopADSAnimations()
     end
     -- Stop fire and run so reload plays unobstructed.
@@ -1116,90 +1138,102 @@ function ViewModelController:SetAiming(entering: boolean)
 
     -- No weapon equipped: clear ADS state and return.
     if equippedWeaponName == nil then
-        isAiming = false
+        adsState = "Hip"
         adsIdleTime = 0
         return
     end
 
-    -- No-op if state unchanged.
-    if entering == isAiming then return end
-
-    -- Block ADS entry while reloading.
-    if entering and isReloading then
-        isAiming = false
+    -- No-op if already in target state.
+    if entering and (adsState == "Entering" or adsState == "Aiming") then
+        return
+    end
+    if not entering and adsState == "Hip" then
         return
     end
 
-    -- Update state.
-    isAiming = entering
-    adsIdleTime = 0
+    -- Block ADS entry while reloading.
+    if entering and isReloading then
+        adsState = "Hip"
+        return
+    end
 
     if entering then
-        -- ADS in: play adsIn animation, then freeze at final frame.
+        -- ADS in: stop idle/run, play adsIn, set state to Entering.
+        -- RenderStepped will monitor TimePosition and freeze at final frame.
+
         -- Stop run (ADS suppresses run visually).
-        if weaponRunTrack and weaponRunTrack.IsPlaying then
-            weaponRunTrack:Stop()
+        if Constants.VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING then
+            if weaponRunTrack and weaponRunTrack.IsPlaying then
+                weaponRunTrack:Stop()
+            end
         end
-        -- Stop idle.
-        if weaponIdleTrack and weaponIdleTrack.IsPlaying then
-            weaponIdleTrack:Stop()
+
+        -- Stop idle (ADS suppresses idle visually).
+        if Constants.VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING then
+            if weaponIdleTrack and weaponIdleTrack.IsPlaying then
+                weaponIdleTrack:Stop()
+            end
+        end
+
+        -- Stop any active adsOut (cancel exit if re-entering).
+        if weaponAdsOutTrack and weaponAdsOutTrack.IsPlaying then
+            weaponAdsOutTrack:Stop()
         end
 
         if weaponAdsInTrack then
+            -- Play adsIn from the start.
+            weaponAdsInTrack.TimePosition = 0
+            weaponAdsInTrack:AdjustSpeed(1)  -- ensure not frozen
             weaponAdsInTrack:Play()
-            -- When adsIn finishes, freeze it at the final frame.
-            -- Capture weapon identity to guard against stale callback after holster.
-            local capturedWeapon = equippedWeaponName
-            weaponAdsInTrack.Stopped:Once(function()
-                -- Only freeze if same weapon, still aiming, and track still exists.
-                if equippedWeaponName ~= capturedWeapon or not isAiming or not weaponAdsInTrack then
-                    return
-                end
-                -- Replay the track, seek to near the end, then freeze with AdjustSpeed(0).
-                weaponAdsInTrack:Play()
-                local len = weaponAdsInTrack.Length
-                if len > 0 then
-                    weaponAdsInTrack.TimePosition = len - Constants.VIEWMODEL_ADS_HOLD_FRAME_EPSILON
-                else
-                    Logger.warn("[ViewModelController] SetAiming: adsIn track length is 0; cannot freeze")
-                end
-                weaponAdsInTrack:AdjustSpeed(0)
-                Logger.debug("[ViewModelController] SetAiming: adsIn frozen at final frame")
-            end)
-            Logger.debug("[ViewModelController] SetAiming: adsIn started")
+            adsState = "Entering"
+            adsIdleTime = 0
+            Logger.debug("[ViewModelController] SetAiming: adsIn started (state = Entering)")
         else
-            Logger.debug("[ViewModelController] SetAiming: no adsIn track loaded")
+            Logger.warn("[ViewModelController] SetAiming: no adsIn track loaded")
+            adsState = "Hip"
         end
     else
-        -- ADS out: unfreeze and stop adsIn, play adsOut, return to idle/run.
+        -- ADS out: unfreeze adsIn, stop it, play adsOut, set state to Exiting.
+        adsIdleTime = 0
+
+        -- Stop and unfreeze adsIn if it's playing/frozen.
         if weaponAdsInTrack and weaponAdsInTrack.IsPlaying then
-            weaponAdsInTrack:AdjustSpeed(1)  -- unfreeze
+            weaponAdsInTrack:AdjustSpeed(1)  -- unfreeze before stopping
             weaponAdsInTrack:Stop()
         end
 
         if weaponAdsOutTrack then
+            weaponAdsOutTrack.TimePosition = 0
             weaponAdsOutTrack:Play()
+            adsState = "Exiting"
+
+            -- When adsOut finishes, return to Hip and resume idle/run.
             local capturedWeapon = equippedWeaponName
             weaponAdsOutTrack.Stopped:Once(function()
-                -- Resume idle/run after adsOut completes.
-                if equippedWeaponName ~= capturedWeapon or self.model == nil or isAiming then
+                -- Only resume if same weapon and still exiting.
+                if equippedWeaponName ~= capturedWeapon or self.model == nil then
                     return
                 end
-                if not isReloading then
-                    if isRunning and weaponRunTrack ~= nil then
-                        self:PlayRunAnimation()
-                    else
-                        self:PlayIdleAnimation()
+                if adsState == "Exiting" then
+                    adsState = "Hip"
+                    -- Resume idle/run if not reloading.
+                    if not isReloading then
+                        if isRunning and weaponRunTrack ~= nil and not Constants.VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING then
+                            self:PlayRunAnimation()
+                        elseif not Constants.VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING then
+                            self:PlayIdleAnimation()
+                        end
                     end
                 end
             end)
-            Logger.debug("[ViewModelController] SetAiming: adsOut started")
+            Logger.debug("[ViewModelController] SetAiming: adsOut started (state = Exiting)")
         else
-            -- No adsOut track: resume idle/run immediately.
+            -- No adsOut track: immediately return to Hip and resume idle/run.
+            adsState = "Hip"
             if not isReloading then
-                if isRunning and weaponRunTrack ~= nil then
+                if isRunning and weaponRunTrack ~= nil and not Constants.VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING then
                     self:PlayRunAnimation()
-                else
+                elseif not Constants.VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING then
                     self:PlayIdleAnimation()
                 end
             end
@@ -1207,9 +1241,10 @@ function ViewModelController:SetAiming(entering: boolean)
     end
 end
 
--- Returns true while the player is aiming (ADS active).
+-- Returns true while the player is aiming (ADS entering, holding, or exiting).
+-- Returns false only when adsState == "Hip".
 function ViewModelController:IsAiming(): boolean
-    return isAiming
+    return adsState ~= "Hip"
 end
 
 -- Plays the ADS in animation (enter ADS).
@@ -1230,8 +1265,14 @@ end
 
 -- Plays the ADS fire animation (firing while ADS).
 -- Called by GunController when firing while IsAiming() is true.
+-- Only plays if adsState == "Aiming" (held ADS pose).
 -- Restartable: each shot re-plays from the start.
 function ViewModelController:PlayADSFireAnimation()
+    -- Only fire while in the held ADS pose.
+    if adsState ~= "Aiming" then
+        Logger.debug("[ViewModelController] PlayADSFireAnimation: not in Aiming state, skipped")
+        return
+    end
     if not weaponAdsFireTrack then return end
     if weaponAdsFireTrack.IsPlaying then
         weaponAdsFireTrack:Stop(0)
@@ -1241,7 +1282,7 @@ function ViewModelController:PlayADSFireAnimation()
 end
 
 -- Stops all ADS animations and clears ADS state.
--- Called internally when holstering or resetting.
+-- Called internally when holstering, reloading, or resetting.
 function ViewModelController:StopADSAnimations()
     if weaponAdsInTrack and weaponAdsInTrack.IsPlaying then
         weaponAdsInTrack:AdjustSpeed(1)  -- unfreeze before stopping
@@ -1253,7 +1294,7 @@ function ViewModelController:StopADSAnimations()
     if weaponAdsFireTrack and weaponAdsFireTrack.IsPlaying then
         weaponAdsFireTrack:Stop()
     end
-    isAiming = false
+    adsState = "Hip"
     adsIdleTime = 0
 end
 
