@@ -1083,4 +1083,28 @@ Constants.VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true
 Constants.VIEWMODEL_ADS_MOUSE_SWAY_MULTIPLIER = 0.1
 Constants.VIEWMODEL_ADS_MOVE_SWAY_MULTIPLIER  = 0.05
 
+-- ============================================================
+-- ADS-only viewmodel alignment offset
+-- Applied only while ADS is active to align iron sights with screen center/crosshair.
+-- Does NOT affect hipfire viewmodel position.
+-- ============================================================
+
+-- ADS alignment offset in studs (applied in camera space).
+-- X: negative moves left, positive moves right
+-- Y: positive moves up, negative moves down
+-- Z: negative moves farther from camera, positive moves closer
+Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_X = -0.30  -- move left to center sights
+Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Y = 0.08   -- move slightly up
+Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Z = -0.12  -- move slightly farther from camera
+
+-- ADS alignment rotation in degrees (applied after offset).
+-- Applied as CFrame.Angles(pitch, yaw, roll) in radians.
+Constants.VIEWMODEL_ADS_ALIGNMENT_ROTATION_X_DEGREES = 0  -- pitch (up/down tilt)
+Constants.VIEWMODEL_ADS_ALIGNMENT_ROTATION_Y_DEGREES = 0  -- yaw (left/right turn)
+Constants.VIEWMODEL_ADS_ALIGNMENT_ROTATION_Z_DEGREES = 0  -- roll (twist)
+
+-- ADS alignment blend speed (alpha lerp per second).
+-- Higher = faster transition in/out of ADS alignment.
+Constants.VIEWMODEL_ADS_ALIGNMENT_BLEND_SPEED = 18
+
 return Constants

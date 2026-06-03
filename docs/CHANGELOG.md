@@ -7,6 +7,132 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-03 — TUNING] — Add ADS-only viewmodel alignment offset for AKS74
+
+### Summary
+
+**This is an ADS alignment tuning pass.** The AKS74 ADS animation plays correctly after the repair, but the in-game ADS sight line is not centered on the player's view/crosshair. The current ADS pose appears too far right, slightly low, and not aligned directly down the sight line.
+
+**Fixed by adding:**
+- Separate ADS-only viewmodel alignment offset (position + rotation)
+- Applied only while `adsState` is Entering, Aiming, or Exiting
+- Smoothly blended in/out via `adsAlignmentAlpha` (0 = hipfire, 1 = full ADS alignment)
+- All tuning values in Constants.lua for easy iteration
+
+**Does NOT affect hipfire viewmodel position.** The alignment offset is zero when `adsState == "Hip"`.
+
+**No camera changes, no FOV zoom, no recoil, no spread, no server changes.** Pure client-side viewmodel offset tuning for ADS sight alignment.
+
+**MCP/Studio verification required** — see 20-step checklist at end of this entry.
+
+### Starting tuning values (Constants.lua)
+
+These are initial values; may need iteration in Studio to perfectly center the sights:
+
+- `VIEWMODEL_ADS_ALIGNMENT_OFFSET_X = -0.30` — move left to center sights
+- `VIEWMODEL_ADS_ALIGNMENT_OFFSET_Y = 0.08` — move slightly up
+- `VIEWMODEL_ADS_ALIGNMENT_OFFSET_Z = -0.12` — move slightly farther from camera
+- `VIEWMODEL_ADS_ALIGNMENT_ROTATION_X_DEGREES = 0` — pitch (up/down tilt)
+- `VIEWMODEL_ADS_ALIGNMENT_ROTATION_Y_DEGREES = 0` — yaw (left/right turn)
+- `VIEWMODEL_ADS_ALIGNMENT_ROTATION_Z_DEGREES = 0` — roll (twist)
+- `VIEWMODEL_ADS_ALIGNMENT_BLEND_SPEED = 18` — alpha lerp per second
+
+**Tuning guidance (if sight still off after testing):**
+- Sight right of crosshair → make OFFSET_X more negative
+- Sight left of crosshair → make OFFSET_X less negative
+- Sight too low → increase OFFSET_Y
+- Sight too high → decrease OFFSET_Y
+- Gun too close/large → make OFFSET_Z more negative
+- Gun too far/small → make OFFSET_Z less negative
+
+### Changes to `src/client/ViewModelController.lua`
+
+**New state variable:**
+- `local adsAlignmentAlpha: number = 0` — blend alpha from 0 (hipfire) to 1 (full ADS alignment)
+
+**RenderStepped loop — ADS alignment blending added:**
+- Determines `targetAlpha` based on `adsState`:
+  - `targetAlpha = 1` when Entering or Aiming (needs alignment)
+  - `targetAlpha = 0` when Hip or Exiting (return to hipfire)
+- Lerps `adsAlignmentAlpha` toward target using `VIEWMODEL_ADS_ALIGNMENT_BLEND_SPEED`
+- Builds `adsAlignmentCF` from Constants values, scaled by `adsAlignmentAlpha`
+- Position offset: `CFrame.new(offsetX, offsetY, offsetZ)`
+- Rotation offset: `CFrame.Angles(rotX, rotY, rotZ)` (degrees converted to radians)
+- Final offset: `adsAlignmentCF = position * rotation`
+
+**Final viewmodel CFrame order:**
+```
+cam.CFrame
+  * CAMERA_EXTRA_OFFSET       (base hipfire offset)
+  * adsAlignmentCF             (ADS-only alignment — zero when Hip)
+  * viewRecoilCFrame           (rotational recoil)
+  * moveCF                     (movement sway from MovementController)
+  * BASE_OFFSET                (model-specific offset)
+  * CFrame.new(0, 0, recoilOffset)  (positional recoil)
+  * adsIdleCF                  (fake ADS idle breathing/sway)
+```
+
+**Reasoning:** `adsAlignmentCF` is applied after `CAMERA_EXTRA_OFFSET` (hipfire base) but before recoil/sway. This ensures:
+1. Hipfire position unchanged (alignment alpha is 0 when Hip)
+2. ADS alignment blends smoothly during Entering/Exiting states
+3. Recoil and procedural sway still apply on top of the aligned ADS pose
+
+**Cleanup integration:**
+- `init()` now resets `adsAlignmentAlpha = 0`
+- `StopWeaponAnimations()` now resets `adsAlignmentAlpha = 0`
+- `StopADSAnimations()` now resets `adsAlignmentAlpha = 0`
+- Holster, hide, reset all clear the alignment offset
+
+### Changes to `src/shared/Constants.lua`
+
+**New ADS alignment section added:**
+- 7 new constants for ADS-only viewmodel alignment
+- Position offset in studs (X/Y/Z)
+- Rotation offset in degrees (pitch/yaw/roll)
+- Blend speed for smooth transitions
+
+### Technical debt affected
+
+**DEBT-013** (High severity) — Weapon name hardcoded — **STABLE**. This task adds only ADS-only viewmodel alignment offset. No server changes, no weapon identity changes, no combat logic changes. Debt remains stable.
+
+**DEBT-034** (Low-Medium severity) — MCP verification — **APPLIES TO THIS TASK**. This task requires MCP/Studio verification to confirm the ADS sight alignment is centered on the crosshair.
+
+**No new debt introduced.** Clean tuning addition following existing patterns.
+
+### MCP/Studio verification steps (20 steps)
+
+When MCP is available, verify the following in Roblox Studio play mode:
+
+1. Start a client playtest
+2. Press 1 to equip AKS74
+3. **CRITICAL:** Confirm normal hipfire viewmodel position is unchanged (alignment offset is zero when Hip)
+4. Right mouse to ADS
+5. **CRITICAL:** Confirm ADS enters smoothly with no snapping (blend works)
+6. **CRITICAL:** Confirm the AKS74 rear/front sights move closer to screen center/crosshair (alignment applied)
+7. **CRITICAL:** Confirm the sight line is no longer far right of center (X offset working)
+8. **CRITICAL:** Confirm the sight line is no longer too low (Y offset working)
+9. **CRITICAL:** Confirm the gun is not too close to camera (Z offset working)
+10. Fire while ADS → confirm ADS fire animation still works
+11. Confirm recoil still applies on top of ADS alignment
+12. Exit ADS → confirm alignment offset blends out smoothly (no snap)
+13. Confirm normal idle resumes after ADS exit
+14. Holster while ADS → confirm alignment offset resets (alpha returns to 0)
+15. Re-equip → confirm no ADS offset stuck in hipfire (alpha starts at 0)
+16. Confirm camera.CFrame unchanged
+17. Confirm no FOV zoom or camera zoom
+18. Confirm no new remotes created
+19. Confirm no server combat/damage/ammo/reload/health/raycast changes
+20. Confirm no errors in Output
+
+**If sight alignment is still off after testing:**
+- Use the tuning guidance above
+- Adjust only Constants.lua values
+- Do NOT change ADS animation, camera.CFrame, or hipfire base offset
+
+**MCP unavailable:** Perform all 20 steps manually in Studio.
+
+---
+
 ## [2026-06-03 — REPAIR] — Fix broken AKS74 first-person ADS animation system
 
 ### Summary
