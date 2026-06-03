@@ -1048,4 +1048,33 @@ Constants.WORLD_WEAPON_R6_RIGHT_ARM_NAME      = "Right Arm"
 Constants.WORLD_AKS74_GRIP_C0 = CFrame.new()
 Constants.WORLD_AKS74_GRIP_C1 = CFrame.new()
 
+-- ============================================================
+-- First-person viewmodel ADS (aim down sights) — animation only
+-- No FOV zoom, no camera changes — ADS is driven purely by animation playback.
+-- ============================================================
+
+-- Input type for ADS toggle (right mouse button).
+Constants.ADS_INPUT_USER_INPUT_TYPE = Enum.UserInputType.MouseButton2
+
+-- Fade time for ADS animation blend/transitions (in seconds).
+Constants.VIEWMODEL_ADS_FADE_TIME = 0.08
+
+-- Epsilon for holding ADS-in final frame (TimePosition = Length - epsilon).
+-- Used when adsIdle is rbxassetid://0; fake idle by freezing the final ADS-in pose.
+Constants.VIEWMODEL_ADS_HOLD_FRAME_EPSILON = 0.01
+
+-- Fake ADS idle movement toggles and parameters.
+-- When adsIdle is rbxassetid://0, ViewModelController applies subtle procedural
+-- movement to the frozen ADS-in pose to simulate breathing/aiming micro-adjustments.
+Constants.VIEWMODEL_ADS_FAKE_IDLE_ENABLED      = true
+Constants.VIEWMODEL_ADS_FAKE_IDLE_POSITION_X   = 0.003   -- horizontal sway amplitude (studs)
+Constants.VIEWMODEL_ADS_FAKE_IDLE_POSITION_Y   = 0.004   -- vertical breathing amplitude (studs)
+Constants.VIEWMODEL_ADS_FAKE_IDLE_ROTATION_DEGREES = 0.12  -- tiny rotational sway (degrees)
+Constants.VIEWMODEL_ADS_FAKE_IDLE_FREQUENCY    = 1.15    -- breathing cycle frequency (Hz)
+
+-- ADS sway/lag multipliers (reduce existing procedural movement while ADS).
+-- Applied to any existing viewmodel mouse/move sway when SetAiming(true).
+Constants.VIEWMODEL_ADS_MOUSE_SWAY_MULTIPLIER = 0.25
+Constants.VIEWMODEL_ADS_MOVE_SWAY_MULTIPLIER  = 0.2
+
 return Constants

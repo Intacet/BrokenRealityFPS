@@ -329,7 +329,12 @@ function GunController:Start()
         -- ── Audio and visuals ─────────────────────────────────────────────────
 
         SoundController:PlayGunshot()
-        ViewModelController:PlayFireAnimation()
+        -- Play ADS fire animation if aiming, otherwise normal fire animation.
+        if ViewModelController:IsAiming() then
+            ViewModelController:PlayADSFireAnimation()
+        else
+            ViewModelController:PlayFireAnimation()
+        end
 
         -- Muzzle flash. Duration from WeaponFeel so designers can tune it.
         local flash        = Instance.new("Part")
@@ -369,6 +374,30 @@ function GunController:Start()
         ViewModelController:PlayReloadAnimation()
         Logger.debug("[GunController] Reload requested")
     end)
+
+    -- ── Input: ADS (aim down sights) — MB2 toggle ─────────────────────────────
+    -- Toggles first-person ADS animation on/off.
+    -- Only affects viewmodel animation; no server state, no recoil/spread changes.
+    -- MB2 press toggles isAiming state; GunController uses ViewModelController:IsAiming()
+    -- to decide which fire animation to play (normal fire vs ADS fire).
+    local adsConn = UserInputService.InputBegan:Connect(function(input: InputObject, gp: boolean)
+        if gp then return end
+        if input.UserInputType ~= Constants.ADS_INPUT_USER_INPUT_TYPE then return end
+        -- Block ADS while holstered (no weapon in hand).
+        if equippedWeaponName == nil then return end
+        if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
+        -- Stage 2P: block ADS while tactical sprint is active.
+        if Constants.TACTICAL_SPRINT_BLOCKS_GUN_USE
+            and MovementController.IsTacticalSprinting()
+        then
+            return
+        end
+        -- Toggle ADS state.
+        local currentlyAiming = ViewModelController:IsAiming()
+        ViewModelController:SetAiming(not currentlyAiming)
+        Logger.debug("[GunController] ADS toggled: " .. tostring(not currentlyAiming))
+    end)
+    table.insert(_connections, adsConn)
 
     -- ── Server event listeners ────────────────────────────────────────────────
 

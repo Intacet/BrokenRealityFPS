@@ -182,7 +182,7 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-013] Weapon name is hardcoded on both client and server instead of sent in the payload — PARTIALLY RESOLVED 2026-05-15
+## [DEBT-013] Weapon name is hardcoded on both client and server instead of sent in the payload — PARTIALLY RESOLVED 2026-05-15 — STABLE 2026-06-03
 
 **Files:** `src/server/GunService.server.lua`, `src/client/GunController.lua`, `src/client/UI/HUD.lua`, `src/shared/Constants.lua`
 **Severity:** High
@@ -192,6 +192,7 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 **Updated (2026-05-14 — AR15 viewmodel task):** Both hardcodes changed from `"SCAR"` to `"AR15"`. Both sides were in sync but structurally fragile.
 **Partially resolved (2026-05-15 — GunService):** The server-side `local DEFAULT_WEAPON = "AR15"` in GunService was replaced with `Constants.DEFAULT_WEAPON` — the weapon name now has a single source of truth in `src/shared/Constants.lua`. `AmmoChanged` payload expanded from `(mag, reserve)` to `(weaponName, mag, reserve)`: GunService sends `Constants.DEFAULT_WEAPON` with every ammo update. HUD now displays the server-sent weapon name instead of the hardcoded "SCAR" string.
 **Partially resolved (2026-05-15 — GunController):** GunController's `local CURRENT_WEAPON = "AR15"` was removed. Both GunService and GunController now read `Constants.DEFAULT_WEAPON` directly. A single rename of `Constants.DEFAULT_WEAPON` covers both sides. GunController uses `Constants.DEFAULT_WEAPON` only for client-side prediction: dry-fire checks, WeaponData range for the cosmetic raycast, and local rate limiting. GunService remains the server-authoritative source.
+**Stable (2026-06-03 — ADS animation task):** ADS system added to ViewModelController and GunController. ADS is animation-only: no server changes, no spread/recoil/damage changes, no weapon identity changes. `ViewModelController:IsAiming()` is used by GunController to decide which fire animation to play (normal fire vs ADS fire), but this is client-side presentation only. Server validation continues to use `Constants.DEFAULT_WEAPON` for all combat logic. This task does NOT worsen DEBT-013.
 **Remaining risk:** `WeaponFired` and `ReloadRequest` still do not carry a weapon name — this is intentional until a full server-owned loadout/equipment system exists. With only one weapon this is invisible; with multiple weapons, the server would have no way to know which weapon a client is using. The HUD label and ammo logic remain correct as long as there is only one weapon.
 **MCP unavailable:** These changes were not tested in Roblox Studio. Runtime behavior — HUD weapon label displaying the server-sent string, ammo counts remaining correct, GunController dry-fire and rate-limit behavior unchanged — must be verified.
 **Trigger for full resolution:** Multiple weapons exist as a player choice. Add `weaponName: string` to the `WeaponFired` payload (and to `ReloadRequest`), validate it exists in WeaponData on the server.

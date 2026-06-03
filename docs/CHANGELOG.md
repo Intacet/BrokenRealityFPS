@@ -7,6 +7,140 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-03] — AKS74 first-person ADS animation system foundation
+
+### Summary
+
+Adds first-person ADS (aim down sights) animation system for AKS74 viewmodel. Right mouse button (MB2) toggles ADS on/off. ADS in animation plays once, then the final frame is held/frozen to fake an ADS idle pose. Subtle procedural breathing/sway movement is applied while the pose is frozen. Firing while ADS plays a separate ADS fire animation instead of the normal hip-fire animation. Reload or holster exits ADS cleanly.
+
+**Animation-only system:** No FOV zoom, no camera changes, no spread/recoil/accuracy changes, no server combat changes. This task adds only the viewmodel ADS animation playback foundation.
+
+**MCP/Studio verification required** — see verification steps at the end of this entry.
+
+### Animation IDs added to `WeaponData["AKS74"].animations.firstPerson`
+
+- `adsIn = "rbxassetid://134918319490586"` — ADS enter animation (plays once, frozen at end)
+- `adsOut = "rbxassetid://132508450718728"` — ADS exit animation (returns to idle)
+- `adsFire = "rbxassetid://138021695403324"` — fire while ADS (Action2 priority, overlays held ADS pose)
+- `adsIdle = "rbxassetid://0"` — no dedicated ADS idle animation; fake via freeze + procedural movement
+
+### Changes to `src/client/ViewModelController.lua`
+
+**New state variables:**
+- `weaponAdsInTrack`, `weaponAdsOutTrack`, `weaponAdsFireTrack: AnimationTrack?` — FP ADS animation tracks
+- `isAiming: boolean` — true while ADS active
+- `adsIdleTime: number` — accumulator for fake ADS idle sine-based breathing/sway
+
+**New public methods:**
+- `ViewModelController:SetAiming(entering: boolean)` — toggles ADS on/off; plays adsIn/adsOut; freezes adsIn at final frame
+- `ViewModelController:IsAiming(): boolean` — returns true while aiming
+- `ViewModelController:PlayADSInAnimation()` — plays adsIn animation (exposed for external choreography)
+- `ViewModelController:PlayADSOutAnimation()` — plays adsOut animation (exposed for external choreography)
+- `ViewModelController:PlayADSFireAnimation()` — plays adsFire animation; restartable per shot
+- `ViewModelController:StopADSAnimations()` — stops all ADS tracks, unfreezes adsIn, clears state
+
+**ADS track loading in `_setupWeaponAnimations()`:**
+- Loads adsIn (one-shot, Action priority, freezes at final frame when Stopped event fires)
+- Loads adsOut (one-shot, Action priority, returns to idle/run on Stopped)
+- Loads adsFire (one-shot, Action2 priority, overlays frozen ADS pose during fire)
+
+**ADS freeze logic:**
+- `SetAiming(true)` plays adsIn animation once
+- adsIn.Stopped:Once callback replays the track, seeks to `Length - VIEWMODEL_ADS_HOLD_FRAME_EPSILON`, then calls `AdjustSpeed(0)` to freeze
+- Frozen pose held until `SetAiming(false)` unfreezes and plays adsOut
+- Captured weapon identity guards against stale callbacks after holster
+
+**Fake ADS idle movement in RenderStepped:**
+- When `isAiming` is true and `VIEWMODEL_ADS_FAKE_IDLE_ENABLED` is true, applies subtle procedural movement to frozen ADS pose
+- Sine-wave breathing (vertical Y sway)
+- Horizontal X sway
+- Tiny Z-axis rotation
+- Frequency and amplitudes from Constants (tunable)
+- Applied as `adsIdleCF` multiplied onto the viewmodel PivotTo chain after BASE_OFFSET + recoil
+
+**ADS cleanup:**
+- `init()` and `StopWeaponAnimations()` now Stop/Destroy ADS tracks and reset `isAiming` and `adsIdleTime`
+- `PlayReloadAnimation()` calls `StopADSAnimations()` if `isAiming` is true (reload exits ADS)
+- `SetAiming(false)` when entering while `isReloading` is true (reload blocks ADS entry)
+
+**Priority and conflict handling:**
+- Reload takes priority over ADS (entering ADS while reloading is blocked; reloading while ADS exits ADS first)
+- Run animation suppressed while ADS (stop run track when adsIn starts)
+- adsOut completion resumes idle or run depending on `isRunning` flag
+
+### Changes to `src/client/GunController.lua`
+
+**New input: MB2 ADS toggle**
+- Listens to `UserInputService.InputBegan` with `Constants.ADS_INPUT_USER_INPUT_TYPE` (MouseButton2)
+- Guards: game processed, holstered, not ACTIVE phase, tactical sprint active (if enabled)
+- Toggles ADS: reads `ViewModelController:IsAiming()`, calls `ViewModelController:SetAiming(not currentlyAiming)`
+- Connection stored in `_connections` table for cleanup on reset
+
+**Fire animation selection:**
+- Fire handler now checks `ViewModelController:IsAiming()`
+- If aiming: calls `ViewModelController:PlayADSFireAnimation()`
+- If not aiming: calls `ViewModelController:PlayFireAnimation()` (existing behavior)
+
+**No server changes:**
+- No new remotes
+- No changes to WeaponFired payload
+- No changes to spread, recoil, accuracy, or damage
+- ADS is purely client-side animation
+
+### Changes to `src/shared/Constants.lua`
+
+**ADS input and animation tuning constants:**
+- `ADS_INPUT_USER_INPUT_TYPE = Enum.UserInputType.MouseButton2` — right mouse button
+- `VIEWMODEL_ADS_FADE_TIME = 0.08` — animation blend fade time (seconds)
+- `VIEWMODEL_ADS_HOLD_FRAME_EPSILON = 0.01` — seek offset from end when freezing adsIn final frame
+- `VIEWMODEL_ADS_FAKE_IDLE_ENABLED = true` — toggle for procedural ADS idle movement
+- `VIEWMODEL_ADS_FAKE_IDLE_POSITION_X = 0.003` — horizontal sway amplitude (studs)
+- `VIEWMODEL_ADS_FAKE_IDLE_POSITION_Y = 0.004` — vertical breathing amplitude (studs)
+- `VIEWMODEL_ADS_FAKE_IDLE_ROTATION_DEGREES = 0.12` — tiny rotational sway (degrees)
+- `VIEWMODEL_ADS_FAKE_IDLE_FREQUENCY = 1.15` — breathing cycle frequency (Hz)
+- `VIEWMODEL_ADS_MOUSE_SWAY_MULTIPLIER = 0.25` — reduce mouse sway while ADS (future use if mouse sway added)
+- `VIEWMODEL_ADS_MOVE_SWAY_MULTIPLIER = 0.2` — reduce movement sway while ADS (future use if move sway added)
+
+### Technical debt affected
+
+**DEBT-013** (High severity) — Weapon name hardcoded — **NOT WORSENED**. This task adds only client-side ADS animation. No server validation changes. No new weapon identity logic. Debt remains stable.
+
+**DEBT-034** (Low-Medium severity) — MCP verification relies on self-reporting — **APPLIES TO THIS TASK**. This task requires MCP/Studio verification per PROJECT_RULES.md. See verification steps below.
+
+**No new debt introduced.** This task adds only ADS animation playback to ViewModelController and MB2 input to GunController. No remotes added, no server changes, no camera changes, no assets imported.
+
+### MCP/Studio verification steps (23 steps)
+
+When MCP is available, verify the following in Roblox Studio play mode before marking this entry complete:
+
+1. Start a client playtest (single player or local server).
+2. Confirm AKS74 is holstered before pressing 1.
+3. Press right mouse while holstered → confirm ADS does not activate, no errors in Output.
+4. Press 1 to equip AKS74.
+5. Confirm existing equip animation (rbxassetid://139265999638776) plays.
+6. Confirm existing idle animation (rbxassetid://75961893882956) loops.
+7. Right mouse to ADS → confirm AKS_ADS (rbxassetid://134918319490586) plays once.
+8. Confirm after adsIn finishes, the final ADS pose is held/frozen (no loop, no return to idle).
+9. Confirm fake ADS idle breathing/sway is subtle (very small amplitude, not distracting).
+10. Fire while ADS → confirm AKS_ADS_FIRE (rbxassetid://138021695403324) plays instead of normal fire.
+11. Fire multiple shots while ADS → confirm adsFire restarts cleanly each shot, ADS pose stays held between shots.
+12. Right mouse again to exit ADS → confirm AKS_UNADS (rbxassetid://132508450718728) plays once.
+13. Confirm after adsOut completes, normal idle animation (rbxassetid://75961893882956) resumes.
+14. Enter ADS, then press R to reload → confirm ADS exits immediately, reload animation plays cleanly.
+15. Holster (press 1) while ADS → confirm all ADS tracks stop, no ADS pose remains frozen.
+16. Re-equip AKS74 → confirm ADS state is reset (isAiming = false, adsIdleTime = 0).
+17. Confirm camera.CFrame behavior is unchanged (no FOV zoom, no camera movement).
+18. Confirm there is no FOV zoom when ADS (FieldOfView stays at default ~70).
+19. Confirm no new remotes were created (check ReplicatedStorage/Remotes — only existing remotes present).
+20. Confirm no server combat, damage, ammo, reload, health, or raycast behavior changed (fire still hits at same accuracy/damage).
+21. Confirm no errors in Output panel.
+22. Sprint (LeftShift) while ADS → confirm run animation does not override ADS pose.
+23. Enter RESULTS phase while ADS → confirm viewmodel hides cleanly, ADS state clears on next equip.
+
+**If MCP is unavailable:** Mark this entry "needs Studio verification" and perform the 23 steps manually in Studio before deploying to production.
+
+---
+
 ## [2026-05-29] — AKS74 third-person world weapon model attachment (WorldWeaponService)
 
 ### Summary
