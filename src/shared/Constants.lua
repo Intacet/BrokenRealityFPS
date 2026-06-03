@@ -1093,9 +1093,10 @@ Constants.VIEWMODEL_ADS_MOVE_SWAY_MULTIPLIER  = 0.05
 -- X: negative moves left, positive moves right
 -- Y: positive moves up, negative moves down
 -- Z: negative moves farther from camera, positive moves closer
-Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_X = -0.30  -- move left to center sights
-Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Y = 0.08   -- move slightly up
-Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Z = -0.12  -- move slightly farther from camera
+-- CRITICAL: Z should be POSITIVE for ADS to bring gun closer and see down sights
+Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_X = -0.50  -- move left to center sights
+Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Y = -0.10  -- move down to align with screen center
+Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Z = 0.50   -- bring much closer to camera for sight picture
 
 -- ADS alignment rotation in degrees (applied after offset).
 -- Applied as CFrame.Angles(pitch, yaw, roll) in radians.
