@@ -153,11 +153,6 @@ local adsState: ADSState = "Hip"
 -- Fake ADS idle: accumulator for sine-based breathing/sway when adsState == "Aiming".
 local adsIdleTime: number = 0
 
--- ADS alignment offset: alpha from 0 (hipfire) to 1 (full ADS alignment).
--- Blends smoothly in RenderStepped to align iron sights with screen center while ADS.
--- Target 1 when adsState is Entering or Aiming, target 0 when Hip.
-local adsAlignmentAlpha: number = 0
-
 -- Third-person character weapon AnimationTracks.
 -- Loaded on the local player's Humanoid.Animator when a weapon is equipped.
 -- Priority: equip/idle = Action (overlays movement), fire/reload = Action2 (overlays idle).
@@ -336,7 +331,6 @@ function ViewModelController:init()
     isRunning   = false
     adsState    = "Hip"
     adsIdleTime = 0
-    adsAlignmentAlpha = 0
     -- Third-person character tracks: nil references only — do NOT call Stop/Destroy.
     -- init() is called from CharacterAdded where the old Humanoid.Animator may already be
     -- destroyed, making track method calls unsafe.  Same pattern as MovementController's
@@ -406,7 +400,6 @@ function ViewModelController:StopWeaponAnimations()
     isRunning   = false
     adsState    = "Hip"
     adsIdleTime = 0
-    adsAlignmentAlpha = 0
     -- Third-person character tracks: stop and destroy (character is alive in this path).
     -- AnimationTrack:Destroy() severs Stopped connections synchronously, preventing any
     -- deferred equip-chain or reload-chain callback from firing after holster.
@@ -951,33 +944,6 @@ function ViewModelController:Start()
             end
         end
 
-        -- ADS alignment alpha: blend toward 1 when ADS active, toward 0 when Hip.
-        -- Target 1 when Entering or Aiming (needs alignment), 0 when Hip or Exiting (return to hipfire).
-        local targetAlpha = 0
-        if adsState == "Entering" or adsState == "Aiming" then
-            targetAlpha = 1
-        elseif adsState == "Exiting" then
-            -- While exiting, smoothly blend back to 0 to avoid visual snap when adsOut plays.
-            targetAlpha = 0
-        end
-        -- Lerp adsAlignmentAlpha toward target.
-        local blendSpeed = Constants.VIEWMODEL_ADS_ALIGNMENT_BLEND_SPEED
-        adsAlignmentAlpha = adsAlignmentAlpha + (targetAlpha - adsAlignmentAlpha) * math.min(1, blendSpeed * dt)
-
-        -- ADS alignment offset: only applied when adsAlignmentAlpha > 0.
-        local adsAlignmentCF = CFrame.new()
-        if adsAlignmentAlpha > 0 then
-            -- Build position offset.
-            local offsetX = Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_X * adsAlignmentAlpha
-            local offsetY = Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Y * adsAlignmentAlpha
-            local offsetZ = Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Z * adsAlignmentAlpha
-            -- Build rotation offset (degrees → radians).
-            local rotX = math.rad(Constants.VIEWMODEL_ADS_ALIGNMENT_ROTATION_X_DEGREES) * adsAlignmentAlpha
-            local rotY = math.rad(Constants.VIEWMODEL_ADS_ALIGNMENT_ROTATION_Y_DEGREES) * adsAlignmentAlpha
-            local rotZ = math.rad(Constants.VIEWMODEL_ADS_ALIGNMENT_ROTATION_Z_DEGREES) * adsAlignmentAlpha
-            adsAlignmentCF = CFrame.new(offsetX, offsetY, offsetZ) * CFrame.Angles(rotX, rotY, rotZ)
-        end
-
         -- Fake ADS idle: when adsState == "Aiming" and fake idle enabled, apply subtle procedural movement.
         local adsIdleCF = CFrame.new()
         if adsState == "Aiming" and Constants.VIEWMODEL_ADS_FAKE_IDLE_ENABLED then
@@ -992,14 +958,14 @@ function ViewModelController:Start()
             adsIdleCF = CFrame.new(x, y, 0) * CFrame.Angles(0, 0, math.rad(rotDeg))
         end
 
-        -- Final viewmodel CFrame: cam * base * alignment * recoil * move * procedural.
-        -- Order: CAMERA_EXTRA_OFFSET (base hipfire) → adsAlignmentCF (ADS-only alignment)
-        --        → viewRecoilCFrame (rotational recoil) → moveCF (movement sway)
-        --        → BASE_OFFSET (model-specific) → recoilOffset (positional recoil) → adsIdleCF (fake idle).
+        -- Final viewmodel CFrame: cam * base * recoil * move * procedural.
+        -- Order: CAMERA_EXTRA_OFFSET (base hipfire) → viewRecoilCFrame (rotational recoil)
+        --        → moveCF (movement sway) → BASE_OFFSET (model-specific)
+        --        → recoilOffset (positional recoil) → adsIdleCF (fake idle).
+        -- NO alignment offset — the ADS animation itself positions the gun correctly.
         m:PivotTo(
             cam.CFrame
             * CAMERA_EXTRA_OFFSET
-            * adsAlignmentCF
             * viewRecoilCFrame
             * moveCF
             * BASE_OFFSET
