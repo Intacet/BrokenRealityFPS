@@ -503,12 +503,27 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-040] ADS visual transition not implemented
+## [DEBT-040] ADS visual transition not implemented — REPAIRED 2026-06-03, NEEDS STUDIO VERIFICATION
 
-**File:** `src/client/GunController.lua`, `src/client/ViewModelController.lua`
-**Risk:** `isADS` is tracked and gates spread calculation, but there is no visual change when MouseButton2 is held. The viewmodel does not move into a sights-up position, no FOV change occurs, and no TweenService transition plays. The player receives mechanical benefit (tighter spread) with no visual feedback that ADS is active.
-**Trigger:** Any playtesting session where a player notices pressing right-click does nothing visible.
-**Fix when:** ViewModelController is extended to expose a `SetADS(isADS: boolean)` setter. GunController calls it on MouseButton2 down/up. ViewModelController tweens the viewmodel position to an ADS offset CFrame over `WeaponFeel.adsTime` seconds. Optionally, `workspace.CurrentCamera.FieldOfView` is tweened to 50° and back.
+**File:** `src/client/GunController.lua`, `src/client/ViewModelController.lua`, `src/shared/Constants.lua`
+**Severity:** Medium (was Medium-High before initial implementation)
+**Studio verification required:** Yes
+**Original risk (pre-2026-06-03):** `isADS` was tracked and gated spread calculation, but no visual change occurred when MouseButton2 was held. Viewmodel did not move into sights-up position, no FOV change, no TweenService transition.
+**Implemented (2026-06-03):** ADS animation system added using AKS74 first-person adsIn/adsOut/adsFire animations. Right mouse toggles ADS. ADS enter plays once, freezes at final frame, and holds the ADS pose via TimePosition monitoring in RenderStepped. ADS fire plays on top of held pose. ADS exit plays and returns to idle. Explicit ADSState type ("Hip" | "Entering" | "Aiming" | "Exiting"). No camera changes, no FOV zoom — animation-only.
+**Repaired (2026-06-03 — this task):** Original implementation suffered from track fighting (idle/run conflicting with ADS pose) and fake ADS idle interference (procedural sine movement pulling gun away from animation's baked position). Repair removed fake ADS idle, disabled procedural movement during ADS, and ensured idle/run tracks are stopped when entering ADS. ADS pose is now driven entirely by the animation final frame with no code-based offsets.
+**Current state:** ADS system exists and uses correct animations. Fake idle removed. Procedural movement suppressed during ADS. Track blending fixed. **NOT VERIFIED IN STUDIO** — MCP was unavailable for this repair pass.
+**Remaining risk:** The repair assumes the AKS74 adsIn animation's final frame has correct iron-sight alignment baked in. If the animation itself is misaligned, the visual result will still be wrong — but that would be an animation authoring issue, not a code issue.
+**Resolve when:** Studio verification confirms:
+1. Right mouse while holstered → no errors, ADS does not activate
+2. Equip AKS74 → right mouse → ADS enter animation plays once and freezes at final frame
+3. ADS pose is stable (no visual jumping/popping/pulling away)
+4. Normal idle does not fight the held ADS pose
+5. Run animation does not fight the held ADS pose
+6. Procedural movement/sway/bob does not move the viewmodel while ADS is held
+7. Fire while ADS → AKS_ADS_FIRE plays, returns to held ADS pose after
+8. Right mouse again → ADS exit animation plays, returns to normal idle
+9. Enter ADS → reload → ADS exits cleanly, reload plays
+10. Enter ADS → holster → all ADS tracks stop, no pose remains stuck
 
 ---
 

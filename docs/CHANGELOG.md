@@ -7,6 +7,161 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-03 — REPAIR] — Repair AKS74 ADS track blending and remove fake ADS idle
+
+### Summary
+
+**This is an ADS animation system repair pass.** The AKS74 ADS system was visually broken: the gun entered ADS but then shifted/pulled away from the correct sight-aligned pose instead of holding the final frame cleanly. Root causes:
+
+1. **Fake ADS idle interference** — Procedural sine-wave breathing/sway (adsIdleCF) was fighting the animation's baked final pose
+2. **Procedural movement not suppressed** — MovementController sway (moveCF) continued to offset the viewmodel during ADS
+3. **Alignment offset removed** — Previous attempt to fix alignment added code-based CFrame offsets on top of the animation; user confirmed animation itself has correct positioning baked in
+
+**Fixed by:**
+- Removing fake ADS idle (adsIdleCF) entirely from final viewmodel CFrame
+- Suppressing procedural movement (moveCF) while `adsState` is Entering or Aiming
+- Removing all ADS alignment offset code (adsAlignmentAlpha, alignment Constants)
+- Ensuring idle/run tracks are stopped when entering ADS (already implemented, preserved)
+- Increasing ADS freeze epsilon from 0.001 to 0.03 so animation plays to completion
+- Using VIEWMODEL_ADS_TRACK_FADE_TIME for adsIn/adsOut Play() calls
+
+**Does NOT affect:**
+- Camera (no CFrame changes, no FOV zoom)
+- Server combat (no damage, ammo, reload, hit validation changes)
+- Movement animations
+- Hipfire behavior
+
+**MCP/Studio verification required but unavailable** — see 28-step verification checklist at end of this entry.
+
+### Changes to `src/shared/Constants.lua`
+
+**Removed (old fake idle system):**
+- `VIEWMODEL_ADS_FAKE_IDLE_ENABLED`
+- `VIEWMODEL_ADS_FAKE_IDLE_POSITION_X`
+- `VIEWMODEL_ADS_FAKE_IDLE_POSITION_Y`
+- `VIEWMODEL_ADS_FAKE_IDLE_ROTATION_DEGREES`
+- `VIEWMODEL_ADS_FAKE_IDLE_FREQUENCY`
+- `VIEWMODEL_ADS_MOUSE_SWAY_MULTIPLIER`
+- `VIEWMODEL_ADS_MOVE_SWAY_MULTIPLIER`
+
+**Added (repair system):**
+- `VIEWMODEL_ADS_TRACK_FADE_TIME = 0.03` — fade time for adsIn/adsOut Play() calls
+- `VIEWMODEL_ADS_DISABLE_FAKE_IDLE = true` — master switch to disable fake idle
+- `VIEWMODEL_ADS_DISABLE_PROCEDURAL_MOVEMENT = true` — suppresses moveCF during ADS
+
+**Changed:**
+- `VIEWMODEL_ADS_HOLD_FRAME_EPSILON` changed from 0.001 to 0.03 (~2 frames at 60fps)
+- Renamed `VIEWMODEL_ADS_TRANSITION_FADE_TIME` → `VIEWMODEL_ADS_TRACK_FADE_TIME`
+
+**Preserved (unchanged):**
+- `VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING = true`
+- `VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true`
+- `ADS_INPUT_USER_INPUT_TYPE = Enum.UserInputType.MouseButton2`
+
+### Changes to `src/client/ViewModelController.lua`
+
+**Removed:**
+- `adsAlignmentAlpha` state variable (was blending ADS alignment offset)
+- Fake ADS idle calculation block (sine-wave adsIdleCF)
+- All alignment offset blending logic
+- `adsAlignmentCF` from final viewmodel CFrame chain
+
+**Added:**
+- Procedural movement suppression: when `VIEWMODEL_ADS_DISABLE_PROCEDURAL_MOVEMENT == true` and `adsState` is Entering or Aiming, `finalMoveCF = CFrame.new()` (zeroes out moveCF)
+- Fade time parameter to adsIn/adsOut Play() calls: `Play(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)`
+
+**Changed:**
+- Final viewmodel CFrame order simplified:
+  ```
+  cam.CFrame
+    * CAMERA_EXTRA_OFFSET
+    * viewRecoilCFrame
+    * finalMoveCF        (zeroed during ADS if disabled)
+    * BASE_OFFSET
+    * CFrame.new(0, 0, recoilOffset)
+  ```
+  No adsIdleCF, no adsAlignmentCF.
+
+**Preserved (unchanged):**
+- ADS state machine (Hip/Entering/Aiming/Exiting)
+- TimePosition monitoring freeze logic in RenderStepped
+- SetAiming() idle/run suppression
+- ADS fire animation selection
+- Public API: SetAiming(boolean), IsAiming(), PlayADSInAnimation(), PlayADSOutAnimation(), PlayADSFireAnimation(), StopADSAnimations()
+
+### Technical debt affected
+
+**DEBT-040 (ADS visual transition not implemented)** — Updated to "REPAIRED 2026-06-03, NEEDS STUDIO VERIFICATION". Entry reflects that ADS system now exists, was repaired to remove fake idle and alignment offset interference, but has not been verified in Studio. 10-point verification checklist added to debt entry.
+
+**DEBT-013 (Weapon name hardcoded)** — STABLE. This repair does not touch weapon identity, server combat, or ammo logic. ADS animation selection is client-side presentation only.
+
+**DEBT-034 (MCP verification)** — APPLIES. This repair requires MCP/Studio verification to confirm ADS pose stability, track blending, and that idle/run do not fight the held ADS pose. **MCP was unavailable for this task** — Studio verification is deferred.
+
+**No new debt introduced.** This is a repair pass that simplifies the existing ADS system by removing fragile code-based offsets and trusting the animation's baked positioning.
+
+### Animation IDs preserved (AKS74 first-person)
+
+- `adsIn` (ADS enter): rbxassetid://134918319490586
+- `adsOut` (ADS exit): rbxassetid://132508450718728
+- `adsFire` (fire while ADS): rbxassetid://138021695403324
+- `equip`: rbxassetid://139265999638776
+- `idle`: rbxassetid://75961893882956
+- `fire`: rbxassetid://116185608269786
+- `reload`: rbxassetid://127212878966691
+- `run`: rbxassetid://111133092181267
+
+### MCP/Studio verification checklist (28 steps)
+
+**MCP was unavailable for this repair pass.** The following verification steps must be completed in Roblox Studio before this repair can be marked resolved:
+
+**Phase 1: Basic ADS entry/exit**
+1. Start client playtest
+2. Confirm AKS74 is holstered before pressing 1
+3. Press right mouse while holstered → confirm ADS does not activate, no errors in Output
+4. Press 1 to equip AKS74
+5. Confirm equip animation plays
+6. Confirm idle animation loops
+7. Right mouse to enter ADS
+8. Confirm AKS_ADS (rbxassetid://134918319490586) plays once
+9. Confirm ADS does not pop, jump, or get pulled away by idle/run
+10. Confirm ADS pose is held before animation stops (freeze at final frame)
+
+**Phase 2: Track fighting checks**
+11. While ADS is held, confirm normal idle does not play or visually interfere
+12. While ADS is held, confirm run animation does not play or visually interfere
+13. While ADS is held, move mouse → confirm no procedural sway/lag (moveCF suppressed)
+14. While ADS is held, press movement keys → confirm no procedural bob (moveCF suppressed)
+15. Confirm viewmodel is completely stable during held ADS (animation pose only, no code offsets)
+
+**Phase 3: ADS fire**
+16. Fire while ADS
+17. Confirm AKS_ADS_FIRE (rbxassetid://138021695403324) plays
+18. Confirm fire animation does not break held ADS pose
+19. Fire multiple shots while ADS
+20. Confirm ADS fire restarts cleanly per shot, returns to held ADS pose after each
+
+**Phase 4: ADS exit**
+21. Right mouse again to exit ADS
+22. Confirm AKS_UNADS (rbxassetid://132508450718728) plays once
+23. Confirm normal idle resumes after exit
+24. Confirm no visual pop or snap on exit
+
+**Phase 5: Edge cases**
+25. Enter ADS → press reload → confirm ADS exits cleanly, reload animation plays
+26. Enter ADS → holster (press 1 or switch weapon) → confirm all ADS tracks stop, no pose stuck
+27. Re-equip → confirm ADS state resets to Hip, can enter ADS again cleanly
+28. Confirm no errors in Output during any of the above steps
+
+**Phase 6: Unchanged systems**
+- Confirm camera.CFrame behavior unchanged (no zoom, no FOV change)
+- Confirm no new remotes created
+- Confirm server combat unchanged (damage, ammo, reload, health, raycast validation)
+- Confirm movement animations unchanged
+
+**Resolve DEBT-040 when:** All 28 verification steps pass in Studio play mode.
+
+---
+
 ## [2026-06-03 — TUNING] — Add ADS-only viewmodel alignment offset for AKS74
 
 ### Summary

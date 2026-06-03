@@ -1057,31 +1057,22 @@ Constants.WORLD_AKS74_GRIP_C1 = CFrame.new()
 Constants.ADS_INPUT_USER_INPUT_TYPE = Enum.UserInputType.MouseButton2
 
 -- Fade time for ADS animation blend/transitions (in seconds).
-Constants.VIEWMODEL_ADS_TRANSITION_FADE_TIME = 0.05
+Constants.VIEWMODEL_ADS_TRACK_FADE_TIME = 0.03
 
 -- Epsilon for holding ADS-in final frame (TimePosition >= Length - epsilon triggers freeze).
--- Used when adsIdle is rbxassetid://0; fake idle by freezing the final ADS-in pose.
 -- Monitored in RenderStepped, not via Stopped callback (avoids replay pop).
--- Reduced to 0.001 so animation plays all the way to actual final frame before freezing.
-Constants.VIEWMODEL_ADS_HOLD_FRAME_EPSILON = 0.001
+-- Set to 0.03 (~2 frames at 60fps) — close enough to end without risking natural stop.
+Constants.VIEWMODEL_ADS_HOLD_FRAME_EPSILON = 0.03
 
--- Fake ADS idle movement toggles and parameters.
--- When adsIdle is rbxassetid://0, ViewModelController applies subtle procedural
--- movement to the frozen ADS-in pose to simulate breathing/aiming micro-adjustments.
--- Only applied when adsState == "Aiming" (not during Entering or Exiting).
-Constants.VIEWMODEL_ADS_FAKE_IDLE_ENABLED      = true
-Constants.VIEWMODEL_ADS_FAKE_IDLE_POSITION_X   = 0.001   -- horizontal sway amplitude (studs) — very subtle
-Constants.VIEWMODEL_ADS_FAKE_IDLE_POSITION_Y   = 0.0015  -- vertical breathing amplitude (studs) — very subtle
-Constants.VIEWMODEL_ADS_FAKE_IDLE_ROTATION_DEGREES = 0.04  -- tiny rotational sway (degrees) — extremely subtle
-Constants.VIEWMODEL_ADS_FAKE_IDLE_FREQUENCY    = 0.85    -- breathing cycle frequency (Hz) — slower, more natural
+-- Disable fake ADS idle movement for this repair pass.
+-- The ADS animation itself should control the final pose — no procedural sway/breathing.
+Constants.VIEWMODEL_ADS_DISABLE_FAKE_IDLE = true
+
+-- Disable procedural movement (mouse sway, move bob) while ADS to keep pose stable.
+Constants.VIEWMODEL_ADS_DISABLE_PROCEDURAL_MOVEMENT = true
 
 -- Suppress normal idle/run tracks while ADS to prevent pose fighting.
 Constants.VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING = true
 Constants.VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true
-
--- ADS sway/lag multipliers (reduce existing procedural movement while ADS).
--- Applied to any existing viewmodel mouse/move sway when adsState == "Aiming".
-Constants.VIEWMODEL_ADS_MOUSE_SWAY_MULTIPLIER = 0.1
-Constants.VIEWMODEL_ADS_MOVE_SWAY_MULTIPLIER  = 0.05
 
 return Constants

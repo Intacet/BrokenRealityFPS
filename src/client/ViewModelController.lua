@@ -944,33 +944,28 @@ function ViewModelController:Start()
             end
         end
 
-        -- Fake ADS idle: when adsState == "Aiming" and fake idle enabled, apply subtle procedural movement.
-        local adsIdleCF = CFrame.new()
-        if adsState == "Aiming" and Constants.VIEWMODEL_ADS_FAKE_IDLE_ENABLED then
-            adsIdleTime = adsIdleTime + dt
-            local freq = Constants.VIEWMODEL_ADS_FAKE_IDLE_FREQUENCY
-            local t = adsIdleTime * freq * 2 * math.pi
-            -- Subtle horizontal and vertical sway.
-            local x = math.sin(t * 1.3) * Constants.VIEWMODEL_ADS_FAKE_IDLE_POSITION_X
-            local y = math.sin(t) * Constants.VIEWMODEL_ADS_FAKE_IDLE_POSITION_Y
-            -- Tiny rotational sway.
-            local rotDeg = math.sin(t * 0.7) * Constants.VIEWMODEL_ADS_FAKE_IDLE_ROTATION_DEGREES
-            adsIdleCF = CFrame.new(x, y, 0) * CFrame.Angles(0, 0, math.rad(rotDeg))
+        -- Procedural movement suppression while ADS.
+        -- When ADS is active (Entering or Aiming), disable procedural movement to keep pose stable.
+        local finalMoveCF = moveCF
+        if Constants.VIEWMODEL_ADS_DISABLE_PROCEDURAL_MOVEMENT then
+            if adsState == "Entering" or adsState == "Aiming" then
+                finalMoveCF = CFrame.new()  -- zero out procedural movement
+            end
         end
 
         -- Final viewmodel CFrame: cam * base * recoil * move * procedural.
         -- Order: CAMERA_EXTRA_OFFSET (base hipfire) → viewRecoilCFrame (rotational recoil)
-        --        → moveCF (movement sway) → BASE_OFFSET (model-specific)
-        --        → recoilOffset (positional recoil) → adsIdleCF (fake idle).
-        -- NO alignment offset — the ADS animation itself positions the gun correctly.
+        --        → finalMoveCF (movement sway, zeroed during ADS if disabled)
+        --        → BASE_OFFSET (model-specific) → recoilOffset (positional recoil)
+        -- NO fake ADS idle — the ADS animation itself positions the gun correctly.
+        -- NO alignment offset — removed per user feedback (animation bakes correct position).
         m:PivotTo(
             cam.CFrame
             * CAMERA_EXTRA_OFFSET
             * viewRecoilCFrame
-            * moveCF
+            * finalMoveCF
             * BASE_OFFSET
             * CFrame.new(0, 0, recoilOffset)
-            * adsIdleCF
         )
     end)
 
@@ -1186,10 +1181,10 @@ function ViewModelController:SetAiming(entering: boolean)
         end
 
         if weaponAdsInTrack then
-            -- Play adsIn from the start.
+            -- Play adsIn from the start with fade.
             weaponAdsInTrack.TimePosition = 0
             weaponAdsInTrack:AdjustSpeed(1)  -- ensure not frozen
-            weaponAdsInTrack:Play()
+            weaponAdsInTrack:Play(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
             adsState = "Entering"
             adsIdleTime = 0
             Logger.debug("[ViewModelController] SetAiming: adsIn started (state = Entering)")
@@ -1209,7 +1204,7 @@ function ViewModelController:SetAiming(entering: boolean)
 
         if weaponAdsOutTrack then
             weaponAdsOutTrack.TimePosition = 0
-            weaponAdsOutTrack:Play()
+            weaponAdsOutTrack:Play(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
             adsState = "Exiting"
 
             -- When adsOut finishes, return to Hip and resume idle/run.
