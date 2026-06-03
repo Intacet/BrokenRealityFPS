@@ -49,16 +49,12 @@ WeaponData["AKS74"] = {
             fire    = "rbxassetid://116185608269786",
             reload  = "rbxassetid://127212878966691",
             run     = "rbxassetid://111133092181267",
-            ads     = "rbxassetid://119290496869006",  -- looped ADS hold pose
         },
         thirdPerson = {
             equip  = "rbxassetid://124808012153849",
             idle   = "rbxassetid://79290751562233",
             fire   = "rbxassetid://101346298541907",
             reload = "rbxassetid://82861605710102",
-            adsIn  = "rbxassetid://134918319490586",
-            adsOut = "rbxassetid://132508450718728",
-            adsFire = "rbxassetid://138021695403324",
         },
     },
 }

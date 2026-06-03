@@ -31,10 +31,6 @@
 --   A random angular deviation (half-cone) is applied to the raycast direction before
 --   firing. Cone angle is computed from WeaponFeel values + MovementController state.
 --
--- ADS:
---   isADS tracks whether MouseButton2 is held. WeaponFeel.baseSpread is used instead
---   of hipfireSpread when isADS is true. Visual ADS transition is deferred; DEBT-040.
---
 -- What this controller does NOT do:
 --   - Decide if a shot hit or apply damage  →  GunService + DamageService (server)
 --   - Render a viewmodel                    →  ViewModelController
@@ -352,27 +348,6 @@ function GunController:Start()
         task.delay(feel.muzzleFlashDuration :: number, function()
             flash:Destroy()
         end)
-    end)
-
-    -- ── Input: ADS ────────────────────────────────────────────────────────────
-    -- isADS tracks state for spread calculation.
-    -- SetADS drives first-person FOV + viewmodel offset lerp.
-    -- SetTPADS drives third-person adsIn/adsOut/adsFire animation sequence.
-    UserInputService.InputBegan:Connect(function(input: InputObject, gp: boolean)
-        if gp then return end
-        if input.UserInputType ~= Enum.UserInputType.MouseButton2 then return end
-        if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
-        if MovementController:IsADSBlocked() then return end
-        isADS = true
-        ViewModelController:SetADS(true)    -- FP: lerp FOV + viewmodel offset
-        ViewModelController:SetTPADS(true)  -- TP: start adsIn → freeze at last frame
-    end)
-
-    UserInputService.InputEnded:Connect(function(input: InputObject, _gp: boolean)
-        if input.UserInputType ~= Enum.UserInputType.MouseButton2 then return end
-        isADS = false
-        ViewModelController:SetADS(false)   -- FP: restore FOV + hip offset
-        ViewModelController:SetTPADS(false) -- TP: unfreeze adsIn → play adsOut → resume idle
     end)
 
     -- ── Input: Reload ─────────────────────────────────────────────────────────
