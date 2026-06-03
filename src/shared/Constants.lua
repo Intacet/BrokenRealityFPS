@@ -1059,10 +1059,10 @@ Constants.ADS_INPUT_USER_INPUT_TYPE = Enum.UserInputType.MouseButton2
 -- Fade time for ADS animation blend/transitions (in seconds).
 Constants.VIEWMODEL_ADS_TRACK_FADE_TIME = 0.03
 
--- Epsilon for holding ADS-in final frame (TimePosition >= Length - epsilon triggers freeze).
--- Monitored in RenderStepped, not via Stopped callback (avoids replay pop).
--- Set to 0.03 (~2 frames at 60fps) — close enough to end without risking natural stop.
-Constants.VIEWMODEL_ADS_HOLD_FRAME_EPSILON = 0.03
+-- Epsilon for holding ADS-in final frame (no longer used for early freeze).
+-- Set to 0 — animation plays fully to completion, Stopped callback handles transition to Aiming.
+-- RenderStepped no longer monitors TimePosition for early freeze.
+Constants.VIEWMODEL_ADS_HOLD_FRAME_EPSILON = 0
 
 -- Disable fake ADS idle movement for this repair pass.
 -- The ADS animation itself should control the final pose — no procedural sway/breathing.

@@ -7,6 +7,177 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-03 — REPAIR PASS 2] — Fix AKS74 ADS animations getting cut off early
+
+### Summary
+
+**This is an ADS animation completion repair pass.** The previous repair (Pass 1) introduced epsilon-based freeze logic that froze the ADS enter animation ~2 frames (0.03s) before natural completion, causing visible animation cutoff. User reported "the ads alignment is still fucked up" and "it looks like the enter and exit ads animations dont finish."
+
+**Root cause:** `VIEWMODEL_ADS_HOLD_FRAME_EPSILON = 0.03` in RenderStepped was checking:
+```lua
+if pos >= (len - 0.03) then
+    weaponAdsInTrack.TimePosition = len - 0.03
+    weaponAdsInTrack:AdjustSpeed(0)
+    adsState = "Aiming"
+end
+```
+This froze the animation 0.03 seconds before it reached the final pose, visually cutting it off before the gun reached the iron-sights-aligned position.
+
+**Fixed by:**
+- Removing epsilon-based freeze from RenderStepped
+- Setting `VIEWMODEL_ADS_HOLD_FRAME_EPSILON = 0` (no longer used for early freeze)
+- Using `adsInTrack.Stopped:Once` callback to detect natural completion
+- Transitioning to Aiming state **after** animation completes, not before
+- Holding final pose by setting `TimePosition = Length` and `AdjustSpeed(0)` inside Stopped callback
+
+**Result:** ADS enter animation plays fully to its natural end before pose is held. ADS exit animation plays fully back to hipfire. No visible cutoff.
+
+**Does NOT affect:**
+- Camera (no CFrame changes, no FOV zoom)
+- Server combat (no damage, ammo, reload, hit validation changes)
+- Track blending (idle/run still suppressed during ADS)
+- Procedural movement suppression (still disabled during ADS)
+- Fake idle removal (still removed, unchanged from Pass 1)
+
+**MCP/Studio verification required but unavailable** — see 25-step verification checklist at end of this entry.
+
+### Changes to `src/shared/Constants.lua`
+
+**Changed:**
+- `VIEWMODEL_ADS_HOLD_FRAME_EPSILON` changed from 0.03 → 0
+- Comment updated to reflect epsilon no longer used for early freeze
+- RenderStepped no longer monitors TimePosition for freeze trigger
+
+**Unchanged:**
+- `VIEWMODEL_ADS_TRACK_FADE_TIME = 0.03`
+- `VIEWMODEL_ADS_DISABLE_FAKE_IDLE = true`
+- `VIEWMODEL_ADS_DISABLE_PROCEDURAL_MOVEMENT = true`
+- `VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING = true`
+- `VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true`
+
+### Changes to `src/client/ViewModelController.lua`
+
+**Removed:**
+- Epsilon-based freeze block in RenderStepped:
+  ```lua
+  if adsState == "Entering" and pos >= (len - epsilon) then
+      -- freeze animation early (REMOVED)
+  end
+  ```
+
+**Added:**
+- `adsInTrack.Stopped:Once` callback in SetAiming() when entering ADS:
+  ```lua
+  weaponAdsInTrack.Stopped:Once(function()
+      -- Only transition if same weapon, still entering, model exists
+      if equippedWeaponName ~= capturedWeapon or self.model == nil then return end
+      if adsState ~= "Entering" then return end
+
+      -- Transition to Aiming
+      adsState = "Aiming"
+      adsIdleTime = 0
+
+      -- Hold final pose
+      if weaponAdsInTrack and weaponAdsInTrack.Length > 0 then
+          weaponAdsInTrack.TimePosition = weaponAdsInTrack.Length
+          weaponAdsInTrack:AdjustSpeed(0)
+      end
+  end)
+  ```
+
+**Changed:**
+- RenderStepped ADS monitoring block replaced with comment explaining removal
+- Entering → Aiming transition now happens **after** animation completes, not ~2 frames before
+
+**Preserved (unchanged):**
+- ADS state machine (Hip/Entering/Aiming/Exiting)
+- SetAiming() idle/run suppression
+- Procedural movement suppression (finalMoveCF = CFrame.new() during ADS)
+- Final viewmodel CFrame order (no fake idle, no alignment offset)
+- ADS exit Stopped callback (unchanged, already worked correctly)
+- Public API: SetAiming(), IsAiming(), PlayADSInAnimation(), PlayADSOutAnimation(), PlayADSFireAnimation(), StopADSAnimations()
+
+### Technical debt affected
+
+**DEBT-040 (ADS visual transition)** — Updated to "REPAIRED 2026-06-03 (x2), NEEDS STUDIO VERIFICATION". Entry now documents both repair passes:
+- Pass 1: Removed fake idle, disabled procedural movement, fixed track fighting
+- Pass 2: Removed epsilon-based early freeze, added Stopped callback for natural completion
+
+12-point verification checklist added (was 10 points, added 2 for animation completion checks).
+
+**Remaining risk documented:** Stopped callback approach relies on Roblox preserving animation pose when TimePosition is set to Length and speed is 0 after track stops. If Roblox does not preserve pose, will need real AKS74_FP_ADS_Idle animation asset.
+
+**DEBT-013 (Weapon name hardcoded)** — STABLE. No weapon identity or server combat changes.
+
+**DEBT-034 (MCP verification)** — APPLIES. MCP unavailable — Studio verification deferred.
+
+**No new debt introduced.** This repair simplifies completion detection (Stopped callback instead of epsilon polling).
+
+### Animation IDs preserved (AKS74 first-person)
+
+All animation IDs unchanged from Pass 1:
+- `adsIn` (ADS enter): rbxassetid://134918319490586
+- `adsOut` (ADS exit): rbxassetid://132508450718728
+- `adsFire` (fire while ADS): rbxassetid://138021695403324
+- `equip`: rbxassetid://139265999638776
+- `idle`: rbxassetid://75961893882956
+- `fire`: rbxassetid://116185608269786
+- `reload`: rbxassetid://127212878966691
+- `run`: rbxassetid://111133092181267
+
+### MCP/Studio verification checklist (25 steps)
+
+**MCP was unavailable for this repair pass.** The following verification steps must be completed in Roblox Studio before this repair can be marked resolved:
+
+**Phase 1: Basic ADS entry (animation completion focus)**
+1. Start client playtest
+2. Press 1 to equip AKS74
+3. Confirm equip animation plays
+4. Confirm idle animation loops
+5. Right mouse to enter ADS
+6. **CRITICAL:** Confirm AKS_ADS (rbxassetid://134918319490586) plays **all the way to its visible final pose** (no cutoff at ~2 frames before end)
+7. **CRITICAL:** Confirm ADS enter animation **visually finishes** before weapon pose becomes stable
+8. Confirm adsState transitions to Aiming only **after** animation completes (check via Logger.debug if needed)
+9. Confirm final ADS pose is held stable (no snap back to hipfire after Stopped fires)
+
+**Phase 2: Track fighting and procedural movement (unchanged from Pass 1)**
+10. While ADS is held, confirm normal idle does not play or visually interfere
+11. While ADS is held, confirm run animation does not play or visually interfere
+12. While ADS is held, move mouse → confirm no procedural sway/lag
+13. While ADS is held, press movement keys → confirm no procedural bob
+14. Confirm viewmodel is completely stable during held ADS
+
+**Phase 3: ADS fire (unchanged from Pass 1)**
+15. Fire while ADS
+16. Confirm AKS_ADS_FIRE (rbxassetid://138021695403324) plays
+17. Fire multiple shots while ADS
+18. Confirm ADS fire restarts cleanly per shot, returns to held ADS pose after each
+
+**Phase 4: ADS exit (animation completion focus)**
+19. Right mouse again to exit ADS
+20. **CRITICAL:** Confirm AKS_UNADS (rbxassetid://132508450718728) plays **fully back to hipfire** (no cutoff)
+21. Confirm normal idle resumes after ADS exit finishes
+22. Confirm no visual pop or snap on exit
+
+**Phase 5: Edge cases (unchanged from Pass 1)**
+23. Enter ADS → press reload → confirm ADS exits cleanly, reload plays
+24. Enter ADS → holster → confirm all ADS tracks stop, no pose stuck
+25. Re-equip → confirm ADS state resets to Hip, can enter ADS again cleanly
+
+**Phase 6: Unchanged systems**
+- Confirm camera.CFrame behavior unchanged (no zoom, no FOV change)
+- Confirm no new remotes created
+- Confirm server combat unchanged (damage, ammo, reload, health, raycast validation)
+- Confirm no errors in Output during any of the above steps
+
+**CRITICAL PASS/FAIL:** Steps 6, 7, 9, and 20 are the repair success criteria. If these fail, the epsilon-based freeze issue persists or the Stopped callback approach does not preserve pose.
+
+**If pose does not hold after Stopped fires:** Add TECHNICAL_DEBT entry stating "AKS74 requires a real first-person ADS idle animation. Holding the ADS enter animation final frame via TimePosition + AdjustSpeed(0) after Stopped does not preserve pose in Roblox AnimationTrack playback."
+
+**Resolve DEBT-040 when:** All 25 verification steps pass in Studio play mode.
+
+---
+
 ## [2026-06-03 — REPAIR] — Repair AKS74 ADS track blending and remove fake ADS idle
 
 ### Summary

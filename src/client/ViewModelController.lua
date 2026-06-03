@@ -929,20 +929,9 @@ function ViewModelController:Start()
         local cam    = workspace.CurrentCamera
         local moveCF = MovementController:GetViewmodelAddCFrame()
 
-        -- ADS state machine: monitor adsIn progress and freeze at final frame.
-        -- When adsState == "Entering" and adsIn reaches near its end, freeze it and transition to "Aiming".
-        if adsState == "Entering" and weaponAdsInTrack and weaponAdsInTrack.IsPlaying then
-            local len = weaponAdsInTrack.Length
-            local pos = weaponAdsInTrack.TimePosition
-            if len > 0 and pos >= (len - Constants.VIEWMODEL_ADS_HOLD_FRAME_EPSILON) then
-                -- Freeze at final frame: seek to near-end, adjust speed to 0.
-                weaponAdsInTrack.TimePosition = math.max(0, len - Constants.VIEWMODEL_ADS_HOLD_FRAME_EPSILON)
-                weaponAdsInTrack:AdjustSpeed(0)
-                adsState = "Aiming"
-                adsIdleTime = 0
-                Logger.debug("[ViewModelController] RenderStepped: adsIn frozen at final frame (state = Aiming)")
-            end
-        end
+        -- ADS state machine: no longer monitors TimePosition for early freeze.
+        -- ADS enter animation plays fully to completion; Stopped callback handles Entering → Aiming transition.
+        -- This comment block preserved for code archaeology; epsilon-based freeze removed to fix visual cutoff.
 
         -- Procedural movement suppression while ADS.
         -- When ADS is active (Entering or Aiming), disable procedural movement to keep pose stable.
@@ -1188,6 +1177,35 @@ function ViewModelController:SetAiming(entering: boolean)
             adsState = "Entering"
             adsIdleTime = 0
             Logger.debug("[ViewModelController] SetAiming: adsIn started (state = Entering)")
+
+            -- When adsIn finishes playing, transition to Aiming and hold the final pose.
+            local capturedWeapon = equippedWeaponName
+            weaponAdsInTrack.Stopped:Once(function()
+                -- Only transition if same weapon, still entering, and model exists.
+                if equippedWeaponName ~= capturedWeapon or self.model == nil then
+                    return
+                end
+                if adsState ~= "Entering" then
+                    return
+                end
+
+                -- Transition to Aiming state.
+                adsState = "Aiming"
+                adsIdleTime = 0
+                Logger.debug("[ViewModelController] adsIn Stopped: transitioned to Aiming")
+
+                -- Hold the final pose by setting TimePosition to Length and freezing.
+                if weaponAdsInTrack then
+                    local len = weaponAdsInTrack.Length
+                    if len > 0 then
+                        weaponAdsInTrack.TimePosition = len
+                        weaponAdsInTrack:AdjustSpeed(0)
+                        Logger.debug("[ViewModelController] adsIn Stopped: holding final pose at TimePosition = " .. tostring(len))
+                    else
+                        Logger.warn("[ViewModelController] adsIn Stopped: track length is 0, cannot hold pose")
+                    end
+                end
+            end)
         else
             Logger.warn("[ViewModelController] SetAiming: no adsIn track loaded")
             adsState = "Hip"
