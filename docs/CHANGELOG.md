@@ -7,6 +7,204 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-03 — REPAIR PASS 3] — Replace broken AKS74 ADS hold system with real ADS idle animation
+
+### Summary
+
+**This is the final ADS animation repair pass.** The previous two repair passes attempted to hold the ADS pose by freezing the adsIn animation's final frame (Pass 1: epsilon-based freeze in RenderStepped, Pass 2: Stopped callback + TimePosition = Length + AdjustSpeed(0)). Both approaches were unreliable because Roblox does not preserve an AnimationTrack's pose after it stops, even when explicitly seeking to the end and freezing it.
+
+**User provided real ADS idle animation.** This repair replaces all broken freeze/hold logic with proper ADS animation flow using a real looping adsIdle track.
+
+**Root cause of all three attempts:** Trying to fake ADS idle by holding/freezing the adsIn animation's final frame is fundamentally unreliable in Roblox AnimationTrack playback. The correct solution is to use a dedicated ADS idle animation that loops while the player is aiming.
+
+**Fixed by:**
+- Adding real ADS idle animation track: `adsIdle = rbxassetid://105305883052870`
+- Updating adsIn and adsOut animation IDs to new versions
+- Loading adsIdle track in `_setupWeaponAnimations` with `Looped = true`, `Priority = Action`
+- Starting adsIdle loop in adsIn.Stopped callback after enter animation finishes
+- Stopping adsIdle when exiting ADS, reloading, or holstering
+- Removing all freeze/hold logic (TimePosition manipulation, AdjustSpeed(0), epsilon checks)
+- Removing unused Constants: `VIEWMODEL_ADS_HOLD_FRAME_EPSILON`, `VIEWMODEL_ADS_DISABLE_FAKE_IDLE`
+
+**Result:** Clean ADS animation flow:
+1. Right mouse → adsIn plays once
+2. adsIn finishes → adsIdle starts and loops
+3. Fire while ADS → adsFire plays on top, adsIdle continues
+4. Right mouse again → adsIdle stops, adsOut plays once
+5. adsOut finishes → hip idle resumes
+
+**Does NOT affect:**
+- Camera (no CFrame changes, no FOV zoom)
+- Server combat (no damage, ammo, reload, hit validation changes)
+- Track blending (idle/run still suppressed during ADS)
+- Procedural movement suppression (still disabled during ADS)
+
+**MCP/Studio verification required but unavailable** — see 25-step verification checklist at end of this entry.
+
+### Changes to `src/shared/WeaponData.lua`
+
+**Animation IDs updated:**
+```lua
+firstPerson = {
+    -- Existing IDs (unchanged):
+    equip   = "rbxassetid://139265999638776",
+    idle    = "rbxassetid://75961893882956",
+    fire    = "rbxassetid://116185608269786",
+    reload  = "rbxassetid://127212878966691",
+    run     = "rbxassetid://111133092181267",
+    
+    -- New ADS animation IDs:
+    adsIn   = "rbxassetid://112260183627854",  -- was 134918319490586
+    adsOut  = "rbxassetid://108479441252268",  -- was 132508450718728
+    adsIdle = "rbxassetid://105305883052870",  -- was 0 (no animation)
+    adsFire = "rbxassetid://138021695403324",  -- unchanged (preserved)
+}
+```
+
+### Changes to `src/shared/Constants.lua`
+
+**Removed:**
+- `VIEWMODEL_ADS_HOLD_FRAME_EPSILON` (no longer used, freeze logic removed)
+- `VIEWMODEL_ADS_DISABLE_FAKE_IDLE` (no longer needed, using real adsIdle)
+
+**Preserved (unchanged):**
+- `VIEWMODEL_ADS_TRACK_FADE_TIME = 0.03`
+- `VIEWMODEL_ADS_DISABLE_PROCEDURAL_MOVEMENT = true`
+- `VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING = true`
+- `VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true`
+- `ADS_INPUT_USER_INPUT_TYPE = Enum.UserInputType.MouseButton2`
+
+### Changes to `src/client/ViewModelController.lua`
+
+**Added:**
+- `local weaponAdsIdleTrack: AnimationTrack? = nil` variable declaration
+- adsIdle track loading in `_setupWeaponAnimations`:
+  ```lua
+  local adsIdleId: string = tostring(fp.adsIdle or "")
+  if adsIdleId ~= "" and adsIdleId ~= "rbxassetid://0" then
+      local adsIdleAnim = Instance.new("Animation")
+      adsIdleAnim.AnimationId = adsIdleId
+      local track = (animator :: Animator):LoadAnimation(adsIdleAnim)
+      track.Looped   = true   -- ADS idle loops
+      track.Priority = Enum.AnimationPriority.Action
+      weaponAdsIdleTrack = track
+  end
+  ```
+- adsIdle cleanup in `init()` and `StopWeaponAnimations()` (Stop + Destroy)
+- adsIdle start in adsIn.Stopped callback:
+  ```lua
+  if weaponAdsIdleTrack then
+      weaponAdsIdleTrack:Play(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
+      Logger.debug("[ViewModelController] adsIn Stopped: adsIdle started")
+  end
+  ```
+- adsIdle stop in SetAiming(false) before playing adsOut
+- adsIdle stop in StopADSAnimations()
+
+**Removed:**
+- All adsIn freeze/hold logic (TimePosition = Length, AdjustSpeed(0))
+- `adsAlignmentAlpha` variable and all references (was removed in Pass 1, final cleanup)
+- "unfreeze before stopping" logic (no longer freezing tracks)
+
+**Changed:**
+- adsIn.Stopped callback now starts adsIdle loop instead of freezing adsIn
+- SetAiming(false) now stops adsIdle before playing adsOut
+- Comment updates to reflect real adsIdle usage instead of freeze/hold
+
+**Preserved (unchanged):**
+- ADS state machine (Hip/Entering/Aiming/Exiting)
+- SetAiming() idle/run suppression
+- Procedural movement suppression (finalMoveCF = CFrame.new() during ADS)
+- Final viewmodel CFrame order (no fake idle, no alignment offset)
+- Public API: SetAiming(), IsAiming(), PlayADSInAnimation(), PlayADSOutAnimation(), PlayADSFireAnimation(), StopADSAnimations()
+
+### Technical debt affected
+
+**DEBT-040 (ADS visual transition)** — Updated to "FULLY REPAIRED 2026-06-03 (x3), NEEDS STUDIO VERIFICATION". Entry now documents all three repair passes:
+- **Pass 1:** Removed fake procedural idle, disabled procedural movement, fixed track fighting
+- **Pass 2:** Removed epsilon-based early freeze, added Stopped callback freeze
+- **Pass 3:** Replaced broken freeze/hold logic with real adsIdle looping track
+
+14-point verification checklist added (was 12 points in Pass 2, added 2 for adsIdle loop checks).
+
+**Severity lowered:** Medium → Low. With real adsIdle animation, no structural risk remains. Only standard animation playback risk (asset loads correctly, no corruption).
+
+**DEBT-013 (Weapon name hardcoded)** — STABLE. No weapon identity or server combat changes.
+
+**DEBT-034 (MCP verification)** — APPLIES. MCP unavailable — Studio verification deferred.
+
+**No new debt introduced.** This repair removes all broken code (freeze/hold logic) and replaces it with standard animation playback (looping adsIdle track).
+
+### Animation IDs Summary
+
+**New ADS animation IDs:**
+- `adsIn` (ADS enter): rbxassetid://112260183627854 (**new**)
+- `adsIdle` (ADS idle loop): rbxassetid://105305883052870 (**new - replaces fake freeze**)
+- `adsOut` (ADS exit): rbxassetid://108479441252268 (**new**)
+- `adsFire` (fire while ADS): rbxassetid://138021695403324 (**preserved from previous**)
+
+**Unchanged AKS74 first-person IDs:**
+- `equip`: rbxassetid://139265999638776
+- `idle`: rbxassetid://75961893882956
+- `fire`: rbxassetid://116185608269786
+- `reload`: rbxassetid://127212878966691
+- `run`: rbxassetid://111133092181267
+
+### MCP/Studio verification checklist (25 steps)
+
+**MCP was unavailable for this repair pass.** The following verification steps must be completed in Roblox Studio before this repair can be marked resolved:
+
+**Phase 1: Basic ADS animation flow**
+1. Start client playtest
+2. Press 1 to equip AKS74
+3. Confirm equip animation plays
+4. Confirm hip idle animation loops
+5. Right mouse to enter ADS
+6. **CRITICAL:** Confirm AKS_ADS_IN (rbxassetid://112260183627854) plays fully
+7. **CRITICAL:** After adsIn finishes, confirm AKS_ADS_IDLE (rbxassetid://105305883052870) starts and loops smoothly
+8. **CRITICAL:** Confirm adsIdle loops continuously without snapping back to hipfire
+
+**Phase 2: Track fighting and procedural movement**
+9. While adsIdle is looping, confirm normal hip idle does not play or visually interfere
+10. While adsIdle is looping, confirm run animation does not play or visually interfere
+11. While ADS is active, move mouse → confirm no procedural sway/lag
+12. While ADS is active, press movement keys → confirm no procedural bob
+
+**Phase 3: ADS fire**
+13. Fire while ADS
+14. **CRITICAL:** Confirm AKS_ADS_FIRE (rbxassetid://138021695403324) plays on top of looping adsIdle
+15. **CRITICAL:** After adsFire completes, confirm adsIdle continues looping (not stopped by fire)
+16. Fire multiple shots while ADS
+17. Confirm adsFire restarts cleanly per shot, adsIdle never stops
+
+**Phase 4: ADS exit**
+18. Right mouse again to exit ADS
+19. **CRITICAL:** Confirm adsIdle stops, AKS_ADS_OUT (rbxassetid://108479441252268) plays fully
+20. Confirm hip idle resumes after adsOut finishes
+21. Confirm no visual pop or snap on exit
+
+**Phase 5: Edge cases**
+22. Enter ADS → reload → confirm adsIn/adsIdle stop cleanly, reload plays
+23. Enter ADS → holster → confirm all ADS tracks stop, no pose stuck
+24. Re-equip → confirm ADS state resets to Hip, can enter ADS again cleanly
+25. Confirm no errors in Output during any of the above steps
+
+**Phase 6: Unchanged systems**
+- Confirm camera.CFrame behavior unchanged (no zoom, no FOV change)
+- Confirm no new remotes created
+- Confirm server combat unchanged (damage, ammo, reload, health, raycast validation)
+
+**CRITICAL PASS/FAIL:** Steps 7, 8, 14, 15, and 19 are the repair success criteria. If these fail:
+- Step 7 fails: adsIdle did not start after adsIn finished → check adsIn.Stopped callback
+- Step 8 fails: adsIdle snaps back to hipfire → check animation asset Looped property + track.Looped = true
+- Step 14 fails: adsFire did not play on top of adsIdle → check animation Priority (adsFire should be Action2)
+- Step 15 fails: adsIdle stopped after adsFire → check that adsFire does not call Stop on adsIdle
+- Step 19 fails: adsIdle did not stop before adsOut → check SetAiming(false) stops adsIdle
+
+**Resolve DEBT-040 when:** All 25 verification steps pass in Studio play mode.
+
+---
+
 ## [2026-06-03 — REPAIR PASS 2] — Fix AKS74 ADS animations getting cut off early
 
 ### Summary

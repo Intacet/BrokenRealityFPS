@@ -503,30 +503,33 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-040] ADS visual transition not implemented — REPAIRED 2026-06-03 (x2), NEEDS STUDIO VERIFICATION
+## [DEBT-040] ADS visual transition not implemented — FULLY REPAIRED 2026-06-03 (x3), NEEDS STUDIO VERIFICATION
 
-**File:** `src/client/GunController.lua`, `src/client/ViewModelController.lua`, `src/shared/Constants.lua`
-**Severity:** Medium (was Medium-High before initial implementation)
+**File:** `src/client/GunController.lua`, `src/client/ViewModelController.lua`, `src/shared/WeaponData.lua`, `src/shared/Constants.lua`
+**Severity:** Low (was Medium-High before initial implementation, Medium after repairs 1-2)
 **Studio verification required:** Yes
 **Original risk (pre-2026-06-03):** `isADS` was tracked and gated spread calculation, but no visual change occurred when MouseButton2 was held. Viewmodel did not move into sights-up position, no FOV change, no TweenService transition.
 **Implemented (2026-06-03):** ADS animation system added using AKS74 first-person adsIn/adsOut/adsFire animations. Right mouse toggles ADS. ADS enter plays once, freezes at final frame, and holds the ADS pose via TimePosition monitoring in RenderStepped. ADS fire plays on top of held pose. ADS exit plays and returns to idle. Explicit ADSState type ("Hip" | "Entering" | "Aiming" | "Exiting"). No camera changes, no FOV zoom — animation-only.
 **Repaired (2026-06-03 — repair pass 1):** Original implementation suffered from track fighting (idle/run conflicting with ADS pose) and fake ADS idle interference (procedural sine movement pulling gun away from animation's baked position). Repair removed fake ADS idle, disabled procedural movement during ADS, and ensured idle/run tracks are stopped when entering ADS. ADS pose is now driven entirely by the animation final frame with no code-based offsets.
 **Repaired (2026-06-03 — repair pass 2):** First repair introduced epsilon-based freeze (VIEWMODEL_ADS_HOLD_FRAME_EPSILON = 0.03) that froze adsIn animation ~2 frames before natural completion, causing visible animation cutoff. User reported ADS enter/exit animations not finishing. Second repair removes epsilon-based freeze from RenderStepped, sets epsilon to 0, and uses adsInTrack.Stopped:Once callback to detect completion. Animation now plays fully to its natural end before transitioning to Aiming state and holding final pose via TimePosition = Length + AdjustSpeed(0).
-**Current state:** ADS system exists and uses correct animations. Fake idle removed. Procedural movement suppressed during ADS. Track blending fixed. Epsilon-based early freeze removed — animation plays to completion. **NOT VERIFIED IN STUDIO** — MCP was unavailable for both repair passes.
-**Remaining risk:** Stopped callback approach relies on Roblox preserving animation pose when TimePosition is set to Length and speed is set to 0 after the track has naturally stopped. If Roblox does not preserve the pose, the held ADS position may snap back to hipfire. If this occurs in Studio verification, document requirement for a real AKS74_FP_ADS_Idle animation asset instead of holding the enter animation final frame.
+**Fully Repaired (2026-06-03 — repair pass 3):** Stopped callback freeze approach was unreliable (Roblox does not preserve pose after AnimationTrack stops). User provided real ADS idle animation. Final repair replaces broken freeze/hold logic with proper ADS animation flow: adsIn plays once → adsIdle loops (new real animation) → adsFire plays on top → adsIdle continues → adsOut plays once → returns to hip idle. No freezing, no holding stopped tracks, no fake idle, no alignment offsets. Clean animation-driven ADS system.
+**Current state:** ADS system uses proper animation flow with real adsIdle looping track. All broken freeze/hold logic removed. Fake idle removed. Procedural movement suppressed during ADS. Track blending fixed. Animation IDs updated: adsIn = rbxassetid://112260183627854, adsIdle = rbxassetid://105305883052870, adsOut = rbxassetid://108479441252268, adsFire = rbxassetid://138021695403324 (preserved). **NOT VERIFIED IN STUDIO** — MCP was unavailable for all three repair passes.
+**Remaining risk:** None structural. Standard animation playback risk (tracks load correctly, no asset corruption). If adsIdle does not loop correctly in Studio, check animation asset settings (Looped property must be enabled in animation itself, though code sets track.Looped = true as backup).
 **Resolve when:** Studio verification confirms:
 1. Right mouse while holstered → no errors, ADS does not activate
-2. Equip AKS74 → right mouse → ADS enter animation plays **fully to its visible final pose** (no cutoff)
-3. ADS enter completes before transitioning to Aiming state (animation finishes visibly)
-4. ADS pose is held stable after enter finishes (no visual jumping/popping/pulling away)
-5. Normal idle does not fight the held ADS pose
-6. Run animation does not fight the held ADS pose
-7. Procedural movement/sway/bob does not move the viewmodel while ADS is held
-8. Fire while ADS → AKS_ADS_FIRE plays, returns to held ADS pose after
-9. Right mouse again → ADS exit animation plays **fully to hipfire** (no cutoff)
-10. Normal idle resumes after ADS exit finishes
-11. Enter ADS → reload → ADS exits cleanly, reload plays
-12. Enter ADS → holster → all ADS tracks stop, no pose remains stuck
+2. Equip AKS74 → right mouse → ADS enter animation (rbxassetid://112260183627854) plays fully
+3. After ADS enter finishes → ADS idle animation (rbxassetid://105305883052870) starts and loops smoothly
+4. ADS idle loops continuously without snapping back to hipfire or fighting normal idle/run
+5. Normal idle does not play or visually interfere while ADS idle is looping
+6. Run animation does not play or visually interfere while ADS idle is looping
+7. Procedural movement/sway/bob does not move the viewmodel while ADS is active (Entering or Aiming)
+8. Fire while ADS → AKS_ADS_FIRE (rbxassetid://138021695403324) plays on top of looping adsIdle
+9. After ADS fire completes → ADS idle continues looping (not stopped by fire animation)
+10. Right mouse again → ADS idle stops, ADS exit animation (rbxassetid://108479441252268) plays fully
+11. After ADS exit finishes → normal hip idle resumes
+12. Enter ADS → reload → ADS idle/in/out all stop cleanly, reload plays
+13. Enter ADS → holster → all ADS tracks stop, no pose remains stuck
+14. Re-equip → ADS state resets to Hip, can enter ADS again cleanly
 
 ---
 

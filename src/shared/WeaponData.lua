@@ -49,10 +49,10 @@ WeaponData["AKS74"] = {
             fire    = "rbxassetid://116185608269786",
             reload  = "rbxassetid://127212878966691",
             run     = "rbxassetid://111133092181267",
-            adsIn   = "rbxassetid://134918319490586",   -- ADS enter animation
-            adsOut  = "rbxassetid://132508450718728",   -- ADS exit animation
-            adsFire = "rbxassetid://138021695403324",   -- fire while ADS
-            adsIdle = "rbxassetid://0",                 -- no dedicated ADS idle; fake via freeze
+            adsIn   = "rbxassetid://112260183627854",   -- ADS enter animation (new)
+            adsOut  = "rbxassetid://108479441252268",   -- ADS exit animation (new)
+            adsIdle = "rbxassetid://105305883052870",   -- ADS idle loop (new - replaces fake freeze)
+            adsFire = "rbxassetid://138021695403324",   -- fire while ADS (preserved)
         },
         thirdPerson = {
             equip  = "rbxassetid://124808012153849",
