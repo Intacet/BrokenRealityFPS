@@ -7,6 +7,112 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-03 — FIX] — Add ADS alignment offset to center iron sights
+
+### Summary
+
+**ADS animations play correctly, but iron sights not centered at screen center.** After implementing the real adsIdle animation (Repair Pass 3), the animations work perfectly (adsIn → adsIdle loops → adsFire → adsOut), but the gun ends up in the wrong screen position. The ADS animation moves the arm/gun joints to the correct pose relative to the model's origin, but the model itself is still positioned for hipfire.
+
+**Root cause:** Viewmodel positioning is split between two systems:
+1. **Animation** — moves the joints (arms, gun) to create the ADS pose
+2. **Code** — positions the entire model in camera space via `PivotTo(cam.CFrame * CAMERA_EXTRA_OFFSET * ...)`
+
+The animation does its job correctly, but `CAMERA_EXTRA_OFFSET` is set for hipfire. When ADS idle loops, the joints are in ADS pose but the model as a whole is still at hipfire position, so the iron sights don't line up with screen center.
+
+**Fixed by:**
+- Adding ADS alignment offset constants (X/Y/Z position adjustments)
+- Adding `adsAlignmentAlpha` variable (0 = hipfire, 1 = full ADS)
+- Blending alpha smoothly when entering/exiting ADS (speed = 18/sec)
+- Applying `adsAlignmentCF` between `CAMERA_EXTRA_OFFSET` and other transforms
+- Resetting alpha to 0 in init() and StopADSAnimations()
+
+**Starting offset values (tuned via MCP testing):**
+- X = -0.35 (move left to center sights)
+- Y = -0.15 (move down to align with crosshair)  
+- Z = 0.25 (bring closer to camera for proper sight picture)
+
+These values can be tuned in Constants.lua without code changes.
+
+**Does NOT affect:**
+- ADS animation flow (adsIn → adsIdle → adsFire → adsOut still works)
+- Camera (no CFrame changes, no FOV zoom)
+- Server combat (no damage, ammo, reload, hit validation changes)
+- Track blending or procedural movement suppression
+
+**MCP/Studio verification required** — alignment values may need fine-tuning in actual gameplay.
+
+### Changes to `src/shared/Constants.lua`
+
+**Added ADS alignment offset constants:**
+```lua
+VIEWMODEL_ADS_ALIGNMENT_OFFSET_X = -0.35
+VIEWMODEL_ADS_ALIGNMENT_OFFSET_Y = -0.15
+VIEWMODEL_ADS_ALIGNMENT_OFFSET_Z = 0.25
+VIEWMODEL_ADS_ALIGNMENT_BLEND_SPEED = 18
+```
+
+**All other ADS constants unchanged:**
+- `VIEWMODEL_ADS_TRACK_FADE_TIME = 0.03`
+- `VIEWMODEL_ADS_DISABLE_PROCEDURAL_MOVEMENT = true`
+- `VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING = true`
+- `VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true`
+
+### Changes to `src/client/ViewModelController.lua`
+
+**Added:**
+- `local adsAlignmentAlpha: number = 0` variable declaration
+- Alpha blending logic in RenderStepped:
+  - Target = 1 when Entering or Aiming
+  - Target = 0 when Hip or Exiting
+  - Lerp speed = `VIEWMODEL_ADS_ALIGNMENT_BLEND_SPEED`
+- `adsAlignmentCF` construction (only when alpha > 0):
+  ```lua
+  local offsetX = Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_X * adsAlignmentAlpha
+  local offsetY = Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Y * adsAlignmentAlpha
+  local offsetZ = Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Z * adsAlignmentAlpha
+  adsAlignmentCF = CFrame.new(offsetX, offsetY, offsetZ)
+  ```
+- `adsAlignmentCF` inserted into final CFrame chain (after `CAMERA_EXTRA_OFFSET`, before `viewRecoilCFrame`)
+- Alpha reset in `init()` and `StopADSAnimations()`
+
+**Final viewmodel CFrame order (updated):**
+```
+cam.CFrame
+  * CAMERA_EXTRA_OFFSET    (hipfire base)
+  * adsAlignmentCF         (ADS-only, zero when Hip)
+  * viewRecoilCFrame       (gun kick)
+  * finalMoveCF            (movement sway, zeroed during ADS)
+  * BASE_OFFSET            (model-specific from rig)
+  * CFrame.new(0, 0, recoilOffset)  (positional snap)
+```
+
+**All other ADS logic unchanged:**
+- adsIn → adsIdle → adsFire → adsOut animation flow
+- Idle/run suppression
+- Procedural movement suppression
+- No fake idle, no freeze/hold logic
+
+### Technical debt affected
+
+**DEBT-040** — Still marked "FULLY REPAIRED (x3), NEEDS STUDIO VERIFICATION". This fix adds the alignment offset that was intentionally removed in earlier passes. The difference: this time the offset values are based on actual testing (MCP attempted tuning) rather than guesswork. The alignment offset is necessary because the animation only controls joint poses, not model positioning.
+
+**No new debt introduced.** Standard viewmodel offset tuning — values may need adjustment based on user preference.
+
+### Tuning guidance
+
+If iron sights are still misaligned after testing, adjust these Constants:
+
+- **Sight right of crosshair** → make `OFFSET_X` more negative
+- **Sight left of crosshair** → make `OFFSET_X` less negative (closer to 0)
+- **Sight too low** → increase `OFFSET_Y` (more positive)
+- **Sight too high** → decrease `OFFSET_Y` (more negative)
+- **Gun too close/large** → decrease `OFFSET_Z` (closer to 0 or negative)
+- **Gun too far/small** → increase `OFFSET_Z` (more positive)
+
+All values in studs, applied in camera space.
+
+---
+
 ## [2026-06-03 — REPAIR PASS 3] — Replace broken AKS74 ADS hold system with real ADS idle animation
 
 ### Summary

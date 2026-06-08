@@ -1059,6 +1059,14 @@ Constants.ADS_INPUT_USER_INPUT_TYPE = Enum.UserInputType.MouseButton2
 -- Fade time for ADS animation blend/transitions (in seconds).
 Constants.VIEWMODEL_ADS_TRACK_FADE_TIME = 0.03
 
+-- ADS alignment offset to center iron sights at screen center.
+-- Applied only while ADS is active (Entering, Aiming, or Exiting states).
+-- The ADS animation moves the joints, but the model as a whole needs repositioning.
+Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_X = -0.35  -- move left to center sights
+Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Y = -0.15  -- move down to align with crosshair
+Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Z = 0.25   -- bring closer to camera for sight picture
+Constants.VIEWMODEL_ADS_ALIGNMENT_BLEND_SPEED = 18  -- alpha lerp per second
+
 -- Disable procedural movement (mouse sway, move bob) while ADS to keep pose stable.
 Constants.VIEWMODEL_ADS_DISABLE_PROCEDURAL_MOVEMENT = true
 
