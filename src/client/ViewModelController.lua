@@ -166,14 +166,6 @@ local adsState: ADSState = "Hip"
 -- Fake ADS idle: accumulator for sine-based breathing/sway when adsState == "Aiming".
 local adsIdleTime: number = 0
 
--- ADS aim attachment alignment state.
--- adsAimAlpha: 0 = hip pivot, 1 = attachment-aligned pivot.  Lerped each RenderStepped.
--- adsAimAttachment: Attachment found in the equipped viewmodel; cached on EquipWeapon.
--- adsAimTargetPrev: last-frame target (0 or 1) used to gate change-only Logger.debug calls.
-local adsAimAlpha:      number      = 0
-local adsAimAttachment: Attachment? = nil
-local adsAimTargetPrev: number      = -1   -- -1 forces a log on the very first frame
-
 
 -- Third-person character weapon AnimationTracks.
 -- Loaded on the local player's Humanoid.Animator when a weapon is equipped.
@@ -358,9 +350,6 @@ function ViewModelController:init()
     isRunning            = false
     adsState             = "Hip"
     adsIdleTime          = 0
-    adsAimAlpha          = 0
-    adsAimAttachment     = nil
-    adsAimTargetPrev     = -1
     -- Third-person character tracks: nil references only — do NOT call Stop/Destroy.
     -- init() is called from CharacterAdded where the old Humanoid.Animator may already be
     -- destroyed, making track method calls unsafe.  Same pattern as MovementController's
@@ -435,8 +424,6 @@ function ViewModelController:StopWeaponAnimations()
     isRunning              = false
     adsState               = "Hip"
     adsIdleTime            = 0
-    adsAimAlpha            = 0
-    adsAimTargetPrev       = -1
     -- Third-person character tracks: stop and destroy (character is alive in this path).
     -- AnimationTrack:Destroy() severs Stopped connections synchronously, preventing any
     -- deferred equip-chain or reload-chain callback from firing after holster.
@@ -472,7 +459,6 @@ function ViewModelController:HolsterWeapon()
         self.model = nil
     end
     equippedWeaponName = nil
-    adsAimAttachment   = nil   -- model destroyed; reference is now invalid
     visible            = false
     Logger.debug("[ViewModelController] HolsterWeapon: weapon holstered")
 end
@@ -647,21 +633,6 @@ function ViewModelController:EquipWeapon(weaponName: string)
 
     -- Load first-person animation tracks on the viewmodel clone's Animator.
     self:_setupWeaponAnimations(weaponName, data)
-
-    -- Cache the ADSAimAttachment for per-frame sightline alignment in RenderStepped.
-    -- Searches the entire clone so the attachment can live on any part (Sights preferred).
-    adsAimAttachment = nil
-    if Constants.VIEWMODEL_ADS_USE_AIM_ATTACHMENT then
-        local att = clone:FindFirstChild(Constants.VIEWMODEL_ADS_AIM_ATTACHMENT_NAME, true)
-        if att and att:IsA("Attachment") then
-            adsAimAttachment = att :: Attachment
-            Logger.debug("[ViewModelController] EquipWeapon: ADSAimAttachment cached (parent: '"
-                .. (att.Parent and (att.Parent :: Instance).Name or "?") .. "')")
-        else
-            Logger.warn("[ViewModelController] EquipWeapon: ADSAimAttachment not found in '"
-                .. weaponName .. "' — ADS sightline alignment disabled for this weapon")
-        end
-    end
 
     -- Load third-person animation tracks on the character's Humanoid.Animator.
     -- These overlay movement animations on the character body (visible in third-person
@@ -1028,59 +999,19 @@ function ViewModelController:Start()
             freeAimCF = CFrame.Angles(freeAimPitch, freeAimYaw, freeAimRoll)
         end
 
-        -- ADS aim alpha: lerp toward 1 during Entering/Aiming, back toward 0 otherwise.
-        -- Target is governed by the USE_AIM_ATTACHMENT gate and per-state phase constants.
-        local adsAimTarget: number = 0
-        if Constants.VIEWMODEL_ADS_USE_AIM_ATTACHMENT then
-            if (adsState == "Entering" and Constants.VIEWMODEL_ADS_AIM_APPLY_WHILE_ENTERING)
-                or (adsState == "Aiming" and Constants.VIEWMODEL_ADS_AIM_APPLY_WHILE_AIMING) then
-                adsAimTarget = 1
-            end
-            -- DISABLE_WHILE_EXITING: Exiting leaves target at 0, which is the default.
-        end
-        -- Log once per target change (change-gated, not per-frame).
-        if adsAimTarget ~= adsAimTargetPrev then
-            Logger.debug(string.format(
-                "[ViewModelController] ADS aim target: %.0f → %.0f (state=%s)",
-                adsAimTargetPrev, adsAimTarget, adsState))
-            adsAimTargetPrev = adsAimTarget
-        end
-        adsAimAlpha = adsAimAlpha
-            + (adsAimTarget - adsAimAlpha) * math.min(1, dt * Constants.VIEWMODEL_ADS_AIM_BLEND_SPEED)
-
-        -- Base viewmodel pivot: full chain without any ADS attachment correction.
-        local basePivot = cam.CFrame
+        -- Final viewmodel CFrame.
+        -- Order: CAMERA_EXTRA_OFFSET → viewRecoilCFrame → freeAimCF → finalMoveCF
+        --        → BASE_OFFSET → positional recoilOffset.
+        -- No code-level ADS alignment offset: the ADS animation alone positions the sights.
+        m:PivotTo(
+            cam.CFrame
             * CAMERA_EXTRA_OFFSET
             * viewRecoilCFrame
             * freeAimCF
             * finalMoveCF
             * BASE_OFFSET
             * CFrame.new(0, 0, recoilOffset)
-
-        -- ADS sightline alignment: move the entire viewmodel pivot so ADSAimAttachment
-        -- lands at the camera centre (+ tuning offsets) when adsAimAlpha == 1.
-        -- Uses last-frame pivot + attachment WorldCFrame; one-frame lag is imperceptible.
-        if Constants.VIEWMODEL_ADS_USE_AIM_ATTACHMENT
-            and adsAimAlpha > 0
-            and adsAimAttachment ~= nil then
-            local aimAtt       = adsAimAttachment :: Attachment
-            local currentPivot = m:GetPivot()
-            local aimWorld     = aimAtt.WorldCFrame
-            local localAim     = currentPivot:ToObjectSpace(aimWorld)
-            local targetAimWorld = cam.CFrame
-                * CFrame.new(
-                    Constants.VIEWMODEL_ADS_AIM_TARGET_OFFSET_X,
-                    Constants.VIEWMODEL_ADS_AIM_TARGET_OFFSET_Y,
-                    Constants.VIEWMODEL_ADS_AIM_TARGET_OFFSET_Z)
-                * CFrame.Angles(
-                    math.rad(Constants.VIEWMODEL_ADS_AIM_TARGET_ROTATION_X_DEGREES),
-                    math.rad(Constants.VIEWMODEL_ADS_AIM_TARGET_ROTATION_Y_DEGREES),
-                    math.rad(Constants.VIEWMODEL_ADS_AIM_TARGET_ROTATION_Z_DEGREES))
-            local aimAlignedPivot = targetAimWorld * localAim:Inverse()
-            m:PivotTo(basePivot:Lerp(aimAlignedPivot, adsAimAlpha))
-        else
-            m:PivotTo(basePivot)
-        end
+        )
     end)
 
     Logger.debug("[ViewModelController] Ready")
@@ -1451,8 +1382,6 @@ function ViewModelController:StopADSAnimations()
     end
     adsState               = "Hip"
     adsIdleTime            = 0
-    adsAimAlpha            = 0
-    adsAimTargetPrev       = -1
 end
 
 -- ============================================================
