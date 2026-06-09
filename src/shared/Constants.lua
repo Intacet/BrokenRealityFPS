@@ -1085,34 +1085,37 @@ Constants.VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true
 Constants.FREE_AIM_ENABLED                 = true
 
 -- Hipfire deadzone radius in pixels (how far the crosshair can drift from center).
-Constants.FREE_AIM_RADIUS_PIXELS           = 110
+-- Kept small so the crosshair barely leaves centre — a subtle floating feel.
+Constants.FREE_AIM_RADIUS_PIXELS           = 35
 
 -- ADS deadzone radius in pixels (tighter; makes ADS feel steadier).
-Constants.FREE_AIM_ADS_RADIUS_PIXELS       = 28
+Constants.FREE_AIM_ADS_RADIUS_PIXELS       = 10
 
 -- Scale factor applied to raw mouse delta before adding to aim offset.
--- 1.0 = 1 pixel of crosshair movement per pixel of mouse movement.
-Constants.FREE_AIM_MOUSE_GAIN              = 1.0
+-- Low value = crosshair barely responds to mouse; feels heavy/sluggish.
+Constants.FREE_AIM_MOUSE_GAIN              = 0.25
 
 -- Return-to-center speed (lerp per second) when mouse is idle, hipfire.
-Constants.FREE_AIM_RETURN_SPEED            = 10
+-- Low value = slow pendulum creep back to centre = more weighty inertia feel.
+Constants.FREE_AIM_RETURN_SPEED            = 4
 
 -- Return-to-center speed (lerp per second) when mouse is idle, ADS.
-Constants.FREE_AIM_ADS_RETURN_SPEED        = 18
+Constants.FREE_AIM_ADS_RETURN_SPEED        = 7
 
 -- Speed at which the visible crosshair position lerps toward the raw aim offset.
--- Higher = crosshair tracks the aim point more tightly.
-Constants.FREE_AIM_CROSSHAIR_SMOOTH_SPEED  = 22
+-- Low value = the crosshair trails behind the raw point with noticeable lag (the "weight").
+Constants.FREE_AIM_CROSSHAIR_SMOOTH_SPEED  = 6
 
 -- Speed at which the viewmodel lean lerps toward the normalized aim offset.
--- Lower = more lag between crosshair drift and weapon tilt.
-Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED   = 16
+-- Low value = weapon lags well behind the crosshair and catches up slowly.
+Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED   = 5
 
 -- Maximum yaw (left/right) tilt applied to the viewmodel, in degrees.
-Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES   = 4
+-- Very small — almost imperceptible; just enough to feel the gun follow the aim.
+Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES   = 1.5
 
 -- Maximum pitch (up/down) tilt applied to the viewmodel, in degrees.
-Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES = 3
+Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES = 1.0
 
 -- When true, free aim is suppressed and smoothly recenters while sprinting.
 Constants.FREE_AIM_DISABLE_WHILE_SPRINTING = true
