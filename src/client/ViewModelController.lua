@@ -163,10 +163,6 @@ local adsState: ADSState = "Hip"
 -- Fake ADS idle: accumulator for sine-based breathing/sway when adsState == "Aiming".
 local adsIdleTime: number = 0
 
--- ADS alignment offset alpha: 0 = hipfire, 1 = full ADS alignment.
--- Blends smoothly when entering/exiting ADS to align iron sights with screen center.
-local adsAlignmentAlpha: number = 0
-
 -- Third-person character weapon AnimationTracks.
 -- Loaded on the local player's Humanoid.Animator when a weapon is equipped.
 -- Priority: equip/idle = Action (overlays movement), fire/reload = Action2 (overlays idle).
@@ -350,7 +346,6 @@ function ViewModelController:init()
     isRunning   = false
     adsState    = "Hip"
     adsIdleTime = 0
-    adsAlignmentAlpha = 0
     -- Third-person character tracks: nil references only — do NOT call Stop/Destroy.
     -- init() is called from CharacterAdded where the old Humanoid.Animator may already be
     -- destroyed, making track method calls unsafe.  Same pattern as MovementController's
@@ -969,28 +964,6 @@ function ViewModelController:Start()
         -- ADS enter animation plays fully to completion; Stopped callback handles Entering → Aiming transition.
         -- This comment block preserved for code archaeology; epsilon-based freeze removed to fix visual cutoff.
 
-        -- ADS alignment alpha blending.
-        -- Blend toward 1 when ADS active (Entering/Aiming), toward 0 when Hip/Exiting.
-        local targetAlpha = 0
-        if adsState == "Entering" or adsState == "Aiming" then
-            targetAlpha = 1
-        elseif adsState == "Exiting" then
-            targetAlpha = 0  -- blend back to hipfire during exit animation
-        end
-        local blendSpeed = Constants.VIEWMODEL_ADS_ALIGNMENT_BLEND_SPEED
-        adsAlignmentAlpha = adsAlignmentAlpha + (targetAlpha - adsAlignmentAlpha) * math.min(1, blendSpeed * dt)
-
-        -- ADS alignment offset: applied only when adsAlignmentAlpha > 0.
-        -- The animation moves the joints to the correct pose, but the model as a whole needs repositioning
-        -- to center the iron sights at screen center.
-        local adsAlignmentCF = CFrame.new()
-        if adsAlignmentAlpha > 0 then
-            local offsetX = Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_X * adsAlignmentAlpha
-            local offsetY = Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Y * adsAlignmentAlpha
-            local offsetZ = Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Z * adsAlignmentAlpha
-            adsAlignmentCF = CFrame.new(offsetX, offsetY, offsetZ)
-        end
-
         -- Procedural movement suppression while ADS.
         -- When ADS is active (Entering or Aiming), disable procedural movement to keep pose stable.
         local finalMoveCF = moveCF
@@ -1001,14 +974,14 @@ function ViewModelController:Start()
         end
 
         -- Free-aim viewmodel lean: blend the normalized aim offset toward the weapon's
-        -- visible rotation.  Suppressed during ADS (Entering / Aiming) so it does not
-        -- fight adsAlignmentCF and push the iron sights off-center.  During Hip and
-        -- Exiting the lean resumes from wherever vmFreeAimBlended left off (near zero
-        -- after being drained), so there is no pop on ADS exit.
+        -- visible rotation.  Suppressed during ADS (Entering / Aiming) so the lean does not
+        -- push the iron sights off-center.  During Hip and Exiting the lean resumes from
+        -- wherever vmFreeAimBlended left off (near zero after being drained), so there is
+        -- no pop on ADS exit.
         local freeAimCF: CFrame
         if adsState == "Entering" or adsState == "Aiming" then
             -- Drain blended value toward zero so the lean doesn't snap when exiting ADS.
-            -- freeAimCF is identity — iron sights stay exactly where adsAlignmentCF placed them.
+            -- freeAimCF is identity — the ADS animation alone positions the iron sights.
             vmFreeAimBlended = vmFreeAimBlended:Lerp(
                 Vector2.zero,
                 math.min(1, dt * Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED)
@@ -1025,18 +998,16 @@ function ViewModelController:Start()
             freeAimCF = CFrame.Angles(freeAimPitch, freeAimYaw, 0)
         end
 
-        -- Final viewmodel CFrame: cam * base * alignment * recoil * freeAim * move * procedural.
-        -- Order: CAMERA_EXTRA_OFFSET (base hipfire) → adsAlignmentCF (ADS-only alignment, zero when Hip)
-        --        → viewRecoilCFrame (rotational recoil) → freeAimCF (weapon lean toward aim point, Stage 1;
-        --          identity during Entering/Aiming so iron sights are undisturbed)
-        --        → finalMoveCF (movement sway, zeroed during ADS)
-        --        → BASE_OFFSET (model-specific) → recoilOffset (positional recoil)
-        -- The ADS animation moves the joints, but adsAlignmentCF repositions the entire model
-        -- so the animated iron sights end up centered at screen center.
+        -- Final viewmodel CFrame.
+        -- Order: CAMERA_EXTRA_OFFSET (base hipfire positioning) → viewRecoilCFrame (rotational recoil)
+        --        → freeAimCF (weapon lean toward aim point, Stage 1; identity during Entering/Aiming)
+        --        → finalMoveCF (movement sway/bob, zeroed during ADS)
+        --        → BASE_OFFSET (model-specific pivot alignment) → recoilOffset (positional recoil)
+        -- CAMERA_EXTRA_OFFSET is always applied and was present when ADS was authored — the ADS animation
+        -- itself positions the iron sights at screen center without any additional model-level offset.
         m:PivotTo(
             cam.CFrame
             * CAMERA_EXTRA_OFFSET
-            * adsAlignmentCF
             * viewRecoilCFrame
             * freeAimCF
             * finalMoveCF
@@ -1408,7 +1379,6 @@ function ViewModelController:StopADSAnimations()
     end
     adsState = "Hip"
     adsIdleTime = 0
-    adsAlignmentAlpha = 0
 end
 
 -- ============================================================

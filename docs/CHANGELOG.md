@@ -7,6 +7,19 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-09 — FIX] — Remove adsAlignmentCF; ADS iron sights now positioned by animation only
+
+### Summary
+
+Removed `adsAlignmentCF` and `adsAlignmentAlpha` entirely. These were introduced during the free-aim session as a manual model-level repositioning offset intended to center the iron sights during ADS, but they caused the sights to appear offset (the ADS animation already positions the sights correctly by itself). `CAMERA_EXTRA_OFFSET` remains — it was present when the ADS animation was authored and does not interfere.
+
+### What was changed
+
+- **`src/shared/Constants.lua`** — removed `VIEWMODEL_ADS_ALIGNMENT_OFFSET_X/Y/Z` and `VIEWMODEL_ADS_ALIGNMENT_BLEND_SPEED` (4 constants).
+- **`src/client/ViewModelController.lua`** — removed `adsAlignmentAlpha` state variable, both reset sites (`init()` and the ADS-stop path), the entire alpha-blending and CFrame-construction block in RenderStepped, and `* adsAlignmentCF` from the PivotTo chain. PivotTo chain is now `cam.CFrame * CAMERA_EXTRA_OFFSET * viewRecoilCFrame * freeAimCF * finalMoveCF * BASE_OFFSET * recoilOffset`.
+
+---
+
 ## [2026-06-09 — TUNING] — Free-aim viewmodel lean: ADS suppression fix + increased rotation
 
 ### Summary
