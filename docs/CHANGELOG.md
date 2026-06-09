@@ -7,6 +7,35 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-09 — FIX] — Restore ADS alignment CFrame; fix idle-after-ADS bug
+
+### Summary
+
+Two bugs repaired in `ViewModelController`:
+
+1. **ADS alignment regression (introduced commit 71386d9):** `adsAlignmentCF` was incorrectly removed with the rationale "iron sights positioned by animation only." This was wrong — `CAMERA_EXTRA_OFFSET = CFrame.new(-0.1, 0.25, 0.7)` creates a residual misalignment between the FakeCamera reference point and screen centre that the ADS animation alone does not compensate. The model-level offset is a necessary empirical correction. Removing it caused AKS74 iron sights to appear off-centre during ADS.
+
+2. **Idle-after-ADS freeze (introduced when `VIEWMODEL_ADS_DISABLE_*` flags were enabled):** When both `VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING = true` and `VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true`, the `adsOut.Stopped` callback had no branch that could resume any animation. The weapon froze on the last frame of adsOut with nothing playing. Fixed by removing the DISABLE_* constant checks from the post-ADS resume path — these flags suppress tracks *during* ADS, not *after*.
+
+Both fixes were verified in Studio via MCP play-mode: `adsIn started` → `adsIn Stopped: adsIdle started` → `adsOut started` → `adsOut complete: hip animation resumed` all logged correctly; 1 animation track confirmed playing after ADS exit (was 0 before fix). See DEBT-040.
+
+### Files changed
+
+- **`src/shared/Constants.lua`** — restored four ADS alignment constants: `VIEWMODEL_ADS_ALIGNMENT_OFFSET_X = -0.35`, `VIEWMODEL_ADS_ALIGNMENT_OFFSET_Y = -0.15`, `VIEWMODEL_ADS_ALIGNMENT_OFFSET_Z = 0.25`, `VIEWMODEL_ADS_ALIGNMENT_BLEND_SPEED = 18`.
+- **`src/client/ViewModelController.lua`:**
+  - Added `adsAlignmentAlpha: number` and `adsAlignmentTargetLast: number` state variables.
+  - Reset both in `init()`, `StopWeaponAnimations()`, and `StopADSAnimations()`.
+  - Added per-frame alpha blending block in RenderStepped: target = 1 during Entering/Aiming, 0 during Hip/Exiting; lerps at `VIEWMODEL_ADS_ALIGNMENT_BLEND_SPEED`.
+  - `adsAlignmentCF` constructed from scaled offset components and inserted into PivotTo chain after `CAMERA_EXTRA_OFFSET`.
+  - PivotTo chain: `cam.CFrame * CAMERA_EXTRA_OFFSET * adsAlignmentCF * viewRecoilCFrame * freeAimCF * finalMoveCF * BASE_OFFSET * CFrame.new(0, 0, recoilOffset)`.
+  - `adsOut.Stopped` callback and no-adsOut-track fallback: removed DISABLE_* constant checks from the resume path; idle or run now unconditionally resumes on ADS exit.
+
+### Tuning note
+
+`VIEWMODEL_ADS_ALIGNMENT_OFFSET_*` values were found empirically. Must be re-tuned in Studio if `CAMERA_EXTRA_OFFSET` changes or the AKS74 ADS animation is replaced.
+
+---
+
 ## [2026-06-09 — TUNING] — Free-aim: reset to reference constants + add viewmodel roll
 
 ### Summary

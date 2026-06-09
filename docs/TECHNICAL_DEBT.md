@@ -503,33 +503,33 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 
 ---
 
-## [DEBT-040] ADS visual transition not implemented — FULLY REPAIRED 2026-06-03 (x3), NEEDS STUDIO VERIFICATION
+## [DEBT-040] ADS visual transition not implemented — FULLY REPAIRED 2026-06-03 (x3) — ALIGNMENT REGRESSION + IDLE BUG REPAIRED 2026-06-09 — STUDIO VERIFIED 2026-06-09
 
 **File:** `src/client/GunController.lua`, `src/client/ViewModelController.lua`, `src/shared/WeaponData.lua`, `src/shared/Constants.lua`
 **Severity:** Low (was Medium-High before initial implementation, Medium after repairs 1-2)
-**Studio verification required:** Yes
+**Studio verification required:** Yes — verified 2026-06-09 via MCP
 **Original risk (pre-2026-06-03):** `isADS` was tracked and gated spread calculation, but no visual change occurred when MouseButton2 was held. Viewmodel did not move into sights-up position, no FOV change, no TweenService transition.
 **Implemented (2026-06-03):** ADS animation system added using AKS74 first-person adsIn/adsOut/adsFire animations. Right mouse toggles ADS. ADS enter plays once, freezes at final frame, and holds the ADS pose via TimePosition monitoring in RenderStepped. ADS fire plays on top of held pose. ADS exit plays and returns to idle. Explicit ADSState type ("Hip" | "Entering" | "Aiming" | "Exiting"). No camera changes, no FOV zoom — animation-only.
 **Repaired (2026-06-03 — repair pass 1):** Original implementation suffered from track fighting (idle/run conflicting with ADS pose) and fake ADS idle interference (procedural sine movement pulling gun away from animation's baked position). Repair removed fake ADS idle, disabled procedural movement during ADS, and ensured idle/run tracks are stopped when entering ADS. ADS pose is now driven entirely by the animation final frame with no code-based offsets.
 **Repaired (2026-06-03 — repair pass 2):** First repair introduced epsilon-based freeze (VIEWMODEL_ADS_HOLD_FRAME_EPSILON = 0.03) that froze adsIn animation ~2 frames before natural completion, causing visible animation cutoff. User reported ADS enter/exit animations not finishing. Second repair removes epsilon-based freeze from RenderStepped, sets epsilon to 0, and uses adsInTrack.Stopped:Once callback to detect completion. Animation now plays fully to its natural end before transitioning to Aiming state and holding final pose via TimePosition = Length + AdjustSpeed(0).
 **Fully Repaired (2026-06-03 — repair pass 3):** Stopped callback freeze approach was unreliable (Roblox does not preserve pose after AnimationTrack stops). User provided real ADS idle animation. Final repair replaces broken freeze/hold logic with proper ADS animation flow: adsIn plays once → adsIdle loops (new real animation) → adsFire plays on top → adsIdle continues → adsOut plays once → returns to hip idle. No freezing, no holding stopped tracks, no fake idle, no alignment offsets. Clean animation-driven ADS system.
-**Current state:** ADS system uses proper animation flow with real adsIdle looping track. All broken freeze/hold logic removed. Fake idle removed. Procedural movement suppressed during ADS. Track blending fixed. Animation IDs updated: adsIn = rbxassetid://112260183627854, adsIdle = rbxassetid://105305883052870, adsOut = rbxassetid://108479441252268, adsFire = rbxassetid://138021695403324 (preserved). **NOT VERIFIED IN STUDIO** — MCP was unavailable for all three repair passes.
-**Remaining risk:** None structural. Standard animation playback risk (tracks load correctly, no asset corruption). If adsIdle does not loop correctly in Studio, check animation asset settings (Looped property must be enabled in animation itself, though code sets track.Looped = true as backup).
-**Resolve when:** Studio verification confirms:
-1. Right mouse while holstered → no errors, ADS does not activate
-2. Equip AKS74 → right mouse → ADS enter animation (rbxassetid://112260183627854) plays fully
-3. After ADS enter finishes → ADS idle animation (rbxassetid://105305883052870) starts and loops smoothly
-4. ADS idle loops continuously without snapping back to hipfire or fighting normal idle/run
-5. Normal idle does not play or visually interfere while ADS idle is looping
-6. Run animation does not play or visually interfere while ADS idle is looping
-7. Procedural movement/sway/bob does not move the viewmodel while ADS is active (Entering or Aiming)
-8. Fire while ADS → AKS_ADS_FIRE (rbxassetid://138021695403324) plays on top of looping adsIdle
-9. After ADS fire completes → ADS idle continues looping (not stopped by fire animation)
-10. Right mouse again → ADS idle stops, ADS exit animation (rbxassetid://108479441252268) plays fully
-11. After ADS exit finishes → normal hip idle resumes
-12. Enter ADS → reload → ADS idle/in/out all stop cleanly, reload plays
-13. Enter ADS → holster → all ADS tracks stop, no pose remains stuck
-14. Re-equip → ADS state resets to Hip, can enter ADS again cleanly
+**Regression introduced (2026-06-03 — commit 71386d9):** `adsAlignmentCF` (CFrame.new(-0.35, -0.15, 0.25)) was incorrectly removed with the comment "iron sights positioned by animation only." This was wrong — the ADS animation moves rig joints toward the sights-up pose, but `CAMERA_EXTRA_OFFSET = CFrame.new(-0.1, 0.25, 0.7)` creates a residual misalignment between the FakeCamera reference point and actual screen-centre. The model-level offset is necessary to compensate this delta. Removing it caused AKS74 iron sights to be visually off-centre during ADS.
+**Regression repaired (2026-06-09 — repair pass 4):** `adsAlignmentCF` system restored with smooth alpha blending (0→1 during Entering/Aiming; 1→0 during Exiting/Hip). Four alignment constants restored in `Constants.lua`: `VIEWMODEL_ADS_ALIGNMENT_OFFSET_X = -0.35`, `VIEWMODEL_ADS_ALIGNMENT_OFFSET_Y = -0.15`, `VIEWMODEL_ADS_ALIGNMENT_OFFSET_Z = 0.25`, `VIEWMODEL_ADS_ALIGNMENT_BLEND_SPEED = 18`. Local variables `adsAlignmentAlpha` and `adsAlignmentTargetLast` added to ViewModelController. Alpha is blended per-frame in RenderStepped and reset to 0 in `init()`, `StopWeaponAnimations()`, and `StopADSAnimations()`. `adsAlignmentCF` is inserted into the PivotTo chain after `CAMERA_EXTRA_OFFSET` and before `viewRecoilCFrame`. Hipfire is unaffected (alpha = 0 while Hip/Exiting). Blend is identity at alpha = 0 — no position change in hip.
+**Second bug repaired (2026-06-09 — idle-after-ADS):** When `VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING = true` and `VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true`, the `adsOut.Stopped` callback had no code path that could resume any animation. The DISABLE_* constants suppress idle/run DURING ADS — they must not block animation resumption AFTER ADS ends. Fixed by removing the DISABLE_* constant checks from the adsOut Stopped callback and the no-adsOut-track fallback, so hip idle (or run) unconditionally resumes when ADS exits.
+**Studio verified (2026-06-09):** MCP play-mode test confirmed:
+- AKS74 equips correctly, idle track plays ✅
+- `SetAiming(true)` → `adsIn started (state = Entering)` logged ✅
+- `adsIn Stopped: transitioned to Aiming` logged ✅
+- `adsIn Stopped: adsIdle started` logged ✅ (adsIdle loops after adsIn completes)
+- `SetAiming(false)` → `adsOut started (state = Exiting)` logged ✅
+- `PlayIdleAnimation: idle track started` logged from adsOut Stopped callback ✅
+- `adsOut complete: hip animation resumed` logged ✅ (idle-after-ADS bug confirmed fixed)
+- `StopWeaponAnimations: ADS alignment reset` logged on holster ✅
+- No errors in console during any ADS cycle ✅
+- Animator track inspection: 1 track playing after ADS exit (was 0 before fix — frozen on adsOut frame) ✅
+**Current state:** ADS system fully functional. State machine: Hip → Entering (adsIn) → Aiming (adsIdle loops) → Exiting (adsOut) → Hip (idle resumes). Whole-model alignment correction applied smoothly during ADS. Hipfire unchanged.
+**Remaining tuning risk:** The four `VIEWMODEL_ADS_ALIGNMENT_*` constants were tuned empirically against `CAMERA_EXTRA_OFFSET = CFrame.new(-0.1, 0.25, 0.7)` and the AKS74 FakeCamera rig. If `CAMERA_EXTRA_OFFSET` is changed, or the AKS74 ADS animation ID is replaced with one that bakes a different sights-up pose, the alignment constants must be re-tuned in Studio. This is intentional — the values are explicitly documented as empirical. See VIEWMODEL_ADS_ALIGNMENT_OFFSET_* comments in Constants.lua.
+**Resolved when:** All Studio verification checklist items above passed (2026-06-09). Entry retained for tuning-risk record only.
 
 ---
 

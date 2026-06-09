@@ -14,7 +14,12 @@
 --   HolsterWeapon() stops animations, destroys the model clone, and clears all equip state.
 --
 -- PivotTo camera follow (every RenderStepped, only when self.model is non-nil):
---   m:PivotTo(cam.CFrame * viewRecoilCFrame * moveCF * BASE_OFFSET * CFrame.new(0,0,recoilOffset))
+--   m:PivotTo(cam.CFrame * CAMERA_EXTRA_OFFSET * adsAlignmentCF * viewRecoilCFrame
+--             * freeAimCF * finalMoveCF * BASE_OFFSET * CFrame.new(0,0,recoilOffset))
+--   CAMERA_EXTRA_OFFSET  — constant hipfire base offset from the camera reference point.
+--   adsAlignmentCF       — whole-model correction (alpha-blended) that compensates the
+--                          residual sightline offset caused by CAMERA_EXTRA_OFFSET during ADS.
+--                          Identity (zero) during Hip — hipfire positioning is unchanged.
 --   BASE_OFFSET is computed from the rig's FakeCamera CFrame relative to HumanoidRootPart.
 --   Falls back to REAL_MODEL_OFFSET when FakeCamera is absent.
 --   Positional recoil (RECOIL_DIST) and camera-relative recoil CFrame (from GunController) are
@@ -162,6 +167,14 @@ local adsState: ADSState = "Hip"
 
 -- Fake ADS idle: accumulator for sine-based breathing/sway when adsState == "Aiming".
 local adsIdleTime: number = 0
+
+-- ADS alignment: smooth alpha (0 = Hip, 1 = full ADS alignment) used to blend in/out the
+-- whole-model pivot correction (adsAlignmentCF) that compensates the residual sightline
+-- offset caused by CAMERA_EXTRA_OFFSET.  Reset to 0 on holster, reload interrupt, respawn,
+-- and full state clear so it can never get stuck at 1.
+local adsAlignmentAlpha: number = 0
+-- Tracks the last blending target for sparse debug logging (no per-frame log spam).
+local adsAlignmentTargetLast: number = 0
 
 -- Third-person character weapon AnimationTracks.
 -- Loaded on the local player's Humanoid.Animator when a weapon is equipped.
@@ -342,10 +355,12 @@ function ViewModelController:init()
         weaponAdsFireTrack:Destroy()
         weaponAdsFireTrack = nil
     end
-    isReloading = false
-    isRunning   = false
-    adsState    = "Hip"
-    adsIdleTime = 0
+    isReloading          = false
+    isRunning            = false
+    adsState             = "Hip"
+    adsIdleTime          = 0
+    adsAlignmentAlpha    = 0
+    adsAlignmentTargetLast = 0
     -- Third-person character tracks: nil references only — do NOT call Stop/Destroy.
     -- init() is called from CharacterAdded where the old Humanoid.Animator may already be
     -- destroyed, making track method calls unsafe.  Same pattern as MovementController's
@@ -416,10 +431,13 @@ function ViewModelController:StopWeaponAnimations()
         weaponAdsFireTrack:Destroy()
         weaponAdsFireTrack = nil
     end
-    isReloading = false
-    isRunning   = false
-    adsState    = "Hip"
-    adsIdleTime = 0
+    isReloading            = false
+    isRunning              = false
+    adsState               = "Hip"
+    adsIdleTime            = 0
+    adsAlignmentAlpha      = 0
+    adsAlignmentTargetLast = 0
+    Logger.debug("[ViewModelController] StopWeaponAnimations: ADS alignment reset")
     -- Third-person character tracks: stop and destroy (character is alive in this path).
     -- AnimationTrack:Destroy() severs Stopped connections synchronously, preventing any
     -- deferred equip-chain or reload-chain callback from firing after holster.
@@ -973,6 +991,28 @@ function ViewModelController:Start()
             end
         end
 
+        -- ADS alignment: blend a whole-model pivot correction in/out as ADS state changes.
+        -- target = 1 while Entering/Aiming (sights need correction); 0 when Hip/Exiting.
+        -- The resulting adsAlignmentCF is identity when adsAlignmentAlpha == 0 (Hip), so
+        -- hipfire positioning is completely unaffected.
+        -- Logging is sparse: only fires on target state transitions, never every frame.
+        local adsAlignTarget: number = 0
+        if adsState == "Entering" or adsState == "Aiming" then
+            adsAlignTarget = 1
+        end
+        if adsAlignTarget ~= adsAlignmentTargetLast then
+            adsAlignmentTargetLast = adsAlignTarget
+            Logger.debug("[ViewModelController] ADS alignment target → " .. tostring(adsAlignTarget))
+        end
+        adsAlignmentAlpha = adsAlignmentAlpha
+            + (adsAlignTarget - adsAlignmentAlpha)
+            * math.min(1, dt * Constants.VIEWMODEL_ADS_ALIGNMENT_BLEND_SPEED)
+        local adsAlignmentCF = CFrame.new(
+            Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_X * adsAlignmentAlpha,
+            Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Y * adsAlignmentAlpha,
+            Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Z * adsAlignmentAlpha
+        )
+
         -- Free-aim viewmodel lean: blend the normalized aim offset toward the weapon's
         -- visible rotation.  Suppressed during ADS (Entering / Aiming) so the lean does not
         -- push the iron sights off-center.  During Hip and Exiting the lean resumes from
@@ -1005,15 +1045,19 @@ function ViewModelController:Start()
         end
 
         -- Final viewmodel CFrame.
-        -- Order: CAMERA_EXTRA_OFFSET (base hipfire positioning) → viewRecoilCFrame (rotational recoil)
+        -- Order: CAMERA_EXTRA_OFFSET (constant hipfire base offset from camera reference point)
+        --        → adsAlignmentCF (whole-model pivot correction; identity when Hip — no hipfire effect)
+        --        → viewRecoilCFrame (rotational recoil from GunController)
         --        → freeAimCF (weapon lean toward aim point, Stage 1; identity during Entering/Aiming)
         --        → finalMoveCF (movement sway/bob, zeroed during ADS)
-        --        → BASE_OFFSET (model-specific pivot alignment) → recoilOffset (positional recoil)
-        -- CAMERA_EXTRA_OFFSET is always applied and was present when ADS was authored — the ADS animation
-        -- itself positions the iron sights at screen center without any additional model-level offset.
+        --        → BASE_OFFSET (model-specific pivot alignment from FakeCamera)
+        --        → recoilOffset (positional recoil, decays toward 0)
+        -- adsAlignmentCF compensates the residual sightline offset between CAMERA_EXTRA_OFFSET
+        -- and actual screen centre; it blends in during ADS enter and out during ADS exit.
         m:PivotTo(
             cam.CFrame
             * CAMERA_EXTRA_OFFSET
+            * adsAlignmentCF
             * viewRecoilCFrame
             * freeAimCF
             * finalMoveCF
@@ -1303,14 +1347,19 @@ function ViewModelController:SetAiming(entering: boolean)
                 end
                 if adsState == "Exiting" then
                     adsState = "Hip"
-                    -- Resume idle/run if not reloading.
+                    -- Resume base-layer hip animation.
+                    -- The VIEWMODEL_ADS_DISABLE_* constants suppress idle/run DURING ADS;
+                    -- they must not prevent the hip animation from resuming once ADS ends.
+                    -- Without unconditional resumption here, the weapon freezes on the final
+                    -- adsOut frame with no looping animation (idle-after-ADS bug — DEBT-040).
                     if not isReloading then
-                        if isRunning and weaponRunTrack ~= nil and not Constants.VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING then
+                        if isRunning and weaponRunTrack ~= nil then
                             self:PlayRunAnimation()
-                        elseif not Constants.VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING then
+                        else
                             self:PlayIdleAnimation()
                         end
                     end
+                    Logger.debug("[ViewModelController] adsOut complete: hip animation resumed")
                 end
             end)
             Logger.debug("[ViewModelController] SetAiming: adsOut started (state = Exiting)")
@@ -1318,9 +1367,9 @@ function ViewModelController:SetAiming(entering: boolean)
             -- No adsOut track: immediately return to Hip and resume idle/run.
             adsState = "Hip"
             if not isReloading then
-                if isRunning and weaponRunTrack ~= nil and not Constants.VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING then
+                if isRunning and weaponRunTrack ~= nil then
                     self:PlayRunAnimation()
-                elseif not Constants.VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING then
+                else
                     self:PlayIdleAnimation()
                 end
             end
@@ -1383,8 +1432,11 @@ function ViewModelController:StopADSAnimations()
     if weaponAdsFireTrack and weaponAdsFireTrack.IsPlaying then
         weaponAdsFireTrack:Stop()
     end
-    adsState = "Hip"
-    adsIdleTime = 0
+    adsState               = "Hip"
+    adsIdleTime            = 0
+    adsAlignmentAlpha      = 0
+    adsAlignmentTargetLast = 0
+    Logger.debug("[ViewModelController] StopADSAnimations: ADS alignment reset")
 end
 
 -- ============================================================
