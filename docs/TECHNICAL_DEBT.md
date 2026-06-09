@@ -1494,12 +1494,12 @@ This worsens DEBT-013 (weapon name not sent in `WeaponFired` payload) by adding 
 
 **What Stage 1 implements:**
 - `FreeAimController` tracks a screen-space aim offset driven by `UserInputService:GetMouseDelta()` each `RenderStepped`.
-- The offset is clamped to a circular deadzone (`FREE_AIM_RADIUS_PIXELS = 110` hipfire, `FREE_AIM_ADS_RADIUS_PIXELS = 28` ADS).
+- The offset is clamped to a circular deadzone (`FREE_AIM_RADIUS_PIXELS = 120` hipfire, `FREE_AIM_ADS_RADIUS_PIXELS = 24` ADS).
 - `CrosshairUI:SetFreeAimOffset()` moves the crosshair container by the smoothed pixel offset.
-- `ViewModelController:SetFreeAimOffset()` tilts the viewmodel by a normalized version of the offset (up to `FREE_AIM_VIEWMODEL_YAW_DEGREES = 4°` / `FREE_AIM_VIEWMODEL_PITCH_DEGREES = 2.5°`). Lean is suppressed (identity CFrame) during ADS Entering/Aiming states, and `vmFreeAimBlended` is drained toward zero so there is no pop on ADS exit. The former `adsAlignmentCF` model-level offset was removed — ADS iron sight centering is handled entirely by the ADS animation.
+- `ViewModelController:SetFreeAimOffset()` tilts the viewmodel by a normalized version of the offset using yaw (`FREE_AIM_VIEWMODEL_YAW_DEGREES = 4°`), pitch (`FREE_AIM_VIEWMODEL_PITCH_DEGREES = 3°`), and roll (`FREE_AIM_VIEWMODEL_ROLL_DEGREES = 1.5°` — horizontal offset tilts the gun top toward the aim side). Lean is suppressed (identity CFrame) during ADS Entering/Aiming states, and `vmFreeAimBlended` is drained toward zero so there is no pop on ADS exit. The former `adsAlignmentCF` model-level offset was removed — ADS iron sight centering is handled entirely by the ADS animation.
 - Free aim is suppressed (offset smoothly returns to zero) while sprinting, reloading, or with no weapon equipped.
 - On holster, offset resets instantly when `FREE_AIM_RESET_ON_HOLSTER = true`.
-- All 14 `FREE_AIM_*` constants live in `src/shared/Constants.lua`; no magic values.
+- All 15 `FREE_AIM_*` constants live in `src/shared/Constants.lua`; no magic values.
 
 **What Stage 1 does NOT do (intentional):**
 - **Bullets do not follow the floating crosshair.** `GunController` fires `WeaponFired` with `camera.CFrame.LookVector` as before — the server raycast is unchanged.

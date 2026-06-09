@@ -993,9 +993,15 @@ function ViewModelController:Start()
                 vmFreeAimNormalized,
                 math.min(1, dt * Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED)
             )
+            -- Yaw: left/right lean following horizontal crosshair offset.
+            -- Pitch: up/down lean following vertical crosshair offset (inverted Y so
+            --   crosshair up → gun pitches up toward the aim point).
+            -- Roll: subtle clockwise tilt as crosshair moves right; gives inertia feel.
+            --   Negative sign so positive X (right) = negative Z rotation = gun top leans right.
             local freeAimYaw   = vmFreeAimBlended.X * math.rad(Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES)
             local freeAimPitch = -vmFreeAimBlended.Y * math.rad(Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES)
-            freeAimCF = CFrame.Angles(freeAimPitch, freeAimYaw, 0)
+            local freeAimRoll  = -vmFreeAimBlended.X * math.rad(Constants.FREE_AIM_VIEWMODEL_ROLL_DEGREES)
+            freeAimCF = CFrame.Angles(freeAimPitch, freeAimYaw, freeAimRoll)
         end
 
         -- Final viewmodel CFrame.

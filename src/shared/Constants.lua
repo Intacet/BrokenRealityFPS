@@ -1077,39 +1077,41 @@ Constants.VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true
 Constants.FREE_AIM_ENABLED                 = true
 
 -- Hipfire deadzone radius in pixels (how far the crosshair can drift from center).
--- Kept small so the crosshair barely leaves centre — a subtle floating feel.
-Constants.FREE_AIM_RADIUS_PIXELS           = 35
+Constants.FREE_AIM_RADIUS_PIXELS           = 120
 
 -- ADS deadzone radius in pixels (tighter; makes ADS feel steadier).
-Constants.FREE_AIM_ADS_RADIUS_PIXELS       = 10
+Constants.FREE_AIM_ADS_RADIUS_PIXELS       = 24
 
 -- Scale factor applied to raw mouse delta before adding to aim offset.
--- Low value = crosshair barely responds to mouse; feels heavy/sluggish.
-Constants.FREE_AIM_MOUSE_GAIN              = 0.25
+-- 1.0 = one-to-one with raw delta; lower = sluggish/heavy; higher = hair-trigger.
+Constants.FREE_AIM_MOUSE_GAIN              = 1.0
 
 -- Return-to-center speed (lerp per second) when mouse is idle, hipfire.
--- Low value = slow pendulum creep back to centre = more weighty inertia feel.
-Constants.FREE_AIM_RETURN_SPEED            = 4
+Constants.FREE_AIM_RETURN_SPEED            = 9
 
 -- Return-to-center speed (lerp per second) when mouse is idle, ADS.
-Constants.FREE_AIM_ADS_RETURN_SPEED        = 7
+Constants.FREE_AIM_ADS_RETURN_SPEED        = 18
 
 -- Speed at which the visible crosshair position lerps toward the raw aim offset.
--- Low value = the crosshair trails behind the raw point with noticeable lag (the "weight").
-Constants.FREE_AIM_CROSSHAIR_SMOOTH_SPEED  = 6
+-- Higher = snappier tracking; lower = more pronounced trailing lag.
+Constants.FREE_AIM_CROSSHAIR_SMOOTH_SPEED  = 22
 
 -- Speed at which the viewmodel lean lerps toward the normalized aim offset.
--- Low value = weapon lags well behind the crosshair and catches up slowly.
 -- Also governs how quickly the lean drains to zero during ADS.
-Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED   = 9
+Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED   = 16
 
--- Maximum yaw (left/right) tilt applied to the viewmodel, in degrees.
+-- Maximum yaw (left/right) tilt of the viewmodel toward the aim point, in degrees.
 -- Suppressed during ADS so iron sights stay centered (see ViewModelController).
 Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES   = 4
 
--- Maximum pitch (up/down) tilt applied to the viewmodel, in degrees.
+-- Maximum pitch (up/down) tilt of the viewmodel toward the aim point, in degrees.
 -- Suppressed during ADS so iron sights stay centered (see ViewModelController).
-Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES = 2.5
+Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES = 3
+
+-- Maximum roll (clockwise tilt) of the viewmodel as the crosshair moves horizontally.
+-- Adds a subtle weapon-inertia lean: crosshair left → gun tilts slightly left.
+-- Suppressed during ADS so iron sights stay centered (see ViewModelController).
+Constants.FREE_AIM_VIEWMODEL_ROLL_DEGREES  = 1.5
 
 -- When true, free aim is suppressed and smoothly recenters while sprinting.
 Constants.FREE_AIM_DISABLE_WHILE_SPRINTING = true

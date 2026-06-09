@@ -7,6 +7,42 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-09 — TUNING] — Free-aim: reset to reference constants + add viewmodel roll
+
+### Summary
+
+Resets all free-aim constants to the intended reference-feel values and adds a third rotation axis (roll) to the viewmodel lean so the gun tilts slightly into horizontal crosshair movement.
+
+### Constants changed (`src/shared/Constants.lua`)
+
+| Constant | Old | New |
+|---|---|---|
+| `FREE_AIM_RADIUS_PIXELS` | 35 | 120 |
+| `FREE_AIM_ADS_RADIUS_PIXELS` | 10 | 24 |
+| `FREE_AIM_MOUSE_GAIN` | 0.25 | 1.0 |
+| `FREE_AIM_RETURN_SPEED` | 4 | 9 |
+| `FREE_AIM_ADS_RETURN_SPEED` | 7 | 18 |
+| `FREE_AIM_CROSSHAIR_SMOOTH_SPEED` | 6 | 22 |
+| `FREE_AIM_VIEWMODEL_BLEND_SPEED` | 9 | 16 |
+| `FREE_AIM_VIEWMODEL_PITCH_DEGREES` | 2.5 | 3 |
+| `FREE_AIM_VIEWMODEL_ROLL_DEGREES` | *(new)* | 1.5 |
+
+`FREE_AIM_VIEWMODEL_YAW_DEGREES` (4), `FREE_AIM_DISABLE_WHILE_SPRINTING/RELOADING`, `FREE_AIM_RESET_ON_HOLSTER`, and `FREE_AIM_RESET_ON_ADS_EXIT` are unchanged.
+
+### ViewModelController change (`src/client/ViewModelController.lua`)
+
+`freeAimCF` now uses all three rotation axes:
+```lua
+local freeAimYaw   = vmFreeAimBlended.X * math.rad(FREE_AIM_VIEWMODEL_YAW_DEGREES)
+local freeAimPitch = -vmFreeAimBlended.Y * math.rad(FREE_AIM_VIEWMODEL_PITCH_DEGREES)
+local freeAimRoll  = -vmFreeAimBlended.X * math.rad(FREE_AIM_VIEWMODEL_ROLL_DEGREES)
+freeAimCF = CFrame.Angles(freeAimPitch, freeAimYaw, freeAimRoll)
+```
+Negative roll sign: positive X (crosshair right) → gun top tilts right (natural inertia lean).
+Roll is suppressed during ADS (same branch as yaw/pitch).
+
+---
+
 ## [2026-06-09 — FIX] — Remove adsAlignmentCF; ADS iron sights now positioned by animation only
 
 ### Summary

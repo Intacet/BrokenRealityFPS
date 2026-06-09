@@ -987,7 +987,8 @@ ViewModelController     -- driven by RoundStateChanged; reads MovementController
                         --   Stage 1 free-aim API (2026-06-09):
                         --     SetFreeAimOffset(normalizedOffset: Vector2) — pushed by GunController each frame;
                         --       stored as vmFreeAimNormalized; RenderStepped lerps vmFreeAimBlended toward it
-                        --       at FREE_AIM_VIEWMODEL_BLEND_SPEED and converts to CFrame.Angles (yaw/pitch).
+                        --       at FREE_AIM_VIEWMODEL_BLEND_SPEED and converts to CFrame.Angles (pitch, yaw, roll).
+                        --       Roll axis: -X * FREE_AIM_VIEWMODEL_ROLL_DEGREES so crosshair-right tilts gun-top right.
                         --       freeAimCF inserted between viewRecoilCFrame and finalMoveCF in PivotTo chain.
                         --     GetIsReloading() → bool — exposes isReloading so GunController can relay it
                         --       to FreeAimController without a duplicate flag.
