@@ -1496,7 +1496,7 @@ This worsens DEBT-013 (weapon name not sent in `WeaponFired` payload) by adding 
 - `FreeAimController` tracks a screen-space aim offset driven by `UserInputService:GetMouseDelta()` each `RenderStepped`.
 - The offset is clamped to a circular deadzone (`FREE_AIM_RADIUS_PIXELS = 110` hipfire, `FREE_AIM_ADS_RADIUS_PIXELS = 28` ADS).
 - `CrosshairUI:SetFreeAimOffset()` moves the crosshair container by the smoothed pixel offset.
-- `ViewModelController:SetFreeAimOffset()` tilts the viewmodel by a normalized version of the offset (up to `FREE_AIM_VIEWMODEL_YAW_DEGREES = 4°` / `FREE_AIM_VIEWMODEL_PITCH_DEGREES = 3°`).
+- `ViewModelController:SetFreeAimOffset()` tilts the viewmodel by a normalized version of the offset (up to `FREE_AIM_VIEWMODEL_YAW_DEGREES = 4°` / `FREE_AIM_VIEWMODEL_PITCH_DEGREES = 2.5°`). Lean is suppressed (identity CFrame) during ADS Entering/Aiming states, and `vmFreeAimBlended` is drained toward zero so there is no pop on ADS exit.
 - Free aim is suppressed (offset smoothly returns to zero) while sprinting, reloading, or with no weapon equipped.
 - On holster, offset resets instantly when `FREE_AIM_RESET_ON_HOLSTER = true`.
 - All 14 `FREE_AIM_*` constants live in `src/shared/Constants.lua`; no magic values.

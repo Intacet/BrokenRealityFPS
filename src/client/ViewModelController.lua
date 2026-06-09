@@ -1001,19 +1001,34 @@ function ViewModelController:Start()
         end
 
         -- Free-aim viewmodel lean: blend the normalized aim offset toward the weapon's
-        -- visible rotation.  Inserted between recoil and procedural movement so it
-        -- compounds naturally without fighting the ADS alignment.
-        vmFreeAimBlended = vmFreeAimBlended:Lerp(
-            vmFreeAimNormalized,
-            math.min(1, dt * Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED)
-        )
-        local freeAimYaw   = vmFreeAimBlended.X * math.rad(Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES)
-        local freeAimPitch = -vmFreeAimBlended.Y * math.rad(Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES)
-        local freeAimCF    = CFrame.Angles(freeAimPitch, freeAimYaw, 0)
+        -- visible rotation.  Suppressed during ADS (Entering / Aiming) so it does not
+        -- fight adsAlignmentCF and push the iron sights off-center.  During Hip and
+        -- Exiting the lean resumes from wherever vmFreeAimBlended left off (near zero
+        -- after being drained), so there is no pop on ADS exit.
+        local freeAimCF: CFrame
+        if adsState == "Entering" or adsState == "Aiming" then
+            -- Drain blended value toward zero so the lean doesn't snap when exiting ADS.
+            -- freeAimCF is identity — iron sights stay exactly where adsAlignmentCF placed them.
+            vmFreeAimBlended = vmFreeAimBlended:Lerp(
+                Vector2.zero,
+                math.min(1, dt * Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED)
+            )
+            freeAimCF = CFrame.new()
+        else
+            -- Hip / Exiting: apply lean normally.
+            vmFreeAimBlended = vmFreeAimBlended:Lerp(
+                vmFreeAimNormalized,
+                math.min(1, dt * Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED)
+            )
+            local freeAimYaw   = vmFreeAimBlended.X * math.rad(Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES)
+            local freeAimPitch = -vmFreeAimBlended.Y * math.rad(Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES)
+            freeAimCF = CFrame.Angles(freeAimPitch, freeAimYaw, 0)
+        end
 
         -- Final viewmodel CFrame: cam * base * alignment * recoil * freeAim * move * procedural.
         -- Order: CAMERA_EXTRA_OFFSET (base hipfire) → adsAlignmentCF (ADS-only alignment, zero when Hip)
-        --        → viewRecoilCFrame (rotational recoil) → freeAimCF (weapon lean toward aim point, Stage 1)
+        --        → viewRecoilCFrame (rotational recoil) → freeAimCF (weapon lean toward aim point, Stage 1;
+        --          identity during Entering/Aiming so iron sights are undisturbed)
         --        → finalMoveCF (movement sway, zeroed during ADS)
         --        → BASE_OFFSET (model-specific) → recoilOffset (positional recoil)
         -- The ADS animation moves the joints, but adsAlignmentCF repositions the entire model

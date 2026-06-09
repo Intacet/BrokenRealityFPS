@@ -7,6 +7,26 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-09 — TUNING] — Free-aim viewmodel lean: ADS suppression fix + increased rotation
+
+### Summary
+
+Two targeted fixes to the Stage 1 free-aim viewmodel lean introduced in the previous entry:
+
+1. **ADS suppression:** `freeAimCF` (the weapon lean CFrame) is now set to identity during `adsState == "Entering"` or `"Aiming"`, and `vmFreeAimBlended` is drained toward `Vector2.zero` at the same blend speed. This prevents the free-aim lean from fighting `adsAlignmentCF` and pushing the iron sights off-center. When exiting ADS (`"Exiting"` → `"Hip"`), `vmFreeAimBlended` starts from near zero and smoothly picks up the current crosshair position — no snap or pop.
+
+2. **Increased rotation:** Viewmodel lean angles and blend speed bumped to values that are clearly visible:
+   - `FREE_AIM_VIEWMODEL_YAW_DEGREES`: 1.5 → 4
+   - `FREE_AIM_VIEWMODEL_PITCH_DEGREES`: 1.0 → 2.5
+   - `FREE_AIM_VIEWMODEL_BLEND_SPEED`: 5 → 9
+
+### Files changed
+
+- **`src/shared/Constants.lua`** — updated three `FREE_AIM_VIEWMODEL_*` constants.
+- **`src/client/ViewModelController.lua`** — replaced unconditional freeAimCF lerp with an `if/else` branch on `adsState`; Entering/Aiming drains blended value and returns identity CFrame; Hip/Exiting applies lean normally.
+
+---
+
 ## [2026-06-09 — FEATURE] — Stage 1 free-aim foundation (DayZ-style floating crosshair)
 
 ### Summary

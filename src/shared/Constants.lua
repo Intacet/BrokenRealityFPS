@@ -1108,14 +1108,16 @@ Constants.FREE_AIM_CROSSHAIR_SMOOTH_SPEED  = 6
 
 -- Speed at which the viewmodel lean lerps toward the normalized aim offset.
 -- Low value = weapon lags well behind the crosshair and catches up slowly.
-Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED   = 5
+-- Also governs how quickly the lean drains to zero during ADS.
+Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED   = 9
 
 -- Maximum yaw (left/right) tilt applied to the viewmodel, in degrees.
--- Very small — almost imperceptible; just enough to feel the gun follow the aim.
-Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES   = 1.5
+-- Suppressed during ADS so iron sights stay centered (see ViewModelController).
+Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES   = 4
 
 -- Maximum pitch (up/down) tilt applied to the viewmodel, in degrees.
-Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES = 1.0
+-- Suppressed during ADS so iron sights stay centered (see ViewModelController).
+Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES = 2.5
 
 -- When true, free aim is suppressed and smoothly recenters while sprinting.
 Constants.FREE_AIM_DISABLE_WHILE_SPRINTING = true
