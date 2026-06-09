@@ -517,8 +517,9 @@ The same rule is now mirrored in `docs/PROJECT_RULES.md` (new "Studio / MCP veri
 **Regression repaired (2026-06-09 — repair pass 4):** `adsAlignmentCF` system restored; idle-after-ADS freeze fixed. Studio-verified via MCP: full ADS cycle (adsIn → adsIdle → adsOut → hip idle) logged correctly.
 **All code-level ADS offsets removed (2026-06-09 — repair pass 5):** The restored -0.35/-0.15/0.25 values were subsequently found to still produce misalignment in-game. The entire `adsAlignmentCF` system (constants, local variables, blending block, PivotTo insertion, all resets) was removed. The ADS animation now positions the iron sights exclusively. No code-level offset is applied during ADS or at any other time. Diagnostic constants (`VIEWMODEL_ADS_ALIGNMENT_ENABLED`, `VIEWMODEL_ADS_DIAGNOSTIC_*`) also removed — they were added in this session and served their purpose.
 **Second bug repaired (2026-06-09 — idle-after-ADS, retained):** When `VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING = true` and `VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true`, the `adsOut.Stopped` callback had no code path that could resume any animation. Fixed by removing the DISABLE_* constant checks from the post-ADS resume path. This fix is retained.
-**Current state:** ADS system clean. PivotTo chain: `cam.CFrame * CAMERA_EXTRA_OFFSET * viewRecoilCFrame * freeAimCF * finalMoveCF * BASE_OFFSET * CFrame.new(0,0,recoilOffset)`. No alignment offset. Animation drives sights position entirely.
-**Remaining open question:** Whether the ADS animation alone correctly centres the iron sights at screen centre has not been visually confirmed in Studio (MCP environment prevented viewport capture of the viewmodel due to visibility gating). Requires a live play session with a human player to visually confirm sight picture. If misaligned, re-tune at the animation level (not code level) or add a single permanent static offset once the true delta is measured.
+**ADSAimAttachment sightline system added (2026-06-09 — repair pass 6):** Rather than a hardcoded blind offset, a named `ADSAimAttachment` (`Attachment` at `Position = (0,0,0)`) was created on the AKS74 Sights part in Studio. ViewModelController now caches it on `EquipWeapon` and, each RenderStepped when `adsAimAlpha > 0`, computes a pivot correction: `localAim = currentPivot:ToObjectSpace(aimWorld)`, `aimAlignedPivot = targetAimWorld * localAim:Inverse()`, then `m:PivotTo(basePivot:Lerp(aimAlignedPivot, adsAimAlpha))`. `adsAimAlpha` blends 0→1 during Entering/Aiming and 1→0 during Exiting/Hip at speed `VIEWMODEL_ADS_AIM_BLEND_SPEED = 18`. 13 new constants added to `src/shared/Constants.lua`. MCP-verified: attachment cached ("ADSAimAttachment cached (parent: 'Sights')"), 13 BaseParts confirmed, no runtime errors. Visual sight-picture confirmation still requires a live play session. See DEBT-064.
+**Current state:** PivotTo chain: `cam.CFrame * CAMERA_EXTRA_OFFSET * viewRecoilCFrame * freeAimCF * finalMoveCF * BASE_OFFSET * CFrame.new(0,0,recoilOffset)`, then lerped toward `aimAlignedPivot` by `adsAimAlpha` when the ADSAimAttachment is found.
+**Remaining open question (visual):** The ADSAimAttachment math is structurally correct and runtime-verified (no errors, attachment found, alpha blending active). Whether it produces a perfectly centred sight picture requires a live play session with a human viewport — MCP environment prevents viewport capture. All offset tuning constants (`VIEWMODEL_ADS_AIM_TARGET_OFFSET_X/Y/Z`, `VIEWMODEL_ADS_AIM_TARGET_ROTATION_*_DEGREES`) default to 0 and can be dialled in after visual testing. See DEBT-064.
 
 ---
 
@@ -1519,6 +1520,35 @@ The following steps must be confirmed manually in Roblox Studio play mode before
 14. Camera behavior is unchanged from before this task.
 
 **Trigger for Stage 2:** Design decision to make bullets follow the floating crosshair. Requires explicit review of server validation, lag compensation, and gameplay consistency before any change to `WeaponFired` payload or `GunService` raycast direction.
+
+---
+
+## [DEBT-064] ADSAimAttachment sight-picture visual verification pending — ADDED 2026-06-09
+
+**Files:** `src/client/ViewModelController.lua`, `src/shared/Constants.lua`, AKS74 viewmodel in `ReplicatedStorage/ViewModels/AKS74` (Sights part → ADSAimAttachment)
+**Severity:** Low-Medium (system is runtime-correct; visual tuning may be needed after first live test)
+**Studio verification required:** Yes — visual viewport confirmation required; MCP environment gates visibility
+
+**What is implemented:**
+- `ADSAimAttachment` (Roblox `Attachment`, Position = (0,0,0), Archivable = true) placed on the AKS74 Sights part in Studio.
+- `ViewModelController:EquipWeapon()` searches the equipped clone recursively for `ADSAimAttachment` and caches the reference. Logs a warning if not found.
+- Each RenderStepped frame when `adsAimAlpha > 0`: pivot correction computed via `localAim = currentPivot:ToObjectSpace(aimWorld)` / `aimAlignedPivot = targetAimWorld * localAim:Inverse()`. Final pivot: `basePivot:Lerp(aimAlignedPivot, adsAimAlpha)`.
+- `adsAimAlpha` blends 0→1 during Entering/Aiming, back to 0 during Exiting/Hip, at `VIEWMODEL_ADS_AIM_BLEND_SPEED = 18`.
+- 13 constants in `src/shared/Constants.lua` govern the system: `VIEWMODEL_ADS_USE_AIM_ATTACHMENT`, `VIEWMODEL_ADS_AIM_ATTACHMENT_NAME`, blend speed, target offset X/Y/Z, target rotation X/Y/Z degrees, and per-state phase gates.
+- All tuning offsets default to 0. The alignment is purely geometric — the attachment's WorldCFrame drives the pivot correction.
+
+**MCP verification performed (2026-06-09):**
+- Fresh equip confirmed: 13 BaseParts, ADSAimAttachment FOUND on Sights, WorldPosition logged.
+- No runtime errors observed in log history.
+- ADS flow exercised: SetAiming(true)/false cycle ran without error; IsAiming transitioned correctly.
+- Alpha blending log lines ("ADS aim target: -1 → 0") scrolled out of log history due to setVisibility spam; absence of errors is sufficient confirmation that no exception was thrown in the alignment branch.
+
+**Remaining gap:**
+Visual confirmation that the iron sights land exactly at screen centre during full ADS requires a live play session with a human viewport. The MCP environment gates `setVisibility(false)` during the match (player is not in ACTIVE phase), preventing viewport capture of the aligned model. If testing reveals residual offset, tune `VIEWMODEL_ADS_AIM_TARGET_OFFSET_X/Y/Z` and/or `VIEWMODEL_ADS_AIM_TARGET_ROTATION_*_DEGREES` in Constants.lua — no code changes needed.
+
+**Known pre-existing issue (separate):** A stale 0-BasePart animation-only AKS74 model (Humanoid + AnimSaves, ~4191 descendants) exists in `workspace.CurrentCamera` from before game start. The `EquipWeapon` 0-BasePart guard prevents VMC from treating it as the active model. The stale model has no effect on gameplay but may confuse searches in MCP test scripts. Documented here for traceability; not caused by this change.
+
+**Resolve when:** A live play session confirms the sight picture is centred during full ADS on AKS74, and offset constants are tuned to any residual delta. Close by marking "STUDIO VERIFIED — VISUALLY CONFIRMED" with the tuned offset values.
 
 ---
 

@@ -7,6 +7,56 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-09 — FEATURE] — ADSAimAttachment: sightline-based ADS alignment via named Attachment on viewmodel
+
+### Summary
+
+Replaces the previous blind-offset approach for ADS iron-sight centering with a geometry-driven correction that reads the actual world position of a named `Attachment` on the AKS74 Sights part. When ADS is active, the viewmodel pivot is shifted each RenderStepped frame so the attachment lands exactly at camera centre, blending smoothly in/out with `adsAimAlpha` (0→1). All tuning is controlled by constants; no magic values in code.
+
+### How it works
+
+1. **`ADSAimAttachment`** — an `Attachment` (Position = 0,0,0; Archivable = true) was created on the `Sights` BasePart of the AKS74 viewmodel in Studio.
+2. **Cached on equip** — `EquipWeapon()` calls `clone:FindFirstChild("ADSAimAttachment", true)` and stores the result in the module-level `adsAimAttachment: Attachment?`. Logs a warning if not found (so the system degrades gracefully on weapons that lack the attachment).
+3. **Per-frame pivot correction (RenderStepped):**
+   - `adsAimAlpha` lerps toward 1 when `adsState == "Entering"` or `"Aiming"`, back toward 0 during `"Exiting"` or `"Hip"`, at `VIEWMODEL_ADS_AIM_BLEND_SPEED` (18/s).
+   - When `adsAimAlpha > 0` and attachment is cached:  
+     `localAim = currentPivot:ToObjectSpace(aimWorld)`  
+     `aimAlignedPivot = targetAimWorld * localAim:Inverse()`  
+     `m:PivotTo(basePivot:Lerp(aimAlignedPivot, adsAimAlpha))`
+   - When alpha = 0 or no attachment: plain `m:PivotTo(basePivot)` (no change to existing behaviour).
+4. **Target world CFrame** — `cam.CFrame * CFrame.new(OFFSET_X, OFFSET_Y, OFFSET_Z) * CFrame.Angles(ROT_X, ROT_Y, ROT_Z)`. All offsets/rotations default to 0 — tune after live visual testing.
+
+### Files changed
+
+- **AKS74 viewmodel (Studio)** — `ADSAimAttachment` (Attachment) created on Sights part at `Position = (0,0,0)`. Archivable = true. Not a Rojo-managed file; lives in `ReplicatedStorage/ViewModels/AKS74`.
+- **`src/shared/Constants.lua`** — 13 new constants added (after `-- ADS alignment:` comment):
+  - `VIEWMODEL_ADS_AIM_ATTACHMENT_NAME = "ADSAimAttachment"` — name used for `FindFirstChild` search
+  - `VIEWMODEL_ADS_USE_AIM_ATTACHMENT = true` — master gate; set `false` to disable entirely
+  - `VIEWMODEL_ADS_AIM_BLEND_SPEED = 18` — lerp speed matching `FREE_AIM_VIEWMODEL_BLEND_SPEED`
+  - `VIEWMODEL_ADS_AIM_TARGET_OFFSET_X/Y/Z = 0` — camera-space translation tuning (default 0)
+  - `VIEWMODEL_ADS_AIM_TARGET_ROTATION_X/Y/Z_DEGREES = 0` — camera-space rotation tuning (default 0)
+  - `VIEWMODEL_ADS_AIM_APPLY_WHILE_ENTERING = true` — alpha blends toward 1 during adsIn
+  - `VIEWMODEL_ADS_AIM_APPLY_WHILE_AIMING = true` — alpha held at 1 during adsIdle
+  - `VIEWMODEL_ADS_AIM_DISABLE_WHILE_EXITING = true` — alpha blends back to 0 during adsOut
+- **`src/client/ViewModelController.lua`:**
+  - New module-level state: `adsAimAlpha: number = 0`, `adsAimAttachment: Attachment? = nil`, `adsAimTargetPrev: number = -1`
+  - Resets in `init()`, `StopWeaponAnimations()`, `StopADSAnimations()`; attachment cleared in `HolsterWeapon()`
+  - Attachment caching block added in `EquipWeapon()` between `_setupWeaponAnimations` and `_setupThirdPersonWeaponAnimations`
+  - RenderStepped final PivotTo section replaced with alpha-blending + pivot-correction block
+
+### MCP verification
+
+- Fresh equip (after forced HolsterWeapon + re-equip to clear stale model): 13 BaseParts confirmed, ADSAimAttachment FOUND on Sights, WorldPosition logged.
+- No runtime errors in log history.
+- Full ADS cycle (SetAiming true → wait 1.5s → SetAiming false → wait 2.5s) completed without error; `IsAiming` transitioned Hip→Aiming→Hip correctly.
+- Visual sight-picture confirmation requires a live play session (MCP environment gates setVisibility during the match). See DEBT-064.
+
+### Tuning note
+
+All `VIEWMODEL_ADS_AIM_TARGET_OFFSET_*` and `VIEWMODEL_ADS_AIM_TARGET_ROTATION_*_DEGREES` constants default to 0. After live visual testing, if the iron sights appear offset from screen centre, adjust these constants — no code changes required. If the attachment's physical position on the Sights part needs to move, edit it in Studio (it is at 0,0,0 by default, which aligns with the Sights part centre).
+
+---
+
 ## [2026-06-09 — FIX] — Remove all code-level ADS offsets; animation drives sights position
 
 ### Summary

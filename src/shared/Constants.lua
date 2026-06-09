@@ -1066,7 +1066,38 @@ Constants.VIEWMODEL_ADS_DISABLE_PROCEDURAL_MOVEMENT = true
 Constants.VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING = true
 Constants.VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true
 
--- ADS alignment: no code-level offset applied. The ADS animation positions the iron sights.
+-- ADS aim attachment: sightline-based alignment using a named Attachment on the viewmodel.
+-- When VIEWMODEL_ADS_USE_AIM_ATTACHMENT = true, RenderStepped finds the ADSAimAttachment
+-- in the equipped viewmodel and computes a pivot correction so that attachment lands at
+-- camera centre (with optional tuning offsets) during ADS, driven by adsAimAlpha (0→1).
+-- Parent: Sights part of AKS74 (or any part on the viewmodel along the sightline).
+-- Offsets default to 0 — tune to dial in the exact sight picture after live testing.
+Constants.VIEWMODEL_ADS_AIM_ATTACHMENT_NAME           = "ADSAimAttachment"
+Constants.VIEWMODEL_ADS_USE_AIM_ATTACHMENT            = true
+
+-- Lerp speed (per second) for adsAimAlpha.  18 matches FREE_AIM_VIEWMODEL_BLEND_SPEED.
+Constants.VIEWMODEL_ADS_AIM_BLEND_SPEED               = 18
+
+-- Camera-space translation offset applied to the target attachment world CFrame.
+-- Positive X shifts the target right; positive Y up; negative Z forward (toward camera).
+-- Leave at 0 until live testing reveals a residual delta.
+Constants.VIEWMODEL_ADS_AIM_TARGET_OFFSET_X           = 0
+Constants.VIEWMODEL_ADS_AIM_TARGET_OFFSET_Y           = 0
+Constants.VIEWMODEL_ADS_AIM_TARGET_OFFSET_Z           = 0
+
+-- Camera-space rotation applied to the target attachment world CFrame (degrees).
+-- Tune if the iron sights need a slight pitch/yaw correction to be level at screen centre.
+Constants.VIEWMODEL_ADS_AIM_TARGET_ROTATION_X_DEGREES = 0
+Constants.VIEWMODEL_ADS_AIM_TARGET_ROTATION_Y_DEGREES = 0
+Constants.VIEWMODEL_ADS_AIM_TARGET_ROTATION_Z_DEGREES = 0
+
+-- Phase gates: controls during which ADS states the alignment is active.
+-- APPLY_WHILE_ENTERING = true  → alpha blends toward 1 while adsIn plays.
+-- APPLY_WHILE_AIMING   = true  → alpha held at 1 while adsIdle loops.
+-- DISABLE_WHILE_EXITING = true → alpha blends back to 0 as adsOut plays (target = 0).
+Constants.VIEWMODEL_ADS_AIM_APPLY_WHILE_ENTERING      = true
+Constants.VIEWMODEL_ADS_AIM_APPLY_WHILE_AIMING        = true
+Constants.VIEWMODEL_ADS_AIM_DISABLE_WHILE_EXITING     = true
 
 -- ============================================================
 -- Free-aim foundation (Stage 1 — visual / input only)
