@@ -987,9 +987,15 @@ ViewModelController     -- driven by RoundStateChanged; reads MovementController
                         --   Stage 1 free-aim API (2026-06-09):
                         --     SetFreeAimOffset(normalizedOffset: Vector2) — pushed by GunController each frame;
                         --       stored as vmFreeAimNormalized; RenderStepped lerps vmFreeAimBlended toward it
-                        --       at FREE_AIM_VIEWMODEL_BLEND_SPEED and converts to CFrame.Angles (pitch, yaw, roll).
-                        --       Roll axis: -X * FREE_AIM_VIEWMODEL_ROLL_DEGREES so crosshair-right tilts gun-top right.
+                        --       at FREE_AIM_VIEWMODEL_BLEND_SPEED and converts to rotation + translation CFrame.
+                        --       Roll axis: -(aim.X + inertia.X) * ROLL_DEGREES so both aim and mouse velocity
+                        --       contribute to weapon tilt. Translation is opposite to movement (mass illusion).
                         --       freeAimCF inserted between viewRecoilCFrame and finalMoveCF in PivotTo chain.
+                        --     SetMouseInertia(mouseDelta: Vector2) — pushed by GunController each frame with
+                        --       UserInputService:GetMouseDelta(); integrated into vmMouseInertia (damped velocity)
+                        --       which adds extra roll and translation proportional to mouse speed. Scaled by
+                        --       vmInertiaCurrent (state weight: hip=1.0, sprint=0.35, reload=0.15, ADS→0).
+                        --       Zeroed on holster/reset via StopWeaponAnimations(). Stage 1 visual only.
                         --     GetIsReloading() → bool — exposes isReloading so GunController can relay it
                         --       to FreeAimController without a duplicate flag.
                         --   Weapon is holstered (model == nil) by default; GunController calls

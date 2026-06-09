@@ -1475,50 +1475,50 @@ This worsens DEBT-013 (weapon name not sent in `WeaponFired` payload) by adding 
 
 ---
 
-## [DEBT-063] Stage 1 free-aim is visual/input foundation only — GunController firing ray unchanged — ADDED 2026-06-09
+## [DEBT-063] Stage 1 free-aim is visual/input foundation only — GunController firing ray unchanged — ADDED 2026-06-09 — UPDATED 2026-06-09 (Stage 1b inertia improvements)
 
 **Files:** `src/client/FreeAimController.lua`, `src/client/GunController.lua`, `src/client/ViewModelController.lua`, `src/client/UI/CrosshairUI.lua`, `src/shared/Constants.lua`
 **Severity:** Low (intentional deferral; no bug — Stage 1 is correct and complete by design)
 **Studio verification required:** Yes — see manual test steps below
 
-**What Stage 1 implements:**
+**What Stage 1 implements (original — 2026-06-09):**
 - `FreeAimController` tracks a screen-space aim offset driven by `UserInputService:GetMouseDelta()` each `RenderStepped`.
-- The offset is clamped to a circular deadzone (`FREE_AIM_RADIUS_PIXELS = 120` hipfire, `FREE_AIM_ADS_RADIUS_PIXELS = 24` ADS).
-- `CrosshairUI:SetFreeAimOffset()` moves the crosshair container by the smoothed pixel offset.
-- `ViewModelController:SetFreeAimOffset()` tilts the viewmodel by a normalized version of the offset using yaw (`FREE_AIM_VIEWMODEL_YAW_DEGREES = 4°`), pitch (`FREE_AIM_VIEWMODEL_PITCH_DEGREES = 3°`), and roll (`FREE_AIM_VIEWMODEL_ROLL_DEGREES = 1.5°` — horizontal offset tilts the gun top toward the aim side). Lean is suppressed (identity CFrame) during ADS Entering/Aiming states, and `vmFreeAimBlended` is drained toward zero so there is no pop on ADS exit. The former `adsAlignmentCF` model-level offset was removed — ADS iron sight centering is handled entirely by the ADS animation.
-- Free aim is suppressed (offset smoothly returns to zero) while sprinting, reloading, or with no weapon equipped.
-- On holster, offset resets instantly when `FREE_AIM_RESET_ON_HOLSTER = true`.
-- All 15 `FREE_AIM_*` constants live in `src/shared/Constants.lua`; no magic values.
+- The offset is clamped to a circular deadzone (`FREE_AIM_RADIUS_PIXELS = 145` hipfire, `FREE_AIM_ADS_RADIUS_PIXELS = 18` ADS).
+- `CrosshairUI`: fixed crosshair image (`rbxassetid://82580952195402`, 32 px) always at screen center; separate barrel dot (8 px circle) drifts with `SetFreeAimOffset` to show actual gun barrel aim point. Dot returns to center as inertia settles.
+- `ViewModelController:SetFreeAimOffset()` tilts the viewmodel via yaw/pitch/roll and translates opposite to movement (mass illusion). Lean is suppressed (identity CFrame) during ADS Entering/Aiming states; `vmFreeAimBlended` drains to zero so there is no snap on ADS exit.
 
-**What Stage 1 does NOT do (intentional):**
+**What Stage 1b adds (2026-06-09 — this update):**
+- **Mouse inertia velocity layer:** `ViewModelController:SetMouseInertia(mouseDelta)` — new public API. GunController pushes `UserInputService:GetMouseDelta()` each frame when `FREE_AIM_MOUSE_INERTIA_ENABLED`. ViewModelController integrates it into `vmMouseInertia` (damped velocity, clamped to `FREE_AIM_MOUSE_INERTIA_MAX=1.0`), adding extra roll and X/Y translation to the viewmodel proportional to how fast the mouse is moving.
+- **State weight system:** `vmInertiaCurrent` lerps toward a state-based target each frame: hip=1.0, sprint=0.35 (`FREE_AIM_SPRINT_WEIGHT`), reload=0.15 (`FREE_AIM_RELOAD_WEIGHT`), ADS→0. During ADS the entire free-aim CFrame is identity regardless of weight, preserving ADS alignment. The weight multiplies all rotation and translation values, so sprint/reload produce gentler inertia rather than snapping to zero.
+- **Constants changed:** `FREE_AIM_DISABLE_WHILE_SPRINTING` and `FREE_AIM_DISABLE_WHILE_RELOADING` changed to `false` — the weight system replaces hard suppression. `FREE_AIM_VIEWMODEL_YAW_DEGREES` 4→7, `PITCH_DEGREES` 3→5, `ROLL_DEGREES` 1.5→4, `MOUSE_GAIN` 1.0→1.15, `RETURN_SPEED` 9→7, `ADS_RETURN_SPEED` 18→22, `CROSSHAIR_SMOOTH_SPEED` 22→18, `BLEND_SPEED` 16→13, `RADIUS_PIXELS` 120→145, `ADS_RADIUS_PIXELS` 24→18. New constants: `FREE_AIM_VIEWMODEL_TRANSLATE_X/Y/Z`, `FREE_AIM_MOUSE_INERTIA_ENABLED/GAIN/DAMPING/RETURN_SPEED/MAX`, `FREE_AIM_HIP/ADS/SPRINT/RELOAD_WEIGHT`.
+- **Constant tuning risk:** All inertia magnitudes and decay rates are tunable via `Constants.lua`. The current values (`INERTIA_GAIN=0.035`, `DAMPING=12`, `TRANSLATE_X=0.08`, `TRANSLATE_Y=0.045`, `TRANSLATE_Z=0.025`) may need adjustment based on actual feel at runtime — especially TRANSLATE_Z (adds forward/back depth on aim magnitude) and INERTIA_DAMPING (controls how quickly the extra roll bleeds off).
+
+**What Stage 1b does NOT do (intentional — unchanged from Stage 1):**
 - **Bullets do not follow the floating crosshair.** `GunController` fires `WeaponFired` with `camera.CFrame.LookVector` as before — the server raycast is unchanged.
-- **No camera deadzone rotation.** The camera follows the Roblox default controller. Only the crosshair and viewmodel lean are affected.
-- **No body/camera yaw decoupling.** Full DayZ-style body yaw (camera rotates independently of character facing) is not implemented.
-- **No independent first-person body yaw.** Stage 1 is purely a visual/input overlay.
+- **No camera deadzone rotation.** The camera follows the Roblox default controller.
+- **No body/camera yaw decoupling.** Full DayZ-style body yaw is not implemented.
+- **No recoil, muzzle flash, shell ejection, or sound changes.**
 
 **Stage 2 options (deferred — review before implementing):**
-1. **Local shot visuals:** Route `GunController`'s local cosmetic raycast (client-side muzzle flash placement, local hit VFX) through `FreeAimController:GetAimRay()` so the visual shot appears to come from the crosshair position. Server validation is unchanged.
-2. **Server-side free-aim:** If the design evolves to use the floating crosshair for actual hit detection, the `WeaponFired` payload would need to include the aim viewport point or direction, and `GunService` would need to validate it. This requires reviewing `GunService` origin/direction validation, lag compensation, and anti-cheat implications. Do not implement without explicit design review.
-3. **Full camera deadzone:** DayZ-style body/camera yaw decoupling — camera rotates while body faces forward; past a threshold the body snaps to follow. This requires changes to `MovementController` (camera yaw / `HumanoidRootPart` facing), which is out of scope for Stage 1.
+1. **Local shot visuals:** Route `GunController`'s local cosmetic raycast through `FreeAimController:GetAimRay()` so visual shots appear to come from the crosshair. Server validation unchanged.
+2. **Server-side free-aim:** If design evolves to use the floating crosshair for actual hit detection, the `WeaponFired` payload would need the aim viewport point/direction, and `GunService` would need to validate it. Requires reviewing origin/direction validation, lag compensation, and anti-cheat implications.
+3. **Full camera deadzone:** DayZ-style body/camera yaw decoupling — requires changes to `MovementController`, out of scope for Stage 1.
 
-**MCP / Studio verification required:**
-The following steps must be confirmed manually in Roblox Studio play mode before closing this entry:
+**MCP / Studio verification required (Stage 1b):**
 1. Zero errors in Output on spawn (no `[FreeAimController]`, `[CrosshairUI]`, `[ViewModelController]`, or `[GunController]` errors).
-2. FreeAimController initializes (`[FreeAimController] Initialized — free aim ENABLED` appears in Output).
-3. Crosshair is centered (no drift) while weapon is holstered.
-4. Press key 1 → weapon equips, equip animation plays, idle loops.
-5. Move mouse — crosshair drifts within the circular deadzone; viewmodel subtly leans toward the drift direction.
-6. Stop moving mouse — crosshair smoothly returns toward center.
-7. ADS (MB2) — crosshair range is smaller (tighter); ADS animations still play correctly.
-8. Reload (R) — crosshair smoothly recenters during reload; reload animation plays; idle/run resumes after.
-9. Sprint — crosshair recenters while sprinting; idle/run animations unaffected.
-10. Holster (key 1 again) — crosshair snaps to center; no drift.
-11. Re-equip — free aim works again.
-12. Fire (MB1) — firing behavior unchanged; bullets still follow camera.CFrame.LookVector.
-13. No new remotes created; no server combat or damage behavior changed.
-14. Camera behavior is unchanged from before this task.
+2. Crosshair image fixed at screen center; barrel dot starts at center.
+3. Press key 1 → weapon equips, idle loops.
+4. Move mouse — barrel dot drifts; viewmodel leans with roll + translation; stops and returns smoothly.
+5. Move mouse fast — extra roll momentum visible on viewmodel; bleeds off after mouse stops.
+6. Sprint — viewmodel inertia is reduced (~35% of hip) but not zeroed.
+7. Reload (R) — viewmodel inertia further reduced (~15%); reload animation plays; idle/run resumes after.
+8. ADS (MB2) — freeAimCF is identity; ADS animation + iron sight centering correct; no snap on ADS exit.
+9. Holster — barrel dot snaps to center; vmMouseInertia zeroed; no drift.
+10. Fire (MB1) — firing unchanged; bullets still follow `camera.CFrame.LookVector`.
+11. No new remotes; no server combat or damage behavior changed.
+12. Camera behavior unchanged.
 
-**Trigger for Stage 2:** Design decision to make bullets follow the floating crosshair. Requires explicit review of server validation, lag compensation, and gameplay consistency before any change to `WeaponFired` payload or `GunService` raycast direction.
+**Trigger for Stage 2:** Design decision to make bullets follow the floating crosshair. Requires explicit review of server validation, lag compensation, and gameplay consistency.
 
 ---
 

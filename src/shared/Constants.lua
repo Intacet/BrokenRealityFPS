@@ -1066,7 +1066,12 @@ Constants.VIEWMODEL_ADS_DISABLE_PROCEDURAL_MOVEMENT = true
 Constants.VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING = true
 Constants.VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true
 
--- ADS alignment: no code-level offset applied. The ADS animation positions the iron sights.
+-- ADS alignment: blend the viewmodel pivot toward the FakeCamera-at-camera-centre position
+-- during ADS so the ADS animation's sights land exactly at screen centre.
+-- At alpha=1 CAMERA_EXTRA_OFFSET is removed from the chain; BASE_OFFSET then places
+-- FakeCamera exactly at cam.CFrame, matching where the ADS animation aims the iron sights.
+-- At 18/s the correction reaches ~99% complete by the time a 0.25 s adsIn finishes.
+Constants.VIEWMODEL_ADS_AIM_BLEND_SPEED = 18
 
 -- ============================================================
 -- Free-aim foundation (Stage 1 — visual / input only)
@@ -1079,47 +1084,82 @@ Constants.VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true
 Constants.FREE_AIM_ENABLED                 = true
 
 -- Hipfire deadzone radius in pixels (how far the crosshair can drift from center).
-Constants.FREE_AIM_RADIUS_PIXELS           = 120
+Constants.FREE_AIM_RADIUS_PIXELS           = 145
 
 -- ADS deadzone radius in pixels (tighter; makes ADS feel steadier).
-Constants.FREE_AIM_ADS_RADIUS_PIXELS       = 24
+Constants.FREE_AIM_ADS_RADIUS_PIXELS       = 18
 
 -- Scale factor applied to raw mouse delta before adding to aim offset.
 -- 1.0 = one-to-one with raw delta; lower = sluggish/heavy; higher = hair-trigger.
-Constants.FREE_AIM_MOUSE_GAIN              = 1.0
+Constants.FREE_AIM_MOUSE_GAIN              = 1.15
 
 -- Return-to-center speed (lerp per second) when mouse is idle, hipfire.
-Constants.FREE_AIM_RETURN_SPEED            = 9
+Constants.FREE_AIM_RETURN_SPEED            = 7
 
 -- Return-to-center speed (lerp per second) when mouse is idle, ADS.
-Constants.FREE_AIM_ADS_RETURN_SPEED        = 18
+Constants.FREE_AIM_ADS_RETURN_SPEED        = 22
 
 -- Speed at which the visible crosshair position lerps toward the raw aim offset.
 -- Higher = snappier tracking; lower = more pronounced trailing lag.
-Constants.FREE_AIM_CROSSHAIR_SMOOTH_SPEED  = 22
+Constants.FREE_AIM_CROSSHAIR_SMOOTH_SPEED  = 18
 
--- Speed at which the viewmodel lean lerps toward the normalized aim offset.
+-- Speed at which the viewmodel lean and inertia weight lerp toward their targets each frame.
 -- Also governs how quickly the lean drains to zero during ADS.
-Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED   = 16
+Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED   = 13
 
 -- Maximum yaw (left/right) tilt of the viewmodel toward the aim point, in degrees.
 -- Suppressed during ADS so iron sights stay centered (see ViewModelController).
-Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES   = 4
+Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES   = 7
 
 -- Maximum pitch (up/down) tilt of the viewmodel toward the aim point, in degrees.
 -- Suppressed during ADS so iron sights stay centered (see ViewModelController).
-Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES = 3
+Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES = 5
 
--- Maximum roll (clockwise tilt) of the viewmodel as the crosshair moves horizontally.
--- Adds a subtle weapon-inertia lean: crosshair left → gun tilts slightly left.
+-- Maximum roll (clockwise tilt) of the viewmodel as the crosshair and inertia move horizontally.
+-- Combined with mouse inertia contribution for a weighted, grounded feel.
 -- Suppressed during ADS so iron sights stay centered (see ViewModelController).
-Constants.FREE_AIM_VIEWMODEL_ROLL_DEGREES  = 1.5
+Constants.FREE_AIM_VIEWMODEL_ROLL_DEGREES  = 4
 
--- When true, free aim is suppressed and smoothly recenters while sprinting.
-Constants.FREE_AIM_DISABLE_WHILE_SPRINTING = true
+-- Translation: viewmodel shifts slightly opposite to the aim/inertia direction.
+-- Gives the AK a sense of physical mass — the gun lags behind the look direction.
+-- X = lateral (studs), Y = vertical (studs), Z = depth (studs).
+Constants.FREE_AIM_VIEWMODEL_TRANSLATE_X   = 0.08
+Constants.FREE_AIM_VIEWMODEL_TRANSLATE_Y   = 0.045
+Constants.FREE_AIM_VIEWMODEL_TRANSLATE_Z   = 0.025
 
--- When true, free aim is suppressed and smoothly recenters while reloading.
-Constants.FREE_AIM_DISABLE_WHILE_RELOADING = true
+-- Mouse inertia: velocity accumulated from raw mouse delta each frame, then damped.
+-- Adds roll and translation when the mouse is moving quickly, settling smoothly after.
+Constants.FREE_AIM_MOUSE_INERTIA_ENABLED   = true
+
+-- How strongly each mouse-delta unit pushes the inertia velocity (0 = off, higher = more lag).
+Constants.FREE_AIM_MOUSE_INERTIA_GAIN      = 0.035
+
+-- Damping rate (lerp fraction/s) applied to inertia velocity when not in ADS.
+-- Lower value = takes longer to settle (heavier feel).
+Constants.FREE_AIM_MOUSE_INERTIA_DAMPING   = 12
+
+-- Damping rate (lerp fraction/s) applied to inertia velocity during ADS.
+-- Higher than DAMPING so inertia drains quickly when entering ADS.
+Constants.FREE_AIM_MOUSE_INERTIA_RETURN_SPEED = 10
+
+-- Maximum inertia velocity magnitude (clamps how far inertia can push the viewmodel).
+Constants.FREE_AIM_MOUSE_INERTIA_MAX       = 1.0
+
+-- Per-state inertia weight. 1.0 = full effect applied; 0.0 = suppressed completely.
+-- Lerped each frame at FREE_AIM_VIEWMODEL_BLEND_SPEED so transitions are smooth.
+-- ADS is kept very low so iron sights remain steady; sprint/reload are partial.
+Constants.FREE_AIM_HIP_WEIGHT              = 1.0
+Constants.FREE_AIM_ADS_WEIGHT              = 0.18
+Constants.FREE_AIM_SPRINT_WEIGHT           = 0.35
+Constants.FREE_AIM_RELOAD_WEIGHT           = 0.15
+
+-- When true, free-aim crosshair offset smoothly recenters while sprinting.
+-- False: crosshair drift is allowed during sprint; inertia weight still reduces effect.
+Constants.FREE_AIM_DISABLE_WHILE_SPRINTING = false
+
+-- When true, free-aim crosshair offset smoothly recenters while reloading.
+-- False: crosshair drift is allowed during reload; inertia weight still reduces effect.
+Constants.FREE_AIM_DISABLE_WHILE_RELOADING = false
 
 -- When true, the aim offset is reset to zero when the weapon is holstered.
 Constants.FREE_AIM_RESET_ON_HOLSTER        = true

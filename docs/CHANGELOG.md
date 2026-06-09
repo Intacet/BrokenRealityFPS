@@ -7,6 +7,58 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-09 — FEAT] — Stage 1b: mouse inertia velocity layer + state weight system + crosshair/dot swap
+
+### Summary
+
+Improves first-person weapon inertia feel to closer match a reference clip. Adds a damped mouse-velocity layer that makes the viewmodel lag and roll when the mouse moves fast, a per-state weight system that scales inertia based on game state, and weapon translation opposite to movement for a sense of physical mass. Also inverts the crosshair/dot UI design so the crosshair image stays fixed at screen center (where bullets go) and a small barrel dot drifts with the free-aim offset, returning to center as inertia settles. All changes are Stage 1 visual only — no bullet direction, server combat, camera, ADS alignment, or recoil changes.
+
+### Files changed
+
+- **`src/shared/Constants.lua`** — updated existing free-aim constants (see values below); added 14 new constants: `FREE_AIM_VIEWMODEL_TRANSLATE_X/Y/Z`, `FREE_AIM_MOUSE_INERTIA_ENABLED/GAIN/DAMPING/RETURN_SPEED/MAX`, `FREE_AIM_HIP/ADS/SPRINT/RELOAD_WEIGHT`. Changed `FREE_AIM_DISABLE_WHILE_SPRINTING` and `FREE_AIM_DISABLE_WHILE_RELOADING` to `false` (weight system replaces hard suppression).
+- **`src/client/ViewModelController.lua`** — added `vmMouseInertiaDelta`, `vmMouseInertia`, `vmInertiaCurrent` state variables (reset in `init()` and `StopWeaponAnimations()`); added assert to `SetFreeAimOffset`; added new public method `SetMouseInertia(mouseDelta: Vector2)`; replaced RenderStepped free-aim block with full weight + mouse inertia + translation system.
+- **`src/client/GunController.lua`** — added `ViewModelController:SetMouseInertia(UserInputService:GetMouseDelta())` call inside `FREE_AIM_ENABLED` block when `FREE_AIM_MOUSE_INERTIA_ENABLED`.
+- **`src/client/UI/CrosshairUI.lua`** — rewritten: fixed `crosshairImg` (ImageLabel, `rbxassetid://82580952195402`, 32 px) always at screen center; `barrelDot` (8 px filled circle with UICorner) drifts with `SetFreeAimOffset` to show barrel aim point, snaps back to center on disable.
+- **`docs/PROJECT_MAP.md`** — updated ViewModelController API section to document `SetMouseInertia`.
+- **`docs/TECHNICAL_DEBT.md`** — updated DEBT-063 with Stage 1b additions, new constants, and tuning risk notes.
+
+### Constants updated (`src/shared/Constants.lua`)
+
+| Constant | Old | New |
+|---|---|---|
+| `FREE_AIM_RADIUS_PIXELS` | 120 | 145 |
+| `FREE_AIM_ADS_RADIUS_PIXELS` | 24 | 18 |
+| `FREE_AIM_MOUSE_GAIN` | 1.0 | 1.15 |
+| `FREE_AIM_RETURN_SPEED` | 9 | 7 |
+| `FREE_AIM_ADS_RETURN_SPEED` | 18 | 22 |
+| `FREE_AIM_CROSSHAIR_SMOOTH_SPEED` | 22 | 18 |
+| `FREE_AIM_VIEWMODEL_BLEND_SPEED` | 16 | 13 |
+| `FREE_AIM_VIEWMODEL_YAW_DEGREES` | 4 | 7 |
+| `FREE_AIM_VIEWMODEL_PITCH_DEGREES` | 3 | 5 |
+| `FREE_AIM_VIEWMODEL_ROLL_DEGREES` | 1.5 | 4 |
+| `FREE_AIM_DISABLE_WHILE_SPRINTING` | true | false |
+| `FREE_AIM_DISABLE_WHILE_RELOADING` | true | false |
+
+### Test steps
+
+1. Zero Output errors on spawn.
+2. Crosshair image fixed at center; barrel dot starts at center.
+3. Move mouse — dot drifts, viewmodel leans with roll + translation, returns smoothly.
+4. Move mouse fast — extra roll momentum visible; bleeds off after stop.
+5. Sprint — viewmodel inertia at ~35%; dot still drifts but gentler.
+6. Reload — viewmodel inertia at ~15%; dot still drifts but gentler.
+7. ADS — freeAimCF is identity; iron sights correct; no snap on exit.
+8. Holster — dot snaps center; inertia zeroed.
+9. Fire — bullets still follow `camera.CFrame.LookVector`; damage unchanged.
+
+### Maintenance risks
+
+- Inertia constants (`GAIN`, `DAMPING`, `TRANSLATE_*`) may need runtime tuning — see DEBT-063.
+- `FREE_AIM_ADS_WEIGHT = 0.18` constant exists but ADS path still forces identity CFrame for alignment safety; the weight is intentionally not applied during ADS.
+- MCP / Studio verification not performed this session — mark as unverified until tested in play mode.
+
+---
+
 ## [2026-06-09 — FIX] — Remove all code-level ADS offsets; animation drives sights position
 
 ### Summary

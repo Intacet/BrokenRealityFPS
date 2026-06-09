@@ -2,12 +2,14 @@
 -- ModuleScript
 -- Location in Studio: StarterPlayer > StarterPlayerScripts > Controllers > UI > CrosshairUI
 --
--- Minimal tactical crosshair and hitmarker.
--- Crosshair: four white axis-aligned bars, 2×12 px, 6 px gap from center.
--- Hitmarker: four diagonal bars, 2×10 px, rotated 45°, Color3.fromRGB(220,60,60).
---   Appears instantly; fades to transparent over 0.08s using TweenService.
--- All elements ZIndex 10. No center dot. Sharp rectangles only.
--- Crosshair visible during PREP and ACTIVE; hidden during all other phases.
+-- Fixed crosshair image at screen center + barrel dot that drifts with free-aim inertia.
+-- Crosshair: ImageLabel using CROSSHAIR_IMAGE_ID, always fixed at true screen center.
+-- Barrel dot: small filled circle that follows where the gun barrel is actually pointing.
+--   Drifts with free-aim offset; returns to screen center as inertia fades.
+-- Hitmarker: four diagonal bars, 2×10 px, Color3.fromRGB(220,60,60).
+--   Appears instantly; fades over HM_FADE_TIME seconds.
+-- All elements ZIndex 10.
+-- Crosshair + dot visible during PREP and ACTIVE; hidden during all other phases.
 --
 -- Initialized by ClientInit via loadInitAndStart():
 --   1. init(playerGui) — creates all ScreenGui instances
@@ -27,31 +29,35 @@ local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEve
 -- Configuration
 -- ============================================================
 
-local CH_GAP : number = 6    -- pixels from screen center to near edge of each crosshair bar
-local CH_LEN : number = 12   -- long dimension of each crosshair bar in pixels
-local CH_THK : number = 2    -- short dimension (thickness) of each bar in pixels
+-- Crosshair image: fixed at screen center; always shows where bullets land.
+local CROSSHAIR_IMAGE_ID : string = "rbxassetid://82580952195402"
+local CROSSHAIR_SIZE     : number = 32   -- pixels; small, matches dot scale
 
-local HM_LEN  : number = 10  -- long dimension of each hitmarker bar
-local HM_DIST : number = 8   -- pixels diagonally from center to each hitmarker bar center
+-- Barrel dot: drifts with gun inertia / free-aim, returns to center.
+-- Slightly larger than a pixel so it reads clearly, similar visual weight to the crosshair.
+local DOT_SIZE  : number = 8    -- pixels; diameter
+local DOT_COLOR          = Color3.new(1, 1, 1)
+local DOT_ALPHA : number = 0.1  -- nearly opaque for readability
 
-local WHITE    = Color3.new(1, 1, 1)
-local HM_COLOR = Color3.fromRGB(220, 60, 60)
+-- Hitmarker
+local HM_LEN  : number = 10
+local HM_DIST : number = 8
+local HM_THK  : number = 2
+local HM_COLOR           = Color3.fromRGB(220, 60, 60)
 
-local ZINDEX = 10
+local ZINDEX : number = 10
 
-local HM_SHOW_TIME : number = 0.12  -- seconds the hitmarker stays fully visible
-local HM_FADE_TIME : number = 0.08  -- seconds to fade the hitmarker out
+local HM_SHOW_TIME : number = 0.12
+local HM_FADE_TIME : number = 0.08
 
 -- ============================================================
 -- GUI references (set inside init())
 -- ============================================================
 
-local crosshairContainer : Frame
-local hitmarkerBars      : { Frame } = {}
+local crosshairImg  : ImageLabel      -- fixed at screen center; never shifted
+local barrelDot     : Frame           -- drifts with free-aim to show barrel aim point
+local hitmarkerBars : { Frame } = {}
 
--- Whether free-aim crosshair movement is currently active.
--- Tracks the last value passed to SetFreeAimEnabled so SetFreeAimOffset
--- can be a pure position write without needing its own enabled check.
 local freeAimEnabled: boolean = false
 
 -- ============================================================
@@ -65,15 +71,15 @@ local function makeBar(
     rotation : number,
     color    : Color3
 ): Frame
-    local bar                  = Instance.new("Frame")
-    bar.Size                   = size
-    bar.Position               = position
-    bar.AnchorPoint            = Vector2.new(0.5, 0.5)
-    bar.BackgroundColor3       = color
-    bar.BorderSizePixel        = 0
-    bar.Rotation               = rotation
-    bar.ZIndex                 = ZINDEX
-    bar.Parent                 = parent
+    local bar            = Instance.new("Frame")
+    bar.Size             = size
+    bar.Position         = position
+    bar.AnchorPoint      = Vector2.new(0.5, 0.5)
+    bar.BackgroundColor3 = color
+    bar.BorderSizePixel  = 0
+    bar.Rotation         = rotation
+    bar.ZIndex           = ZINDEX
+    bar.Parent           = parent
     return bar
 end
 
@@ -84,76 +90,62 @@ end
 local CrosshairUI = {}
 
 function CrosshairUI:init(playerGui: PlayerGui)
-    local screen              = Instance.new("ScreenGui")
-    screen.Name               = "CrosshairUI"
-    screen.ResetOnSpawn       = false
-    screen.IgnoreGuiInset     = true
-    screen.ZIndexBehavior     = Enum.ZIndexBehavior.Sibling
-    screen.Parent             = playerGui
+    local screen          = Instance.new("ScreenGui")
+    screen.Name           = "CrosshairUI"
+    screen.ResetOnSpawn   = false
+    screen.IgnoreGuiInset = true
+    screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screen.Parent         = playerGui
 
-    -- ── Crosshair ─────────────────────────────────────────────────────────────
-    crosshairContainer               = Instance.new("Frame")
-    crosshairContainer.Name          = "Crosshair"
-    crosshairContainer.Size          = UDim2.fromScale(1, 1)
-    crosshairContainer.BackgroundTransparency = 1
-    crosshairContainer.ZIndex        = ZINDEX
-    crosshairContainer.Visible       = false
-    crosshairContainer.Parent        = screen
+    -- ── Fixed crosshair image (always at screen center) ───────────────────────
+    -- Lives directly in the ScreenGui; free-aim never shifts it.
+    crosshairImg                     = Instance.new("ImageLabel")
+    crosshairImg.Name                = "CrosshairImage"
+    crosshairImg.Size                = UDim2.fromOffset(CROSSHAIR_SIZE, CROSSHAIR_SIZE)
+    crosshairImg.Position            = UDim2.new(0.5, 0, 0.5, 0)
+    crosshairImg.AnchorPoint         = Vector2.new(0.5, 0.5)
+    crosshairImg.Image               = CROSSHAIR_IMAGE_ID
+    crosshairImg.BackgroundTransparency = 1
+    crosshairImg.BorderSizePixel     = 0
+    crosshairImg.ZIndex              = ZINDEX
+    crosshairImg.ScaleType           = Enum.ScaleType.Fit
+    crosshairImg.Visible             = false
+    crosshairImg.Parent              = screen
 
+    -- ── Barrel dot (drifts with free-aim inertia) ─────────────────────────────
+    -- Starts at screen center; SetFreeAimOffset moves it to show actual barrel aim point.
+    -- Returns to center as inertia settles, converging on the crosshair.
+    barrelDot                     = Instance.new("Frame")
+    barrelDot.Name                = "BarrelDot"
+    barrelDot.Size                = UDim2.fromOffset(DOT_SIZE, DOT_SIZE)
+    barrelDot.Position            = UDim2.new(0.5, 0, 0.5, 0)
+    barrelDot.AnchorPoint         = Vector2.new(0.5, 0.5)
+    barrelDot.BackgroundColor3    = DOT_COLOR
+    barrelDot.BackgroundTransparency = DOT_ALPHA
+    barrelDot.BorderSizePixel     = 0
+    barrelDot.ZIndex              = ZINDEX + 1   -- always on top of crosshair image
+    barrelDot.Visible             = false
+    barrelDot.Parent              = screen
+
+    -- Rounded corners so the dot is a circle.
+    local corner       = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent      = barrelDot
+
+    -- ── Hitmarker (fixed at screen center) ────────────────────────────────────
     local cx = 0.5
     local cy = 0.5
+    local d  = HM_DIST
 
-    -- Top
-    makeBar(crosshairContainer,
-        UDim2.fromOffset(CH_THK, CH_LEN),
-        UDim2.new(cx, 0, cy, -(CH_GAP + CH_LEN / 2)),
-        0, WHITE)
+    hitmarkerBars[1] = makeBar(screen, UDim2.fromOffset(HM_THK, HM_LEN),
+        UDim2.new(cx,  d, cy, -d), -45, HM_COLOR)
+    hitmarkerBars[2] = makeBar(screen, UDim2.fromOffset(HM_THK, HM_LEN),
+        UDim2.new(cx, -d, cy,  d), -45, HM_COLOR)
+    hitmarkerBars[3] = makeBar(screen, UDim2.fromOffset(HM_THK, HM_LEN),
+        UDim2.new(cx, -d, cy, -d),  45, HM_COLOR)
+    hitmarkerBars[4] = makeBar(screen, UDim2.fromOffset(HM_THK, HM_LEN),
+        UDim2.new(cx,  d, cy,  d),  45, HM_COLOR)
 
-    -- Bottom
-    makeBar(crosshairContainer,
-        UDim2.fromOffset(CH_THK, CH_LEN),
-        UDim2.new(cx, 0, cy, CH_GAP + CH_LEN / 2),
-        0, WHITE)
-
-    -- Left
-    makeBar(crosshairContainer,
-        UDim2.fromOffset(CH_LEN, CH_THK),
-        UDim2.new(cx, -(CH_GAP + CH_LEN / 2), cy, 0),
-        0, WHITE)
-
-    -- Right
-    makeBar(crosshairContainer,
-        UDim2.fromOffset(CH_LEN, CH_THK),
-        UDim2.new(cx, CH_GAP + CH_LEN / 2, cy, 0),
-        0, WHITE)
-
-    -- ── Hitmarker ─────────────────────────────────────────────────────────────
-    -- Four diagonal bars forming an X; built directly in the screen, not in crosshairContainer,
-    -- so they can be individually tweened for the fade-out.
-    local d = HM_DIST
-
-    -- NE (/)
-    hitmarkerBars[1] = makeBar(screen,
-        UDim2.fromOffset(CH_THK, HM_LEN),
-        UDim2.new(cx, d, cy, -d),
-        -45, HM_COLOR)
-    -- SW (/)
-    hitmarkerBars[2] = makeBar(screen,
-        UDim2.fromOffset(CH_THK, HM_LEN),
-        UDim2.new(cx, -d, cy, d),
-        -45, HM_COLOR)
-    -- NW (\)
-    hitmarkerBars[3] = makeBar(screen,
-        UDim2.fromOffset(CH_THK, HM_LEN),
-        UDim2.new(cx, -d, cy, -d),
-        45, HM_COLOR)
-    -- SE (\)
-    hitmarkerBars[4] = makeBar(screen,
-        UDim2.fromOffset(CH_THK, HM_LEN),
-        UDim2.new(cx, d, cy, d),
-        45, HM_COLOR)
-
-    -- Start hidden
     for _, bar in ipairs(hitmarkerBars) do
         bar.BackgroundTransparency = 1
     end
@@ -164,57 +156,54 @@ end
 function CrosshairUI:Start()
     RoundStateChanged.OnClientEvent:Connect(function(raw: any)
         local payload = raw :: { phase: string }
-        local phase   = payload.phase
-        crosshairContainer.Visible =
-            (phase == Constants.Phase.PREP or phase == Constants.Phase.ACTIVE)
+        local show    = (payload.phase == Constants.Phase.PREP
+                      or payload.phase == Constants.Phase.ACTIVE)
+        crosshairImg.Visible = show
+        barrelDot.Visible    = show
     end)
 
     Logger.debug("[CrosshairUI] Started")
 end
 
 -- ============================================================
--- Free-aim crosshair API (Stage 1 — visual only)
+-- Free-aim barrel dot API (Stage 1 — visual only)
 -- ============================================================
 
--- Moves the entire crosshair container by the given pixel offset from screen center.
+-- Moves the barrel dot by the free-aim pixel offset from screen center.
+-- The crosshair image is NOT moved — it stays fixed at the bullet aim point.
 -- Called every RenderStepped by GunController with FreeAimController:GetSmoothedAimOffset().
--- The hitmarker bars live directly in the ScreenGui (not in the container) so they
--- always flash at fixed screen center regardless of free-aim drift.
 function CrosshairUI:SetFreeAimOffset(offset: Vector2): ()
-    local container = crosshairContainer
-    if not container then
-        Logger.warn("[CrosshairUI] SetFreeAimOffset: crosshairContainer is nil")
+    local dot = barrelDot
+    if not dot then
+        Logger.warn("[CrosshairUI] SetFreeAimOffset: barrelDot is nil")
         return
     end
-    -- Position is UDim2.new(0, offsetX_px, 0, offsetY_px).
-    -- The container is full-screen (Scale 1,1) so a pixel-only Position shifts every
-    -- bar inside it by exactly (offset.X, offset.Y) pixels from its normal position.
-    container.Position = UDim2.new(0, offset.X, 0, offset.Y)
+    dot.Position = UDim2.new(0.5, offset.X, 0.5, offset.Y)
 end
 
--- Enables or disables free-aim crosshair movement.
--- When disabled (no weapon equipped), the container snaps back to (0,0) immediately.
+-- Enables or disables free-aim dot movement.
+-- When disabled the barrel dot snaps back to screen center (converges with crosshair).
 function CrosshairUI:SetFreeAimEnabled(enabled: boolean): ()
     assert(typeof(enabled) == "boolean", "[CrosshairUI] SetFreeAimEnabled: expected boolean")
     freeAimEnabled = enabled
     if not enabled then
-        local container = crosshairContainer
-        if container then
-            container.Position = UDim2.fromScale(0, 0)
+        local dot = barrelDot
+        if dot then
+            dot.Position = UDim2.new(0.5, 0, 0.5, 0)
         end
     end
 end
 
 -- ============================================================
+-- Hitmarker
+-- ============================================================
 
--- Shows the hitmarker for HM_SHOW_TIME seconds, then fades it over HM_FADE_TIME.
--- Safe to call rapidly — each new call snaps bars back to opaque instantly.
+-- Shows the hitmarker for HM_SHOW_TIME seconds then fades it over HM_FADE_TIME.
+-- Safe to call rapidly — each call snaps bars back to fully opaque immediately.
 function CrosshairUI:ShowHitmarker()
-    -- Snap visible immediately
     for _, bar in ipairs(hitmarkerBars) do
         bar.BackgroundTransparency = 0
     end
-
     task.delay(HM_SHOW_TIME, function()
         local fadeInfo = TweenInfo.new(HM_FADE_TIME, Enum.EasingStyle.Linear)
         for _, bar in ipairs(hitmarkerBars) do

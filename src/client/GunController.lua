@@ -222,6 +222,9 @@ function GunController:Start()
             FreeAimController:SetReloading(ViewModelController:GetIsReloading())
             FreeAimController:SetAiming(ViewModelController:IsAiming())
             ViewModelController:SetFreeAimOffset(FreeAimController:GetNormalizedAimOffset())
+            if Constants.FREE_AIM_MOUSE_INERTIA_ENABLED then
+                ViewModelController:SetMouseInertia(UserInputService:GetMouseDelta())
+            end
             CrosshairUI:SetFreeAimOffset(FreeAimController:GetSmoothedAimOffset())
             CrosshairUI:SetFreeAimEnabled(
                 FreeAimController:IsEnabled() and equippedWeaponName ~= nil

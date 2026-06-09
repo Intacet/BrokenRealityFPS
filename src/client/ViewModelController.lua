@@ -127,6 +127,14 @@ local viewRecoilCFrame: CFrame = CFrame.new()
 local vmFreeAimNormalized: Vector2 = Vector2.zero
 local vmFreeAimBlended:    Vector2 = Vector2.zero
 
+-- Mouse inertia state: velocity accumulated from raw mouse delta each frame, then damped.
+-- vmMouseInertiaDelta: latest delta pushed by GunController via SetMouseInertia().
+-- vmMouseInertia:      running velocity (integrated + clamped + damped each RenderStepped).
+-- vmInertiaCurrent:    current inertia weight [0, 1] lerped toward state-based target.
+local vmMouseInertiaDelta: Vector2 = Vector2.zero
+local vmMouseInertia:      Vector2 = Vector2.zero
+local vmInertiaCurrent:    number  = 1
+
 -- Name of the currently equipped weapon, or nil when holstered.
 local equippedWeaponName: string? = nil
 
@@ -165,6 +173,12 @@ local adsState: ADSState = "Hip"
 
 -- Fake ADS idle: accumulator for sine-based breathing/sway when adsState == "Aiming".
 local adsIdleTime: number = 0
+
+-- ADS pivot alignment alpha (0 = hip pivot, 1 = FakeCamera-at-camera-centre pivot).
+-- Lerped each RenderStepped toward 1 during Entering/Aiming and toward 0 during Exiting/Hip.
+-- At alpha=1 the pivot removes CAMERA_EXTRA_OFFSET so the ADS animation's sights land at
+-- screen centre.  Uses BASE_OFFSET which was already derived from FakeCamera in EquipWeapon.
+local adsAimAlpha: number = 0
 
 
 -- Third-person character weapon AnimationTracks.
@@ -350,6 +364,10 @@ function ViewModelController:init()
     isRunning            = false
     adsState             = "Hip"
     adsIdleTime          = 0
+    adsAimAlpha          = 0
+    vmMouseInertiaDelta  = Vector2.zero
+    vmMouseInertia       = Vector2.zero
+    vmInertiaCurrent     = 1
     -- Third-person character tracks: nil references only — do NOT call Stop/Destroy.
     -- init() is called from CharacterAdded where the old Humanoid.Animator may already be
     -- destroyed, making track method calls unsafe.  Same pattern as MovementController's
@@ -424,6 +442,10 @@ function ViewModelController:StopWeaponAnimations()
     isRunning              = false
     adsState               = "Hip"
     adsIdleTime            = 0
+    adsAimAlpha            = 0
+    vmMouseInertiaDelta    = Vector2.zero
+    vmMouseInertia         = Vector2.zero
+    vmInertiaCurrent       = 1
     -- Third-person character tracks: stop and destroy (character is alive in this path).
     -- AnimationTrack:Destroy() severs Stopped connections synchronously, preventing any
     -- deferred equip-chain or reload-chain callback from firing after holster.
@@ -977,12 +999,49 @@ function ViewModelController:Start()
             end
         end
 
-        -- Free-aim viewmodel lean.
-        -- Suppressed during ADS (Entering/Aiming) so the lean does not interfere with the
-        -- ADS animation pose.  vmFreeAimBlended is drained toward zero during ADS so there
-        -- is no snap on ADS exit.
+        -- Free-aim viewmodel lean + mouse inertia + weight system.
+        -- ADS (Entering/Aiming): freeAimCF is identity; blended values drain toward zero
+        --   so there is no snap on ADS exit.  ADS alignment is preserved unchanged.
+        -- Hip/Exiting: build CFrame from normalized offset + mouse inertia, scaled by vmInertiaCurrent.
+        local inADS = adsState == "Entering" or adsState == "Aiming"
+
+        -- Inertia weight: lerp toward state-based target each frame.
+        local targetWeight: number
+        if inADS then
+            targetWeight = 0
+        elseif isReloading then
+            targetWeight = Constants.FREE_AIM_RELOAD_WEIGHT
+        elseif isRunning then
+            targetWeight = Constants.FREE_AIM_SPRINT_WEIGHT
+        else
+            targetWeight = Constants.FREE_AIM_HIP_WEIGHT
+        end
+        vmInertiaCurrent = vmInertiaCurrent
+            + (targetWeight - vmInertiaCurrent) * math.min(1, dt * Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED)
+
+        -- Mouse inertia: integrate delta, clamp magnitude, then damp.
+        if Constants.FREE_AIM_MOUSE_INERTIA_ENABLED then
+            if not inADS then
+                vmMouseInertia = vmMouseInertia
+                    + vmMouseInertiaDelta * Constants.FREE_AIM_MOUSE_INERTIA_GAIN
+                local inertMag = vmMouseInertia.Magnitude
+                if inertMag > Constants.FREE_AIM_MOUSE_INERTIA_MAX then
+                    vmMouseInertia = vmMouseInertia * (Constants.FREE_AIM_MOUSE_INERTIA_MAX / inertMag)
+                end
+                vmMouseInertia = vmMouseInertia:Lerp(
+                    Vector2.zero,
+                    math.min(1, dt * Constants.FREE_AIM_MOUSE_INERTIA_DAMPING)
+                )
+            else
+                vmMouseInertia = vmMouseInertia:Lerp(
+                    Vector2.zero,
+                    math.min(1, dt * Constants.FREE_AIM_MOUSE_INERTIA_RETURN_SPEED)
+                )
+            end
+        end
+
         local freeAimCF: CFrame
-        if adsState == "Entering" or adsState == "Aiming" then
+        if inADS then
             vmFreeAimBlended = vmFreeAimBlended:Lerp(
                 Vector2.zero,
                 math.min(1, dt * Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED)
@@ -993,25 +1052,63 @@ function ViewModelController:Start()
                 vmFreeAimNormalized,
                 math.min(1, dt * Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED)
             )
-            local freeAimYaw   = vmFreeAimBlended.X * math.rad(Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES)
-            local freeAimPitch = -vmFreeAimBlended.Y * math.rad(Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES)
-            local freeAimRoll  = -vmFreeAimBlended.X * math.rad(Constants.FREE_AIM_VIEWMODEL_ROLL_DEGREES)
-            freeAimCF = CFrame.Angles(freeAimPitch, freeAimYaw, freeAimRoll)
+            local w = vmInertiaCurrent
+
+            -- Inertia X/Y from mouse delta (adds roll momentum when mouse is moving fast).
+            local inertiaX: number = 0
+            local inertiaY: number = 0
+            if Constants.FREE_AIM_MOUSE_INERTIA_ENABLED then
+                inertiaX = vmMouseInertia.X
+                inertiaY = vmMouseInertia.Y
+            end
+
+            -- Rotation: yaw + pitch from aim offset; roll from aim + mouse inertia.
+            local freeAimYaw   = vmFreeAimBlended.X * math.rad(Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES) * w
+            local freeAimPitch = -vmFreeAimBlended.Y * math.rad(Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES) * w
+            local freeAimRoll  = -(vmFreeAimBlended.X + inertiaX) * math.rad(Constants.FREE_AIM_VIEWMODEL_ROLL_DEGREES) * w
+
+            -- Translation opposite to movement gives the weapon a sense of physical mass.
+            local translateX = -(vmFreeAimBlended.X + inertiaX) * Constants.FREE_AIM_VIEWMODEL_TRANSLATE_X * w
+            local translateY = -(vmFreeAimBlended.Y + inertiaY) * Constants.FREE_AIM_VIEWMODEL_TRANSLATE_Y * w
+            local translateZ =  vmFreeAimBlended.Magnitude * Constants.FREE_AIM_VIEWMODEL_TRANSLATE_Z * w
+
+            freeAimCF = CFrame.new(translateX, translateY, translateZ)
+                * CFrame.Angles(freeAimPitch, freeAimYaw, freeAimRoll)
         end
 
-        -- Final viewmodel CFrame.
-        -- Order: CAMERA_EXTRA_OFFSET → viewRecoilCFrame → freeAimCF → finalMoveCF
-        --        → BASE_OFFSET → positional recoilOffset.
-        -- No code-level ADS alignment offset: the ADS animation alone positions the sights.
-        m:PivotTo(
-            cam.CFrame
+        -- ADS pivot alignment.
+        -- The ADS animation targets FakeCamera, but the hip pivot chain places FakeCamera at
+        -- cam.CFrame * CAMERA_EXTRA_OFFSET rather than cam.CFrame.  To fix this, adsAimAlpha
+        -- blends the pivot toward a chain that omits CAMERA_EXTRA_OFFSET so BASE_OFFSET places
+        -- FakeCamera exactly at cam.CFrame when alpha=1 — matching where the animation aims.
+        -- freeAimCF and finalMoveCF are already CFrame.new() during ADS (zeroed above).
+        local adsAimTarget: number = 0
+        if adsState == "Entering" or adsState == "Aiming" then
+            adsAimTarget = 1
+        end
+        adsAimAlpha = adsAimAlpha
+            + (adsAimTarget - adsAimAlpha) * math.min(1, dt * Constants.VIEWMODEL_ADS_AIM_BLEND_SPEED)
+
+        -- Hip base pivot (full chain, unchanged from hip behaviour).
+        local basePivot = cam.CFrame
             * CAMERA_EXTRA_OFFSET
             * viewRecoilCFrame
             * freeAimCF
             * finalMoveCF
             * BASE_OFFSET
             * CFrame.new(0, 0, recoilOffset)
-        )
+
+        if adsAimAlpha > 0.001 then
+            -- ADS-aligned pivot: no CAMERA_EXTRA_OFFSET → FakeCamera lands at cam.CFrame.
+            -- Recoil is preserved so weapon kick is still visible while aiming.
+            local aimAlignedPivot = cam.CFrame
+                * viewRecoilCFrame
+                * BASE_OFFSET
+                * CFrame.new(0, 0, recoilOffset)
+            m:PivotTo(basePivot:Lerp(aimAlignedPivot, adsAimAlpha))
+        else
+            m:PivotTo(basePivot)
+        end
     end)
 
     Logger.debug("[ViewModelController] Ready")
@@ -1382,6 +1479,7 @@ function ViewModelController:StopADSAnimations()
     end
     adsState               = "Hip"
     adsIdleTime            = 0
+    adsAimAlpha            = 0
 end
 
 -- ============================================================
@@ -1400,7 +1498,20 @@ end
 -- converting it to a subtle weapon yaw/pitch via FREE_AIM_VIEWMODEL_YAW/PITCH_DEGREES.
 -- Stage 1 only — does not affect camera.CFrame, bullet direction, or server state.
 function ViewModelController:SetFreeAimOffset(normalizedOffset: Vector2): ()
+    assert(typeof(normalizedOffset) == "Vector2",
+        "[ViewModelController] SetFreeAimOffset: normalizedOffset must be a Vector2")
     vmFreeAimNormalized = normalizedOffset
+end
+
+-- Receives the latest raw mouse delta from GunController each RenderStepped.
+-- Stored as vmMouseInertiaDelta; RenderStepped integrates it into vmMouseInertia (a damped
+-- velocity), which adds roll and translation to the viewmodel in proportion to how fast
+-- the mouse is moving.  Zeroed on holster/reset via StopWeaponAnimations().
+-- Stage 1 only — does not affect camera.CFrame, bullet direction, or server state.
+function ViewModelController:SetMouseInertia(mouseDelta: Vector2): ()
+    assert(typeof(mouseDelta) == "Vector2",
+        "[ViewModelController] SetMouseInertia: mouseDelta must be a Vector2")
+    vmMouseInertiaDelta = mouseDelta
 end
 
 -- Returns true while a reload animation is playing.
