@@ -1066,18 +1066,7 @@ Constants.VIEWMODEL_ADS_DISABLE_PROCEDURAL_MOVEMENT = true
 Constants.VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING = true
 Constants.VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true
 
--- ADS alignment: whole-model pivot correction applied only while ADS is active.
--- The ADS animation moves rig joints toward the sights-up pose, but CAMERA_EXTRA_OFFSET
--- (-0.1, 0.25, 0.7) creates a residual misalignment between the FakeCamera reference point
--- and the actual screen-centre sightline.  These offsets compensate that delta empirically.
--- Blends in (alpha 0→1) during Entering/Aiming; blends out (alpha 1→0) during Exiting/Hip.
--- Hipfire is completely unaffected (adsAlignmentAlpha is 0 while Hip).
--- TUNING RISK: values were found empirically in Studio.  Re-tune if CAMERA_EXTRA_OFFSET or
--- the ADS animation ID changes.  See DEBT-040.
-Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_X    = -0.35
-Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Y    = -0.15
-Constants.VIEWMODEL_ADS_ALIGNMENT_OFFSET_Z    =  0.25
-Constants.VIEWMODEL_ADS_ALIGNMENT_BLEND_SPEED =  18
+-- ADS alignment: no code-level offset applied. The ADS animation positions the iron sights.
 
 -- ============================================================
 -- Free-aim foundation (Stage 1 — visual / input only)

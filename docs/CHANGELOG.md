@@ -7,6 +7,19 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-09 — FIX] — Remove all code-level ADS offsets; animation drives sights position
+
+### Summary
+
+Removed the entire `adsAlignmentCF` system: all alignment constants, the alpha blending state variables, the per-frame blending block in RenderStepped, and the PivotTo insertion. Also removed the diagnostic constants added earlier in this session (`VIEWMODEL_ADS_ALIGNMENT_ENABLED`, `VIEWMODEL_ADS_VISUAL_DIAGNOSTIC_MODE`, `VIEWMODEL_ADS_DIAGNOSTIC_*`). The ADS animation now positions the iron sights exclusively. No code-level pivot correction is applied at any point during ADS.
+
+### Files changed
+
+- **`src/shared/Constants.lua`** — removed `VIEWMODEL_ADS_ALIGNMENT_OFFSET_X/Y/Z`, `VIEWMODEL_ADS_ALIGNMENT_BLEND_SPEED`, `VIEWMODEL_ADS_ALIGNMENT_ENABLED`, and all `VIEWMODEL_ADS_DIAGNOSTIC_*` / `VIEWMODEL_ADS_VISUAL_DIAGNOSTIC_MODE` constants.
+- **`src/client/ViewModelController.lua`** — removed `adsAlignmentAlpha`, `adsAlignmentTargetLast`, their resets in `init()` / `StopWeaponAnimations()` / `StopADSAnimations()`, the alpha-blending and CFrame-construction block in RenderStepped, `* adsAlignmentCF` from PivotTo, and the diagnostic freeAimCF / procedural override branches. PivotTo chain is now: `cam.CFrame * CAMERA_EXTRA_OFFSET * viewRecoilCFrame * freeAimCF * finalMoveCF * BASE_OFFSET * CFrame.new(0,0,recoilOffset)`.
+
+---
+
 ## [2026-06-09 — FIX] — Restore ADS alignment CFrame; fix idle-after-ADS bug
 
 ### Summary
