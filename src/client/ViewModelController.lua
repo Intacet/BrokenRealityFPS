@@ -116,6 +116,14 @@ local recoilOffset: number = 0
 -- Rotational recoil CFrame pushed by GunController each frame via SetRecoilOffset().
 local viewRecoilCFrame: CFrame = CFrame.new()
 
+-- Free-aim viewmodel rotation state (Stage 1 — visual only).
+-- vmFreeAimNormalized: latest normalized offset pushed by GunController each frame
+--   via SetFreeAimOffset().  Range [-1, 1] in each axis (0,0 = crosshair centered).
+-- vmFreeAimBlended:    per-frame lerped value; eases toward vmFreeAimNormalized at
+--   FREE_AIM_VIEWMODEL_BLEND_SPEED to give the weapon a slight lag behind aim drift.
+local vmFreeAimNormalized: Vector2 = Vector2.zero
+local vmFreeAimBlended:    Vector2 = Vector2.zero
+
 -- Name of the currently equipped weapon, or nil when holstered.
 local equippedWeaponName: string? = nil
 
@@ -992,9 +1000,21 @@ function ViewModelController:Start()
             end
         end
 
-        -- Final viewmodel CFrame: cam * base * alignment * recoil * move * procedural.
+        -- Free-aim viewmodel lean: blend the normalized aim offset toward the weapon's
+        -- visible rotation.  Inserted between recoil and procedural movement so it
+        -- compounds naturally without fighting the ADS alignment.
+        vmFreeAimBlended = vmFreeAimBlended:Lerp(
+            vmFreeAimNormalized,
+            math.min(1, dt * Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED)
+        )
+        local freeAimYaw   = vmFreeAimBlended.X * math.rad(Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES)
+        local freeAimPitch = -vmFreeAimBlended.Y * math.rad(Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES)
+        local freeAimCF    = CFrame.Angles(freeAimPitch, freeAimYaw, 0)
+
+        -- Final viewmodel CFrame: cam * base * alignment * recoil * freeAim * move * procedural.
         -- Order: CAMERA_EXTRA_OFFSET (base hipfire) → adsAlignmentCF (ADS-only alignment, zero when Hip)
-        --        → viewRecoilCFrame (rotational recoil) → finalMoveCF (movement sway, zeroed during ADS)
+        --        → viewRecoilCFrame (rotational recoil) → freeAimCF (weapon lean toward aim point, Stage 1)
+        --        → finalMoveCF (movement sway, zeroed during ADS)
         --        → BASE_OFFSET (model-specific) → recoilOffset (positional recoil)
         -- The ADS animation moves the joints, but adsAlignmentCF repositions the entire model
         -- so the animated iron sights end up centered at screen center.
@@ -1003,6 +1023,7 @@ function ViewModelController:Start()
             * CAMERA_EXTRA_OFFSET
             * adsAlignmentCF
             * viewRecoilCFrame
+            * freeAimCF
             * finalMoveCF
             * BASE_OFFSET
             * CFrame.new(0, 0, recoilOffset)
@@ -1383,6 +1404,22 @@ end
 -- Push pattern keeps the dependency one-directional: GunController → ViewModelController.
 function ViewModelController:SetRecoilOffset(cf: CFrame)
     viewRecoilCFrame = cf
+end
+
+-- Receives the normalized free-aim offset from GunController each RenderStepped.
+-- normalizedOffset is in [-1, 1] range per axis (FreeAimController:GetNormalizedAimOffset()).
+-- Stored as vmFreeAimNormalized; RenderStepped lerps vmFreeAimBlended toward it each frame,
+-- converting it to a subtle weapon yaw/pitch via FREE_AIM_VIEWMODEL_YAW/PITCH_DEGREES.
+-- Stage 1 only — does not affect camera.CFrame, bullet direction, or server state.
+function ViewModelController:SetFreeAimOffset(normalizedOffset: Vector2): ()
+    vmFreeAimNormalized = normalizedOffset
+end
+
+-- Returns true while a reload animation is playing.
+-- Read by GunController each RenderStepped to push isReloading state to FreeAimController.
+-- Exposed here so GunController can query it without storing a duplicate flag.
+function ViewModelController:GetIsReloading(): boolean
+    return isReloading
 end
 
 -- Returns a CFrame at the barrel muzzle tip for muzzle-flash placement.

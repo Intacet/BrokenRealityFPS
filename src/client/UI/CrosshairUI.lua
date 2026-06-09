@@ -49,6 +49,11 @@ local HM_FADE_TIME : number = 0.08  -- seconds to fade the hitmarker out
 local crosshairContainer : Frame
 local hitmarkerBars      : { Frame } = {}
 
+-- Whether free-aim crosshair movement is currently active.
+-- Tracks the last value passed to SetFreeAimEnabled so SetFreeAimOffset
+-- can be a pure position write without needing its own enabled check.
+local freeAimEnabled: boolean = false
+
 -- ============================================================
 -- Private helpers
 -- ============================================================
@@ -166,6 +171,41 @@ function CrosshairUI:Start()
 
     Logger.debug("[CrosshairUI] Started")
 end
+
+-- ============================================================
+-- Free-aim crosshair API (Stage 1 — visual only)
+-- ============================================================
+
+-- Moves the entire crosshair container by the given pixel offset from screen center.
+-- Called every RenderStepped by GunController with FreeAimController:GetSmoothedAimOffset().
+-- The hitmarker bars live directly in the ScreenGui (not in the container) so they
+-- always flash at fixed screen center regardless of free-aim drift.
+function CrosshairUI:SetFreeAimOffset(offset: Vector2): ()
+    local container = crosshairContainer
+    if not container then
+        Logger.warn("[CrosshairUI] SetFreeAimOffset: crosshairContainer is nil")
+        return
+    end
+    -- Position is UDim2.new(0, offsetX_px, 0, offsetY_px).
+    -- The container is full-screen (Scale 1,1) so a pixel-only Position shifts every
+    -- bar inside it by exactly (offset.X, offset.Y) pixels from its normal position.
+    container.Position = UDim2.new(0, offset.X, 0, offset.Y)
+end
+
+-- Enables or disables free-aim crosshair movement.
+-- When disabled (no weapon equipped), the container snaps back to (0,0) immediately.
+function CrosshairUI:SetFreeAimEnabled(enabled: boolean): ()
+    assert(typeof(enabled) == "boolean", "[CrosshairUI] SetFreeAimEnabled: expected boolean")
+    freeAimEnabled = enabled
+    if not enabled then
+        local container = crosshairContainer
+        if container then
+            container.Position = UDim2.fromScale(0, 0)
+        end
+    end
+end
+
+-- ============================================================
 
 -- Shows the hitmarker for HM_SHOW_TIME seconds, then fades it over HM_FADE_TIME.
 -- Safe to call rapidly — each new call snaps bars back to opaque instantly.

@@ -1074,4 +1074,57 @@ Constants.VIEWMODEL_ADS_DISABLE_PROCEDURAL_MOVEMENT = true
 Constants.VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING = true
 Constants.VIEWMODEL_ADS_DISABLE_NORMAL_IDLE_WHILE_AIMING = true
 
+-- ============================================================
+-- Free-aim foundation (Stage 1 — visual / input only)
+-- Crosshair and viewmodel lean toward mouse aim point within a deadzone.
+-- Does NOT change bullet direction, camera.CFrame, server remotes, or hit validation.
+-- Stage 2 integration (GetAimRay → firing) is deferred; see DEBT-063.
+-- ============================================================
+
+-- Master switch: set false to disable all free-aim behaviour instantly.
+Constants.FREE_AIM_ENABLED                 = true
+
+-- Hipfire deadzone radius in pixels (how far the crosshair can drift from center).
+Constants.FREE_AIM_RADIUS_PIXELS           = 110
+
+-- ADS deadzone radius in pixels (tighter; makes ADS feel steadier).
+Constants.FREE_AIM_ADS_RADIUS_PIXELS       = 28
+
+-- Scale factor applied to raw mouse delta before adding to aim offset.
+-- 1.0 = 1 pixel of crosshair movement per pixel of mouse movement.
+Constants.FREE_AIM_MOUSE_GAIN              = 1.0
+
+-- Return-to-center speed (lerp per second) when mouse is idle, hipfire.
+Constants.FREE_AIM_RETURN_SPEED            = 10
+
+-- Return-to-center speed (lerp per second) when mouse is idle, ADS.
+Constants.FREE_AIM_ADS_RETURN_SPEED        = 18
+
+-- Speed at which the visible crosshair position lerps toward the raw aim offset.
+-- Higher = crosshair tracks the aim point more tightly.
+Constants.FREE_AIM_CROSSHAIR_SMOOTH_SPEED  = 22
+
+-- Speed at which the viewmodel lean lerps toward the normalized aim offset.
+-- Lower = more lag between crosshair drift and weapon tilt.
+Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED   = 16
+
+-- Maximum yaw (left/right) tilt applied to the viewmodel, in degrees.
+Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES   = 4
+
+-- Maximum pitch (up/down) tilt applied to the viewmodel, in degrees.
+Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES = 3
+
+-- When true, free aim is suppressed and smoothly recenters while sprinting.
+Constants.FREE_AIM_DISABLE_WHILE_SPRINTING = true
+
+-- When true, free aim is suppressed and smoothly recenters while reloading.
+Constants.FREE_AIM_DISABLE_WHILE_RELOADING = true
+
+-- When true, the aim offset is reset to zero when the weapon is holstered.
+Constants.FREE_AIM_RESET_ON_HOLSTER        = true
+
+-- When false, the aim offset is NOT reset when exiting ADS back to hipfire.
+-- The crosshair drifts from wherever it was before ADS, giving continuity.
+Constants.FREE_AIM_RESET_ON_ADS_EXIT       = false
+
 return Constants

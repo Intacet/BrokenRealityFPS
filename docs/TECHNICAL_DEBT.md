@@ -264,9 +264,9 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 **Severity:** Low-Medium
 **Studio verification required:** No
 **Risk:** `ClientInit.client.lua` holds an explicit ordered list of `loadAndStart()` / `loadInitAndStart()` calls. When a new controller is built (e.g. `MovementController`, `CutsceneController`), a developer must manually add its call in the correct position. If forgotten, the controller's `Start()` is never called and it silently does nothing — no error, no warning, just a non-functional system.
-**Current count:** 9 entries (MatchController, MatchUI, HUD, DeathScreen, KillFeedUI, CrosshairUI, ViewModelController, SoundController, GunController).
+**Current count:** 11 entries (MatchController, MatchUI, HUD, DeathScreen, KillFeedUI, CrosshairUI, ViewModelController, SoundController, MovementController, FreeAimController, GunController). **Updated 2026-06-09 — FreeAimController (Stage 1 free-aim) added as entry 10; GunController moved to 11.**
 **Trigger:** Every time a new controller is built. The risk grows with each addition.
-**Fix when:** The controller count reaches double digits. At that point, consider a self-registration pattern where each ModuleScript registers itself with ClientInit via a shared table, or a folder-scan pattern that discovers and calls all controllers automatically. Until then, the explicit list is simpler and clearer.
+**Fix when:** Self-registration or folder-scan pattern is added — the controller count is now at double digits. Consider a shared registry table that each ModuleScript adds itself to, with ClientInit iterating in dependency order. The explicit list is simpler but requires manual discipline on every new controller.
 
 ---
 
@@ -1483,6 +1483,53 @@ This worsens DEBT-013 (weapon name not sent in `WeaponFired` payload) by adding 
 15. Check Output → no errors from `[WorldWeaponService]` or `[GunController]` throughout.
 
 **Resolve when:** All 15 checklist items pass in a live Studio session and the grip CFrames produce a correct gun position in the player's hands.
+
+---
+
+## [DEBT-063] Stage 1 free-aim is visual/input foundation only — GunController firing ray unchanged — ADDED 2026-06-09
+
+**Files:** `src/client/FreeAimController.lua`, `src/client/GunController.lua`, `src/client/ViewModelController.lua`, `src/client/UI/CrosshairUI.lua`, `src/shared/Constants.lua`
+**Severity:** Low (intentional deferral; no bug — Stage 1 is correct and complete by design)
+**Studio verification required:** Yes — see manual test steps below
+
+**What Stage 1 implements:**
+- `FreeAimController` tracks a screen-space aim offset driven by `UserInputService:GetMouseDelta()` each `RenderStepped`.
+- The offset is clamped to a circular deadzone (`FREE_AIM_RADIUS_PIXELS = 110` hipfire, `FREE_AIM_ADS_RADIUS_PIXELS = 28` ADS).
+- `CrosshairUI:SetFreeAimOffset()` moves the crosshair container by the smoothed pixel offset.
+- `ViewModelController:SetFreeAimOffset()` tilts the viewmodel by a normalized version of the offset (up to `FREE_AIM_VIEWMODEL_YAW_DEGREES = 4°` / `FREE_AIM_VIEWMODEL_PITCH_DEGREES = 3°`).
+- Free aim is suppressed (offset smoothly returns to zero) while sprinting, reloading, or with no weapon equipped.
+- On holster, offset resets instantly when `FREE_AIM_RESET_ON_HOLSTER = true`.
+- All 14 `FREE_AIM_*` constants live in `src/shared/Constants.lua`; no magic values.
+
+**What Stage 1 does NOT do (intentional):**
+- **Bullets do not follow the floating crosshair.** `GunController` fires `WeaponFired` with `camera.CFrame.LookVector` as before — the server raycast is unchanged.
+- **No camera deadzone rotation.** The camera follows the Roblox default controller. Only the crosshair and viewmodel lean are affected.
+- **No body/camera yaw decoupling.** Full DayZ-style body yaw (camera rotates independently of character facing) is not implemented.
+- **No independent first-person body yaw.** Stage 1 is purely a visual/input overlay.
+
+**Stage 2 options (deferred — review before implementing):**
+1. **Local shot visuals:** Route `GunController`'s local cosmetic raycast (client-side muzzle flash placement, local hit VFX) through `FreeAimController:GetAimRay()` so the visual shot appears to come from the crosshair position. Server validation is unchanged.
+2. **Server-side free-aim:** If the design evolves to use the floating crosshair for actual hit detection, the `WeaponFired` payload would need to include the aim viewport point or direction, and `GunService` would need to validate it. This requires reviewing `GunService` origin/direction validation, lag compensation, and anti-cheat implications. Do not implement without explicit design review.
+3. **Full camera deadzone:** DayZ-style body/camera yaw decoupling — camera rotates while body faces forward; past a threshold the body snaps to follow. This requires changes to `MovementController` (camera yaw / `HumanoidRootPart` facing), which is out of scope for Stage 1.
+
+**MCP / Studio verification required:**
+The following steps must be confirmed manually in Roblox Studio play mode before closing this entry:
+1. Zero errors in Output on spawn (no `[FreeAimController]`, `[CrosshairUI]`, `[ViewModelController]`, or `[GunController]` errors).
+2. FreeAimController initializes (`[FreeAimController] Initialized — free aim ENABLED` appears in Output).
+3. Crosshair is centered (no drift) while weapon is holstered.
+4. Press key 1 → weapon equips, equip animation plays, idle loops.
+5. Move mouse — crosshair drifts within the circular deadzone; viewmodel subtly leans toward the drift direction.
+6. Stop moving mouse — crosshair smoothly returns toward center.
+7. ADS (MB2) — crosshair range is smaller (tighter); ADS animations still play correctly.
+8. Reload (R) — crosshair smoothly recenters during reload; reload animation plays; idle/run resumes after.
+9. Sprint — crosshair recenters while sprinting; idle/run animations unaffected.
+10. Holster (key 1 again) — crosshair snaps to center; no drift.
+11. Re-equip — free aim works again.
+12. Fire (MB1) — firing behavior unchanged; bullets still follow camera.CFrame.LookVector.
+13. No new remotes created; no server combat or damage behavior changed.
+14. Camera behavior is unchanged from before this task.
+
+**Trigger for Stage 2:** Design decision to make bullets follow the floating crosshair. Requires explicit review of server validation, lag compensation, and gameplay consistency before any change to `WeaponFired` payload or `GunService` raycast direction.
 
 ---
 

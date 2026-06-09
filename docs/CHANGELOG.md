@@ -7,6 +7,75 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-09 — FEATURE] — Stage 1 free-aim foundation (DayZ-style floating crosshair)
+
+### Summary
+
+Adds a DayZ-style first-person free-aim system for the AKS74 viewmodel. The crosshair and weapon lean drift within a circular deadzone driven by mouse input, returning smoothly to center when the mouse is still. **Stage 1 is visual/input only** — bullets still travel along `camera.CFrame.LookVector`; no server combat, damage, or hit-validation logic was changed.
+
+### What was added
+
+- **`src/client/FreeAimController.lua`** (new) — standalone module tracking the screen-space aim offset. Runs its own `RenderStepped` loop started by `Init()`. Exposes a full public API: `SetEnabled`, `IsEnabled`, `SetWeaponEquipped`, `SetAiming`, `SetSprinting`, `SetReloading`, `ResetOffset`, `GetAimOffset`, `GetSmoothedAimOffset`, `GetNormalizedAimOffset`, `GetAimViewportPoint`, `GetAimRay` (Stage 2 API, not wired to firing). All boolean setters validated with `assert(typeof(...) == "boolean")`.
+
+### What was changed
+
+- **`src/shared/Constants.lua`** — added 14 `FREE_AIM_*` constants:
+  - `FREE_AIM_ENABLED = true` (master switch)
+  - `FREE_AIM_RADIUS_PIXELS = 110` (hipfire deadzone radius)
+  - `FREE_AIM_ADS_RADIUS_PIXELS = 28` (ADS deadzone radius — tighter)
+  - `FREE_AIM_MOUSE_GAIN = 1.0`
+  - `FREE_AIM_RETURN_SPEED = 10` / `FREE_AIM_ADS_RETURN_SPEED = 18`
+  - `FREE_AIM_CROSSHAIR_SMOOTH_SPEED = 22`
+  - `FREE_AIM_VIEWMODEL_BLEND_SPEED = 16`
+  - `FREE_AIM_VIEWMODEL_YAW_DEGREES = 4` / `FREE_AIM_VIEWMODEL_PITCH_DEGREES = 3`
+  - `FREE_AIM_DISABLE_WHILE_SPRINTING = true`
+  - `FREE_AIM_DISABLE_WHILE_RELOADING = true`
+  - `FREE_AIM_RESET_ON_HOLSTER = true`
+  - `FREE_AIM_RESET_ON_ADS_EXIT = false`
+
+- **`src/client/UI/CrosshairUI.lua`** — added two methods:
+  - `SetFreeAimOffset(offset: Vector2)` — moves `crosshairContainer.Position` by the smoothed pixel offset so all four crosshair bars shift as a unit; hitmarker stays at fixed screen center (lives directly in ScreenGui, not in the container).
+  - `SetFreeAimEnabled(enabled: boolean)` — when false, snaps container back to `UDim2.fromScale(0, 0)`. Added `freeAimEnabled` state variable.
+
+- **`src/client/ViewModelController.lua`** — added:
+  - `vmFreeAimNormalized: Vector2` and `vmFreeAimBlended: Vector2` state variables.
+  - Free-aim lean computation in `RenderStepped`: lerps `vmFreeAimBlended` toward `vmFreeAimNormalized`, converts to `CFrame.Angles(pitchRad, yawRad, 0)`, inserts `freeAimCF` between `viewRecoilCFrame` and `finalMoveCF` in the `PivotTo` chain.
+  - `SetFreeAimOffset(normalizedOffset: Vector2)` — push method called by GunController each frame.
+  - `GetIsReloading(): boolean` — exposes `isReloading` flag so GunController can relay it to FreeAimController without storing a duplicate.
+
+- **`src/client/GunController.lua`** — added:
+  - `local FreeAimController = require(script.Parent:WaitForChild("FreeAimController"))` at module level.
+  - Free-aim sync block in `RenderStepped` (gated on `Constants.FREE_AIM_ENABLED`): pushes `SetSprinting`, `SetReloading`, `SetAiming` to FreeAimController; pushes `GetNormalizedAimOffset()` to ViewModelController; pushes `GetSmoothedAimOffset()` and `SetFreeAimEnabled(...)` to CrosshairUI.
+  - `FreeAimController:SetWeaponEquipped(true/false)` calls in the equip/holster handler.
+  - `FreeAimController:ResetOffset()` on holster (when `FREE_AIM_RESET_ON_HOLSTER`) and on `CharacterAdded`.
+
+- **`src/client/ClientInit.client.lua`** — added:
+  - `loadAndInit` helper (calls `controller:Init()`, no `Start()`).
+  - Step 10: `FreeAimController` — initialized via `loadAndInit` before GunController.
+  - GunController renumbered from step 10 to step 11.
+  - Header comment updated to document the new dependency chain.
+
+### What was NOT changed
+
+- Server combat, damage, ammo authority, health, reload authority, raycast validation, or remotes — all unchanged.
+- `GunController` firing ray direction (`WeaponFired` payload) — unchanged; bullets still travel along `camera.CFrame.LookVector`.
+- Camera (`CameraType`, `camera.CFrame`, `FieldOfView`) — unchanged.
+- `MovementController`, `CameraController`, `GunService`, `DamageService`, or any server script — not touched.
+- No new remotes created.
+- ADS in → ADS idle → ADS fire → ADS out animation flow — unchanged.
+- Equip, idle, run, reload, holster viewmodel animations — unchanged.
+
+### Technical debt affected
+
+- **DEBT-017** (ClientInit entry count): now 11 entries (was 10 after MovementController). `Fix when` condition has been reached — self-registration pattern should be considered for the next new controller.
+- **DEBT-063** (new): Stage 1 free-aim visual/input foundation complete. Stage 2 (routing local shot visuals or raycast through `FreeAimController:GetAimRay()`) is intentionally deferred pending design review of server validation implications. Full DayZ-style camera deadzone/body yaw is not yet implemented.
+
+### MCP / Studio verification
+
+MCP was available during implementation. Studio playtest was not run before commit (CLAUDE.md rule: MCP verification required before committing for client controller changes). Mark DEBT-063 as needing Studio verification before closing.
+
+---
+
 ## [2026-06-03 — FIX] — Add ADS alignment offset to center iron sights
 
 ### Summary

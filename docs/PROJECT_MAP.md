@@ -937,7 +937,35 @@ CutsceneController      -- intro/outro sequences, triggered by RoundStateChanged
 HUD                     -- driven by HealthChanged, TeamStatusUpdate, AmmoChanged, RoundStateChanged
 ObjectiveUI             -- driven by ObjectiveUpdated, ObjectiveComplete
 MatchUI                 -- driven by RoundStateChanged
-CrosshairUI             -- driven by RoundStateChanged; exposes ShowHitmarker()
+CrosshairUI             -- driven by RoundStateChanged; exposes ShowHitmarker().
+                        --   Stage 1 free-aim API (2026-06-09):
+                        --     SetFreeAimOffset(offset: Vector2) — moves crosshairContainer.Position by
+                        --       the smoothed pixel offset; hitmarker bars live directly in the ScreenGui
+                        --       (not in the container) so they always flash at fixed screen center.
+                        --     SetFreeAimEnabled(enabled: boolean) — when false, snaps container to (0,0).
+FreeAimController       -- Stage 1 free-aim foundation (added 2026-06-09 — visual/input only).
+                        --   Tracks screen-space aim offset driven by mouse delta each RenderStepped.
+                        --   Requires only Constants + Logger (no circular dependency).
+                        --   Initialized by ClientInit:loadAndInit() (calls :Init(), not :Start()).
+                        --   GunController is the relay: pushes game state to FreeAimController
+                        --     (SetSprinting, SetReloading, SetAiming, SetWeaponEquipped) and reads
+                        --     offsets (GetSmoothedAimOffset → CrosshairUI, GetNormalizedAimOffset →
+                        --     ViewModelController) each RenderStepped.
+                        --   Public API:
+                        --     Init()                     — starts RenderStepped loop + CharacterAdded reset.
+                        --     SetEnabled(bool)           — master kill switch.
+                        --     IsEnabled() → bool
+                        --     SetWeaponEquipped(bool)    — suppresses when false.
+                        --     SetAiming(bool)            — switches to ADS radius/return speed.
+                        --     SetSprinting(bool)         — suppresses when FREE_AIM_DISABLE_WHILE_SPRINTING.
+                        --     SetReloading(bool)         — suppresses when FREE_AIM_DISABLE_WHILE_RELOADING.
+                        --     ResetOffset()              — instantly zeros aimOffset and smoothedOffset.
+                        --     GetAimOffset() → Vector2   — raw clamped pixel offset.
+                        --     GetSmoothedAimOffset() → Vector2  — smoothed pixel offset (for CrosshairUI).
+                        --     GetNormalizedAimOffset() → Vector2 — smoothedOffset / activeRadius (for ViewModelController).
+                        --     GetAimViewportPoint() → Vector2   — screen-center + smoothedOffset.
+                        --     GetAimRay(maxDist?) → Ray          — Stage 2 API only; not wired to firing (see DEBT-063).
+                        --   No new remotes. No camera.CFrame writes. No server changes.
 ViewModelController     -- driven by RoundStateChanged; reads MovementController and WeaponData.
                         --   Fire / recoil / muzzle API: PlayFireAnimation(), SetRecoilOffset(),
                         --   GetBarrelTipCFrame().
@@ -956,6 +984,13 @@ ViewModelController     -- driven by RoundStateChanged; reads MovementController
                         --                                 manages run ↔ idle transition while equipped.
                         --     StopWeaponAnimations()    — stop/destroy all tracks; reset isReloading + isRunning.
                         --   Animation priority order (highest to lowest): Reload ≥ Fire > Run > Idle.
+                        --   Stage 1 free-aim API (2026-06-09):
+                        --     SetFreeAimOffset(normalizedOffset: Vector2) — pushed by GunController each frame;
+                        --       stored as vmFreeAimNormalized; RenderStepped lerps vmFreeAimBlended toward it
+                        --       at FREE_AIM_VIEWMODEL_BLEND_SPEED and converts to CFrame.Angles (yaw/pitch).
+                        --       freeAimCF inserted between viewRecoilCFrame and finalMoveCF in PivotTo chain.
+                        --     GetIsReloading() → bool — exposes isReloading so GunController can relay it
+                        --       to FreeAimController without a duplicate flag.
                         --   Weapon is holstered (model == nil) by default; GunController calls
                         --   EquipWeapon("AKS74") when key 1 is pressed.
                         --   Camera mode and viewmodel visibility are controlled by

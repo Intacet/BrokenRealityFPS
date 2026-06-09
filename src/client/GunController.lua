@@ -58,6 +58,11 @@ local ViewModelController = require(script.Parent:WaitForChild("ViewModelControl
 local MovementController  = require(script.Parent:WaitForChild("MovementController"))
 local CrosshairUI         = require(script.Parent:WaitForChild("UI"):WaitForChild("CrosshairUI"))
 local SoundController     = require(script.Parent:WaitForChild("SoundController"))
+-- Stage 1 free-aim: FreeAimController is Init()ed by ClientInit before GunController:Start().
+-- GunController is the "glue" that relays state → FreeAimController and offsets → CrosshairUI
+-- + ViewModelController each frame.  No circular require: FreeAimController only requires
+-- Constants and Logger.
+local FreeAimController   = require(script.Parent:WaitForChild("FreeAimController"))
 
 local Remotes          = ReplicatedStorage:WaitForChild("Remotes")
 local WeaponFired      = Remotes:WaitForChild("WeaponFired")      :: RemoteEvent
@@ -206,6 +211,22 @@ function GunController:Start()
             local isSprinting = MovementController:GetMoveState() == "Sprinting"
             ViewModelController:SetRunning(isSprinting)
         end
+
+        -- Stage 1 free-aim sync.
+        -- Push current game state to FreeAimController so it can decide suppression,
+        -- then relay the resulting offsets to CrosshairUI and ViewModelController.
+        -- Gated on the master switch so a single constant toggles all free-aim behaviour.
+        if Constants.FREE_AIM_ENABLED then
+            local sprinting = MovementController:GetMoveState() == "Sprinting"
+            FreeAimController:SetSprinting(sprinting)
+            FreeAimController:SetReloading(ViewModelController:GetIsReloading())
+            FreeAimController:SetAiming(ViewModelController:IsAiming())
+            ViewModelController:SetFreeAimOffset(FreeAimController:GetNormalizedAimOffset())
+            CrosshairUI:SetFreeAimOffset(FreeAimController:GetSmoothedAimOffset())
+            CrosshairUI:SetFreeAimEnabled(
+                FreeAimController:IsEnabled() and equippedWeaponName ~= nil
+            )
+        end
     end)
 
     -- ── Input: Key 1 — equip / holster AKS74 viewmodel ─────────────────────
@@ -222,12 +243,23 @@ function GunController:Start()
             -- to the character's Right Arm (visible to self in third-person and
             -- to other players regardless of camera mode).
             WeaponEquipState:FireServer(Constants.DEFAULT_VIEWMODEL_WEAPON, true)
+            -- Notify FreeAimController so the free-aim deadzone activates.
+            if Constants.FREE_AIM_ENABLED then
+                FreeAimController:SetWeaponEquipped(true)
+            end
             Logger.debug("[GunController] Equipped: " .. Constants.DEFAULT_VIEWMODEL_WEAPON)
         else
             ViewModelController:HolsterWeapon()
             equippedWeaponName = nil
             -- Inform WorldWeaponService to remove the world model.
             WeaponEquipState:FireServer(Constants.DEFAULT_VIEWMODEL_WEAPON, false)
+            -- Notify FreeAimController and reset the offset on holster.
+            if Constants.FREE_AIM_ENABLED then
+                FreeAimController:SetWeaponEquipped(false)
+                if Constants.FREE_AIM_RESET_ON_HOLSTER then
+                    FreeAimController:ResetOffset()
+                end
+            end
             Logger.debug("[GunController] Holstered weapon")
         end
     end)
@@ -238,6 +270,11 @@ function GunController:Start()
     -- ensures GunController's local state matches so fire / reload remain gated.
     local respawnConn = LocalPlayer.CharacterAdded:Connect(function(_character: Model)
         equippedWeaponName = nil
+        -- Reset free-aim state on respawn: weapon is holstered, offset is cleared.
+        if Constants.FREE_AIM_ENABLED then
+            FreeAimController:SetWeaponEquipped(false)
+            FreeAimController:ResetOffset()
+        end
         Logger.debug("[GunController] equippedWeaponName cleared on respawn (weapon holstered)")
     end)
     table.insert(_connections, respawnConn)
