@@ -120,6 +120,11 @@ local recoilBuildup:   number  = 0   -- accumulated multiplier from sustained fi
 local recoilResetTimer:number  = 0   -- counts down from feel.recoilResetTime after last shot
 local recoilAltRight:  boolean = true -- alternates sign of lateral kick each shot
 
+-- Full-auto flag. Set true by InputBegan MB1; cleared by InputEnded MB1, dry-fire, or holster.
+-- RenderStepped calls attemptFire() each frame while this is true; the internal cooldown check
+-- gates actual shot cadence to the weapon's fireRate.
+local isAutoFiring: boolean = false
+
 -- ============================================================
 -- Private helpers
 -- ============================================================
@@ -166,6 +171,146 @@ end
 local GunController = {}
 
 function GunController:Start()
+
+    -- ── attemptFire: internal helper — fire one shot if all guards pass ────────
+    -- Defined before RenderStepped and InputBegan so both closures can reference it.
+    -- Returns true on a successful shot, false on any guard failure.
+    -- Reads WeaponData[equippedWeaponName] for client-side rate limiting so the client
+    -- paces shots at AKS74's 650 RPM; GunService still validates against AR15 (DEBT-013).
+    local function attemptFire(): boolean
+        -- Guard: weapon must be equipped.
+        local weapon = equippedWeaponName
+        if weapon == nil then return false end
+
+        -- Guard: phase must be ACTIVE.
+        if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return false end
+
+        -- Guard: WeaponFeel data must exist (uses DEFAULT_WEAPON for all cosmetics).
+        local feel = WeaponFeel[Constants.DEFAULT_WEAPON]
+        if not feel then
+            Logger.warn("[GunController] No WeaponFeel entry for:", Constants.DEFAULT_WEAPON)
+            return false
+        end
+
+        -- Guard: DEFAULT_WEAPON stat block must exist (needed for range and fallback rate).
+        local defaultDef = WeaponData[Constants.DEFAULT_WEAPON]
+        if not defaultDef then
+            Logger.warn("[GunController] No WeaponData entry for:", Constants.DEFAULT_WEAPON)
+            return false
+        end
+
+        -- Derive client-side shot interval. Prefer equipped weapon's rpm then fireRate,
+        -- then fall back to DEFAULT_WEAPON fireRate. AKS74 at 650 RPM = ~0.0923 s;
+        -- AR15 server limit is 0.09 s (more restrictive) so all AKS74 shots pass.
+        local interval: number
+        local equippedDef = (WeaponData :: any)[weapon :: string]
+        if equippedDef ~= nil then
+            local rpm = (equippedDef :: any).rpm
+            local fr  = (equippedDef :: any).fireRate
+            if typeof(rpm) == "number" and (rpm :: number) > 0 then
+                interval = 60 / (rpm :: number)
+            elseif typeof(fr) == "number" and (fr :: number) > 0 then
+                interval = fr :: number
+            else
+                interval = defaultDef.fireRate
+                Logger.warn("[GunController] No rpm/fireRate for " .. weapon .. " — using DEFAULT_WEAPON fallback")
+            end
+        else
+            interval = defaultDef.fireRate
+        end
+
+        -- Guard: dry fire — no rounds in magazine.
+        if currentMag <= 0 then
+            SoundController:PlayDryFire()
+            isAutoFiring = false
+            Logger.debug("[GunController] Dry fire — auto-fire stopped")
+            return false
+        end
+
+        -- Guard: client-side rate limit (mirrors server; server re-validates independently).
+        local now = os.clock()
+        if now - lastShotTime < interval then return false end
+
+        -- Guard: ADS may be blocked by movement.
+        if isADS and MovementController:IsADSBlocked() then
+            isADS = false
+        end
+
+        -- Guard: tactical sprint blocks fire (client-side presentation only).
+        if Constants.TACTICAL_SPRINT_BLOCKS_GUN_USE
+            and MovementController.IsTacticalSprinting()
+        then
+            return false
+        end
+
+        -- Guard: character must exist.
+        local character = LocalPlayer.Character
+        if not character then return false end
+
+        -- ── Spread-perturbed raycast ──────────────────────────────────────────
+        local camera    = workspace.CurrentCamera
+        local origin    = camera.CFrame.Position
+        local baseDir   = camera.CFrame.LookVector
+        local spread    = computeSpread(feel)
+        local direction = applySpread(baseDir, spread)
+
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = { character }
+
+        workspace:Raycast(origin, direction.Unit * defaultDef.range, params)
+
+        lastShotTime = now
+        WeaponFired:FireServer(origin, direction, now)
+
+        -- ── Recoil CFrame snap ────────────────────────────────────────────────
+        recoilBuildup = math.min(
+            recoilBuildup + (feel.recoilBuildup :: number),
+            feel.recoilBuildupMax :: number
+        )
+        recoilResetTimer = feel.recoilResetTime :: number
+
+        local kickUp    = math.rad((feel.recoilUp :: number) * (1 + recoilBuildup))
+        local kickRight = math.rad((feel.recoilRight :: number) * (1 + recoilBuildup))
+        if feel.recoilRightAlternate then
+            kickRight = recoilAltRight and kickRight or -kickRight
+            recoilAltRight = not recoilAltRight
+        end
+        recoilCFrame = recoilCFrame * CFrame.Angles(-kickUp, kickRight, 0)
+
+        -- ── Audio and visuals ─────────────────────────────────────────────────
+        SoundController:PlayGunshot()
+        if ViewModelController:IsAiming() then
+            ViewModelController:PlayADSFireAnimation()
+        else
+            ViewModelController:PlayFireAnimation()
+        end
+
+        -- ── Viewmodel recoil impulse (Stage 1 — viewmodel only) ──────────────
+        if Constants.VIEWMODEL_RECOIL_ENABLED then
+            ViewModelController:ApplyRecoil(ViewModelController:IsAiming())
+        end
+
+        -- ── Muzzle flash (existing behaviour preserved) ───────────────────────
+        local flash        = Instance.new("Part")
+        flash.Name         = "MuzzleFlash"
+        flash.Size         = Vector3.new(0.3, 0.3, 0.3)
+        flash.BrickColor   = BrickColor.new("Bright yellow")
+        flash.Material     = Enum.Material.Neon
+        flash.CanCollide   = false
+        flash.CastShadow   = false
+        flash.Anchored     = true
+        flash.CFrame       = ViewModelController:GetBarrelTipCFrame()
+        flash.Parent       = workspace.CurrentCamera
+        local flashMesh    = Instance.new("SpecialMesh")
+        flashMesh.MeshType = Enum.MeshType.Sphere
+        flashMesh.Parent   = flash
+        task.delay(feel.muzzleFlashDuration :: number, function()
+            flash:Destroy()
+        end)
+
+        return true
+    end
 
     -- ── RenderStepped: recoil recovery ────────────────────────────────────────
     -- Lerps recoilCFrame back toward identity each frame, then pushes the result
@@ -230,6 +375,11 @@ function GunController:Start()
                 FreeAimController:IsEnabled() and equippedWeaponName ~= nil
             )
         end
+
+        -- Full-auto: fire each frame while button is held; internal rate limit gates cadence.
+        if isAutoFiring then
+            attemptFire()
+        end
     end)
 
     -- ── Input: Key 1 — equip / holster AKS74 viewmodel ─────────────────────
@@ -254,6 +404,7 @@ function GunController:Start()
         else
             ViewModelController:HolsterWeapon()
             equippedWeaponName = nil
+            isAutoFiring = false
             -- Inform WorldWeaponService to remove the world model.
             WeaponEquipState:FireServer(Constants.DEFAULT_VIEWMODEL_WEAPON, false)
             -- Notify FreeAimController and reset the offset on holster.
@@ -273,6 +424,7 @@ function GunController:Start()
     -- ensures GunController's local state matches so fire / reload remain gated.
     local respawnConn = LocalPlayer.CharacterAdded:Connect(function(_character: Model)
         equippedWeaponName = nil
+        isAutoFiring = false
         -- Reset free-aim state on respawn: weapon is holstered, offset is cleared.
         if Constants.FREE_AIM_ENABLED then
             FreeAimController:SetWeaponEquipped(false)
@@ -282,118 +434,31 @@ function GunController:Start()
     end)
     table.insert(_connections, respawnConn)
 
-    -- ── Input: Fire ───────────────────────────────────────────────────────────
+    -- ── Input: Fire (full-auto MB1) ───────────────────────────────────────────
+    -- InputBegan sets the isAutoFiring flag and fires the first shot immediately.
+    -- RenderStepped fires subsequent shots while the flag is true, gated by the
+    -- internal rate limit in attemptFire(). InputEnded clears the flag.
+    -- Both connections are stored in _connections for future cleanup.
 
-    UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+    local fireBeganConn = UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
         if gameProcessed then return end
         if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-
-        -- Block fire while holstered (no weapon in hand).
         if equippedWeaponName == nil then return end
-
-        if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
-
-        local feel = WeaponFeel[Constants.DEFAULT_WEAPON]
-        if not feel then
-            Logger.warn("[GunController] No WeaponFeel entry for:", Constants.DEFAULT_WEAPON)
-            return
-        end
-
-        local weaponDef = WeaponData[Constants.DEFAULT_WEAPON]
-        if not weaponDef then
-            Logger.warn("[GunController] No WeaponData entry for:", Constants.DEFAULT_WEAPON)
-            return
-        end
-
-        -- Dry fire.
-        if currentMag <= 0 then
-            SoundController:PlayDryFire()
-            return
-        end
-
-        -- Client-side rate limit.
-        local now = os.clock()
-        if now - lastShotTime < weaponDef.fireRate then return end
-
-        -- ADS blocks sprint; sprinting blocks ADS (MovementController gate).
-        if isADS and MovementController:IsADSBlocked() then
-            isADS = false
-        end
-
-        -- Stage 2P: block firing while tactical sprint is active.
-        -- Client-side presentation block only — no server state change.
-        if Constants.TACTICAL_SPRINT_BLOCKS_GUN_USE
-            and MovementController.IsTacticalSprinting()
-        then
-            return
-        end
-
-        local character = LocalPlayer.Character
-        if not character then return end
-
-        -- ── Spread-perturbed raycast ──────────────────────────────────────────
-        local camera    = workspace.CurrentCamera
-        local origin    = camera.CFrame.Position
-        local baseDir   = camera.CFrame.LookVector
-        local spread    = computeSpread(feel)
-        local direction = applySpread(baseDir, spread)
-
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = { character }
-
-        workspace:Raycast(origin, direction.Unit * weaponDef.range, params)
-
-        lastShotTime = now
-
-        WeaponFired:FireServer(origin, direction, now)
-
-        -- ── Recoil CFrame snap ────────────────────────────────────────────────
-        -- Accumulate buildup and compute this shot's kick angles.
-        recoilBuildup = math.min(
-            recoilBuildup + (feel.recoilBuildup :: number),
-            feel.recoilBuildupMax :: number
-        )
-        recoilResetTimer = feel.recoilResetTime :: number
-
-        local kickUp    = math.rad((feel.recoilUp :: number) * (1 + recoilBuildup))
-        local kickRight = math.rad((feel.recoilRight :: number) * (1 + recoilBuildup))
-        if feel.recoilRightAlternate then
-            kickRight = recoilAltRight and kickRight or -kickRight
-            recoilAltRight = not recoilAltRight
-        end
-
-        -- Compose kick onto the existing recoil CFrame so bursts stack correctly.
-        recoilCFrame = recoilCFrame * CFrame.Angles(-kickUp, kickRight, 0)
-
-        -- ── Audio and visuals ─────────────────────────────────────────────────
-
-        SoundController:PlayGunshot()
-        -- Play ADS fire animation if aiming, otherwise normal fire animation.
-        if ViewModelController:IsAiming() then
-            ViewModelController:PlayADSFireAnimation()
-        else
-            ViewModelController:PlayFireAnimation()
-        end
-
-        -- Muzzle flash. Duration from WeaponFeel so designers can tune it.
-        local flash        = Instance.new("Part")
-        flash.Name         = "MuzzleFlash"
-        flash.Size         = Vector3.new(0.3, 0.3, 0.3)
-        flash.BrickColor   = BrickColor.new("Bright yellow")
-        flash.Material     = Enum.Material.Neon
-        flash.CanCollide   = false
-        flash.CastShadow   = false
-        flash.Anchored     = true
-        flash.CFrame       = ViewModelController:GetBarrelTipCFrame()
-        flash.Parent       = workspace.CurrentCamera
-        local flashMesh    = Instance.new("SpecialMesh")
-        flashMesh.MeshType = Enum.MeshType.Sphere
-        flashMesh.Parent   = flash
-        task.delay(feel.muzzleFlashDuration :: number, function()
-            flash:Destroy()
-        end)
+        if isAutoFiring then return end
+        isAutoFiring = true
+        Logger.debug("[GunController] Auto-fire started")
+        attemptFire()
     end)
+    table.insert(_connections, fireBeganConn)
+
+    local fireEndedConn = UserInputService.InputEnded:Connect(function(input: InputObject, gameProcessed: boolean)
+        if gameProcessed then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        if not isAutoFiring then return end
+        isAutoFiring = false
+        Logger.debug("[GunController] Auto-fire stopped")
+    end)
+    table.insert(_connections, fireEndedConn)
 
     -- ── Input: Reload ─────────────────────────────────────────────────────────
 

@@ -7,6 +7,46 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-10 — FEAT] — AKS74 full-auto 650 RPM + Stage 1 viewmodel recoil foundation
+
+### Summary
+
+Adds full-auto firing for the AKS74 at 650 RPM and a first-person viewmodel recoil system (Stage 1 — viewmodel only, no camera changes). Holding MB1 fires continuously; releasing MB1 stops firing immediately. Each shot calls a new `ViewModelController:ApplyRecoil()` method that pushes the viewmodel kick CFrame toward the camera and allows it to recover smoothly. ADS recoil is smaller/tighter than hipfire. All combat authority remains server-side (GunService unchanged except for future-proofing the rate-limit pattern). No camera changes, no spread changes, no new remotes, no ADS alignment changes.
+
+### Files changed
+
+- **`src/shared/WeaponData.lua`** — added `fireMode = "Auto"`, `rpm = 650`, `fireRate = 60/650`, `damage = 30`, `range = 450`, `magazineSize = 30`, `reserveAmmo = 120`, `reloadTime = 2.2` to AKS74 entry. All animation IDs preserved unchanged.
+- **`src/shared/Constants.lua`** — added `AKS74_DEFAULT_RPM = 650` and 17 `VIEWMODEL_RECOIL_*` constants (`ENABLED`, `HIP/ADS_POSITION_Z/Y`, `HIP/ADS_PITCH/YAW/ROLL_DEGREES`, `KICK_SPEED`, `RECOVERY_SPEED`, `MAX_ACCUMULATED`, `RANDOM_YAW/ROLL_SCALE`).
+- **`src/client/ViewModelController.lua`** — added `vmRecoilTarget`, `vmRecoilCurrent`, `vmRecoilAccum` state variables (reset in `init()` and `StopWeaponAnimations()`); added vmRecoilCF computation block in RenderStepped (chases target at KICK_SPEED, target decays at RECOVERY_SPEED); inserted `* vmRecoilCF` after `* viewRecoilCFrame` in both PivotTo chains (hip and ADS-aligned); added new public method `ApplyRecoil(isAiming: boolean)`.
+- **`src/client/GunController.lua`** — added `local isAutoFiring: boolean = false`; defined `local function attemptFire(): boolean` inside `Start()` (contains all fire logic, reads equipped weapon fireRate for client-side pacing, calls `ViewModelController:ApplyRecoil()`); added `if isAutoFiring then attemptFire() end` at end of RenderStepped; replaced old single-shot InputBegan MB1 handler with new `fireBeganConn` (sets flag, fires first shot) + `fireEndedConn` (clears flag), both stored in `_connections`; added `isAutoFiring = false` resets on holster and respawn.
+- **`src/server/GunService.server.lua`** — rate-limit block updated to derive `effectiveFireRate` from `weaponDef.rpm` when present (`60/rpm`), otherwise uses `weaponDef.fireRate`. Currently AR15 has no `rpm` field so behaviour is unchanged (0.09 s). Added `Logger.debug` for rate rejections. Future-proofing for DEBT-013.
+- **`docs/PROJECT_MAP.md`** — added `ApplyRecoil(isAiming: boolean)` to ViewModelController public API section.
+- **`docs/TECHNICAL_DEBT.md`** — added DEBT-064 (Stage 1 viewmodel recoil foundation; camera recoil, spread bloom, pattern curves, muzzle flash, shell ejection, impact VFX, sound changes all intentionally deferred). Updated affected debt entries (DEBT-013, 039, 040, 045, 059, 063 all stable).
+- **`docs/CHANGELOG.md`** — this entry.
+
+### Maintenance risks
+
+- **Dual recoil coexistence:** `viewRecoilCFrame` (WeaponFeel-based, existing) and `vmRecoilCF` (Constants-based, new) both compose into PivotTo. Combined effect may feel too strong; tune `VIEWMODEL_RECOIL_HIP/ADS_*` constants after Studio playtest.
+- **Client rate limit uses AKS74 data; server uses AR15:** Client paces at 0.0923 s (650 RPM); server validates at 0.09 s (AR15). Both pass because 0.0923 > 0.09. If AR15 RPM is ever reduced below 650 RPM, this relationship holds. If a future weapon fires faster than AR15's rate limit, shots will be rejected server-side (correct security behaviour).
+- **MCP unavailable:** Studio verification was not performed. See DEBT-064 for the full manual test checklist.
+
+### Test steps (manual Studio verification required)
+
+1. `rojo serve default.project.json`; confirm sync completes without error.
+2. Set `FORCE_FIRST_PERSON = true` in Constants.lua; enter play mode with phase ACTIVE.
+3. Press key 1 → AKS74 equips; no Output errors.
+4. Hold MB1 → continuous fire at ~650 RPM; fire animation restarts per shot; gunshot plays each shot.
+5. Release MB1 → firing stops instantly.
+6. Each shot: visible viewmodel kick backward + muzzle rise; smooth recovery between shots.
+7. MB2 (ADS) + hold MB1 → ADS fire animation; smaller/tighter kick than hipfire.
+8. Camera does not move during sustained fire.
+9. Empty magazine → dry fire on MB1; auto-fire stops.
+10. R during fire → reload plays; MB1 during reload → blocked.
+11. Holster mid-fire → no further shots.
+12. `VIEWMODEL_RECOIL_ENABLED = false` → fire works, no vmRecoilCF visual.
+
+---
+
 ## [2026-06-09 — FEAT] — Stage 1b: mouse inertia velocity layer + state weight system + crosshair/dot swap
 
 ### Summary

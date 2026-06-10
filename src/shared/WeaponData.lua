@@ -33,15 +33,24 @@ WeaponData["AR15"] = {
     reloadTime   = 2.2,
 }
 
--- AKS74 — first-person equip/holster foundation (2026-05-28).
+-- AKS74 — full-auto 650 RPM viewmodel weapon (2026-06-10).
 -- displayName / viewModelName / animations are read by ViewModelController only.
--- damage / fireRate / range / magazineSize / reserveAmmo are NOT yet read by GunService for
--- this weapon — GunService continues to use Constants.DEFAULT_WEAPON ("AR15") for all server
--- validation.  See DEBT-013 and DEBT-059.  Third-person animation IDs stored for future use.
+-- fireMode / rpm / fireRate are read by GunController for client-side pacing.
+-- damage / range / magazineSize / reserveAmmo / reloadTime are stored for future GunService use.
+-- GunService continues to use Constants.DEFAULT_WEAPON ("AR15") for all server validation.
+-- See DEBT-013 and DEBT-059.  Third-person animation IDs stored for future use.
 WeaponData["AKS74"] = {
     displayName   = "AKS-74",
     viewModelName = "AKS74",
     worldModelName = "AKS-74",  -- gun-only model in ReplicatedStorage/WorldModels/AKS-74
+    fireMode      = "Auto",
+    rpm           = 650,
+    fireRate      = 60 / 650,   -- ~0.0923 s per shot; derived from rpm, not hardcoded
+    damage        = 30,
+    range         = 450,
+    magazineSize  = 30,
+    reserveAmmo   = 120,
+    reloadTime    = 2.2,
     animations = {
         firstPerson = {
             equip   = "rbxassetid://139265999638776",

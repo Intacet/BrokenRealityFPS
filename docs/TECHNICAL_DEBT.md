@@ -1522,6 +1522,64 @@ This worsens DEBT-013 (weapon name not sent in `WeaponFired` payload) by adding 
 
 ---
 
+## [DEBT-064] Stage 1 viewmodel recoil is foundation only — camera recoil and related systems deferred — ADDED 2026-06-10
+
+**Files:** `src/client/ViewModelController.lua`, `src/client/GunController.lua`, `src/shared/Constants.lua`
+**Severity:** Low (intentional deferral; Stage 1 is correct and complete by design)
+**Studio verification required:** Yes — see manual test steps below
+
+**What Stage 1 implements (2026-06-10):**
+- `ViewModelController:ApplyRecoil(isAiming: boolean)` — new public method. Each call pushes a `kick` CFrame onto `vmRecoilTarget` (position Z/Y + pitch/yaw/roll; ADS kick is smaller than hipfire). RenderStepped lerps `vmRecoilCurrent` toward `vmRecoilTarget` at `VIEWMODEL_RECOIL_KICK_SPEED (35)` and decays `vmRecoilTarget` back to identity at `VIEWMODEL_RECOIL_RECOVERY_SPEED (18)`. `vmRecoilCF` is inserted into both PivotTo chains (hip and ADS-aligned) after `viewRecoilCFrame`. Gated by `VIEWMODEL_RECOIL_ENABLED` master switch.
+- AKS74 full-auto at 650 RPM: `isAutoFiring` flag (module-level in GunController); InputBegan MB1 sets true + fires first shot; InputEnded MB1 clears; RenderStepped calls `attemptFire()` each frame (internal rate limit gates cadence). `attemptFire()` reads `WeaponData[equippedWeaponName].rpm` → `60/rpm` for client-side pacing; GunService still validates against AR15 (DEBT-013).
+- `WeaponData["AKS74"]` extended with `fireMode="Auto"`, `rpm=650`, `fireRate=60/650`, `damage=30`, `range=450`, `magazineSize=30`, `reserveAmmo=120`, `reloadTime=2.2`. Animation IDs unchanged.
+- `Constants.AKS74_DEFAULT_RPM = 650` and 17 `VIEWMODEL_RECOIL_*` constants added.
+- `GunService`: rate-limit block now derives `effectiveFireRate` from `weaponDef.rpm` when present (`60/rpm`); falls back to `weaponDef.fireRate` otherwise. Currently DEFAULT_WEAPON = AR15 has no `rpm` field, so server behaviour is unchanged (`effectiveFireRate = 0.09 s`). Future-proofing only.
+
+**What Stage 1 does NOT do (intentional — all deferred):**
+- **No camera recoil.** `camera.CFrame` is not modified. DEBT-045 (camera-space recoil / CameraType.Scriptable) remains open.
+- **No spread bloom.** `computeSpread()` is unchanged. No hipfire spread increase per shot.
+- **No recoil pattern curves.** Yaw and roll have random variation (`RANDOM_YAW/ROLL_SCALE`) but no deterministic per-shot pattern table.
+- **No muzzle flash changes.** Existing Part-based flash is preserved as-is.
+- **No shell ejection.** Deferred.
+- **No impact VFX changes.** Deferred.
+- **No sound changes.** `SoundController:PlayGunshot()` unchanged.
+- **No new remotes.** `WeaponFired` payload unchanged.
+
+**Dual recoil system coexistence risk:**
+Two viewmodel recoil systems run simultaneously:
+1. **WeaponFeel-based** (`viewRecoilCFrame`, pushed by `GunController:SetRecoilOffset()`) — existing; driven by AR15/SCAR WeaponFeel values via `GunController` RenderStepped. Applies `CFrame.Angles(-kickUp, kickRight, 0)` and lerps to identity.
+2. **Constants-based** (`vmRecoilCF`, driven by `ViewModelController:ApplyRecoil()`) — new; driven by `VIEWMODEL_RECOIL_*` constants. Applied per-shot from GunController's `attemptFire()`.
+
+Both are composed into PivotTo: `... * viewRecoilCFrame * vmRecoilCF * ...`. At default constant values the combined recoil may feel too strong. Tune either set of constants after Studio playtest.
+
+**DEBT-013 status (Stable):** GunService still uses DEFAULT_WEAPON = AR15. AKS74 shots always pass: AR15 rate limit (0.09 s) < AKS74 interval (0.0923 s). No worsening.
+**DEBT-039 status (Stable):** WeaponFeel.lua not modified. Existing recoil uses AR15/SCAR values for all weapons. No change.
+**DEBT-040 status (Stable):** ADS system preserved. `PlayADSFireAnimation()` called when aiming. ADS PivotTo chain updated correctly.
+**DEBT-045 status (Unchanged — partially addressed):** Camera recoil remains deferred. This task adds viewmodel-only recoil (Stage 1 of a multi-stage plan). DEBT-045 will be resolved when CameraType.Scriptable and per-frame camera management are implemented.
+**DEBT-059 status (Stable):** AKS74 equips client-side; server fires as AR15. No worsening — AKS74 shots always pass AR15 rate limit.
+**DEBT-063 status (Stable):** Free-aim is visual-only. Bullet direction unchanged. vmRecoilCF does not affect bullet direction.
+
+**MCP / Studio verification required (2026-06-10 — MCP unavailable at commit time):**
+1. No Output errors from `[GunController]` or `[ViewModelController]` on spawn.
+2. Press key 1 → AKS74 equips; viewmodel visible (when `FORCE_FIRST_PERSON = true`, phase ACTIVE).
+3. Hold MB1 → weapon fires continuously; gunshot plays each shot; fire animation restarts per shot.
+4. Release MB1 → firing stops immediately; no queued shots fire after release.
+5. Hold MB1 → fire rate visually matches ~10.8 shots/second (650 RPM). Time 10 shots.
+6. Hold MB1 → each shot produces visible viewmodel kick (weapon pushes toward screen, muzzle rises). Weapon returns to rest between shots.
+7. MB2 → ADS; hold MB1 → ADS fire animation plays; recoil visually smaller/tighter than hipfire.
+8. No camera movement during full-auto fire. Crosshair stays at screen center.
+9. Empty magazine → dry-fire sound plays on MB1; firing stops; magazine counter reaches 0.
+10. Press R → reload; MB1 during reload → no shots fired.
+11. Holster (key 1) mid-fire → `isAutoFiring` cleared; no shots after holster.
+12. Respawn during fire → `isAutoFiring` cleared; no shots after respawn.
+13. Tactical sprint active → fire blocked (if `TACTICAL_SPRINT_BLOCKS_GUN_USE = true`).
+14. `VIEWMODEL_RECOIL_ENABLED = false` → weapon still fires, no vmRecoilCF kick applied.
+15. Confirm `camera.CFrame` is never written (no FOV, no CameraOffset, no rotation change).
+
+**Trigger for Stage 2:** Design decision to add camera recoil (DEBT-045), spread bloom, or recoil pattern curves. Each of these is a separate stage.
+
+---
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.lua`

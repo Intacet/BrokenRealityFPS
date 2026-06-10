@@ -968,7 +968,11 @@ FreeAimController       -- Stage 1 free-aim foundation (added 2026-06-09 — vis
                         --   No new remotes. No camera.CFrame writes. No server changes.
 ViewModelController     -- driven by RoundStateChanged; reads MovementController and WeaponData.
                         --   Fire / recoil / muzzle API: PlayFireAnimation(), SetRecoilOffset(),
-                        --   GetBarrelTipCFrame().
+                        --   GetBarrelTipCFrame(),
+                        --   ApplyRecoil(isAiming: boolean) — Stage 1 viewmodel recoil impulse per shot
+                        --     (added 2026-06-10). Pushes vmRecoilTarget CFrame outward; RenderStepped
+                        --     decays it back to identity. ADS kick is smaller than hipfire. No camera
+                        --     change. Gated by Constants.VIEWMODEL_RECOIL_ENABLED master switch.
                         --   Equip / holster / animation API (AKS74 — updated 2026-05-29):
                         --     EquipWeapon(name)         — clone viewmodel, load all tracks, equip → run/idle.
                         --     HolsterWeapon()           — stop all tracks, destroy clone, clear state.

@@ -135,6 +135,14 @@ local vmMouseInertiaDelta: Vector2 = Vector2.zero
 local vmMouseInertia:      Vector2 = Vector2.zero
 local vmInertiaCurrent:    number  = 1
 
+-- Stage 1 viewmodel recoil (ApplyRecoil foundation).
+-- vmRecoilTarget:  desired recoil CFrame; pushed outward on each shot, decays to identity.
+-- vmRecoilCurrent: per-frame smoothed follower that chases vmRecoilTarget at KICK_SPEED.
+-- vmRecoilAccum:   shot accumulation counter; reset on holster/respawn.
+local vmRecoilTarget:  CFrame = CFrame.new()
+local vmRecoilCurrent: CFrame = CFrame.new()
+local vmRecoilAccum:   number = 0
+
 -- Name of the currently equipped weapon, or nil when holstered.
 local equippedWeaponName: string? = nil
 
@@ -368,6 +376,9 @@ function ViewModelController:init()
     vmMouseInertiaDelta  = Vector2.zero
     vmMouseInertia       = Vector2.zero
     vmInertiaCurrent     = 1
+    vmRecoilTarget       = CFrame.new()
+    vmRecoilCurrent      = CFrame.new()
+    vmRecoilAccum        = 0
     -- Third-person character tracks: nil references only — do NOT call Stop/Destroy.
     -- init() is called from CharacterAdded where the old Humanoid.Animator may already be
     -- destroyed, making track method calls unsafe.  Same pattern as MovementController's
@@ -446,6 +457,9 @@ function ViewModelController:StopWeaponAnimations()
     vmMouseInertiaDelta    = Vector2.zero
     vmMouseInertia         = Vector2.zero
     vmInertiaCurrent       = 1
+    vmRecoilTarget         = CFrame.new()
+    vmRecoilCurrent        = CFrame.new()
+    vmRecoilAccum          = 0
     -- Third-person character tracks: stop and destroy (character is alive in this path).
     -- AnimationTrack:Destroy() severs Stopped connections synchronously, preventing any
     -- deferred equip-chain or reload-chain callback from firing after holster.
@@ -1089,10 +1103,30 @@ function ViewModelController:Start()
         adsAimAlpha = adsAimAlpha
             + (adsAimTarget - adsAimAlpha) * math.min(1, dt * Constants.VIEWMODEL_ADS_AIM_BLEND_SPEED)
 
-        -- Hip base pivot (full chain, unchanged from hip behaviour).
+        -- ── Stage 1 viewmodel recoil (ApplyRecoil) ──────────────────────────
+        -- vmRecoilCurrent chases vmRecoilTarget quickly (KICK_SPEED) to apply each shot's
+        -- kick; vmRecoilTarget decays toward identity slowly (RECOVERY_SPEED) for recovery.
+        -- Both are CFrame.new() when VIEWMODEL_RECOIL_ENABLED is false.
+        local vmRecoilCF: CFrame
+        if Constants.VIEWMODEL_RECOIL_ENABLED then
+            vmRecoilCurrent = vmRecoilCurrent:Lerp(
+                vmRecoilTarget,
+                math.min(1, dt * Constants.VIEWMODEL_RECOIL_KICK_SPEED)
+            )
+            vmRecoilTarget = vmRecoilTarget:Lerp(
+                CFrame.new(),
+                math.min(1, dt * Constants.VIEWMODEL_RECOIL_RECOVERY_SPEED)
+            )
+            vmRecoilCF = vmRecoilCurrent
+        else
+            vmRecoilCF = CFrame.new()
+        end
+
+        -- Hip base pivot (full chain).
         local basePivot = cam.CFrame
             * CAMERA_EXTRA_OFFSET
             * viewRecoilCFrame
+            * vmRecoilCF
             * freeAimCF
             * finalMoveCF
             * BASE_OFFSET
@@ -1100,9 +1134,11 @@ function ViewModelController:Start()
 
         if adsAimAlpha > 0.001 then
             -- ADS-aligned pivot: no CAMERA_EXTRA_OFFSET → FakeCamera lands at cam.CFrame.
-            -- Recoil is preserved so weapon kick is still visible while aiming.
+            -- viewRecoilCFrame and vmRecoilCF are both preserved so weapon kick is visible
+            -- while aiming. freeAimCF and finalMoveCF are already identity during ADS.
             local aimAlignedPivot = cam.CFrame
                 * viewRecoilCFrame
+                * vmRecoilCF
                 * BASE_OFFSET
                 * CFrame.new(0, 0, recoilOffset)
             m:PivotTo(basePivot:Lerp(aimAlignedPivot, adsAimAlpha))
@@ -1512,6 +1548,31 @@ function ViewModelController:SetMouseInertia(mouseDelta: Vector2): ()
     assert(typeof(mouseDelta) == "Vector2",
         "[ViewModelController] SetMouseInertia: mouseDelta must be a Vector2")
     vmMouseInertiaDelta = mouseDelta
+end
+
+-- Applies a viewmodel recoil impulse when a shot is fired.
+-- Call immediately after WeaponFired:FireServer(). isAiming should be ViewModelController:IsAiming().
+-- ADS kick is smaller/tighter than hipfire. Stage 1 — viewmodel only; no camera.CFrame change.
+-- No-op when Constants.VIEWMODEL_RECOIL_ENABLED is false.
+function ViewModelController:ApplyRecoil(isAiming: boolean): ()
+    if not Constants.VIEWMODEL_RECOIL_ENABLED then return end
+
+    local pz    = isAiming and Constants.VIEWMODEL_RECOIL_ADS_POSITION_Z   or Constants.VIEWMODEL_RECOIL_HIP_POSITION_Z
+    local py    = isAiming and Constants.VIEWMODEL_RECOIL_ADS_POSITION_Y   or Constants.VIEWMODEL_RECOIL_HIP_POSITION_Y
+    local pitch = isAiming and Constants.VIEWMODEL_RECOIL_ADS_PITCH_DEGREES or Constants.VIEWMODEL_RECOIL_HIP_PITCH_DEGREES
+    local yaw   = isAiming and Constants.VIEWMODEL_RECOIL_ADS_YAW_DEGREES   or Constants.VIEWMODEL_RECOIL_HIP_YAW_DEGREES
+    local roll  = isAiming and Constants.VIEWMODEL_RECOIL_ADS_ROLL_DEGREES  or Constants.VIEWMODEL_RECOIL_HIP_ROLL_DEGREES
+
+    -- Add per-shot random variation for organic feel.
+    local jitterYaw  = yaw  * (1 + (math.random() - 0.5) * 2 * Constants.VIEWMODEL_RECOIL_RANDOM_YAW_SCALE)
+    local jitterRoll = roll * (1 + (math.random() - 0.5) * 2 * Constants.VIEWMODEL_RECOIL_RANDOM_ROLL_SCALE)
+
+    local kick = CFrame.new(0, py, pz)
+        * CFrame.Angles(math.rad(pitch), math.rad(jitterYaw), math.rad(jitterRoll))
+
+    vmRecoilTarget = vmRecoilTarget * kick
+    vmRecoilAccum  = math.min(vmRecoilAccum + 1, Constants.VIEWMODEL_RECOIL_MAX_ACCUMULATED + 1)
+    Logger.debug("[ViewModelController] ApplyRecoil: isAiming=" .. tostring(isAiming))
 end
 
 -- Returns true while a reload animation is playing.

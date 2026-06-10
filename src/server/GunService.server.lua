@@ -192,11 +192,23 @@ WeaponFired.OnServerEvent:Connect(function(
     end
 
     -- ── Rate limit ───────────────────────────────────────────────────────────
-    -- Reject shots fired faster than the weapon's fireRate allows.
+    -- Reject shots fired faster than the weapon's configured rate allows.
+    -- Derives effectiveFireRate from weaponDef.rpm when present (future-proof for when
+    -- DEBT-013 is resolved and GunService reads the correct per-weapon definition).
+    -- Currently weaponDef = WeaponData[Constants.DEFAULT_WEAPON] = AR15 (no rpm field),
+    -- so effectiveFireRate = weaponDef.fireRate = 0.09 s — unchanged from before.
     -- os.clock() is server-local and monotonic — not affected by client timing.
     local now      = os.clock()
     local lastShot = lastShotTime[shooter] or 0
-    if now - lastShot < weaponDef.fireRate then
+    local effectiveFireRate: number
+    local defAny = weaponDef :: any
+    if typeof(defAny.rpm) == "number" and defAny.rpm > 0 then
+        effectiveFireRate = 60 / defAny.rpm
+    else
+        effectiveFireRate = weaponDef.fireRate
+    end
+    if now - lastShot < effectiveFireRate then
+        Logger.debug("[GunService] Rate limit: shot rejected for " .. shooter.Name)
         return
     end
     lastShotTime[shooter] = now
