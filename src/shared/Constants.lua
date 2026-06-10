@@ -1174,45 +1174,23 @@ Constants.FREE_AIM_RESET_ON_ADS_EXIT       = false
 -- hard-coded sentinel so no magic number appears in controller code.
 Constants.AKS74_DEFAULT_RPM = 650
 
--- ── Viewmodel recoil (Stage 1 — ApplyRecoil foundation) ──────────────────────────────────
+-- ── Viewmodel recoil (data-driven per weapon; ApplyRecoil) ──────────────────────────────
 -- Master switch. When false, ViewModelController:ApplyRecoil() is a no-op and the
 -- vmRecoilCF inserted into PivotTo is CFrame.new() (identity — zero visual change).
-Constants.VIEWMODEL_RECOIL_ENABLED             = true
+Constants.VIEWMODEL_RECOIL_ENABLED = true
 
--- Hip-fire per-shot kick (applied to vmRecoilTarget each shot).
--- pz > 0 pushes the weapon toward the camera (backward into screen = kick).
--- py > 0 lifts the weapon slightly.
--- Pitch < 0 = muzzle rises (weapon kicks up relative to viewmodel).
-Constants.VIEWMODEL_RECOIL_HIP_POSITION_Z      = 0.08
-Constants.VIEWMODEL_RECOIL_HIP_POSITION_Y      = 0.015
-Constants.VIEWMODEL_RECOIL_HIP_PITCH_DEGREES   = -2.0
-Constants.VIEWMODEL_RECOIL_HIP_YAW_DEGREES     = 0.35
-Constants.VIEWMODEL_RECOIL_HIP_ROLL_DEGREES    = 0.6
-
--- ADS per-shot kick — smaller/tighter than hipfire.
-Constants.VIEWMODEL_RECOIL_ADS_POSITION_Z      = 0.035
-Constants.VIEWMODEL_RECOIL_ADS_POSITION_Y      = 0.006
-Constants.VIEWMODEL_RECOIL_ADS_PITCH_DEGREES   = -0.8
-Constants.VIEWMODEL_RECOIL_ADS_YAW_DEGREES     = 0.15
-Constants.VIEWMODEL_RECOIL_ADS_ROLL_DEGREES    = 0.25
-
--- KICK_SPEED: lerp alpha × per-second rate at which vmRecoilCurrent chases vmRecoilTarget.
--- Higher = snappier kick response.
-Constants.VIEWMODEL_RECOIL_KICK_SPEED          = 35
-
--- RECOVERY_SPEED: lerp alpha × per-second rate at which vmRecoilTarget decays to identity.
--- Lower = longer hold at recoil peak; higher = faster return.
-Constants.VIEWMODEL_RECOIL_RECOVERY_SPEED      = 18
-
--- MAX_ACCUMULATED: maximum value of vmRecoilAccum counter (shot counter, not degrees).
--- Tracked per shot; no functional cap at this stage — future staging can use it as a
--- buildup multiplier when spread/camera recoil are added.
-Constants.VIEWMODEL_RECOIL_MAX_ACCUMULATED     = 1.0
-
--- Random variation scale applied to yaw and roll kick per shot.
--- 1.0 = yaw/roll each vary by ±100% of their base values (fully random within range).
--- 0.0 = no variation (perfectly repeating kick pattern).
-Constants.VIEWMODEL_RECOIL_RANDOM_YAW_SCALE    = 1.0
-Constants.VIEWMODEL_RECOIL_RANDOM_ROLL_SCALE   = 1.0
+-- Fallback values used when a weapon's WeaponData entry has no recoil sub-table.
+-- Per-weapon overrides live in WeaponData["<name>"].recoil.{hip,ads}.
+-- positionBack > 0 moves the weapon toward the camera (+Z camera-local = backward).
+-- positionUp   > 0 lifts the weapon (+Y camera-local).
+-- pitchDegrees > 0 = muzzle rises; verified for cam.CFrame * ... * vmRecoilCF chain.
+Constants.DEFAULT_VIEWMODEL_RECOIL_POSITION_BACK  = 0.04
+Constants.DEFAULT_VIEWMODEL_RECOIL_POSITION_UP    = 0.008
+Constants.DEFAULT_VIEWMODEL_RECOIL_PITCH_DEGREES  = 1.0
+Constants.DEFAULT_VIEWMODEL_RECOIL_YAW_DEGREES    = 0.1
+Constants.DEFAULT_VIEWMODEL_RECOIL_ROLL_DEGREES   = 0.1
+Constants.DEFAULT_VIEWMODEL_RECOIL_RECOVERY_SPEED = 18
+Constants.DEFAULT_VIEWMODEL_RECOIL_KICK_SPEED     = 38
+Constants.DEFAULT_VIEWMODEL_RECOIL_MAX_BUILDUP    = 0.75
 
 return Constants

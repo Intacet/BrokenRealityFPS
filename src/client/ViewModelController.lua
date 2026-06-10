@@ -135,13 +135,19 @@ local vmMouseInertiaDelta: Vector2 = Vector2.zero
 local vmMouseInertia:      Vector2 = Vector2.zero
 local vmInertiaCurrent:    number  = 1
 
--- Stage 1 viewmodel recoil (ApplyRecoil foundation).
--- vmRecoilTarget:  desired recoil CFrame; pushed outward on each shot, decays to identity.
--- vmRecoilCurrent: per-frame smoothed follower that chases vmRecoilTarget at KICK_SPEED.
--- vmRecoilAccum:   shot accumulation counter; reset on holster/respawn.
-local vmRecoilTarget:  CFrame = CFrame.new()
-local vmRecoilCurrent: CFrame = CFrame.new()
-local vmRecoilAccum:   number = 0
+-- Viewmodel recoil state (data-driven per weapon profile; see WeaponData[name].recoil).
+-- vmRecoilTarget:        desired recoil CFrame; pushed outward each shot, decays to identity.
+-- vmRecoilCurrent:       per-frame follower that chases vmRecoilTarget at vmActiveKickSpeed.
+-- vmRecoilBuildup:       accumulated kick scalar [0, maxBuildup]; increases per shot.
+-- vmRecoilYawDir:        alternating yaw direction (+1 or -1); flipped each shot.
+-- vmActiveKickSpeed:     lerp rate for current chasing target; set by ApplyRecoil from profile.
+-- vmActiveRecoverySpeed: lerp rate for target decaying to identity; set by ApplyRecoil.
+local vmRecoilTarget:        CFrame = CFrame.new()
+local vmRecoilCurrent:       CFrame = CFrame.new()
+local vmRecoilBuildup:       number = 0
+local vmRecoilYawDir:        number = 1
+local vmActiveKickSpeed:     number = 38
+local vmActiveRecoverySpeed: number = 18
 
 -- Name of the currently equipped weapon, or nil when holstered.
 local equippedWeaponName: string? = nil
@@ -376,9 +382,12 @@ function ViewModelController:init()
     vmMouseInertiaDelta  = Vector2.zero
     vmMouseInertia       = Vector2.zero
     vmInertiaCurrent     = 1
-    vmRecoilTarget       = CFrame.new()
-    vmRecoilCurrent      = CFrame.new()
-    vmRecoilAccum        = 0
+    vmRecoilTarget        = CFrame.new()
+    vmRecoilCurrent       = CFrame.new()
+    vmRecoilBuildup       = 0
+    vmRecoilYawDir        = 1
+    vmActiveKickSpeed     = Constants.DEFAULT_VIEWMODEL_RECOIL_KICK_SPEED
+    vmActiveRecoverySpeed = Constants.DEFAULT_VIEWMODEL_RECOIL_RECOVERY_SPEED
     -- Third-person character tracks: nil references only — do NOT call Stop/Destroy.
     -- init() is called from CharacterAdded where the old Humanoid.Animator may already be
     -- destroyed, making track method calls unsafe.  Same pattern as MovementController's
@@ -457,9 +466,12 @@ function ViewModelController:StopWeaponAnimations()
     vmMouseInertiaDelta    = Vector2.zero
     vmMouseInertia         = Vector2.zero
     vmInertiaCurrent       = 1
-    vmRecoilTarget         = CFrame.new()
-    vmRecoilCurrent        = CFrame.new()
-    vmRecoilAccum          = 0
+    vmRecoilTarget        = CFrame.new()
+    vmRecoilCurrent       = CFrame.new()
+    vmRecoilBuildup       = 0
+    vmRecoilYawDir        = 1
+    vmActiveKickSpeed     = Constants.DEFAULT_VIEWMODEL_RECOIL_KICK_SPEED
+    vmActiveRecoverySpeed = Constants.DEFAULT_VIEWMODEL_RECOIL_RECOVERY_SPEED
     -- Third-person character tracks: stop and destroy (character is alive in this path).
     -- AnimationTrack:Destroy() severs Stopped connections synchronously, preventing any
     -- deferred equip-chain or reload-chain callback from firing after holster.
@@ -1103,20 +1115,24 @@ function ViewModelController:Start()
         adsAimAlpha = adsAimAlpha
             + (adsAimTarget - adsAimAlpha) * math.min(1, dt * Constants.VIEWMODEL_ADS_AIM_BLEND_SPEED)
 
-        -- ── Stage 1 viewmodel recoil (ApplyRecoil) ──────────────────────────
-        -- vmRecoilCurrent chases vmRecoilTarget quickly (KICK_SPEED) to apply each shot's
-        -- kick; vmRecoilTarget decays toward identity slowly (RECOVERY_SPEED) for recovery.
-        -- Both are CFrame.new() when VIEWMODEL_RECOIL_ENABLED is false.
+        -- ── Viewmodel recoil (data-driven per weapon profile) ───────────────
+        -- vmRecoilCurrent chases vmRecoilTarget at vmActiveKickSpeed (set by ApplyRecoil).
+        -- vmRecoilTarget decays to identity at vmActiveRecoverySpeed.
+        -- vmRecoilBuildup decays at half the recovery rate between shots.
+        -- Both CFrames are identity when VIEWMODEL_RECOIL_ENABLED is false.
         local vmRecoilCF: CFrame
         if Constants.VIEWMODEL_RECOIL_ENABLED then
             vmRecoilCurrent = vmRecoilCurrent:Lerp(
                 vmRecoilTarget,
-                math.min(1, dt * Constants.VIEWMODEL_RECOIL_KICK_SPEED)
+                math.min(1, dt * vmActiveKickSpeed)
             )
             vmRecoilTarget = vmRecoilTarget:Lerp(
                 CFrame.new(),
-                math.min(1, dt * Constants.VIEWMODEL_RECOIL_RECOVERY_SPEED)
+                math.min(1, dt * vmActiveRecoverySpeed)
             )
+            if vmRecoilBuildup > 0 then
+                vmRecoilBuildup = math.max(0, vmRecoilBuildup - dt * vmActiveRecoverySpeed * 0.5)
+            end
             vmRecoilCF = vmRecoilCurrent
         else
             vmRecoilCF = CFrame.new()
@@ -1550,29 +1566,84 @@ function ViewModelController:SetMouseInertia(mouseDelta: Vector2): ()
     vmMouseInertiaDelta = mouseDelta
 end
 
--- Applies a viewmodel recoil impulse when a shot is fired.
--- Call immediately after WeaponFired:FireServer(). isAiming should be ViewModelController:IsAiming().
--- ADS kick is smaller/tighter than hipfire. Stage 1 — viewmodel only; no camera.CFrame change.
+-- Applies a data-driven viewmodel recoil impulse when a shot is fired.
+-- recoilProfile = WeaponData["<name>"].recoil; nil falls back to DEFAULT_VIEWMODEL_RECOIL_*
+-- constants. Stage 1 — viewmodel only; no camera.CFrame change.
 -- No-op when Constants.VIEWMODEL_RECOIL_ENABLED is false.
-function ViewModelController:ApplyRecoil(isAiming: boolean): ()
+function ViewModelController:ApplyRecoil(isAiming: boolean, recoilProfile: any?): ()
+    assert(typeof(isAiming) == "boolean",
+        "[ViewModelController] ApplyRecoil: isAiming must be a boolean")
+    if recoilProfile ~= nil then
+        assert(typeof(recoilProfile) == "table",
+            "[ViewModelController] ApplyRecoil: recoilProfile must be a table or nil")
+    end
     if not Constants.VIEWMODEL_RECOIL_ENABLED then return end
 
-    local pz    = isAiming and Constants.VIEWMODEL_RECOIL_ADS_POSITION_Z   or Constants.VIEWMODEL_RECOIL_HIP_POSITION_Z
-    local py    = isAiming and Constants.VIEWMODEL_RECOIL_ADS_POSITION_Y   or Constants.VIEWMODEL_RECOIL_HIP_POSITION_Y
-    local pitch = isAiming and Constants.VIEWMODEL_RECOIL_ADS_PITCH_DEGREES or Constants.VIEWMODEL_RECOIL_HIP_PITCH_DEGREES
-    local yaw   = isAiming and Constants.VIEWMODEL_RECOIL_ADS_YAW_DEGREES   or Constants.VIEWMODEL_RECOIL_HIP_YAW_DEGREES
-    local roll  = isAiming and Constants.VIEWMODEL_RECOIL_ADS_ROLL_DEGREES  or Constants.VIEWMODEL_RECOIL_HIP_ROLL_DEGREES
+    -- Update active kick/recovery speeds from the profile (persist for this recovery arc).
+    if recoilProfile ~= nil then
+        local ksp = (recoilProfile :: any).kickSpeed
+        local rsp = (recoilProfile :: any).recoverySpeed
+        if typeof(ksp) == "number" then vmActiveKickSpeed     = ksp :: number end
+        if typeof(rsp) == "number" then vmActiveRecoverySpeed = rsp :: number end
+    end
 
-    -- Add per-shot random variation for organic feel.
-    local jitterYaw  = yaw  * (1 + (math.random() - 0.5) * 2 * Constants.VIEWMODEL_RECOIL_RANDOM_YAW_SCALE)
-    local jitterRoll = roll * (1 + (math.random() - 0.5) * 2 * Constants.VIEWMODEL_RECOIL_RANDOM_ROLL_SCALE)
+    -- Resolve hip or ads sub-table.
+    local sub: any = nil
+    if recoilProfile ~= nil then
+        sub = isAiming and (recoilProfile :: any).ads or (recoilProfile :: any).hip
+        if sub == nil then
+            Logger.warn("[ViewModelController] ApplyRecoil: recoilProfile missing sub-table for isAiming=" .. tostring(isAiming))
+        end
+    end
+
+    -- Read per-shot values with fallback to Constants defaults.
+    -- positionBack > 0 = weapon moves toward camera (+Z camera-local = backward kick).
+    -- positionUp   > 0 = weapon lifts upward (+Y camera-local).
+    -- pitchDegrees > 0 = muzzle rises; confirmed for cam.CFrame * ... * vmRecoilCF chain.
+    local pz: number
+    local py: number
+    local pitch: number
+    local yaw: number
+    local roll: number
+    if sub ~= nil then
+        pz    = if typeof((sub :: any).positionBack) == "number" then (sub :: any).positionBack :: number else Constants.DEFAULT_VIEWMODEL_RECOIL_POSITION_BACK
+        py    = if typeof((sub :: any).positionUp)   == "number" then (sub :: any).positionUp   :: number else Constants.DEFAULT_VIEWMODEL_RECOIL_POSITION_UP
+        pitch = if typeof((sub :: any).pitchDegrees) == "number" then (sub :: any).pitchDegrees :: number else Constants.DEFAULT_VIEWMODEL_RECOIL_PITCH_DEGREES
+        yaw   = if typeof((sub :: any).yawDegrees)   == "number" then (sub :: any).yawDegrees   :: number else Constants.DEFAULT_VIEWMODEL_RECOIL_YAW_DEGREES
+        roll  = if typeof((sub :: any).rollDegrees)  == "number" then (sub :: any).rollDegrees  :: number else Constants.DEFAULT_VIEWMODEL_RECOIL_ROLL_DEGREES
+    else
+        pz    = Constants.DEFAULT_VIEWMODEL_RECOIL_POSITION_BACK
+        py    = Constants.DEFAULT_VIEWMODEL_RECOIL_POSITION_UP
+        pitch = Constants.DEFAULT_VIEWMODEL_RECOIL_PITCH_DEGREES
+        yaw   = Constants.DEFAULT_VIEWMODEL_RECOIL_YAW_DEGREES
+        roll  = Constants.DEFAULT_VIEWMODEL_RECOIL_ROLL_DEGREES
+    end
+
+    local randomYawScale  = if recoilProfile ~= nil and typeof((recoilProfile :: any).randomYawScale)  == "number" then (recoilProfile :: any).randomYawScale  :: number else 1.0
+    local randomRollScale = if recoilProfile ~= nil and typeof((recoilProfile :: any).randomRollScale) == "number" then (recoilProfile :: any).randomRollScale :: number else 1.0
+    local maxBuildup      = if recoilProfile ~= nil and typeof((recoilProfile :: any).maxBuildup)      == "number" then (recoilProfile :: any).maxBuildup      :: number else Constants.DEFAULT_VIEWMODEL_RECOIL_MAX_BUILDUP
+    local buildupPerShot  = if recoilProfile ~= nil and typeof((recoilProfile :: any).buildupPerShot)  == "number" then (recoilProfile :: any).buildupPerShot  :: number else 0.10
+    local alternatingYaw  = recoilProfile ~= nil and (recoilProfile :: any).alternatingYaw == true
+
+    -- Scale pitch by buildup; position magnitude is constant per shot.
+    local buildupMult = 1 + vmRecoilBuildup
+    vmRecoilBuildup = math.min(vmRecoilBuildup + buildupPerShot, maxBuildup)
+
+    -- Yaw: alternating direction each shot when alternatingYaw=true; random otherwise.
+    local finalYaw: number
+    if alternatingYaw then
+        finalYaw = yaw * vmRecoilYawDir * (1 + (math.random() - 0.5) * randomYawScale * 0.5)
+        vmRecoilYawDir = -vmRecoilYawDir
+    else
+        finalYaw = yaw * (1 + (math.random() - 0.5) * 2 * randomYawScale)
+    end
+    local finalRoll = roll * (1 + (math.random() - 0.5) * 2 * randomRollScale)
 
     local kick = CFrame.new(0, py, pz)
-        * CFrame.Angles(math.rad(pitch), math.rad(jitterYaw), math.rad(jitterRoll))
+        * CFrame.Angles(math.rad(pitch * buildupMult), math.rad(finalYaw), math.rad(finalRoll))
 
     vmRecoilTarget = vmRecoilTarget * kick
-    vmRecoilAccum  = math.min(vmRecoilAccum + 1, Constants.VIEWMODEL_RECOIL_MAX_ACCUMULATED + 1)
-    Logger.debug("[ViewModelController] ApplyRecoil: isAiming=" .. tostring(isAiming))
+    Logger.debug("[ViewModelController] ApplyRecoil: isAiming=" .. tostring(isAiming) .. " buildup=" .. string.format("%.2f", vmRecoilBuildup))
 end
 
 -- Returns true while a reload animation is playing.

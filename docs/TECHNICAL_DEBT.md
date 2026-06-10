@@ -1522,23 +1522,24 @@ This worsens DEBT-013 (weapon name not sent in `WeaponFired` payload) by adding 
 
 ---
 
-## [DEBT-064] Stage 1 viewmodel recoil is foundation only — camera recoil and related systems deferred — ADDED 2026-06-10
+## [DEBT-064] Stage 1 viewmodel recoil is foundation only — camera recoil and related systems deferred — ADDED 2026-06-10 — UPDATED 2026-06-10
 
-**Files:** `src/client/ViewModelController.lua`, `src/client/GunController.lua`, `src/shared/Constants.lua`
+**Files:** `src/client/ViewModelController.lua`, `src/client/GunController.lua`, `src/shared/Constants.lua`, `src/shared/WeaponData.lua`
 **Severity:** Low (intentional deferral; Stage 1 is correct and complete by design)
 **Studio verification required:** Yes — see manual test steps below
 
-**What Stage 1 implements (2026-06-10):**
-- `ViewModelController:ApplyRecoil(isAiming: boolean)` — new public method. Each call pushes a `kick` CFrame onto `vmRecoilTarget` (position Z/Y + pitch/yaw/roll; ADS kick is smaller than hipfire). RenderStepped lerps `vmRecoilCurrent` toward `vmRecoilTarget` at `VIEWMODEL_RECOIL_KICK_SPEED (35)` and decays `vmRecoilTarget` back to identity at `VIEWMODEL_RECOIL_RECOVERY_SPEED (18)`. `vmRecoilCF` is inserted into both PivotTo chains (hip and ADS-aligned) after `viewRecoilCFrame`. Gated by `VIEWMODEL_RECOIL_ENABLED` master switch.
-- AKS74 full-auto at 650 RPM: `isAutoFiring` flag (module-level in GunController); InputBegan MB1 sets true + fires first shot; InputEnded MB1 clears; RenderStepped calls `attemptFire()` each frame (internal rate limit gates cadence). `attemptFire()` reads `WeaponData[equippedWeaponName].rpm` → `60/rpm` for client-side pacing; GunService still validates against AR15 (DEBT-013).
-- `WeaponData["AKS74"]` extended with `fireMode="Auto"`, `rpm=650`, `fireRate=60/650`, `damage=30`, `range=450`, `magazineSize=30`, `reserveAmmo=120`, `reloadTime=2.2`. Animation IDs unchanged.
-- `Constants.AKS74_DEFAULT_RPM = 650` and 17 `VIEWMODEL_RECOIL_*` constants added.
-- `GunService`: rate-limit block now derives `effectiveFireRate` from `weaponDef.rpm` when present (`60/rpm`); falls back to `weaponDef.fireRate` otherwise. Currently DEFAULT_WEAPON = AR15 has no `rpm` field, so server behaviour is unchanged (`effectiveFireRate = 0.09 s`). Future-proofing only.
+**What Stage 1 implements (2026-06-10, updated same day):**
+- `ViewModelController:ApplyRecoil(isAiming: boolean, recoilProfile: any?)` — data-driven per-weapon recoil. Each call reads `recoilProfile.hip` or `recoilProfile.ads` sub-table for positionBack, positionUp, pitchDegrees, yawDegrees, rollDegrees. Builds up over sustained fire (`buildupPerShot`, `maxBuildup`) scaling pitch per shot. Alternating yaw direction each shot (`alternatingYaw=true`). Kick/recovery speeds from profile. Falls back to `DEFAULT_VIEWMODEL_RECOIL_*` Constants when profile is nil or sub-table absent.
+- `WeaponData["AKS74"].recoil` table: hip/ads sub-tables + buildupPerShot=0.10, maxBuildup=0.75, recoverySpeed=18, kickSpeed=38, randomYawScale=1.0, randomRollScale=1.0, alternatingYaw=true.
+- **Pitch sign fix:** Stage 1 used `pitchDegrees = -2.0` causing the muzzle to DROP (CFrame.Angles negative X rotation drops muzzle in cam.CFrame * vmRecoilCF chain). Fixed: positive pitchDegrees = muzzle rises. AKS74 profile uses `hip.pitchDegrees = 1.6`, `ads.pitchDegrees = 0.65`.
+- **Constants cleanup:** 15 per-weapon `VIEWMODEL_RECOIL_HIP/ADS_*` constants removed. Replaced by 8 `DEFAULT_VIEWMODEL_RECOIL_*` fallback constants. `VIEWMODEL_RECOIL_ENABLED` and `AKS74_DEFAULT_RPM` preserved.
+- AKS74 full-auto at 650 RPM: `isAutoFiring` flag; InputBegan MB1 sets true + fires first shot; InputEnded MB1 clears; RenderStepped calls `attemptFire()` each frame. `attemptFire()` reads `WeaponData[equippedWeaponName].rpm` → `60/rpm` for client-side pacing; passes `equippedDef.recoil` to `ApplyRecoil`.
+- `GunService`: rate-limit derives `effectiveFireRate` from `weaponDef.rpm` when present; falls back to `weaponDef.fireRate`. DEFAULT_WEAPON = AR15 has no `rpm` field; server behaviour unchanged.
 
 **What Stage 1 does NOT do (intentional — all deferred):**
 - **No camera recoil.** `camera.CFrame` is not modified. DEBT-045 (camera-space recoil / CameraType.Scriptable) remains open.
 - **No spread bloom.** `computeSpread()` is unchanged. No hipfire spread increase per shot.
-- **No recoil pattern curves.** Yaw and roll have random variation (`RANDOM_YAW/ROLL_SCALE`) but no deterministic per-shot pattern table.
+- **No deterministic recoil pattern curves.** Yaw has alternating direction + random variation; no per-shot pattern table.
 - **No muzzle flash changes.** Existing Part-based flash is preserved as-is.
 - **No shell ejection.** Deferred.
 - **No impact VFX changes.** Deferred.
@@ -1548,9 +1549,9 @@ This worsens DEBT-013 (weapon name not sent in `WeaponFired` payload) by adding 
 **Dual recoil system coexistence risk:**
 Two viewmodel recoil systems run simultaneously:
 1. **WeaponFeel-based** (`viewRecoilCFrame`, pushed by `GunController:SetRecoilOffset()`) — existing; driven by AR15/SCAR WeaponFeel values via `GunController` RenderStepped. Applies `CFrame.Angles(-kickUp, kickRight, 0)` and lerps to identity.
-2. **Constants-based** (`vmRecoilCF`, driven by `ViewModelController:ApplyRecoil()`) — new; driven by `VIEWMODEL_RECOIL_*` constants. Applied per-shot from GunController's `attemptFire()`.
+2. **Profile-based** (`vmRecoilCF`, driven by `ViewModelController:ApplyRecoil()`) — data-driven; reads from `WeaponData[name].recoil` profile. Applied per-shot from GunController's `attemptFire()`.
 
-Both are composed into PivotTo: `... * viewRecoilCFrame * vmRecoilCF * ...`. At default constant values the combined recoil may feel too strong. Tune either set of constants after Studio playtest.
+Both are composed into PivotTo: `... * viewRecoilCFrame * vmRecoilCF * ...`. Combined effect may feel too strong; tune `WeaponData["AKS74"].recoil.hip/ads` values after Studio playtest.
 
 **DEBT-013 status (Stable):** GunService still uses DEFAULT_WEAPON = AR15. AKS74 shots always pass: AR15 rate limit (0.09 s) < AKS74 interval (0.0923 s). No worsening.
 **DEBT-039 status (Stable):** WeaponFeel.lua not modified. Existing recoil uses AR15/SCAR values for all weapons. No change.

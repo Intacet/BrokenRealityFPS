@@ -288,7 +288,8 @@ function GunController:Start()
 
         -- ── Viewmodel recoil impulse (Stage 1 — viewmodel only) ──────────────
         if Constants.VIEWMODEL_RECOIL_ENABLED then
-            ViewModelController:ApplyRecoil(ViewModelController:IsAiming())
+            local recoilProfile = equippedDef ~= nil and (equippedDef :: any).recoil or nil
+            ViewModelController:ApplyRecoil(ViewModelController:IsAiming(), recoilProfile)
         end
 
         -- ── Muzzle flash (existing behaviour preserved) ───────────────────────

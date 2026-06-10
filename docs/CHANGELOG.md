@@ -7,6 +7,45 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-10 — FIX/REFACTOR] — Per-weapon data-driven viewmodel recoil + pitch sign fix
+
+### Summary
+
+Migrates viewmodel recoil from monolithic `Constants.lua` values to a per-weapon `WeaponData["AKS74"].recoil` table. Fixes a pitch sign bug introduced in the Stage 1 commit (negative pitch caused the muzzle to drop instead of rise). Extends the recoil system with per-shot buildup accumulation, alternating yaw direction, and per-profile kick/recovery speed. `ViewModelController:ApplyRecoil()` gains a required `recoilProfile: any?` parameter; `GunController` passes `equippedDef.recoil` on each shot. No camera changes, no new remotes, no combat authority changes.
+
+### Files changed
+
+- **`src/shared/WeaponData.lua`** — added `WeaponData["AKS74"].recoil` table with `hip` and `ads` sub-tables (positionBack, positionUp, pitchDegrees, yawDegrees, rollDegrees), plus top-level profile fields: `buildupPerShot=0.10`, `maxBuildup=0.75`, `recoverySpeed=18`, `kickSpeed=38`, `randomYawScale=1.0`, `randomRollScale=1.0`, `alternatingYaw=true`. All other AKS74 fields and animation IDs preserved.
+- **`src/shared/Constants.lua`** — removed 15 per-weapon `VIEWMODEL_RECOIL_HIP/ADS_*` constants and the `KICK_SPEED`, `RECOVERY_SPEED`, `MAX_ACCUMULATED`, `RANDOM_YAW/ROLL_SCALE` constants. Replaced with 8 `DEFAULT_VIEWMODEL_RECOIL_*` fallback constants (`POSITION_BACK`, `POSITION_UP`, `PITCH_DEGREES`, `YAW_DEGREES`, `ROLL_DEGREES`, `RECOVERY_SPEED`, `KICK_SPEED`, `MAX_BUILDUP`). Kept `VIEWMODEL_RECOIL_ENABLED` and `AKS74_DEFAULT_RPM`.
+- **`src/client/ViewModelController.lua`** — renamed `vmRecoilAccum` → `vmRecoilBuildup`; added `vmRecoilYawDir`, `vmActiveKickSpeed`, `vmActiveRecoverySpeed` state variables; updated resets in `init()` and `StopWeaponAnimations()`; updated RenderStepped vmRecoilCF block to use active speed vars + decay buildup between shots; rewrote `ApplyRecoil` with signature `(isAiming: boolean, recoilProfile: any?)` — reads from profile sub-table with fallback to `DEFAULT_*` constants, implements buildup multiplier on pitch, alternating yaw direction, and updates active kick/recovery speeds per shot.
+- **`src/client/GunController.lua`** — `attemptFire()` now reads `equippedDef.recoil` and passes it to `ViewModelController:ApplyRecoil()` as `recoilProfile`.
+- **`docs/PROJECT_MAP.md`** — updated `ApplyRecoil` API signature to `(isAiming: boolean, recoilProfile: any?)`.
+- **`docs/TECHNICAL_DEBT.md`** — updated DEBT-064 to note data-driven recoil, pitch sign fix, Constants cleanup, and new buildup/alternatingYaw system.
+- **`docs/CHANGELOG.md`** — this entry.
+
+### Bug fix: pitch sign
+
+Stage 1 set `VIEWMODEL_RECOIL_HIP_PITCH_DEGREES = -2.0` which produced `CFrame.Angles(math.rad(-2.0), ...)` — a negative X rotation in camera-local space — causing the muzzle to drop. Analysis of the `cam.CFrame * ... * vmRecoilCF * ...` chain confirms: for the muzzle vector pointing in −Z camera-local, a positive X rotation (positive pitch) tilts the muzzle toward +Y (upward). `WeaponData["AKS74"].recoil.hip.pitchDegrees = 1.6` (positive) is now used.
+
+### Maintenance risks
+
+- **Dual recoil coexistence:** `viewRecoilCFrame` (WeaponFeel-based) and `vmRecoilCF` (profile-based) both compose into PivotTo. Combined effect may still feel too strong after the pitch fix; tune `WeaponData["AKS74"].recoil.hip/ads` values after Studio playtest.
+- **MCP unavailable:** Studio verification was not performed. See DEBT-064 for the full manual test checklist.
+
+### Test steps (manual Studio verification required)
+
+1. `rojo serve`; confirm sync completes without error.
+2. Set `FORCE_FIRST_PERSON = true`; enter play mode phase ACTIVE; press key 1 to equip AKS74.
+3. Hold MB1 → weapon fires at 650 RPM; viewmodel kicks upward and backward (muzzle rises, not drops).
+4. Sustained fire → buildup: recoil gradually increases over ~7 shots; releases back to base on release.
+5. Alternating yaw: consecutive shots kick left/right/left (not randomly drifting one direction).
+6. MB2 (ADS) + hold MB1 → ADS kick is visibly smaller/tighter than hipfire kick.
+7. No camera movement during fire. Crosshair stays at screen center.
+8. `VIEWMODEL_RECOIL_ENABLED = false` → fire works; no vmRecoilCF kick visible.
+9. Holster mid-fire → buildup resets; re-equip + fire starts from zero buildup.
+
+---
+
 ## [2026-06-10 — FEAT] — AKS74 full-auto 650 RPM + Stage 1 viewmodel recoil foundation
 
 ### Summary

@@ -51,6 +51,29 @@ WeaponData["AKS74"] = {
     magazineSize  = 30,
     reserveAmmo   = 120,
     reloadTime    = 2.2,
+    recoil = {
+        hip = {
+            positionBack = 0.055,   -- weapon moves toward camera each shot
+            positionUp   = 0.012,   -- weapon lifts slightly
+            pitchDegrees = 1.6,     -- positive = muzzle rises (verified for cam.CFrame * vmRecoilCF chain)
+            yawDegrees   = 0.22,
+            rollDegrees  = 0.35,
+        },
+        ads = {
+            positionBack = 0.025,
+            positionUp   = 0.004,
+            pitchDegrees = 0.65,
+            yawDegrees   = 0.08,
+            rollDegrees  = 0.12,
+        },
+        buildupPerShot  = 0.10,   -- buildup scalar added per shot [0, maxBuildup]
+        maxBuildup      = 0.75,   -- caps vmRecoilBuildup; pitch scales by (1 + buildup)
+        recoverySpeed   = 18,     -- lerp rate for vmRecoilTarget decay to identity
+        kickSpeed       = 38,     -- lerp rate for vmRecoilCurrent chasing vmRecoilTarget
+        randomYawScale  = 1.0,    -- ±variation on yaw per shot (0 = deterministic)
+        randomRollScale = 1.0,
+        alternatingYaw  = true,   -- flip yaw direction each shot (left-right-left...)
+    },
     animations = {
         firstPerson = {
             equip   = "rbxassetid://139265999638776",
