@@ -357,6 +357,12 @@ local isReloading:   boolean = false  -- Task A/B: updated by SetReloading()
 local povOffsetCurrent: number = 0
 local povLandDip:       number = 0
 
+-- Task C: movement speed smoothing state.
+-- moveSmoothSpeed: lerped current WalkSpeed; Heartbeat drives it toward getTargetMoveSpeed() each frame.
+-- Hard-zero cases (phase not ACTIVE, landing lock, sprint-stop lock, slide, vault) snap this to 0
+-- immediately via applySpeed() and skip the smooth update.
+local moveSmoothSpeed: number = 0
+
 -- Stage 3A: jump and drop tracking ───────────────────────────────────────────
 -- World-Y position of HumanoidRootPart when the airborne phase began.
 -- Set on Jumping state (jump entry) or Freefall entry (ledge drop with no Jumping state).
@@ -728,15 +734,44 @@ local function resetState()
     movementState.isSliding           = false  -- Stage 3O
 end
 
+-- Returns the target WalkSpeed for the current normal movement state.
+-- Does NOT handle hard-zero cases (phase not ACTIVE, landing lock, sprint-stop lock, slide,
+-- vault) — those are handled by applySpeed() and should not be reached here.
+-- Called by applySpeed() (legacy path) and updateMoveSmoothSpeed() (smooth path).
+local function getTargetMoveSpeed(): number
+    -- Stage 2P: tactical sprint time-based ramp from SPRINT_SPEED to TACTICAL_SPRINT_SPEED.
+    if isTacticalSprinting then
+        local elapsed = os.clock() - tacticalSprintStartTime
+        local t = math.clamp(elapsed / Constants.TACTICAL_SPRINT_ACCELERATION_TIME, 0, 1)
+        return Constants.SPRINT_SPEED
+            + (Constants.TACTICAL_SPRINT_SPEED - Constants.SPRINT_SPEED) * t
+    end
+    -- Stage 3M: hold CROUCH_SPEED during crouch-exit blend.
+    if isCrouchExitTransitioning and Constants.CROUCH_TRANSITION_SPEED_LOCK_ENABLED then
+        return Constants.CROUCH_SPEED
+    end
+    if movementState.isCrouching then
+        return Constants.CROUCH_SPEED
+    elseif movementState.isSprinting and movementState.isMoving then
+        return Constants.SPRINT_SPEED
+    else
+        return Constants.WALK_SPEED
+    end
+end
+
 -- Sets Humanoid.WalkSpeed according to the current phase and movementState.
 -- Safe to call at any time; guards against nil humanoid.
--- Speed priority: not-ACTIVE → 0; crouching → CROUCH_SPEED;
---   sprinting+moving → SPRINT_SPEED; else → WALK_SPEED.
+-- Task C: hard-zero cases snap moveSmoothSpeed = 0 and write WalkSpeed = 0 immediately.
+-- Normal movement cases are a no-op when MOVEMENT_SMOOTH_SPEED_ENABLED is true —
+-- updateMoveSmoothSpeed() in the Heartbeat lerps moveSmoothSpeed toward getTargetMoveSpeed()
+-- and writes WalkSpeed each frame. Legacy (non-smooth) path writes WalkSpeed directly.
 local function applySpeed()
     local hum = humanoid
     if not hum then return end
 
+    -- Hard-zero cases: snap speed to 0 immediately, bypassing the smooth ramp.
     if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then
+        moveSmoothSpeed = 0
         hum.WalkSpeed = 0
         return
     end
@@ -746,6 +781,7 @@ local function applySpeed()
     -- regardless of sprint/crouch/walk state. The LinearVelocity carry (if active)
     -- provides the only motion during this window; player input is not applied.
     if isLandingMovementLocked then
+        moveSmoothSpeed = 0
         hum.WalkSpeed = 0
         return
     end
@@ -754,6 +790,7 @@ local function applySpeed()
     -- When SprintStop is playing and SPRINT_STOP_LOCKS_MOVEMENT is true, WalkSpeed stays
     -- at 0 regardless of sprint/crouch/walk state. Cleared by clearSprintStopLock().
     if isSprintStopPlaying and Constants.SPRINT_STOP_LOCKS_MOVEMENT == true then
+        moveSmoothSpeed = 0
         hum.WalkSpeed = 0
         return
     end
@@ -765,6 +802,7 @@ local function applySpeed()
     -- When SLIDE_MOMENTUM_ENABLED is false this still zeroes WalkSpeed, giving a
     -- speed-only slide without carry (player stops if W is released).
     if isSliding then
+        moveSmoothSpeed = 0
         hum.WalkSpeed = 0
         return
     end
@@ -773,37 +811,16 @@ local function applySpeed()
     -- The Heartbeat drives HRP.CFrame directly; player directional input must not
     -- interfere. WalkSpeed is restored by applySpeed() once isVaulting clears.
     if isVaulting and Constants.VAULT_LOCKS_MOVEMENT == true then
+        moveSmoothSpeed = 0
         hum.WalkSpeed = 0
         return
     end
 
-    -- Stage 2P: tactical sprint speed ramp — lerp from SPRINT_SPEED to TACTICAL_SPRINT_SPEED
-    -- over TACTICAL_SPRINT_ACCELERATION_TIME. Runs before the regular speed checks so it
-    -- takes priority while tactical sprint is active (overrides the normal sprint path).
-    if isTacticalSprinting then
-        local elapsed = os.clock() - tacticalSprintStartTime
-        local t = math.clamp(elapsed / Constants.TACTICAL_SPRINT_ACCELERATION_TIME, 0, 1)
-        hum.WalkSpeed = Constants.SPRINT_SPEED
-            + (Constants.TACTICAL_SPRINT_SPEED - Constants.SPRINT_SPEED) * t
-        return
-    end
+    -- Task C smooth path: Heartbeat's updateMoveSmoothSpeed() handles WalkSpeed each frame.
+    if Constants.MOVEMENT_SMOOTH_SPEED_ENABLED then return end
 
-    -- Stage 3M: hold WalkSpeed at CROUCH_SPEED for the duration of the crouch-exit
-    -- animation blend, so speed does not snap back the instant C is released.
-    -- This path runs only when not crouching (isCrouching=false) — isCrouching takes
-    -- priority via the branch below, so a quick re-press of C is handled correctly.
-    if isCrouchExitTransitioning and Constants.CROUCH_TRANSITION_SPEED_LOCK_ENABLED then
-        hum.WalkSpeed = Constants.CROUCH_SPEED
-        return
-    end
-
-    if movementState.isCrouching then
-        hum.WalkSpeed = Constants.CROUCH_SPEED
-    elseif movementState.isSprinting and movementState.isMoving then
-        hum.WalkSpeed = Constants.SPRINT_SPEED
-    else
-        hum.WalkSpeed = Constants.WALK_SPEED
-    end
+    -- Legacy (non-smooth) path: write WalkSpeed directly to getTargetMoveSpeed() result.
+    hum.WalkSpeed = getTargetMoveSpeed()
 end
 
 -- Maps Humanoid.MoveDirection to one of 9 named directions.
@@ -1087,8 +1104,24 @@ local function updateCustomMouseLockBodyYaw()
     -- Camera-yaw CFrame write path: rotate toward flat camera look direction.
     local flatLook = getFlatCameraYawDirection()
     if not flatLook then return end
+    -- Task C: pick rotation speed based on current movement state.
     -- rotateCharacterCapped sets AutoRotate = false internally.
-    rotateCharacterCapped(flatLook, Constants.CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED)
+    local yawSpeed: number
+    if Constants.MOVEMENT_BODY_YAW_SMOOTH_ENABLED then
+        local dirName = movementState.directionName
+        if movementState.isSprinting or isTacticalSprinting then
+            yawSpeed = Constants.MOVEMENT_BODY_YAW_SPRINT_SMOOTH_SPEED :: number
+        elseif movementState.isCrouching then
+            yawSpeed = Constants.MOVEMENT_BODY_YAW_CROUCH_SMOOTH_SPEED :: number
+        elseif dirName == "Backward" or dirName == "BackLeft" or dirName == "BackRight" then
+            yawSpeed = Constants.MOVEMENT_BODY_YAW_BACKPEDAL_SMOOTH_SPEED :: number
+        else
+            yawSpeed = Constants.MOVEMENT_BODY_YAW_WALK_SMOOTH_SPEED :: number
+        end
+    else
+        yawSpeed = Constants.CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED
+    end
+    rotateCharacterCapped(flatLook, yawSpeed)
 end
 
 -- ── Stage 3E ─────────────────────────────────────────────────────────────────
@@ -3533,6 +3566,8 @@ local function loadMovementAnimations(character: Model)
     -- Task B: reset stance POV offset on respawn.
     povOffsetCurrent = 0
     povLandDip       = 0
+    -- Task C: reset smooth speed on respawn so the character does not inherit stale velocity.
+    moveSmoothSpeed  = 0
     -- Reset set-change log guard so the first movement after respawn re-logs the active set.
     lastAnimationSet       = ""
     -- Reset strafe-blocked log guard so the first movement after respawn re-logs the state.
@@ -5280,6 +5315,8 @@ function MovementController:destroy()
     -- Task B: reset stance POV offset on destroy.
     povOffsetCurrent = 0
     povLandDip       = 0
+    -- Task C: reset smooth speed on destroy.
+    moveSmoothSpeed  = 0
     -- Stage 2E: restore AutoRotate if mouse lock is active before clearing state.
     if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW and customMouseLocked then
         restoreCharacterAutoRotate()
@@ -6021,6 +6058,51 @@ function MovementController:Start()
         end
     end
 
+    -- Task C: lerp moveSmoothSpeed toward getTargetMoveSpeed() using state-appropriate
+    -- acceleration / deceleration, then write hum.WalkSpeed.
+    -- Only runs when MOVEMENT_SMOOTH_SPEED_ENABLED is true and no hard-zero lock is active
+    -- (those are handled by applySpeed() which already wrote 0 and cleared moveSmoothSpeed).
+    -- No camera writes. Does NOT modify camera.CFrame, CameraOffset, or FieldOfView.
+    local function updateMoveSmoothSpeed(dt: number)
+        if not Constants.MOVEMENT_SMOOTH_SPEED_ENABLED then return end
+        local hum = humanoid
+        if not hum then return end
+        -- Skip when a hard-zero lock is active — applySpeed() already owns WalkSpeed in these states.
+        if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
+        if isLandingMovementLocked then return end
+        if isSprintStopPlaying and Constants.SPRINT_STOP_LOCKS_MOVEMENT == true then return end
+        if isSliding then return end
+        if isVaulting and Constants.VAULT_LOCKS_MOVEMENT == true then return end
+
+        local target = getTargetMoveSpeed()
+        local diff   = target - moveSmoothSpeed
+
+        if math.abs(diff) < (Constants.MOVEMENT_STOP_EPSILON :: number) then
+            moveSmoothSpeed = target
+        else
+            local accel: number
+            if diff > 0 then
+                -- Accelerating toward a higher target speed.
+                if isTacticalSprinting or (movementState.isSprinting and movementState.isMoving) then
+                    accel = Constants.MOVEMENT_SPRINT_ACCELERATION :: number
+                elseif movementState.isCrouching or isCrouchExitTransitioning then
+                    accel = Constants.MOVEMENT_CROUCH_ACCELERATION :: number
+                elseif isFalling or wasJumpingThisAirborne then
+                    accel = Constants.MOVEMENT_AIR_ACCELERATION :: number
+                else
+                    accel = Constants.MOVEMENT_ACCELERATION :: number
+                end
+                moveSmoothSpeed = math.min(moveSmoothSpeed + accel * dt, target)
+            else
+                -- Decelerating toward a lower target speed (or stopping).
+                accel = Constants.MOVEMENT_DECELERATION :: number
+                moveSmoothSpeed = math.max(moveSmoothSpeed - accel * dt, target)
+            end
+        end
+
+        hum.WalkSpeed = moveSmoothSpeed
+    end
+
     -- ── Heartbeat: direction detection, speed maintenance, animation update ────
     -- Runs every physics step. Updates movementState, re-applies speed, and drives
     -- the Stage 2A animation layer. No camera writes.
@@ -6071,6 +6153,10 @@ function MovementController:Start()
         movementState.directionName = classifyDirection(moveDir)
 
         applySpeed()
+
+        -- Task C: lerp moveSmoothSpeed toward target and write WalkSpeed (smooth mode only).
+        -- No-op when MOVEMENT_SMOOTH_SPEED_ENABLED is false or a hard-zero lock is active.
+        updateMoveSmoothSpeed(_dt)
 
         -- Stage 3O: update slide LinearVelocity each Heartbeat so VectorVelocity follows
         -- the speed decay curve. The speed decays from the initial slide speed to 0 over

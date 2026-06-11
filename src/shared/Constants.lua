@@ -1283,4 +1283,27 @@ Constants.CAMERA_POV_LAND_RECOVER_SPEED   =   8     -- decay rate: how fast land
 Constants.CAMERA_POV_ADS_MULTIPLIER       =  0.65   -- scale applied to offset while ADS
 Constants.CAMERA_POV_RELOAD_MULTIPLIER    =  0.80   -- scale applied to offset while reloading
 
+-- ── Task C: Criminality-style movement smoothing and body-yaw foundation ─────────────────
+-- Do NOT add MOVEMENT_DISABLE_SPRINT_WHILE_ADS or MOVEMENT_CANCEL_SPRINT_ON_ADS here —
+-- those were added in Task A and already exist above.
+
+-- Movement speed smoothing — WalkSpeed ramps via acceleration/deceleration instead of snapping.
+Constants.MOVEMENT_SMOOTH_SPEED_ENABLED   = true   -- master switch; false = instant snap (legacy)
+Constants.MOVEMENT_ACCELERATION           = 42     -- studs/s²: idle → walk ramp-up
+Constants.MOVEMENT_DECELERATION           = 58     -- studs/s²: any state → idle ramp-down
+Constants.MOVEMENT_SPRINT_ACCELERATION    = 34     -- studs/s²: walk → sprint ramp-up
+Constants.MOVEMENT_CROUCH_ACCELERATION    = 48     -- studs/s²: crouch speed transition
+Constants.MOVEMENT_AIR_ACCELERATION       = 14     -- studs/s²: while airborne (jump/fall)
+Constants.MOVEMENT_STOP_EPSILON           = 0.05   -- studs/s; snap to target when |diff| < this
+Constants.MOVEMENT_MIN_ACTIVE_INPUT       = 0.05   -- input magnitude below which idle is assumed
+
+-- Body yaw smoothing — deg/frame at 60fps passed to rotateCharacterCapped().
+-- MOVEMENT_BODY_YAW_SPRINT_SMOOTH_SPEED equals MAX_DELTA / 60 so sprint caps at the global limit.
+Constants.MOVEMENT_BODY_YAW_SMOOTH_ENABLED               = true  -- master switch; false = use CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED
+Constants.MOVEMENT_BODY_YAW_WALK_SMOOTH_SPEED            = 18    -- deg/frame@60fps while walking
+Constants.MOVEMENT_BODY_YAW_CROUCH_SMOOTH_SPEED          = 20    -- deg/frame@60fps while crouching
+Constants.MOVEMENT_BODY_YAW_SPRINT_SMOOTH_SPEED          = 9     -- deg/frame@60fps while sprinting
+Constants.MOVEMENT_BODY_YAW_BACKPEDAL_SMOOTH_SPEED       = 22    -- deg/frame@60fps while backpedaling
+Constants.MOVEMENT_BODY_YAW_MAX_DELTA_DEGREES_PER_SECOND = 540   -- global cap; 540 / 60 = 9 deg/frame (sprint value)
+
 return Constants

@@ -1729,6 +1729,51 @@ Stage 5A in MovementController already implemented bob + mouse sway via `GetView
 
 ---
 
+## [DEBT-068] Task C (movement smoothing) is foundation only — advanced tuning deferred — ADDED 2026-06-11
+
+**Files:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
+**Severity:** Low (intentional deferral; Stage 1 is correct and complete by design)
+**Studio verification required:** Yes — verify in Studio before closing this entry
+
+**What Task C implements (2026-06-11):**
+- `moveSmoothSpeed` lerps toward `getTargetMoveSpeed()` each Heartbeat using acceleration/deceleration constants.
+- State-appropriate acceleration: walk=42 studs/s², sprint=34, crouch=48, air=14, deceleration=58.
+- Hard-zero cases (phase, landing lock, sprint-stop lock, slide, vault) snap WalkSpeed=0 immediately.
+- Body yaw in mouse-lock walk/crouch mode picks speed by state: walk=18, crouch=20, sprint=9, backpedal=22 deg/frame@60fps.
+- Master switches: `MOVEMENT_SMOOTH_SPEED_ENABLED` and `MOVEMENT_BODY_YAW_SMOOTH_ENABLED` (both default true).
+
+**What Task C does NOT implement (deferred):**
+- Directional acceleration bias (e.g., side-strafe accelerates slower than forward) — all non-sprint states use the same walk acceleration constant.
+- Momentum carry from slide into walk — moveSmoothSpeed snaps to 0 at slide start, ramps up from 0 when slide ends (no inertia transfer from slide carry speed).
+- Smooth sprint-stop deceleration into the sprint-stop animation — sprint-stop lock (`isSprintStopPlaying`) still snaps WalkSpeed to 0; only post-lock resumption is smoothed.
+- Per-weapon body yaw bias (heavy weapons = slower body yaw).
+- Sprint direction body yaw via `rotateCharacterCapped` — `faceCharacterTowardsDirection()` still uses `SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 0.18` lerp; body yaw smoothing constants apply to camera-facing walk/crouch path only.
+- Mouse-lock free-look body yaw (custom free-look systems untouched).
+
+**Architecture note:**
+`updateMoveSmoothSpeed(dt)` is a closure inside `Start()` so it can access all module-level state. It runs after `applySpeed()` in the Heartbeat — `applySpeed()` owns hard-zero snaps, `updateMoveSmoothSpeed()` owns the smooth lerp. The two functions never conflict: hard-zero guards in `updateMoveSmoothSpeed()` mirror those in `applySpeed()` and return early when `applySpeed()` already wrote 0.
+
+**DEBT-066 / 067 status (Stable):** Task C does not touch ADS FOV, CameraOffset, or viewmodel state. No regression risk against Tasks A or B.
+
+**MCP / Studio verification — pending:**
+1. Spawn and walk forward (W). Speed ramps up over ~0.4 s to walk speed (no instant jump).
+2. Release W. Speed ramps to 0 over ~0.3 s.
+3. Sprint from idle (double-tap LeftShift or hold). Speed ramps from walk to sprint over additional ~0.3 s.
+4. Release sprint. Speed decelerates from sprint to walk to 0 smoothly.
+5. Crouch-enter while moving. Speed transitions to crouch speed without snapping.
+6. Slide (LeftCtrl while sprinting). WalkSpeed snaps to 0 immediately; slide momentum is LinearVelocity as before.
+7. Slide ends — stand-up: WalkSpeed ramps from 0 to walk/sprint over ~0.4 s.
+8. Heavy landing lock: WalkSpeed stays 0 during lock window; ramps up after lock clears.
+9. Backpedal (S). Body yaw rotates at ~22 deg/frame — smoother than forward walk.
+10. Sprint then look away from movement direction. Body yaw follows at slower 9 deg/frame.
+11. Set `MOVEMENT_SMOOTH_SPEED_ENABLED = false`. Legacy instant-snap behavior fully restored.
+12. Set `MOVEMENT_BODY_YAW_SMOOTH_ENABLED = false`. Body yaw falls back to `CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED = 18` flat.
+13. Output panel shows no errors or unexpected warns throughout.
+
+**Trigger for Stage 2:** Decision to add directional acceleration bias, slide-into-walk momentum transfer, or sprint-stop deceleration smoothing. Each is a separate stage.
+
+---
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.lua`

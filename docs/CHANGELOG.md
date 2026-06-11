@@ -7,6 +7,44 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-11 — FEAT] — Task C: Criminality-style movement smoothing and body-yaw foundation
+
+### Summary
+
+**Task C:** `Humanoid.WalkSpeed` no longer snaps instantly. A `moveSmoothSpeed` value lerps toward the target speed each Heartbeat using state-appropriate acceleration/deceleration constants (`MOVEMENT_ACCELERATION = 42`, `MOVEMENT_DECELERATION = 58`, `MOVEMENT_SPRINT_ACCELERATION = 34`, `MOVEMENT_CROUCH_ACCELERATION = 48`, `MOVEMENT_AIR_ACCELERATION = 14`). Hard-zero cases (phase not ACTIVE, landing lock, sprint-stop lock, slide, vault) still snap to 0 immediately. Body yaw in mouse-lock walk/crouch mode now picks its rotation speed based on movement state: walking=18 deg/frame, crouching=20, sprinting=9, backpedaling=22.
+
+No camera.CFrame changes. No new remotes. No server changes.
+
+### Features added
+
+- `getTargetMoveSpeed()` — new private helper; returns the target WalkSpeed for normal movement states; used by both the legacy direct-write path and the smooth Heartbeat path.
+- `updateMoveSmoothSpeed(dt)` — new private helper inside `Start()`; lerps `moveSmoothSpeed` toward `getTargetMoveSpeed()` using acceleration or deceleration constants; runs each Heartbeat after `applySpeed()`.
+- `applySpeed()` updated: hard-zero cases now also zero `moveSmoothSpeed`; normal movement is a no-op when `MOVEMENT_SMOOTH_SPEED_ENABLED = true` so the Heartbeat owns WalkSpeed; legacy path calls `getTargetMoveSpeed()` directly.
+- `updateCustomMouseLockBodyYaw()` updated: picks yaw rotation speed by state (`MOVEMENT_BODY_YAW_SPRINT_SMOOTH_SPEED = 9` / `CROUCH = 20` / `BACKPEDAL = 22` / `WALK = 18`); falls back to `CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED` when `MOVEMENT_BODY_YAW_SMOOTH_ENABLED = false`.
+- `moveSmoothSpeed` reset to 0 on respawn and destroy.
+- 15 new constants: `MOVEMENT_SMOOTH_SPEED_ENABLED`, `MOVEMENT_ACCELERATION`, `MOVEMENT_DECELERATION`, `MOVEMENT_SPRINT_ACCELERATION`, `MOVEMENT_CROUCH_ACCELERATION`, `MOVEMENT_AIR_ACCELERATION`, `MOVEMENT_STOP_EPSILON`, `MOVEMENT_MIN_ACTIVE_INPUT`, `MOVEMENT_BODY_YAW_SMOOTH_ENABLED`, `MOVEMENT_BODY_YAW_WALK_SMOOTH_SPEED`, `MOVEMENT_BODY_YAW_CROUCH_SMOOTH_SPEED`, `MOVEMENT_BODY_YAW_SPRINT_SMOOTH_SPEED`, `MOVEMENT_BODY_YAW_BACKPEDAL_SMOOTH_SPEED`, `MOVEMENT_BODY_YAW_MAX_DELTA_DEGREES_PER_SECOND`.
+
+### Files changed
+
+- `src/shared/Constants.lua` — 15 new Task C constants added after Task B block.
+- `src/client/MovementController.lua` — `getTargetMoveSpeed()`, `updateMoveSmoothSpeed()`, updated `applySpeed()`, updated `updateCustomMouseLockBodyYaw()`, `moveSmoothSpeed` state var + resets.
+
+### Verification required (Studio / MCP)
+
+- Start moving from idle: character accelerates smoothly to walk speed over ~0.4 s.
+- Release all keys: character decelerates to 0 over ~0.3 s.
+- Start sprinting: ramps from walk speed to sprint speed over ~0.3 s additional delta.
+- Release sprint mid-run: decelerates back to walk speed smoothly.
+- Crouch entry/exit: speed transitions without snapping.
+- Slide then stand: WalkSpeed ramps back from 0 after slide ends.
+- Backpedal: body rotates toward camera at 22 deg/frame (same direction, no wild snap).
+- Sprint body yaw: rotates at slower 9 deg/frame (camera-facing, but less aggressive).
+- Disable `MOVEMENT_SMOOTH_SPEED_ENABLED = false`: legacy instant-snap behavior restored exactly.
+- Disable `MOVEMENT_BODY_YAW_SMOOTH_ENABLED = false`: falls back to `CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED`.
+- Hard-zero cases (landing lock, sprint-stop lock, slide, vault): WalkSpeed still snaps to 0 immediately, no smooth override.
+
+---
+
 ## [2026-06-11 — FEAT] — Task A: ADS sprint disable + ADS focus zoom; Task B: first-person stance POV height offsets
 
 ### Summary
