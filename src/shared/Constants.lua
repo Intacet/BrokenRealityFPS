@@ -1290,8 +1290,9 @@ Constants.CAMERA_POV_RELOAD_MULTIPLIER    =  0.80   -- scale applied to offset w
 -- updateCameraBodyFeel() in MovementController is the single writer of CameraOffset per frame.
 
 Constants.CAMERA_BODY_FEEL_ENABLED        = true   -- master switch; false = no body camera offsets
-Constants.CAMERA_BODY_OFFSET_SMOOTH_SPEED = 16     -- lerp rate (units/s) for stance Y/Z approach
-Constants.CAMERA_BODY_OFFSET_RESET_SPEED  = 22     -- lerp rate (units/s) for bob fade-out when idle
+Constants.CAMERA_BODY_OFFSET_SMOOTH_SPEED = 10     -- lerp rate (units/s) for stance Y/Z approach
+Constants.CAMERA_BODY_BOB_FADE_IN_SPEED   = 5      -- lerp rate (units/s) for bob alpha fade-in when moving
+Constants.CAMERA_BODY_OFFSET_RESET_SPEED  = 7      -- lerp rate (units/s) for bob fade-out when idle
 
 -- Walk bob
 Constants.CAMERA_WALK_BOB_ENABLED         = true   -- master switch for all bob types
@@ -1315,13 +1316,13 @@ Constants.CAMERA_SLIDE_OFFSET_Z           = -0.15  -- studs; camera pulls back s
 
 -- Jump lift (transient upward impulse at jump start; decays over CAMERA_JUMP_LIFT_DURATION)
 Constants.CAMERA_JUMP_LIFT_Y              = 0.22   -- studs; lift magnitude at jump takeoff
-Constants.CAMERA_JUMP_LIFT_DURATION       = 0.16   -- seconds; decay window for the lift impulse
+Constants.CAMERA_JUMP_LIFT_DURATION       = 0.26   -- seconds; decay window for the lift impulse
 
 -- Fall offset (CAMERA_FALL_OFFSET_Y already set above; MAX_Y is a sanity clamp)
 Constants.CAMERA_FALL_OFFSET_MAX_Y        = -0.35  -- studs; max downward offset during freefall (clamp)
 
 -- Landing dip recovery (replaces CAMERA_POV_LAND_RECOVER_SPEED = 8 for Task D)
-Constants.CAMERA_LAND_RECOVERY_SPEED      = 18     -- decay rate; landing dip fades to zero at this speed
+Constants.CAMERA_LAND_RECOVERY_SPEED      = 10     -- decay rate; landing dip fades to zero at this speed
 
 -- ADS and reload multipliers (replace CAMERA_POV_ADS/RELOAD_MULTIPLIER for Task D)
 Constants.CAMERA_BODY_ADS_MULTIPLIER      = 0.45   -- scale applied to all body offsets + bob while ADS

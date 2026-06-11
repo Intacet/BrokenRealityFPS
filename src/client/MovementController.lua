@@ -6125,7 +6125,7 @@ function MovementController:Start()
         -- Bob alpha: fades in when moving, fades out when stopped (prevents pop).
         local targetAlpha: number = if isMovingForBob then 1 else 0
         local alphaSpeed: number  = if isMovingForBob
-            then (Constants.CAMERA_BODY_OFFSET_SMOOTH_SPEED :: number)
+            then (Constants.CAMERA_BODY_BOB_FADE_IN_SPEED :: number)
             else (Constants.CAMERA_BODY_OFFSET_RESET_SPEED :: number)
         camBobAlpha = camBobAlpha + (targetAlpha - camBobAlpha) * math.min(1, dt * alphaSpeed)
 
