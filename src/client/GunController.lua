@@ -435,6 +435,8 @@ function GunController:Start()
             if Constants.FREE_AIM_ENABLED then
                 FreeAimController:SetWeaponEquipped(true)
             end
+            -- Switch movement animations to the armed set.
+            MovementController.SetEquippedWeaponName(Constants.MOVEMENT_ANIMATION_SET_AR15)
             Logger.debug("[GunController] Equipped: " .. Constants.DEFAULT_VIEWMODEL_WEAPON)
         else
             ViewModelController:HolsterWeapon()
@@ -443,6 +445,8 @@ function GunController:Start()
             -- Clear ADS state in MovementController so focus zoom and sprint-lock
             -- do not persist after the gun is put away.
             MovementController.SetAiming(false)
+            -- Restore movement animations to the unarmed set.
+            MovementController.SetEquippedWeaponName(nil)
             -- Inform WorldWeaponService to remove the world model.
             WeaponEquipState:FireServer(Constants.DEFAULT_VIEWMODEL_WEAPON, false)
             -- Notify FreeAimController and reset the offset on holster.
@@ -463,9 +467,9 @@ function GunController:Start()
     local respawnConn = LocalPlayer.CharacterAdded:Connect(function(_character: Model)
         equippedWeaponName = nil
         isAutoFiring = false
-        -- Clear ADS state in MovementController on respawn so focus zoom does not
-        -- carry over from the previous life.
+        -- Clear ADS state and movement animation set in MovementController on respawn.
         MovementController.SetAiming(false)
+        MovementController.SetEquippedWeaponName(nil)
         -- Reset free-aim state on respawn: weapon is holstered, offset is cleared.
         if Constants.FREE_AIM_ENABLED then
             FreeAimController:SetWeaponEquipped(false)
