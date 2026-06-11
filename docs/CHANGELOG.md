@@ -7,6 +7,49 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-11 — FEAT] — Task F: Non-shift-lock forward locomotion animation
+
+### Summary
+
+Without mouse lock (shift lock), all walking/running directions now play `WalkForward` instead of `WalkBackward`, `WalkForwardLeft`, etc. The character body still turns to face the movement direction via `Humanoid.AutoRotate = true` (engine handles body yaw). With mouse lock ON, all existing directional animations are preserved exactly — no behaviour change for shift-lock mode.
+
+Root cause: the Unarmed animation branch previously played `WalkBackward` and diagonal animations unconditionally regardless of mouse-lock state. Only pure left/right strafe was gated. This fix extends the mouse-lock gate to cover all non-forward directions in the Unarmed set.
+
+### Features added / changed
+
+- **`MOVEMENT_DIRECTIONAL_ANIMS_REQUIRE_MOUSE_LOCK = true`** — new constant; gates all Unarmed directional animations (Backward, ForwardLeft, ForwardRight, BackwardLeft, BackwardRight, Left, Right) behind mouse-lock state.
+- **`MOVEMENT_NON_MOUSE_LOCK_FORCE_FORWARD_ANIM = true`** — forces the locomotion direction to "Forward" when not mouse-locked.
+- **`MOVEMENT_NON_MOUSE_LOCK_AUTOROTATE = true`** — `applyCharacterFacing()` sets `humanoid.AutoRotate = true` in the non-mouse-lock path so the engine rotates the body naturally.
+- **`MOVEMENT_MOUSE_LOCK_AUTOROTATE = false`** — documents the intended mouse-lock AutoRotate state (existing behaviour unchanged).
+- **`MOVEMENT_NON_MOUSE_LOCK_BODY_YAW_SMOOTH_SPEED = 16`** — declared for future manual yaw path (not yet wired; AutoRotate handles it).
+- **`MOVEMENT_MOUSE_LOCK_BODY_YAW_SMOOTH_SPEED = 18`** — documents intended mouse-lock yaw speed reference.
+- **`MOVEMENT_DIRECTION_DOT_FORWARD_THRESHOLD = 0.45`, `MOVEMENT_DIRECTION_DOT_BACK_THRESHOLD = -0.45`, `MOVEMENT_DIRECTION_DOT_STRAFE_THRESHOLD = 0.35`** — declared for future dot-product classifier.
+- **`getLocomotionAnimationDirection(moveDirection, isMouseLocked)`** — new private helper; returns "Forward" when not mouse-locked (so all walking directions fall through to `WalkForward`), `movementState.directionName` when mouse-locked.
+- **`canUseDirectionalAnims`** — new local in `updateMovementAnimation()`; extends the existing `canUseStrafeAnimations` gate to cover all directional slots in the Unarmed branch.
+- **One-shot debug log** on mouse-lock movement mode transitions (not per-frame).
+- **`applyCharacterFacing()` non-mouse-lock path** — now explicitly sets `AutoRotate = true` when `MOVEMENT_NON_MOUSE_LOCK_AUTOROTATE` is true, catching edge cases where `AutoRotate` may have been left false (e.g. after rapid mouse-lock toggling during sprint).
+
+### What did NOT change
+
+- AR15 animation branch — unchanged; it already fell back to `AR15_WalkForward` when not mouse-locked.
+- Sprint animations — unchanged.
+- Crouch animations — unchanged.
+- Body yaw constants (`MOVEMENT_BODY_YAW_WALK_SMOOTH_SPEED` etc.) — unchanged.
+- No camera changes. No physics changes. No new remotes.
+
+### Files changed
+
+- `src/shared/Constants.lua` — 9 new constants added after `MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK`.
+- `src/client/MovementController.lua` — `getLocomotionAnimationDirection()` helper, `canUseDirectionalAnims` gate in `updateMovementAnimation()`, non-mouse-lock `AutoRotate` management in `applyCharacterFacing()`, `lastMouseLockMovementMode` log guard.
+
+### Studio verification
+
+See DEBT-070 for full 12-step test plan.
+
+MCP/Studio verification pending.
+
+---
+
 ## [2026-06-11 — FEAT] — Armed strafe animations (WalkLeft/WalkRight for AR15, shift-lock only)
 
 ### Summary

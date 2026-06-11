@@ -326,6 +326,11 @@ local lastAnimationSet: string = ""
 -- Reset to false on each character load and in destroy().
 local lastStrafeBlockedState: boolean = false
 
+-- Last known mouse-lock movement mode for one-shot debug logging.
+-- true = mouse lock was active on the last logged frame.  Logs only on state change.
+-- Reset to false on each character load and in destroy().
+local lastMouseLockMovementMode: boolean = false
+
 -- Stage 2R: last sprint animation name that was logged to Output.
 -- Guards against per-frame log spam: only logs when the sprint anim key changes.
 -- Reset to "" on each character load and in destroy().
@@ -1171,7 +1176,19 @@ end
 -- returns without writing HumanoidRootPart.CFrame — Roblox physics handles the yaw rotation.
 local function applyCharacterFacing()
     if not Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW then return end
-    if not customMouseLocked then return end
+
+    if not customMouseLocked then
+        -- Non-mouse-lock path: ensure AutoRotate is enabled so the engine turns the
+        -- character toward hum.MoveDirection naturally (no CFrame writes needed here).
+        if Constants.MOVEMENT_NON_MOUSE_LOCK_AUTOROTATE then
+            local hum = humanoid
+            if hum and not hum.AutoRotate then
+                hum.AutoRotate = true
+                Logger.debug("[MovementController] AutoRotate = true (non-mouse-lock locomotion mode)")
+            end
+        end
+        return
+    end
 
     -- Phase gate: only apply rotation in ACTIVE when required.
     if Constants.CUSTOM_MOUSE_LOCK_REQUIRE_ACTIVE_FOR_CHARACTER_ROTATION then
@@ -2113,6 +2130,22 @@ local function isMouseLockedForStrafeAnimations(): boolean
     end
     -- Legacy: Roblox native MouseBehavior check (MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK path).
     return UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
+end
+
+-- Returns the effective locomotion direction name for animation selection.
+-- When MOVEMENT_NON_MOUSE_LOCK_FORCE_FORWARD_ANIM is true and the player is not mouse-locked,
+-- always returns "Forward" so the WalkForward animation plays regardless of movement direction.
+-- The character body still faces the movement direction via Humanoid.AutoRotate = true.
+-- When mouse-locked, returns movementState.directionName (the post-hysteresis camera-relative direction).
+-- Returns "Idle" if the movement vector magnitude is below the direction deadzone.
+local function getLocomotionAnimationDirection(moveDirection: Vector3, isMouseLocked: boolean): string
+    if moveDirection.Magnitude <= (Constants.MOVEMENT_DIRECTION_DEADZONE :: number) then
+        return "Idle"
+    end
+    if not isMouseLocked and (Constants.MOVEMENT_NON_MOUSE_LOCK_FORCE_FORWARD_ANIM :: boolean) then
+        return "Forward"
+    end
+    return movementState.directionName
 end
 
 -- Returns the playback speed multiplier for the given short animation name.
@@ -3590,7 +3623,9 @@ local function loadMovementAnimations(character: Model)
     -- Reset set-change log guard so the first movement after respawn re-logs the active set.
     lastAnimationSet       = ""
     -- Reset strafe-blocked log guard so the first movement after respawn re-logs the state.
-    lastStrafeBlockedState = false
+    lastStrafeBlockedState    = false
+    -- Reset mouse-lock movement mode log guard so first movement after respawn re-logs.
+    lastMouseLockMovementMode = false
     -- Stage 2R: reset sprint anim log guard so the first sprint after respawn re-logs.
     lastSprintAnimName     = ""
     -- Stage 3D: reset sprint body-facing mode log guard on respawn.
@@ -4601,6 +4636,16 @@ local function updateMovementAnimation()
         canUseStrafeAnimations = true
     end
 
+    -- Determine whether ALL directional animations (Backward, diagonals, strafe) are allowed.
+    -- MOVEMENT_DIRECTIONAL_ANIMS_REQUIRE_MOUSE_LOCK is the broader gate that covers every
+    -- non-Forward direction.  When false, canUseDirectionalAnims = true (legacy behaviour).
+    local canUseDirectionalAnims: boolean
+    if Constants.MOVEMENT_DIRECTIONAL_ANIMS_REQUIRE_MOUSE_LOCK then
+        canUseDirectionalAnims = isMouseLockedForStrafeAnimations()
+    else
+        canUseDirectionalAnims = true
+    end
+
     -- Debug: log once when the strafe-blocked state changes (not every Heartbeat frame).
     if Constants.MOVEMENT_ANIMATION_DEBUG then
         local strafeBlocked = not canUseStrafeAnimations
@@ -4610,6 +4655,18 @@ local function updateMovementAnimation()
                 Logger.debug("[MovementController] strafe animations blocked: custom mouse lock not active (press LeftControl to enable)")
             else
                 Logger.debug("[MovementController] strafe animations enabled: custom mouse lock active")
+            end
+        end
+    end
+
+    -- Debug: log once when mouse-lock movement mode changes (non-mouse-lock forces WalkForward).
+    if Constants.MOVEMENT_ANIMATION_DEBUG then
+        if customMouseLocked ~= lastMouseLockMovementMode then
+            lastMouseLockMovementMode = customMouseLocked
+            if customMouseLocked then
+                Logger.debug("[MovementController] directional animation mode active: mouse lock ON")
+            else
+                Logger.debug("[MovementController] non-mouse-lock mode: all walking directions → WalkForward")
             end
         end
     end
@@ -4651,14 +4708,18 @@ local function updateMovementAnimation()
 
     elseif setName == Constants.MOVEMENT_ANIMATION_SET_UNARMED then
         -- Unarmed set: full per-direction selection (Stage 2F).
-        -- WalkBackward plays for Backward regardless of mouse-lock state.
-        -- WalkForwardLeft/Right and WalkBackwardLeft/Right play for diagonals regardless of mouse-lock.
-        -- Pure Left/Right strafe (WalkLeft/WalkRight) still require canUseStrafeAnimations.
-        if dirName == "Backward" then
+        -- All directional animations (Backward, diagonals, Left, Right) require mouse lock when
+        -- MOVEMENT_DIRECTIONAL_ANIMS_REQUIRE_MOUSE_LOCK = true.  Without mouse lock every walking
+        -- direction plays WalkForward; the character body faces movement via AutoRotate = true.
+        -- getLocomotionAnimationDirection() returns "Forward" when not mouse-locked so that
+        -- the path naturally falls through to the WalkForward default at the end of this branch.
+        local effectiveDirName: string = getLocomotionAnimationDirection(movementState.moveVector, customMouseLocked)
+
+        if canUseDirectionalAnims and effectiveDirName == "Backward" then
             local key = "Unarmed_WalkBackward"
             animName = if animationTracks[key] ~= nil then key else "Unarmed_WalkForward"
 
-        elseif dirName == "ForwardLeft" then
+        elseif canUseDirectionalAnims and effectiveDirName == "ForwardLeft" then
             local fwdLeft = "Unarmed_WalkForwardLeft"
             local left    = "Unarmed_WalkLeft"
             if animationTracks[fwdLeft] ~= nil then
@@ -4669,7 +4730,7 @@ local function updateMovementAnimation()
                 animName = "Unarmed_WalkForward"
             end
 
-        elseif dirName == "ForwardRight" then
+        elseif canUseDirectionalAnims and effectiveDirName == "ForwardRight" then
             local fwdRight = "Unarmed_WalkForwardRight"
             local right    = "Unarmed_WalkRight"
             if animationTracks[fwdRight] ~= nil then
@@ -4680,7 +4741,7 @@ local function updateMovementAnimation()
                 animName = "Unarmed_WalkForward"
             end
 
-        elseif dirName == "BackwardLeft" then
+        elseif canUseDirectionalAnims and effectiveDirName == "BackwardLeft" then
             local bwd     = "Unarmed_WalkBackward"
             local bwdLeft = "Unarmed_WalkBackwardLeft"
             if animationTracks[bwdLeft] ~= nil then
@@ -4691,7 +4752,7 @@ local function updateMovementAnimation()
                 animName = "Unarmed_WalkForward"
             end
 
-        elseif dirName == "BackwardRight" then
+        elseif canUseDirectionalAnims and effectiveDirName == "BackwardRight" then
             local bwd      = "Unarmed_WalkBackward"
             local bwdRight = "Unarmed_WalkBackwardRight"
             if animationTracks[bwdRight] ~= nil then
@@ -4702,12 +4763,12 @@ local function updateMovementAnimation()
                 animName = "Unarmed_WalkForward"
             end
 
-        elseif canUseStrafeAnimations then
+        elseif canUseDirectionalAnims and canUseStrafeAnimations then
             -- Left, Right, or Forward with mouse lock active.
-            if dirName == "Left" then
+            if effectiveDirName == "Left" then
                 local leftKey = "Unarmed_WalkLeft"
                 animName = if animationTracks[leftKey] ~= nil then leftKey else "Unarmed_WalkForward"
-            elseif dirName == "Right" then
+            elseif effectiveDirName == "Right" then
                 local rightKey = "Unarmed_WalkRight"
                 animName = if animationTracks[rightKey] ~= nil then rightKey else "Unarmed_WalkForward"
             else
@@ -4716,7 +4777,8 @@ local function updateMovementAnimation()
             end
 
         else
-            -- Mouse lock not active: pure Left/Right and Forward use WalkForward.
+            -- Mouse lock not active (canUseDirectionalAnims = false), or Forward / unclassified:
+            -- always play WalkForward. Character body faces movement direction via AutoRotate.
             animName = "Unarmed_WalkForward"
         end
 
@@ -5314,6 +5376,7 @@ function MovementController:destroy()
     equippedWeaponName        = nil
     lastAnimationSet          = ""
     lastStrafeBlockedState    = false
+    lastMouseLockMovementMode = false
     lastSprintAnimName        = ""   -- Stage 2R
     lastSprintFacingMode              = ""    -- Stage 3D
     lastNaturalSprintAutoRotateActive = false -- Stage 3E

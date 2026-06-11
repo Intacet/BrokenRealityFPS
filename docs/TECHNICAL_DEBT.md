@@ -1808,6 +1808,59 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 
 ---
 
+## [DEBT-070] Task F (non-mouse-lock forward animation) is foundation only — advanced features deferred — ADDED 2026-06-11
+
+**File:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
+**Severity:** Low (foundation solid; several cosmetic and system integration items deferred)
+**Studio verification required:** Yes — see test steps below
+
+**What Task F implemented:**
+- Added 9 new constants (`MOVEMENT_DIRECTIONAL_ANIMS_REQUIRE_MOUSE_LOCK`, `MOVEMENT_NON_MOUSE_LOCK_FORCE_FORWARD_ANIM`, `MOVEMENT_NON_MOUSE_LOCK_AUTOROTATE`, `MOVEMENT_MOUSE_LOCK_AUTOROTATE`, `MOVEMENT_NON_MOUSE_LOCK_BODY_YAW_SMOOTH_SPEED`, `MOVEMENT_MOUSE_LOCK_BODY_YAW_SMOOTH_SPEED`, `MOVEMENT_DIRECTION_DOT_FORWARD_THRESHOLD`, `MOVEMENT_DIRECTION_DOT_BACK_THRESHOLD`, `MOVEMENT_DIRECTION_DOT_STRAFE_THRESHOLD`).
+- Added `getLocomotionAnimationDirection(moveDirection, isMouseLocked)` helper — returns "Forward" when not mouse-locked (so WalkForward plays for all directions), returns `movementState.directionName` when mouse-locked.
+- Gated all Unarmed directional animations (Backward, diagonals, Left, Right) behind `canUseDirectionalAnims` (= `customMouseLocked` when `MOVEMENT_DIRECTIONAL_ANIMS_REQUIRE_MOUSE_LOCK = true`).
+- Added non-mouse-lock path in `applyCharacterFacing()`: sets `humanoid.AutoRotate = true` when not mouse-locked and `MOVEMENT_NON_MOUSE_LOCK_AUTOROTATE = true`.
+- Added one-shot debug log for mouse-lock movement mode transitions.
+
+**Deferred items:**
+
+1. **Transition blend when switching into mouse lock while walking** — The crossfade between `WalkForward` (no mouse lock) and `WalkLeft`/`WalkRight` (mouse lock just enabled) uses the standard `MOVEMENT_WALK_ANIM_CROSSFADE_TIME`. A purpose-built blend curve (e.g. 0.2 s linear → snappy lock-on feel) was not implemented. Current transitions feel adequate but have not been verified at all mouse-lock toggle speeds.
+
+2. **MOVEMENT_NON_MOUSE_LOCK_BODY_YAW_SMOOTH_SPEED not yet wired** — Constant is declared (value 16) but no manual yaw path exists when `MOVEMENT_NON_MOUSE_LOCK_AUTOROTATE = true`. If AutoRotate is ever disabled in the non-mouse-lock path, wire this constant into `rotateCharacterCapped()` for that path.
+
+3. **MOVEMENT_DIRECTION_DOT_* thresholds not yet used** — Constants are declared for future use in a dot-product–based direction classifier (`getLocomotionAnimationDirection` currently delegates to `movementState.directionName` which uses the existing hysteresis-based classifier). A future Stage may replace `classifyDirection()` with a dot-product approach; these thresholds are pre-declared for that.
+
+4. **Crouch and sprint animation direction not yet gated** — `getSprintAnimationName()` and the crouch animation branches were not changed. They continue to use the existing per-direction logic regardless of mouse lock, which is fine for the current R6 animation set (no crouch-backward animation exists). If backward or diagonal crouch anims are added, they should be gated behind `canUseDirectionalAnims` the same way.
+
+5. **AR15 backward animation not yet authored** — AR15 set has `WalkLeft` and `WalkRight` (mouse-lock only). There is no `AR15_WalkBackward`. The AR15 branch already falls back to `AR15_WalkForward` for Backward, which is correct. If an AR15-specific backward animation is added later, gate it behind `canUseDirectionalAnims`.
+
+**Affected DEBT entries:**
+
+**DEBT-050 status (Stable):** `equippedWeaponName` remains presentation-only. Task F reads it via `getAnimationSetName()` — same pattern as Task E. No new coupling.
+
+**DEBT-055 status (Stable):** Task F does not change backpedal input handling. The backpedal animation is now correctly suppressed without mouse lock. If Bugs 1–3 from DEBT-055 reappear during shift-lock testing, Task F is not the cause (gated behind `customMouseLocked`).
+
+**DEBT-058 status (Stable):** Body yaw redesign (Stage 4) is unchanged. `applyCharacterFacing()` now has an early return for non-mouse-lock that sets AutoRotate=true, but does not modify the mouse-lock yaw path.
+
+**DEBT-066–069 status (Stable):** Task F does not touch ADS, camera bob, CameraOffset, or sprint state. No regression risk.
+
+**MCP unavailable — manual Studio test steps:**
+1. Spawn without mouse lock (LeftControl not pressed). Walk forward (W). Verify: `Unarmed_WalkForward` plays. Character faces forward. No backpedal or diagonal animation plays.
+2. Press S (backward). Verify: Character turns 180° via AutoRotate. `Unarmed_WalkForward` still plays (NOT WalkBackward). Body faces backward (away from camera); animation is forward-walk. This is expected — the character is physically facing the direction they are moving.
+3. Press A (strafe left). Verify: Character turns left. `Unarmed_WalkForward` plays. No WalkLeft plays.
+4. Press D (strafe right). Verify: Character turns right. `Unarmed_WalkForward` plays. No WalkRight plays.
+5. Press W+A (diagonal). Verify: Character faces diagonal. `Unarmed_WalkForward` plays. No WalkForwardLeft plays.
+6. Enable mouse lock (LeftControl). Walk forward. Verify: `Unarmed_WalkForward` plays. Body faces camera direction.
+7. With mouse lock ON, press A. Verify: `Unarmed_WalkLeft` plays. Body stays facing camera.
+8. With mouse lock ON, press S. Verify: `Unarmed_WalkBackward` plays (or `Unarmed_WalkForward` fallback if track missing).
+9. Equip weapon (E). Repeat steps 6–8. Verify: `AR15_WalkLeft`/`AR15_WalkRight` play with mouse lock ON. `AR15_WalkForward` plays for all directions without mouse lock.
+10. Toggle mouse lock ON and OFF rapidly while walking. Verify: clean transitions, no animation stuck in backward/strafe state.
+11. Crouch + walk. No regression to crouch animations. Sprint + strafe. No regression to sprint animations.
+12. Output panel: no errors. No per-frame spam. One-shot mode-change logs appear on mouse-lock toggle.
+
+**Trigger for Stage 2:** Decision to add dot-product direction classifier, per-direction crouch animations, or a manual body yaw path for non-mouse-lock mode.
+
+---
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.lua`

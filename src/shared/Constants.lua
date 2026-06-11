@@ -567,6 +567,43 @@ Constants.MOVEMENT_DIRECTION_DEBUG = true
 -- Set false to play strafe animations regardless of mouse-lock state.
 Constants.MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK = true
 
+-- When true, ALL directional animations (Backward, ForwardLeft, ForwardRight, BackwardLeft,
+-- BackwardRight, Left, Right) require mouse lock to be active. Without mouse lock, every
+-- walking direction plays WalkForward instead. This is a superset of
+-- MOVEMENT_STRAFE_ANIMS_REQUIRE_MOUSE_LOCK (which only gates Left/Right strafe).
+-- Set false to restore the legacy behaviour where Backward and diagonals play regardless.
+Constants.MOVEMENT_DIRECTIONAL_ANIMS_REQUIRE_MOUSE_LOCK = true
+
+-- When true and mouse lock is OFF, updateMovementAnimation forces the locomotion direction
+-- to "Forward" for all walking inputs so WalkForward always plays.
+-- Requires MOVEMENT_DIRECTIONAL_ANIMS_REQUIRE_MOUSE_LOCK = true to have any effect.
+Constants.MOVEMENT_NON_MOUSE_LOCK_FORCE_FORWARD_ANIM = true
+
+-- AutoRotate management during non-mouse-lock locomotion.
+-- When true, MovementController sets Humanoid.AutoRotate = true whenever the custom
+-- mouse lock is inactive so the engine rotates the character toward hum.MoveDirection.
+-- When false, AutoRotate is not touched by MovementController in the non-mouse-lock path.
+Constants.MOVEMENT_NON_MOUSE_LOCK_AUTOROTATE = true
+
+-- When true, MovementController ensures Humanoid.AutoRotate = false while custom mouse
+-- lock is active (matches the existing rotateCharacterCapped behaviour).
+Constants.MOVEMENT_MOUSE_LOCK_AUTOROTATE = false
+
+-- Body-yaw smooth speeds for the two locomotion modes.
+-- MOVEMENT_NON_MOUSE_LOCK_BODY_YAW_SMOOTH_SPEED is reserved for a future explicit yaw
+-- path when MOVEMENT_NON_MOUSE_LOCK_AUTOROTATE = false.
+-- MOVEMENT_MOUSE_LOCK_BODY_YAW_SMOOTH_SPEED documents the intended mouse-lock speed;
+-- the per-stance constants (MOVEMENT_BODY_YAW_WALK_SMOOTH_SPEED etc.) are authoritative.
+Constants.MOVEMENT_NON_MOUSE_LOCK_BODY_YAW_SMOOTH_SPEED = 16
+Constants.MOVEMENT_MOUSE_LOCK_BODY_YAW_SMOOTH_SPEED     = 18
+
+-- Dot-product thresholds used by getLocomotionAnimationDirection() when classifying
+-- camera-relative movement into Forward / Backward / Strafe buckets.
+-- Values are cos(angle): 0.45 ≈ 63°, -0.45 ≈ 117°, 0.35 ≈ 70°.
+Constants.MOVEMENT_DIRECTION_DOT_FORWARD_THRESHOLD  =  0.45
+Constants.MOVEMENT_DIRECTION_DOT_BACK_THRESHOLD     = -0.45
+Constants.MOVEMENT_DIRECTION_DOT_STRAFE_THRESHOLD   =  0.35
+
 -- Master switch: when false, MovementController does not disable Animate and does not
 -- play any custom movement tracks — the default avatar animation pack runs as normal.
 -- Set true (default) to use the custom R6 animation system with Unarmed/AR15 sets.
