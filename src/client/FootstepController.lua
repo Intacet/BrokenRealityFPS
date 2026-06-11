@@ -226,6 +226,12 @@ local function onCharacterAdded(character: Model)
     hrp      = root
     setupEmitter(root)
 
+    -- Mute Roblox's built-in running/footstep sound so our custom sounds play exclusively.
+    local defaultRunSound = root:FindFirstChild("Running")
+    if defaultRunSound ~= nil and defaultRunSound:IsA("Sound") then
+        (defaultRunSound :: Sound).Volume = 0
+    end
+
     if Constants.FOOTSTEP_DEBUG :: boolean then
         Logger.debug("[FootstepController] character bound — footsteps active")
     end
