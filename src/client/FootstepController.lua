@@ -227,10 +227,17 @@ local function onCharacterAdded(character: Model)
     setupEmitter(root)
 
     -- Mute Roblox's built-in running/footstep sound so our custom sounds play exclusively.
-    local defaultRunSound = root:FindFirstChild("Running")
-    if defaultRunSound ~= nil and defaultRunSound:IsA("Sound") then
-        (defaultRunSound :: Sound).Volume = 0
+    -- Roblox's Sound script adds "Running" after HumanoidRootPart is ready, so we watch
+    -- ChildAdded as well as checking for an already-present instance.
+    local function muteIfRunningSound(child: Instance)
+        if child.Name == "Running" and child:IsA("Sound") then
+            (child :: Sound).Volume = 0
+        end
     end
+    for _, child in root:GetChildren() do
+        muteIfRunningSound(child)
+    end
+    root.ChildAdded:Connect(muteIfRunningSound)
 
     if Constants.FOOTSTEP_DEBUG :: boolean then
         Logger.debug("[FootstepController] character bound — footsteps active")
