@@ -978,7 +978,13 @@ function ViewModelController:Start()
 
             if isFirstPerson and not gp and delta < 0 then
                 -- Scroll down in first-person → third-person.
-                setFirstPerson(false)
+                -- Block the switch while ADS is active so the player cannot accidentally
+                -- leave first-person in the middle of an aim. ADS exit restores the ability.
+                if Constants.ADS_BLOCK_PERSPECTIVE_SWITCH and adsState ~= "Hip" then
+                    -- no-op: perspective switch suppressed during ADS
+                else
+                    setFirstPerson(false)
+                end
             elseif not isFirstPerson and delta > 0 then
                 -- Scroll up in third-person → snap to first-person when appropriate.
                 -- (gp is ignored here: Roblox marks scroll as processed in Classic mode
