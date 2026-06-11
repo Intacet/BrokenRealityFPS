@@ -440,6 +440,9 @@ function GunController:Start()
             ViewModelController:HolsterWeapon()
             equippedWeaponName = nil
             isAutoFiring = false
+            -- Clear ADS state in MovementController so focus zoom and sprint-lock
+            -- do not persist after the gun is put away.
+            MovementController.SetAiming(false)
             -- Inform WorldWeaponService to remove the world model.
             WeaponEquipState:FireServer(Constants.DEFAULT_VIEWMODEL_WEAPON, false)
             -- Notify FreeAimController and reset the offset on holster.
@@ -460,6 +463,9 @@ function GunController:Start()
     local respawnConn = LocalPlayer.CharacterAdded:Connect(function(_character: Model)
         equippedWeaponName = nil
         isAutoFiring = false
+        -- Clear ADS state in MovementController on respawn so focus zoom does not
+        -- carry over from the previous life.
+        MovementController.SetAiming(false)
         -- Reset free-aim state on respawn: weapon is holstered, offset is cleared.
         if Constants.FREE_AIM_ENABLED then
             FreeAimController:SetWeaponEquipped(false)
