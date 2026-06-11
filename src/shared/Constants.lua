@@ -974,7 +974,7 @@ Constants.VIEWMODEL_EFFECTS_ENABLED = true
 -- ── Bob ───────────────────────────────────────────────────────
 -- Sinusoidal up/down + lateral sway of the weapon while moving.
 -- Amplitude in studs; frequency in cycles per second.
-Constants.VIEWMODEL_BOB_ENABLED           = true
+Constants.VIEWMODEL_BOB_ENABLED           = false -- disabled; replaced by VIEWMODEL_MOVE_BOB_ENABLED in ViewModelController sway layer
 Constants.VIEWMODEL_BOB_WALK_AMPLITUDE    = 0.035  -- max vertical displacement (studs) while walking
 Constants.VIEWMODEL_BOB_WALK_FREQUENCY    = 2.2    -- cycles per second while walking
 Constants.VIEWMODEL_BOB_SPRINT_AMPLITUDE  = 0.055  -- stronger bob while sprinting
@@ -993,8 +993,8 @@ Constants.VIEWMODEL_BOB_FADE_SPEED        = 6
 -- Slight weapon lag/swing driven by mouse movement.
 Constants.VIEWMODEL_SWAY_ENABLED          = true
 -- Degrees of yaw/pitch sway accumulated per pixel of mouse delta.
-Constants.VIEWMODEL_SWAY_HORIZONTAL_FACTOR = 0.005
-Constants.VIEWMODEL_SWAY_VERTICAL_FACTOR   = 0.003
+Constants.VIEWMODEL_SWAY_HORIZONTAL_FACTOR = 0     -- zeroed; ViewModelController sway layer handles mouse sway
+Constants.VIEWMODEL_SWAY_VERTICAL_FACTOR   = 0     -- zeroed; ViewModelController sway layer handles mouse sway
 -- Maximum sway magnitude in degrees (clamps accumulation).
 Constants.VIEWMODEL_SWAY_MAX              = 3.0
 -- Per-second exponential decay rate back to zero when mouse stops moving.
@@ -1209,5 +1209,47 @@ Constants.BULLET_IMPACT_SIZE         = 0.12    -- studs; sphere diameter
 Constants.BULLET_IMPACT_LIFETIME     = 0.10    -- seconds before destroy
 Constants.BULLET_IMPACT_TRANSPARENCY = 0.45
 Constants.BULLET_IMPACT_COLOR        = Color3.fromRGB(170, 170, 170)
+
+-- ── ViewModelController procedural sway ──────────────────────────────────────────────────
+-- A second, independent sway layer applied in ViewModelController's RenderStepped loop.
+-- Stage 5A bob (VIEWMODEL_BOB_ENABLED above = false) and Stage 5A mouse sway factors
+-- (VIEWMODEL_SWAY_HORIZONTAL/VERTICAL_FACTOR = 0 above) are disabled so this layer is the
+-- sole source of weapon bob and mouse lag.  VIEWMODEL_SWAY_ENABLED (above) gates this entire
+-- block; set it false to disable all procedural sway from ViewModelController.
+--
+-- Mouse-look weapon lag (two-spring model):
+--   vmSwayMouseTarget accumulates raw delta, clamped to MAX, decaying at RETURN_SPEED.
+--   vmSwayMouseCurrent chases vmSwayMouseTarget at SMOOTH_SPEED.
+Constants.VIEWMODEL_SWAY_MOUSE_YAW_DEGREES   = 1.2    -- degrees of yaw per unit of accumulated delta
+Constants.VIEWMODEL_SWAY_MOUSE_PITCH_DEGREES = 0.8
+Constants.VIEWMODEL_SWAY_MOUSE_ROLL_DEGREES  = 0.35   -- counter-roll into the turn; felt more than seen
+Constants.VIEWMODEL_SWAY_MOUSE_TRANSLATE_X   = 0.006  -- studs of lateral translation per unit
+Constants.VIEWMODEL_SWAY_MOUSE_TRANSLATE_Y   = 0.004  -- studs of vertical translation per unit
+Constants.VIEWMODEL_SWAY_MOUSE_SMOOTH_SPEED  = 18     -- lerp rate for vmSwayMouseCurrent chasing target
+Constants.VIEWMODEL_SWAY_MOUSE_RETURN_SPEED  = 16     -- lerp rate for vmSwayMouseTarget decaying to zero
+Constants.VIEWMODEL_SWAY_MOUSE_MAX           = 0.65   -- maximum magnitude of accumulated mouse delta
+
+-- Movement bob: sine oscillation while moving. Replaces Stage 5A VIEWMODEL_BOB_ENABLED.
+Constants.VIEWMODEL_MOVE_BOB_ENABLED      = true
+Constants.VIEWMODEL_WALK_BOB_AMOUNT       = 0.018  -- studs; max vertical bob while walking
+Constants.VIEWMODEL_WALK_BOB_SPEED        = 6      -- rad/s sine phase advance while walking
+Constants.VIEWMODEL_SPRINT_BOB_AMOUNT     = 0.035
+Constants.VIEWMODEL_SPRINT_BOB_SPEED      = 9
+Constants.VIEWMODEL_CROUCH_BOB_AMOUNT     = 0.008
+Constants.VIEWMODEL_CROUCH_BOB_SPEED      = 4
+Constants.VIEWMODEL_MOVE_BOB_SMOOTH_SPEED = 12     -- rate at which vmBobTime decays to zero when stopped
+
+-- Strafe roll: weapon rolls and slides when moving laterally relative to camera.
+Constants.VIEWMODEL_STRAFE_ROLL_ENABLED   = true
+Constants.VIEWMODEL_STRAFE_ROLL_DEGREES   = 0.9    -- degrees of roll at full strafe
+Constants.VIEWMODEL_STRAFE_TRANSLATE_X    = 0.012  -- studs of lateral translation at full strafe
+Constants.VIEWMODEL_STRAFE_SMOOTH_SPEED   = 14     -- lerp rate for vmStrafeLag toward current strafe dot
+
+-- State weights [0, 1]: how much sway applies in each state.
+-- ADS is nearly zero; all effects become imperceptible while aiming.
+Constants.VIEWMODEL_SWAY_HIP_WEIGHT    = 1.0
+Constants.VIEWMODEL_SWAY_ADS_WEIGHT    = 0.08
+Constants.VIEWMODEL_SWAY_RELOAD_WEIGHT = 0.15
+Constants.VIEWMODEL_SWAY_SPRINT_WEIGHT = 0.45
 
 return Constants

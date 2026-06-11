@@ -7,6 +7,52 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-10 — FEAT] — Stage 1 procedural weapon sway: mouse lag, movement bob, strafe roll, ADS weight
+
+### Summary
+
+Adds a Tarkov/DayZ-style procedural weapon sway layer to `ViewModelController`. The new `swayCF` CFrame is inserted between `freeAimCF` and `finalMoveCF` in the PivotTo chain, keeping it decoupled from free-aim, recoil, and procedural movement. Stage 5A bob (`VIEWMODEL_BOB_ENABLED = false`) and Stage 5A mouse-sway factors (zeroed) are disabled to avoid doubling; Stage 5A landing dip and slide tilt remain active. No camera changes, no new remotes, no server changes, no bullet direction changes.
+
+### Features added
+
+- **Mouse-look weapon lag (two-spring model):** `vmSwayMouseTarget` accumulates raw mouse delta each frame (clamped to `VIEWMODEL_SWAY_MOUSE_MAX`), decays at `RETURN_SPEED`. `vmSwayMouseCurrent` smoothly chases it at `SMOOTH_SPEED`. Produces yaw, pitch, counter-roll, and X/Y translate.
+- **Movement bob:** Sine oscillation (`vmBobTime`) advances while moving, decays toward zero when stopped. Walk/sprint/crouch amplitudes and speeds separately tuned via `VIEWMODEL_{WALK,SPRINT,CROUCH}_BOB_*` constants.
+- **Strafe roll:** `vmStrafeLag` smoothly tracks `cam.RightVector:Dot(Humanoid.MoveDirection)`. Produces roll and X translation proportional to strafe input.
+- **State-based weight:** `vmSwayWeight` lerps each frame toward hip=100%, sprint=45%, reload=15%, ADS≈0%. All three effects scale by this weight.
+- **New public method:** `ViewModelController:SetReloading(boolean)` — external setter for `isReloading` flag.
+
+### Files changed
+
+- **`src/shared/Constants.lua`** — `VIEWMODEL_BOB_ENABLED = false` (Stage 5A bob off); `VIEWMODEL_SWAY_HORIZONTAL_FACTOR = 0` and `VIEWMODEL_SWAY_VERTICAL_FACTOR = 0` (Stage 5A sway no-op). Added 26 new constants: `VIEWMODEL_SWAY_MOUSE_*` (8), `VIEWMODEL_MOVE_BOB_*` (7), `VIEWMODEL_STRAFE_*` (4), `VIEWMODEL_SWAY_*_WEIGHT` (4), `VIEWMODEL_MOVE_BOB_ENABLED` (1), `VIEWMODEL_STRAFE_ROLL_ENABLED` (1), `VIEWMODEL_SWAY_MOUSE_SMOOTH_SPEED` shared for weight lerp (already counted).
+- **`src/client/ViewModelController.lua`** — Added 5 new state variables (`vmSwayMouseTarget`, `vmSwayMouseCurrent`, `vmSwayWeight`, `vmBobTime`, `vmStrafeLag`). Added `SetReloading(boolean)` public method. Reset all sway vars in `init()` and `StopWeaponAnimations()`. Added ~80-line sway computation block in `RenderStepped` (after `freeAimCF`, before ADS pivot). Inserted `swayCF` into `basePivot`; excluded from `aimAlignedPivot`. Updated header comment (PivotTo chain, public API list).
+- **`docs/TECHNICAL_DEBT.md`** — Added DEBT-065. Updated DEBT-064 DEBT-040/063 status lines.
+- **`docs/CHANGELOG.md`** — this entry.
+
+### Architecture decisions
+
+- `swayCF` is ABSENT from `aimAlignedPivot`. `vmSwayWeight → VIEWMODEL_SWAY_ADS_WEIGHT ≈ 0` during ADS ensures imperceptible residual sway in `basePivot`. The lerp to `aimAlignedPivot` (which has no sway) removes any remainder cleanly.
+- Stage 5A landing dip and slide tilt remain through `finalMoveCF`. This avoids reimplementing them and keeps Stage 5A as owner of those effects.
+- Bob decays by multiplying `vmBobTime * (1 - dt * MOVE_BOB_SMOOTH_SPEED)`, so `sin(vmBobTime) → sin(0) = 0` smoothly with no snap.
+
+### Studio verification status
+
+Pending — rojo build passes (no syntax errors). MCP play-mode verification required before closing DEBT-065.
+
+### Test steps (in Studio play mode)
+
+1. Move mouse slowly → weapon subtly lags camera; returns to neutral when mouse stops.
+2. Move mouse fast → weapon lags more (capped); smoothly settles.
+3. Walk forward → weapon bobs up/down (~1.8cm, ~6 rad/s).
+4. Sprint → stronger bob (~3.5cm, faster). Bob fades when stopping.
+5. Crouch-walk → subtle bob (~0.8cm, slower).
+6. Strafe right → weapon rolls right and slides right; returns when stopped.
+7. ADS (MB2) → sway becomes nearly invisible. Iron sights hold stable.
+8. Reload (R) → sway visibly reduced. Full sway returns after reload.
+9. No camera.CFrame changes at any point. Output shows no errors.
+10. Fire while walking → shots land at crosshair; sway has no effect on bullet direction.
+
+---
+
 ## [2026-06-10 — FIX] — AKS74 shot feedback pass 1: WeaponFeel gate + debug marker + bullet impact
 
 ### Summary

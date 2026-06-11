@@ -15,8 +15,9 @@
 --
 -- PivotTo camera follow (every RenderStepped, only when self.model is non-nil):
 --   m:PivotTo(cam.CFrame * CAMERA_EXTRA_OFFSET * viewRecoilCFrame
---             * freeAimCF * finalMoveCF * BASE_OFFSET * CFrame.new(0,0,recoilOffset))
+--             * vmRecoilCF * freeAimCF * swayCF * finalMoveCF * BASE_OFFSET * CFrame.new(0,0,recoilOffset))
 --   CAMERA_EXTRA_OFFSET — constant base offset from the camera reference point (hipfire).
+--   swayCF — procedural sway: mouse lag, movement bob, strafe roll (weight ADS≈0/hip=100%).
 --   No code-level ADS alignment offset: the ADS animation positions the iron sights.
 --   BASE_OFFSET is computed from the rig's FakeCamera CFrame relative to HumanoidRootPart.
 --   Falls back to REAL_MODEL_OFFSET when FakeCamera is absent.
@@ -49,6 +50,7 @@
 --   :PlayFireAnimation()      — positional recoil snap + one-shot fire track (blocked by reload)
 --   :PlayReloadAnimation()    — one-shot reload track; blocks fire/run; resumes run or idle on end
 --   :SetRunning(isSprinting)  — called by GunController each frame; manages run ↔ idle transition
+--   :SetReloading(reloading)  — external setter for isReloading; wraps internal flag from PlayReloadAnimation
 --   :StopWeaponAnimations()   — stop and destroy all loaded weapon AnimationTracks, reset flags
 --   :SetRecoilOffset(cf)      — push a rotational recoil CFrame from GunController
 --   :GetBarrelTipCFrame()     — world CFrame at MuzzleAttachment tip (muzzle-flash placement)
@@ -148,6 +150,18 @@ local vmRecoilBuildup:       number = 0
 local vmRecoilYawDir:        number = 1
 local vmActiveKickSpeed:     number = 38
 local vmActiveRecoverySpeed: number = 18
+
+-- Procedural sway state (mouse-look weapon lag, movement bob, strafe roll).
+-- vmSwayMouseTarget:  desired sway from accumulated mouse delta; clamped + decays to zero.
+-- vmSwayMouseCurrent: smoothed follower that chases vmSwayMouseTarget; drives swayCF.
+-- vmSwayWeight:       current weight [0, 1] lerped toward state-based target each frame.
+-- vmBobTime:          sine phase accumulator; advanced while moving, decays when stopped.
+-- vmStrafeLag:        smoothed strafe axis [-1 left, +1 right]; drives roll + translate.
+local vmSwayMouseTarget:  Vector2 = Vector2.zero
+local vmSwayMouseCurrent: Vector2 = Vector2.zero
+local vmSwayWeight:       number  = 1
+local vmBobTime:          number  = 0
+local vmStrafeLag:        number  = 0
 
 -- Name of the currently equipped weapon, or nil when holstered.
 local equippedWeaponName: string? = nil
@@ -388,6 +402,11 @@ function ViewModelController:init()
     vmRecoilYawDir        = 1
     vmActiveKickSpeed     = Constants.DEFAULT_VIEWMODEL_RECOIL_KICK_SPEED
     vmActiveRecoverySpeed = Constants.DEFAULT_VIEWMODEL_RECOIL_RECOVERY_SPEED
+    vmSwayMouseTarget  = Vector2.zero
+    vmSwayMouseCurrent = Vector2.zero
+    vmSwayWeight       = 1
+    vmBobTime          = 0
+    vmStrafeLag        = 0
     -- Third-person character tracks: nil references only — do NOT call Stop/Destroy.
     -- init() is called from CharacterAdded where the old Humanoid.Animator may already be
     -- destroyed, making track method calls unsafe.  Same pattern as MovementController's
@@ -472,6 +491,11 @@ function ViewModelController:StopWeaponAnimations()
     vmRecoilYawDir        = 1
     vmActiveKickSpeed     = Constants.DEFAULT_VIEWMODEL_RECOIL_KICK_SPEED
     vmActiveRecoverySpeed = Constants.DEFAULT_VIEWMODEL_RECOIL_RECOVERY_SPEED
+    vmSwayMouseTarget  = Vector2.zero
+    vmSwayMouseCurrent = Vector2.zero
+    vmSwayWeight       = 1
+    vmBobTime          = 0
+    vmStrafeLag        = 0
     -- Third-person character tracks: stop and destroy (character is alive in this path).
     -- AnimationTrack:Destroy() severs Stopped connections synchronously, preventing any
     -- deferred equip-chain or reload-chain callback from firing after holster.
@@ -1102,6 +1126,105 @@ function ViewModelController:Start()
                 * CFrame.Angles(freeAimPitch, freeAimYaw, freeAimRoll)
         end
 
+        -- ── Procedural sway (mouse lag, movement bob, strafe roll) ───────────
+        -- Weight lerps toward state-based target each frame.
+        -- ADS ≈ 0, reload = 15%, sprint = 45%, hip = 100%.
+        -- swayCF is inserted between freeAimCF and finalMoveCF; absent from aimAlignedPivot.
+        local swayWeightTarget: number
+        if inADS then
+            swayWeightTarget = Constants.VIEWMODEL_SWAY_ADS_WEIGHT :: number
+        elseif isReloading then
+            swayWeightTarget = Constants.VIEWMODEL_SWAY_RELOAD_WEIGHT :: number
+        elseif isRunning then
+            swayWeightTarget = Constants.VIEWMODEL_SWAY_SPRINT_WEIGHT :: number
+        else
+            swayWeightTarget = Constants.VIEWMODEL_SWAY_HIP_WEIGHT :: number
+        end
+        vmSwayWeight = vmSwayWeight
+            + (swayWeightTarget - vmSwayWeight)
+            * math.min(1, dt * (Constants.VIEWMODEL_SWAY_MOUSE_SMOOTH_SPEED :: number))
+        local swayW = vmSwayWeight
+
+        local swayCF: CFrame
+        if Constants.VIEWMODEL_SWAY_ENABLED then
+            -- Mouse-look weapon lag (two-spring model).
+            -- vmSwayMouseTarget accumulates raw mouse delta, clamped + decayed toward zero.
+            -- vmSwayMouseCurrent smoothly chases vmSwayMouseTarget for extra lag feel.
+            local md = UserInputService:GetMouseDelta()
+            vmSwayMouseTarget = vmSwayMouseTarget + Vector2.new(md.X, md.Y)
+            local swayMag = vmSwayMouseTarget.Magnitude
+            local swayMax = Constants.VIEWMODEL_SWAY_MOUSE_MAX :: number
+            if swayMag > swayMax then
+                vmSwayMouseTarget = vmSwayMouseTarget * (swayMax / swayMag)
+            end
+            vmSwayMouseTarget = vmSwayMouseTarget:Lerp(
+                Vector2.zero,
+                math.min(1, dt * (Constants.VIEWMODEL_SWAY_MOUSE_RETURN_SPEED :: number))
+            )
+            vmSwayMouseCurrent = vmSwayMouseCurrent:Lerp(
+                vmSwayMouseTarget,
+                math.min(1, dt * (Constants.VIEWMODEL_SWAY_MOUSE_SMOOTH_SPEED :: number))
+            )
+            local sv        = vmSwayMouseCurrent
+            local swayYaw   = math.rad(sv.X * (Constants.VIEWMODEL_SWAY_MOUSE_YAW_DEGREES :: number)) * swayW
+            local swayPitch = math.rad(sv.Y * (Constants.VIEWMODEL_SWAY_MOUSE_PITCH_DEGREES :: number)) * swayW
+            local swayRoll  = math.rad(-sv.X * (Constants.VIEWMODEL_SWAY_MOUSE_ROLL_DEGREES :: number)) * swayW
+            local swayTX    = -sv.X * (Constants.VIEWMODEL_SWAY_MOUSE_TRANSLATE_X :: number) * swayW
+            local swayTY    = -sv.Y * (Constants.VIEWMODEL_SWAY_MOUSE_TRANSLATE_Y :: number) * swayW
+
+            -- Shared movement state for bob and strafe.
+            local char = Players.LocalPlayer.Character
+            local hum: Humanoid? = nil
+            if char then
+                hum = char:FindFirstChildOfClass("Humanoid") :: Humanoid?
+            end
+            local moveDir: Vector3 = if hum then hum.MoveDirection else Vector3.zero
+
+            -- Movement bob: sine oscillation that advances while moving, decays when stopped.
+            local bobTX: number = 0
+            local bobTY: number = 0
+            if Constants.VIEWMODEL_MOVE_BOB_ENABLED then
+                local isMoving = moveDir.Magnitude > 0.1
+                local bobAmount: number = 0
+                local bobSpeed:  number = Constants.VIEWMODEL_WALK_BOB_SPEED :: number
+                if isMoving then
+                    local ms = MovementController:GetMoveState()
+                    if ms == "Sprinting" then
+                        bobAmount = Constants.VIEWMODEL_SPRINT_BOB_AMOUNT :: number
+                        bobSpeed  = Constants.VIEWMODEL_SPRINT_BOB_SPEED  :: number
+                    elseif ms == "Crouching" then
+                        bobAmount = Constants.VIEWMODEL_CROUCH_BOB_AMOUNT :: number
+                        bobSpeed  = Constants.VIEWMODEL_CROUCH_BOB_SPEED  :: number
+                    else
+                        bobAmount = Constants.VIEWMODEL_WALK_BOB_AMOUNT :: number
+                    end
+                    vmBobTime = (vmBobTime + dt * bobSpeed) % (math.pi * 2)
+                else
+                    vmBobTime = vmBobTime
+                        * math.max(0, 1 - dt * (Constants.VIEWMODEL_MOVE_BOB_SMOOTH_SPEED :: number))
+                end
+                bobTY = math.sin(vmBobTime) * bobAmount * swayW
+                bobTX = math.sin(vmBobTime * 0.5) * bobAmount * 0.4 * swayW
+            end
+
+            -- Strafe roll: weapon tilts and slides when moving laterally relative to camera.
+            local strafeRoll: number = 0
+            local strafeTX:   number = 0
+            if Constants.VIEWMODEL_STRAFE_ROLL_ENABLED then
+                local strafeDot = cam.CFrame.RightVector:Dot(moveDir)
+                vmStrafeLag = vmStrafeLag
+                    + (strafeDot - vmStrafeLag)
+                    * math.min(1, dt * (Constants.VIEWMODEL_STRAFE_SMOOTH_SPEED :: number))
+                strafeRoll = math.rad(-vmStrafeLag * (Constants.VIEWMODEL_STRAFE_ROLL_DEGREES :: number)) * swayW
+                strafeTX   = -vmStrafeLag * (Constants.VIEWMODEL_STRAFE_TRANSLATE_X :: number) * swayW
+            end
+
+            swayCF = CFrame.new(swayTX + strafeTX + bobTX, swayTY + bobTY, 0)
+                * CFrame.Angles(swayPitch, swayYaw, swayRoll + strafeRoll)
+        else
+            swayCF = CFrame.new()
+        end
+
         -- ADS pivot alignment.
         -- The ADS animation targets FakeCamera, but the hip pivot chain places FakeCamera at
         -- cam.CFrame * CAMERA_EXTRA_OFFSET rather than cam.CFrame.  To fix this, adsAimAlpha
@@ -1144,6 +1267,7 @@ function ViewModelController:Start()
             * viewRecoilCFrame
             * vmRecoilCF
             * freeAimCF
+            * swayCF
             * finalMoveCF
             * BASE_OFFSET
             * CFrame.new(0, 0, recoilOffset)
@@ -1314,6 +1438,16 @@ function ViewModelController:SetRunning(isSprinting: boolean)
         self:PlayIdleAnimation()
     end
     Logger.debug("[ViewModelController] SetRunning: isRunning=" .. tostring(isRunning))
+end
+
+-- External setter for the isReloading flag.
+-- PlayReloadAnimation() already sets and clears this flag via its Stopped callback, so
+-- GunController typically does not need to call this.  Exposed as part of the public sway
+-- API for completeness and future external callers.
+function ViewModelController:SetReloading(reloading: boolean)
+    assert(typeof(reloading) == "boolean",
+        "[ViewModelController] SetReloading: reloading must be a boolean")
+    isReloading = reloading
 end
 
 -- ============================================================

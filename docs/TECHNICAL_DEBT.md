@@ -1558,10 +1558,10 @@ Previously two rotational recoil systems ran simultaneously for AKS74, causing n
 
 **DEBT-013 status (Stable):** GunService still uses DEFAULT_WEAPON = AR15. AKS74 shots always pass: AR15 rate limit (0.09 s) < AKS74 interval (0.0923 s). No worsening.
 **DEBT-039 status (Updated — pass 1):** WeaponFeel.lua not modified. WeaponFeel rotational kick now gated in GunController for weapons with per-weapon recoil profiles. AR15/SCAR behaviour unchanged. AKS74 no longer uses WeaponFeel rotation.
-**DEBT-040 status (Stable):** ADS system preserved. `PlayADSFireAnimation()` called when aiming. ADS PivotTo chain updated correctly.
+**DEBT-040 status (Stable):** ADS system preserved. `PlayADSFireAnimation()` called when aiming. ADS PivotTo chain updated correctly. Sway layer (DEBT-065) uses `vmSwayWeight = VIEWMODEL_SWAY_ADS_WEIGHT ≈ 0` during ADS — no regression to ADS pose.
 **DEBT-045 status (Unchanged — partially addressed):** Camera recoil remains deferred. This task adds viewmodel-only recoil (Stage 1 of a multi-stage plan). DEBT-045 will be resolved when CameraType.Scriptable and per-frame camera management are implemented.
 **DEBT-059 status (Stable):** AKS74 equips client-side; server fires as AR15. No worsening — AKS74 shots always pass AR15 rate limit.
-**DEBT-063 status (Stable):** Free-aim is visual-only. Bullet direction unchanged. vmRecoilCF does not affect bullet direction.
+**DEBT-063 status (Stable):** Free-aim is visual-only. Bullet direction unchanged. vmRecoilCF does not affect bullet direction. Sway layer (DEBT-065) is a separate CFrame after freeAimCF; no state shared with free-aim system.
 
 **MCP / Studio verification — partially complete (2026-06-10 pass 1):**
 Verified via MCP:
@@ -1589,6 +1589,56 @@ Verified via MCP:
 15. `DEBUG_BULLET_IMPACT_MARKERS = true` → small yellow sphere appears at barrel tip for ~0.08 s per shot; reset to false when done.
 
 **Trigger for Stage 2:** Design decision to add camera recoil (DEBT-045), spread bloom, or recoil pattern curves. Each of these is a separate stage.
+
+---
+
+## [DEBT-065] Stage 1 weapon sway is foundation only — advanced features deferred — ADDED 2026-06-10
+
+**Files:** `src/client/ViewModelController.lua`, `src/shared/Constants.lua`
+**Severity:** Low (intentional deferral; Stage 1 is correct and complete by design)
+**Studio verification required:** Yes — verify in Studio before closing this entry
+
+**What Stage 1 implements (2026-06-10):**
+- Mouse-look weapon lag: two-spring model (target accumulates delta, current chases target). Produces yaw, pitch, roll, and translate X/Y. Replaces Stage 5A mouse sway (VIEWMODEL_SWAY_HORIZONTAL/VERTICAL_FACTOR zeroed).
+- Movement bob: sine oscillation based on `GetMoveState()` (walk/sprint/crouch). Replaces Stage 5A VIEWMODEL_BOB_ENABLED (now false).
+- Strafe roll: weapon tilts and slides when moving laterally relative to the camera.
+- State-based weight: hip=100%, sprint=45%, reload=15%, ADS≈0%. Smoothly lerped each frame.
+- New public method: `ViewModelController:SetReloading(boolean)` — wraps internal `isReloading` flag.
+- Stage 5A landing dip (`VIEWMODEL_LANDING_DIP_ENABLED`) and slide tilt (`VIEWMODEL_SLIDE_TILT_ENABLED`) remain unchanged — these are separate CFrame contributions through `finalMoveCF`.
+- All values in Constants.lua under `VIEWMODEL_SWAY_*`, `VIEWMODEL_MOVE_BOB_*`, `VIEWMODEL_STRAFE_*`, `VIEWMODEL_SWAY_*_WEIGHT`.
+
+**What Stage 1 does NOT implement (deferred):**
+- Breathing idle sway (low-frequency chest-rise oscillation at rest)
+- ADS idle sway (separate from recoil ADS idle)
+- Procedural lean-in when crouching or going prone
+- Inventory-driven weapon weight (heavier gun = more inertia)
+- Networked sway synchronization (third-person observer sees server-side movement only)
+
+**Architecture note:**
+Stage 5A in MovementController already implemented bob + mouse sway via `GetViewmodelAddCFrame()`. Stage 1 (this task) takes over both systems by zeroing Stage 5A's factors and disabling Stage 5A bob, adding them in ViewModelController where per-state weight, roll, and strafe roll can be applied. Stage 5A landing dip and slide tilt remain active through `finalMoveCF`.
+
+**DEBT-040 status (Stable):** `vmSwayWeight → VIEWMODEL_SWAY_ADS_WEIGHT` during ADS; swayCF is excluded from aimAlignedPivot. No ADS pose regression.
+**DEBT-063 status (Stable):** swayCF is a separate layer from freeAimCF; no shared state. Bullet direction unchanged.
+**DEBT-064 status (Stable):** swayCF after freeAimCF, before finalMoveCF; no overlap with vmRecoilCF.
+
+**MCP / Studio verification — pending:**
+1. Spawn with AKS74 equipped.
+2. Move mouse slowly — weapon subtly lags behind camera rotation. Gun returns to neutral when mouse stops.
+3. Move mouse fast — weapon lags more, capped; smoothly settles.
+4. Walk forward — weapon bobs vertically (≈1.8cm amplitude, ~6 rad/s).
+5. Sprint — weapon bobs more (≈3.5cm, faster). Bob fades when stopping.
+6. Crouch-walk — weapon bobs subtly (≈0.8cm).
+7. Strafe right — weapon rolls slightly right and slides right. Rolls back when stopping.
+8. Press MB2 (ADS) — all sway effects become nearly imperceptible (weight = 0.08). Iron sights hold stable.
+9. Press R (reload) — sway visibly reduced (~15% weight). Returns to full after reload completes.
+10. Sprint — sway visibly reduced (~45% weight). Returns to full on stop.
+11. No camera.CFrame changes at any point. Output panel shows no errors.
+12. `VIEWMODEL_SWAY_ENABLED = false` → all sway effects disabled; weapon holds still.
+13. `VIEWMODEL_MOVE_BOB_ENABLED = false` → bob disabled; mouse sway and strafe still active.
+14. `VIEWMODEL_STRAFE_ROLL_ENABLED = false` → strafe roll disabled; bob and mouse sway still active.
+15. Fire while walking — sway and bob do not affect bullet direction; shots land at crosshair.
+
+**Trigger for Stage 2:** Design decision to add breathing idle sway, prone lean, or inventory-driven weight. Each is a separate stage.
 
 ---
 
