@@ -1682,50 +1682,26 @@ Stage 5A in MovementController already implemented bob + mouse sway via `GetView
 
 ---
 
-## [DEBT-067] Task B (stance POV height offsets) is foundation only — advanced features deferred — ADDED 2026-06-11
+## [DEBT-067] Task B (stance POV height offsets) — SUPERSEDED by Task D (2026-06-11)
 
 **Files:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
-**Severity:** Low (intentional deferral; Stage 1 is correct and complete by design)
-**Studio verification required:** Yes — verify in Studio before closing this entry
+**Severity:** Resolved (superseded — implementation replaced, concerns addressed)
+**Studio verification required:** Yes — verify via DEBT-069 MCP steps instead
 
-**What Task B implements (2026-06-11):**
-- Crouch lowers POV smoothly (-1.0 stud) via `Humanoid.CameraOffset.Y`.
-- Slide lowers POV further (-1.45 studs).
-- Jumps produce a transient upward lift (+0.28 stud) for the entire arc; cleared on landing.
-- Ledge drops (freefall without a preceding jump) produce a subtle downward pull (-0.18 stud).
-- Landing impulse: light (-0.18), medium (-0.32), heavy (-0.48); decays via `CAMERA_POV_LAND_RECOVER_SPEED = 8`.
-- ADS scales all stance offsets to 65%; reloading scales to 80%.
-- Mouse-lock X component (shoulder offset) is preserved via read-modify-write — no conflict.
-- All offsets smoothed at `CAMERA_POV_SMOOTH_SPEED = 14` (lerp units/s).
-- State resets on respawn and destroy.
+**Status update (2026-06-11 Task D):**
+Task D replaced `updateStancePovOffset()` with `updateCameraBodyFeel()`, which is the single owner of `Humanoid.CameraOffset` per Heartbeat. All Task B behavior is preserved and extended:
+- Crouch/slide stance Y offsets unchanged (-1.0 / -1.45).
+- Jump offset replaced by transient `camJumpLift` impulse (cleaner — no longer held for entire arc).
+- Fall offset updated to -0.16; max clamp -0.35.
+- Landing dip constants updated (lighter values — see CHANGELOG).
+- Bob + stance interaction (previously "unverified") now implemented and composed in one place.
+- ADS/reload multipliers tightened (0.45/0.65 replacing 0.65/0.80).
+- Z-axis offset added for slide (-0.15) and crouch (0).
+- Mouse-lock X read-modify-write preserved — no coordinate conflict.
+- All state reset on respawn and destroy.
 
-**What Task B does NOT implement (deferred):**
-- Prone stance offset (no prone system exists yet).
-- Lean left/right camera roll offset (no lean system exists yet).
-- Vault POV offset (vaulting already managed by vault arc; no extra Y offset added).
-- Per-weapon CameraOffset.Y bias (heavy weapon = lower carry height) — all weapons share the same offsets.
-- Camera shake on heavy landing (separate screen shake system, not CameraOffset).
-- Interaction with head-bob when crouching while walking (POV offset and walking bob are separate; both apply simultaneously, but combined feel is unverified).
-
-**Architecture note:**
-`updateStancePovOffset(dt)` runs inside the Heartbeat closure so it has access to all module-level state (`movementState`, `isFalling`, `wasJumpingThisAirborne`, `isSliding`, `isAiming`, `isReloading`, `povLandDip`). It runs AFTER `updateSprintCameraOffset()` so the X write from mouse-lock is visible in the read-modify-write. CameraOffset.X is preserved — no coordinate conflict.
-
-**DEBT-040 status (Stable):** ADS multiplier scales the POV offset but does not change the ADS animation, PivotTo chain, or CFrame anywhere. No ADS pose regression.
-**DEBT-066 status (Stable):** Task A `isAiming` flag used by Task B ADS multiplier — same flag, no duplication.
-
-**MCP / Studio verification — pending:**
-1. Spawn. Stand still. CameraOffset.Y should be 0 (no offset).
-2. Crouch (hold C). POV smoothly lowers ~1.0 stud. Release — POV smoothly returns to 0.
-3. Sprint forward, then slide (LeftCtrl while sprinting). POV should be at -1.45 stud during slide.
-4. Jump. POV should lift +0.28 briefly, settle back as the player descends.
-5. Walk off a ledge (ledge drop, no jump). POV drops -0.18 stud during freefall.
-6. Heavy landing (drop from high height). POV dips sharply (-0.48) and recovers over ~0.5s.
-7. ADS (MB2). All offsets should feel more subtle (×0.65).
-8. Reload (R). Offsets should feel slightly more subtle than hip (×0.80).
-9. Mouse lock (LeftControl) active — CameraOffset.X should still be 1.75 (shoulder offset preserved).
-10. Output panel shows no errors throughout.
-
-**Trigger for Stage 2:** Decision to add prone offset, lean roll, vault POV dip, or per-weapon carry height. Each is a separate stage.
+DEBT-040 status (Stable): ADS multiplier scales offsets, no ADS CFrame changes.
+DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 
 ---
 
@@ -1771,6 +1747,64 @@ Stage 5A in MovementController already implemented bob + mouse sway via `GetView
 13. Output panel shows no errors or unexpected warns throughout.
 
 **Trigger for Stage 2:** Decision to add directional acceleration bias, slide-into-walk momentum transfer, or sprint-stop deceleration smoothing. Each is a separate stage.
+
+---
+
+## [DEBT-069] Task D (camera body feel) is foundation only — advanced features deferred — ADDED 2026-06-11
+
+**Files:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
+**Severity:** Low (intentional deferral; Stage 1 is correct and complete by design)
+**Studio verification required:** Yes — verify in Studio before closing this entry
+
+**What Task D implements (2026-06-11):**
+- Walk/sprint/crouch camera bob (Y sine, X cosine-half) via `Humanoid.CameraOffset`.
+- Bob intensity scales with `moveSmoothSpeed` speed fraction so bob eases in/out with movement.
+- `camBobAlpha` lerps in/out separately to prevent pop when movement starts or stops.
+- Z-axis depth offset: slide (-0.15 stud), crouch (0), hip (0); smoothed each Heartbeat.
+- Jump lift: transient upward impulse (+0.22 stud) fired on rising edge of `wasJumpingThisAirborne`; decays exponentially over `CAMERA_JUMP_LIFT_DURATION = 0.16 s`.
+- Freefall: flat offset `CAMERA_FALL_OFFSET_Y = -0.16` stud applied while `isFalling`; clamped to `CAMERA_FALL_OFFSET_MAX_Y = -0.35` stud.
+- Landing dip: impulse written to `povLandDip` by landing handler (light/medium/heavy); decays at `CAMERA_LAND_RECOVERY_SPEED = 18` per second.
+- ADS multiplier (×0.45) and reload multiplier (×0.65) scale the entire composed offset + bob.
+- Single `Humanoid.CameraOffset` owner per Heartbeat via read-modify-write (preserves mouse-lock shoulder X from `updateSprintCameraOffset`).
+- Full state reset on respawn and destroy.
+
+**What Task D does NOT implement (deferred):**
+
+1. **Progressive fall depth deepening** — `CAMERA_FALL_OFFSET_MAX_Y = -0.35` is a clamp, not a lerp target. The offset currently floors at `CAMERA_FALL_OFFSET_Y = -0.16` flat regardless of fall duration. For longer falls the offset should gradually deepen from -0.16 toward -0.35 proportional to airborne time. This requires tracking `timeInFall` and lerping the target toward the max. Deferred: feels fine for short falls; revisit when fall physics or fall damage are added.
+
+2. **Camera tilt/roll during slide** — a subtle Z-axis CameraOffset roll during slide (like Criminality's bank into the slide) is not possible via `Humanoid.CameraOffset` alone; it requires `workspace.CurrentCamera.CFrame` rotation, which is explicitly out of scope per task security constraints. Deferred until a dedicated camera-CFrame compositing layer is approved.
+
+3. **Per-weapon bob bias** — heavy weapons should produce a heavier, slower bob; light weapons a lighter, faster one. All weapons currently share the same walk/sprint/crouch bob constants. Requires a weapon-weight tag in `WeaponData.lua` and a bob-parameter lookup in `MovementController`. Deferred: no weapon-weight system exists yet.
+
+4. **Prone camera offset** — no prone locomotion system exists yet. When prone is added, `updateCameraBodyFeel()` will need a `movementState.isProne` branch (likely -2.0 stud Y, very slow bob). Tracked here to avoid forgetting the camera side when prone locomotion is implemented.
+
+5. **Lean camera offset** — no lean system exists yet. When lean is added, a lateral CameraOffset.X lean component and optional roll (see item 2) will be needed. Tracked here to avoid forgetting the camera side when lean locomotion is implemented.
+
+6. **Camera shake on heavy landing** — a transient screen-shake impulse (via `workspace.CurrentCamera.CFrame` or a separate shake compositor) is a stronger feedback than the landing dip offset alone. Out of scope for Task D (no CameraOffset shake is possible without CFrame access). Deferred to a future screen-shake system.
+
+**Architecture note:**
+`updateCameraBodyFeel(dt)` is the single writer of `Humanoid.CameraOffset` per Heartbeat (replaces Task B's `updateStancePovOffset`). It runs AFTER `updateSprintCameraOffset()` so `existing.X` always reflects the freshest shoulder offset. Bob X is additive on top; it does not conflict. `povOffsetCurrent` and `povLandDip` variable names are reused from Task B to minimize churn.
+
+**DEBT-067 status:** Superseded and resolved by Task D — see DEBT-067 entry above.
+**DEBT-068 status (Stable):** `moveSmoothSpeed` consumed by Task D for `speedFrac` scaling — no conflict; Task C writes the value, Task D reads it. Clean separation.
+
+**MCP / Studio verification — pending:**
+1. Spawn. Stand still. CameraOffset should be 0 on all axes. No bob, no offset.
+2. Walk forward (W). Bob eases in over ~0.3 s. Y sine oscillates, X cosine-half oscillates at half frequency.
+3. Sprint (hold LeftShift). Bob amplitude and speed increase to sprint values. Feels faster and stronger than walk bob.
+4. Stop moving. Bob eases out over ~0.3 s — no pop.
+5. Crouch (hold C) and walk. Bob amplitude and speed reduce to crouch values (subtle sway).
+6. Sprint then slide (LeftCtrl while sprinting). Bob stops during slide. CameraOffset.Z shifts -0.15 stud (camera pulls back slightly). No Z offset during walk.
+7. Jump. CameraOffset.Y lifts +0.22 briefly at takeoff, then decays over ~0.16 s. No persistent arc offset.
+8. Walk off a ledge (no jump). CameraOffset.Y pulls toward -0.16 stud during freefall.
+9. Light landing: CameraOffset.Y dips -0.16 and recovers within ~0.3 s.
+10. Heavy landing (drop from high height): dips -0.45 and recovers over ~0.5 s.
+11. ADS (MB2) while walking. Bob and all offsets visibly damped (×0.45 — roughly half as strong).
+12. Reload (R) while walking. Bob and offsets slightly damped (×0.65 — noticeable but mild).
+13. Mouse-lock active (LeftControl). CameraOffset.X shoulder offset preserved — bob X adds on top, no conflict.
+14. Output panel shows no errors or unexpected warns throughout.
+
+**Trigger for Stage 2:** Decision to add progressive fall deepening, per-weapon bob, or lean/prone camera offsets. Each is a separate stage and depends on the corresponding locomotion system being added first.
 
 ---
 

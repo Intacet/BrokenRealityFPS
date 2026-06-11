@@ -7,6 +7,60 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-11 — FEAT] — Task D: Criminality-style camera body feel
+
+### Summary
+
+**Task D:** `Humanoid.CameraOffset` now receives walk/sprint/crouch camera bob, a Z-axis stance offset for slide and crouch, a transient jump lift impulse at takeoff, a freefall downward offset, and a landing dip impulse. All motion is composed in a single function `updateCameraBodyFeel()` which replaces Task B's `updateStancePovOffset()`. ADS scales all offsets to 45%; reloading scales to 65%. Bob fades out smoothly when the player stops moving. No `camera.CFrame` changes. No new remotes.
+
+### Features added / changed
+
+- `updateCameraBodyFeel(dt)` — new private helper inside `Start()`; single owner of `Humanoid.CameraOffset` per Heartbeat (replaces Task B's `updateStancePovOffset()`).
+- Walk bob: `CAMERA_WALK_BOB_SPEED = 6` rad/s, Y=0.035, X=0.012 stud amplitudes.
+- Sprint bob: `CAMERA_SPRINT_BOB_SPEED = 9` rad/s, Y=0.075, X=0.022 stud amplitudes.
+- Crouch bob: `CAMERA_CROUCH_BOB_SPEED = 4` rad/s, Y=0.012, X=0.006 stud amplitudes.
+- Bob intensity scales with `moveSmoothSpeed / targetSpeed` (no pop at ramp start). Bob fades out via `camBobAlpha` lerp when stopped.
+- Bob suppressed during slide, freefall, and jump arc.
+- Jump lift: `camJumpLift = CAMERA_JUMP_LIFT_Y = 0.22` fired on `wasJumpingThisAirborne` rising edge; decays over `CAMERA_JUMP_LIFT_DURATION = 0.16 s`.
+- Freefall offset: `CAMERA_FALL_OFFSET_Y = -0.16`; clamped by `CAMERA_FALL_OFFSET_MAX_Y = -0.35`.
+- Stance Z: slide = -0.15, crouch = 0; smoothed via `camBodyOffsetZ`.
+- Landing dip constants updated: light=-0.16, medium=-0.30, heavy=-0.45; recovery `CAMERA_LAND_RECOVERY_SPEED = 18` (up from 8).
+- ADS/reload multipliers: `CAMERA_BODY_ADS_MULTIPLIER = 0.45` / `CAMERA_BODY_RELOAD_MULTIPLIER = 0.65` (replaces Task B's 0.65 / 0.80).
+- 5 new module-level state vars: `camBobPhase`, `camBobAlpha`, `camBodyOffsetZ`, `camJumpLift`, `prevWasJumpingAirborne`.
+- All Task D state reset on respawn and destroy.
+- Landing handler guard updated from `CAMERA_POV_ENABLED` → `CAMERA_BODY_FEEL_ENABLED`.
+
+### Constants updated (in-place value changes)
+
+- `CAMERA_FALL_OFFSET_Y`: -0.18 → -0.16
+- `CAMERA_LAND_LIGHT_DIP_Y`: -0.18 → -0.16
+- `CAMERA_LAND_MEDIUM_DIP_Y`: -0.32 → -0.30
+- `CAMERA_LAND_HEAVY_DIP_Y`: -0.48 → -0.45
+
+### Files changed
+
+- `src/shared/Constants.lua` — 23 new Task D constants; 4 existing values updated.
+- `src/client/MovementController.lua` — `updateCameraBodyFeel()` replaces `updateStancePovOffset()`; 5 new state vars + resets; Heartbeat call updated; landing handler guard updated.
+
+### Verification required (Studio / MCP)
+
+1. Walk forward — subtle Y/X camera bob visible; stops smoothly when W is released.
+2. Sprint — stronger bob, faster phase. Stops/fades cleanly.
+3. Crouch walk — slow, subtle bob.
+4. Stand still — bob amplitude fades to zero; CameraOffset.Y returns to 0.
+5. Crouch — POV lowers ~1.0 stud smoothly. Release — returns smoothly.
+6. Slide — POV lowers ~1.45 stud; slight camera pull-back in Z.
+7. Jump — brief upward lift (+0.22) at takeoff, then offset returns to 0 over ~0.16 s.
+8. Ledge drop — subtle -0.16 stud drop during freefall.
+9. Light land — small dip (-0.16); recovers in ~0.06 s.
+10. Heavy land (drop from height) — strong dip (-0.45); recovers in ~0.1 s.
+11. ADS — all bob and stance motion noticeably more subtle (×0.45).
+12. Reload — bob/stance slightly more subtle (×0.65).
+13. Die / respawn — CameraOffset immediately returns to zero; no stale bob.
+14. `camera.CFrame` behavior unchanged. No new remotes. No server changes.
+
+---
+
 ## [2026-06-11 — FEAT] — Task C: Criminality-style movement smoothing and body-yaw foundation
 
 ### Summary

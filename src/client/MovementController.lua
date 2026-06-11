@@ -363,6 +363,19 @@ local povLandDip:       number = 0
 -- immediately via applySpeed() and skip the smooth update.
 local moveSmoothSpeed: number = 0
 
+-- Task D: camera body feel state (extends Task B's stance offset system).
+-- updateCameraBodyFeel() is the single owner of Humanoid.CameraOffset per Heartbeat.
+-- camBobPhase:  sine accumulator; advances only when the character is grounded and moving.
+-- camBobAlpha:  fade multiplier (0 = bob silent, 1 = full); lerps to prevent pop on start/stop.
+-- camBodyOffsetZ: smoothed CameraOffset.Z for slide/crouch depth (new axis — Task B wrote Z=0).
+-- camJumpLift:  transient upward impulse fired at jump takeoff; decays over CAMERA_JUMP_LIFT_DURATION.
+-- prevWasJumpingAirborne: edge-detect for the wasJumpingThisAirborne rising edge.
+local camBobPhase:            number  = 0
+local camBobAlpha:            number  = 0
+local camBodyOffsetZ:         number  = 0
+local camJumpLift:            number  = 0
+local prevWasJumpingAirborne: boolean = false
+
 -- Stage 3A: jump and drop tracking ───────────────────────────────────────────
 -- World-Y position of HumanoidRootPart when the airborne phase began.
 -- Set on Jumping state (jump entry) or Freefall entry (ledge drop with no Jumping state).
@@ -3563,11 +3576,17 @@ local function loadMovementAnimations(character: Model)
     isAiming       = false
     isFocusZoomed  = false
     isReloading    = false
-    -- Task B: reset stance POV offset on respawn.
+    -- Task B/D: reset stance POV offset on respawn.
     povOffsetCurrent = 0
     povLandDip       = 0
     -- Task C: reset smooth speed on respawn so the character does not inherit stale velocity.
     moveSmoothSpeed  = 0
+    -- Task D: reset camera body feel state on respawn.
+    camBobPhase            = 0
+    camBobAlpha            = 0
+    camBodyOffsetZ         = 0
+    camJumpLift            = 0
+    prevWasJumpingAirborne = false
     -- Reset set-change log guard so the first movement after respawn re-logs the active set.
     lastAnimationSet       = ""
     -- Reset strafe-blocked log guard so the first movement after respawn re-logs the state.
@@ -4060,9 +4079,8 @@ local function playLandingAnimation(animationName: string)
         end
     end
 
-    -- Task B: set stance POV landing dip impulse.
-    -- povLandDip decays back to zero in updateStancePovOffset() each Heartbeat.
-    if Constants.CAMERA_POV_ENABLED then
+    -- Task D: set landing dip impulse. povLandDip decays in updateCameraBodyFeel() each Heartbeat.
+    if Constants.CAMERA_BODY_FEEL_ENABLED then
         if animationName == "LandingLight" then
             povLandDip = Constants.CAMERA_LAND_LIGHT_DIP_Y :: number
         elseif animationName == "LandingHeavy" then
@@ -5312,11 +5330,17 @@ function MovementController:destroy()
     isAiming       = false
     isFocusZoomed  = false
     isReloading    = false
-    -- Task B: reset stance POV offset on destroy.
+    -- Task B/D: reset stance POV offset on destroy.
     povOffsetCurrent = 0
     povLandDip       = 0
     -- Task C: reset smooth speed on destroy.
     moveSmoothSpeed  = 0
+    -- Task D: reset camera body feel state on destroy.
+    camBobPhase            = 0
+    camBobAlpha            = 0
+    camBodyOffsetZ         = 0
+    camJumpLift            = 0
+    prevWasJumpingAirborne = false
     -- Stage 2E: restore AutoRotate if mouse lock is active before clearing state.
     if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW and customMouseLocked then
         restoreCharacterAutoRotate()
@@ -6002,57 +6026,146 @@ function MovementController:Start()
             )
     end
 
-    -- ── Task B: stance POV height offsets ─────────────────────────────────────
-    -- Writes Humanoid.CameraOffset.Y each Heartbeat based on movement stance.
-    -- Priority: landing dip (additive) > slide > crouch > jump/fall > idle.
-    -- ADS and reload multipliers scale the combined stance offset.
-    -- The existing X component (mouse-lock shoulder offset) is preserved via read-modify-write.
+    -- ── Task D: Criminality-style camera body feel ─────────────────────────────
+    -- Single owner of Humanoid.CameraOffset per Heartbeat (replaces Task B's updateStancePovOffset).
+    -- Composes: stance Y/Z, jump lift impulse, fall offset, landing dip, walk/sprint/crouch bob.
+    -- ADS and reload multipliers scale the entire composed offset + bob.
+    -- Mouse-lock shoulder X is preserved via read-modify-write (bob X adds on top).
     -- No camera.CFrame, FieldOfView, or CameraType writes.
-    local function updateStancePovOffset(dt: number)
-        if not Constants.CAMERA_POV_ENABLED then return end
+    local function updateCameraBodyFeel(dt: number)
+        if not Constants.CAMERA_BODY_FEEL_ENABLED then return end
         local hum = humanoid
         if not hum then return end
 
-        -- Stance target Y: mutually exclusive priority order.
+        -- ── Stance Y (priority: slide > crouch > idle) ─────────────────────────
         local stanceY: number
         if movementState.isSliding then
             stanceY = Constants.CAMERA_SLIDE_OFFSET_Y :: number
         elseif movementState.isCrouching then
             stanceY = Constants.CAMERA_CROUCH_OFFSET_Y :: number
-        elseif wasJumpingThisAirborne then
-            -- Entire jump arc (ascent + descent from a jump) → lift offset.
-            stanceY = Constants.CAMERA_JUMP_OFFSET_Y :: number
-        elseif isFalling then
-            -- Freefall without a preceding jump (ledge drop) → subtle downward pull.
-            stanceY = Constants.CAMERA_FALL_OFFSET_Y :: number
         else
             stanceY = 0
         end
 
-        -- Decay landing dip transient impulse.
+        -- ── Stance Z (camera depth pull for slide/crouch) ──────────────────────
+        local stanceZ: number
+        if movementState.isSliding then
+            stanceZ = Constants.CAMERA_SLIDE_OFFSET_Z :: number
+        elseif movementState.isCrouching then
+            stanceZ = Constants.CAMERA_CROUCH_OFFSET_Z :: number
+        else
+            stanceZ = 0
+        end
+
+        -- ── Jump lift (transient upward impulse at jump takeoff) ───────────────
+        -- Rising-edge detect on wasJumpingThisAirborne → fire once per jump.
+        if wasJumpingThisAirborne and not prevWasJumpingAirborne then
+            camJumpLift = Constants.CAMERA_JUMP_LIFT_Y :: number
+        end
+        prevWasJumpingAirborne = wasJumpingThisAirborne
+        -- Decay lift to zero over CAMERA_JUMP_LIFT_DURATION.
+        if camJumpLift ~= 0 then
+            local decayRate: number = 1 / math.max(0.01, Constants.CAMERA_JUMP_LIFT_DURATION :: number)
+            camJumpLift = camJumpLift * math.max(0, 1 - math.min(1, dt * decayRate))
+            if math.abs(camJumpLift) < 0.002 then camJumpLift = 0 end
+        end
+
+        -- ── Fall offset (freefall downward pull) ───────────────────────────────
+        -- CAMERA_FALL_OFFSET_MAX_Y is a sanity clamp; progressive deepening is deferred (DEBT-069).
+        local fallY: number = if isFalling then Constants.CAMERA_FALL_OFFSET_Y :: number else 0
+
+        -- ── Landing dip (transient impulse; decays to zero) ───────────────────
         if povLandDip ~= 0 then
-            local recoverSpeed = Constants.CAMERA_POV_LAND_RECOVER_SPEED :: number
+            local recoverSpeed: number = Constants.CAMERA_LAND_RECOVERY_SPEED :: number
             povLandDip = povLandDip * math.max(0, 1 - math.min(1, dt * recoverSpeed))
             if math.abs(povLandDip) < 0.002 then povLandDip = 0 end
         end
 
-        -- ADS or reload multiplier scales the stance offset (dip is additive, not scaled).
+        -- ── Bob ────────────────────────────────────────────────────────────────
+        -- Suppressed during slide, freefall, and jump arc (only plays when grounded + moving).
+        local bobAmtY:  number = 0
+        local bobAmtX:  number = 0
+        local bobSpeed: number = 0
+
+        local isMovingForBob: boolean = movementState.isMoving
+            and not movementState.isSliding
+            and not isFalling
+            and not wasJumpingThisAirborne
+
+        if Constants.CAMERA_WALK_BOB_ENABLED and isMovingForBob then
+            if movementState.isSprinting or isTacticalSprinting then
+                bobAmtY  = Constants.CAMERA_SPRINT_BOB_AMOUNT_Y :: number
+                bobAmtX  = Constants.CAMERA_SPRINT_BOB_AMOUNT_X :: number
+                bobSpeed = Constants.CAMERA_SPRINT_BOB_SPEED :: number
+            elseif movementState.isCrouching then
+                bobAmtY  = Constants.CAMERA_CROUCH_BOB_AMOUNT_Y :: number
+                bobAmtX  = Constants.CAMERA_CROUCH_BOB_AMOUNT_X :: number
+                bobSpeed = Constants.CAMERA_CROUCH_BOB_SPEED :: number
+            else
+                bobAmtY  = Constants.CAMERA_WALK_BOB_AMOUNT_Y :: number
+                bobAmtX  = Constants.CAMERA_WALK_BOB_AMOUNT_X :: number
+                bobSpeed = Constants.CAMERA_WALK_BOB_SPEED :: number
+            end
+        end
+
+        -- Speed fraction: bob intensity scales with how close the current speed is to target.
+        -- Prevents full-amplitude bob while the character is still accelerating from idle.
+        local speedRef: number = if (movementState.isSprinting or isTacticalSprinting)
+            then (Constants.SPRINT_SPEED :: number)
+            else (Constants.WALK_SPEED :: number)
+        local speedFrac: number = if speedRef > 0
+            then math.clamp(moveSmoothSpeed / speedRef, 0, 1)
+            else 0
+
+        -- Phase accumulator: advances only while grounded + moving.
+        if isMovingForBob then
+            camBobPhase = camBobPhase + bobSpeed * dt
+        end
+
+        -- Bob alpha: fades in when moving, fades out when stopped (prevents pop).
+        local targetAlpha: number = if isMovingForBob then 1 else 0
+        local alphaSpeed: number  = if isMovingForBob
+            then (Constants.CAMERA_BODY_OFFSET_SMOOTH_SPEED :: number)
+            else (Constants.CAMERA_BODY_OFFSET_RESET_SPEED :: number)
+        camBobAlpha = camBobAlpha + (targetAlpha - camBobAlpha) * math.min(1, dt * alphaSpeed)
+
+        -- Y: sine (up-down). X: cosine at half frequency (gentler lateral sway).
+        local bobY: number = math.sin(camBobPhase) * bobAmtY * speedFrac * camBobAlpha
+        local bobX: number = math.cos(camBobPhase * 0.5) * bobAmtX * speedFrac * camBobAlpha
+
+        -- ── Multiplier (ADS / reload) ──────────────────────────────────────────
         local mult: number = 1
         if isAiming then
-            mult = Constants.CAMERA_POV_ADS_MULTIPLIER :: number
+            mult = Constants.CAMERA_BODY_ADS_MULTIPLIER :: number
         elseif isReloading then
-            mult = Constants.CAMERA_POV_RELOAD_MULTIPLIER :: number
+            mult = Constants.CAMERA_BODY_RELOAD_MULTIPLIER :: number
         end
-        local combinedY = stanceY * mult + povLandDip
 
-        -- Smooth current toward combined target.
-        local smoothSpeed = Constants.CAMERA_POV_SMOOTH_SPEED :: number
+        -- ── Smooth stance Y and Z toward targets ───────────────────────────────
+        -- Jump lift and fall offset overlay on top of stance Y before the lerp.
+        local stanceTargetY: number = stanceY + camJumpLift + fallY
+        local smoothSpeed:   number = Constants.CAMERA_BODY_OFFSET_SMOOTH_SPEED :: number
         povOffsetCurrent = povOffsetCurrent
-            + (combinedY - povOffsetCurrent) * math.min(1, dt * smoothSpeed)
+            + (stanceTargetY - povOffsetCurrent) * math.min(1, dt * smoothSpeed)
+        -- Clamp: during freefall, prevent offset from exceeding CAMERA_FALL_OFFSET_MAX_Y.
+        if isFalling then
+            povOffsetCurrent = math.max(Constants.CAMERA_FALL_OFFSET_MAX_Y :: number, povOffsetCurrent)
+        end
 
-        -- Write Y only; preserve X (mouse-lock shoulder offset) and Z.
-        local existing = hum.CameraOffset
-        local newOffset = Vector3.new(existing.X, povOffsetCurrent, existing.Z)
+        camBodyOffsetZ = camBodyOffsetZ
+            + (stanceZ - camBodyOffsetZ) * math.min(1, dt * smoothSpeed)
+
+        -- ── Compose and write CameraOffset (single write per frame) ───────────
+        -- Landing dip is additive on smoothed stance Y (not scaled by mult — raw impulse).
+        -- Bob is composited after mult so ADS/reload reduces both stance + bob uniformly.
+        local finalY: number = (povOffsetCurrent + povLandDip) * mult + bobY
+        local finalX: number = bobX * mult
+        local finalZ: number = camBodyOffsetZ * mult
+
+        -- Preserve mouse-lock shoulder X via read-modify-write.
+        -- updateSprintCameraOffset() runs before this function and owns CameraOffset.X.
+        local existing: Vector3 = hum.CameraOffset
+        local newOffset: Vector3 = Vector3.new(existing.X + finalX, finalY, finalZ)
         if newOffset ~= existing then
             hum.CameraOffset = newOffset
         end
@@ -6254,10 +6367,10 @@ function MovementController:Start()
         -- Result stored in viewmodelAddCFrame; read by GetViewmodelAddCFrame().
         updateViewmodelEffects(_dt)
 
-        -- Task B: update stance POV CameraOffset.Y after all other updates so it reads
-        -- the final sprint/slide/crouch state for this frame. Runs after updateSprintCameraOffset
-        -- so the X component written by mouse-lock is visible in the read-modify-write.
-        updateStancePovOffset(_dt)
+        -- Task D: update camera body feel (stance, bob, jump lift, fall, landing dip).
+        -- Runs after updateSprintCameraOffset() so the X component written by the shoulder
+        -- offset system is already present in CameraOffset — bob X is added on top safely.
+        updateCameraBodyFeel(_dt)
     end)
     table.insert(_connections, heartbeatConn)
 

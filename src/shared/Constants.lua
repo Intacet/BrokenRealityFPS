@@ -1275,15 +1275,57 @@ Constants.ADS_FORCE_FIRST_PERSON          = true   -- true → entering ADS snap
 Constants.CAMERA_POV_ENABLED              = true    -- master switch; false → no stance offset writes
 Constants.CAMERA_CROUCH_OFFSET_Y          = -1.0    -- studs; POV lowered while crouching
 Constants.CAMERA_SLIDE_OFFSET_Y           = -1.45   -- studs; POV lowered while sliding
-Constants.CAMERA_JUMP_OFFSET_Y            =  0.28   -- studs; lift during the jump arc
-Constants.CAMERA_FALL_OFFSET_Y            = -0.18   -- studs; subtle drop during freefall (ledge drop)
-Constants.CAMERA_LAND_LIGHT_DIP_Y         = -0.18   -- studs; landing impulse — light impact
-Constants.CAMERA_LAND_MEDIUM_DIP_Y        = -0.32   -- studs; landing impulse — medium impact
-Constants.CAMERA_LAND_HEAVY_DIP_Y         = -0.48   -- studs; landing impulse — heavy impact
+Constants.CAMERA_JUMP_OFFSET_Y            =  0.28   -- studs; lift during the jump arc (Task B; superseded by CAMERA_JUMP_LIFT_Y in Task D)
+Constants.CAMERA_FALL_OFFSET_Y            = -0.16   -- studs; subtle drop during freefall (updated Task D)
+Constants.CAMERA_LAND_LIGHT_DIP_Y         = -0.16   -- studs; landing impulse — light impact (updated Task D)
+Constants.CAMERA_LAND_MEDIUM_DIP_Y        = -0.30   -- studs; landing impulse — medium impact (updated Task D)
+Constants.CAMERA_LAND_HEAVY_DIP_Y         = -0.45   -- studs; landing impulse — heavy impact (updated Task D)
 Constants.CAMERA_POV_SMOOTH_SPEED         =  14     -- lerp rate: how fast current tracks stance target
 Constants.CAMERA_POV_LAND_RECOVER_SPEED   =   8     -- decay rate: how fast landing dip fades to zero
 Constants.CAMERA_POV_ADS_MULTIPLIER       =  0.65   -- scale applied to offset while ADS
 Constants.CAMERA_POV_RELOAD_MULTIPLIER    =  0.80   -- scale applied to offset while reloading
+
+-- ── Task D: Criminality-style camera body feel ───────────────────────────────────────────
+-- All offsets applied via Humanoid.CameraOffset only. No camera.CFrame changes.
+-- updateCameraBodyFeel() in MovementController is the single writer of CameraOffset per frame.
+
+Constants.CAMERA_BODY_FEEL_ENABLED        = true   -- master switch; false = no body camera offsets
+Constants.CAMERA_BODY_OFFSET_SMOOTH_SPEED = 16     -- lerp rate (units/s) for stance Y/Z approach
+Constants.CAMERA_BODY_OFFSET_RESET_SPEED  = 22     -- lerp rate (units/s) for bob fade-out when idle
+
+-- Walk bob
+Constants.CAMERA_WALK_BOB_ENABLED         = true   -- master switch for all bob types
+Constants.CAMERA_WALK_BOB_AMOUNT_Y        = 0.035  -- studs; vertical bob amplitude while walking
+Constants.CAMERA_WALK_BOB_AMOUNT_X        = 0.012  -- studs; horizontal sway amplitude while walking
+Constants.CAMERA_WALK_BOB_SPEED           = 6      -- radians/s; sine phase advance while walking
+
+-- Sprint bob
+Constants.CAMERA_SPRINT_BOB_AMOUNT_Y      = 0.075  -- studs; vertical bob amplitude while sprinting
+Constants.CAMERA_SPRINT_BOB_AMOUNT_X      = 0.022  -- studs; horizontal sway amplitude while sprinting
+Constants.CAMERA_SPRINT_BOB_SPEED         = 9      -- radians/s; sine phase advance while sprinting
+
+-- Crouch bob
+Constants.CAMERA_CROUCH_BOB_AMOUNT_Y      = 0.012  -- studs; vertical bob amplitude while crouching
+Constants.CAMERA_CROUCH_BOB_AMOUNT_X      = 0.006  -- studs; horizontal sway amplitude while crouching
+Constants.CAMERA_CROUCH_BOB_SPEED         = 4      -- radians/s; sine phase advance while crouching
+
+-- Stance Z offsets (applied to CameraOffset.Z; negative = camera pulls backward)
+Constants.CAMERA_CROUCH_OFFSET_Z          = 0      -- studs; camera depth while crouching
+Constants.CAMERA_SLIDE_OFFSET_Z           = -0.15  -- studs; camera pulls back slightly during slide
+
+-- Jump lift (transient upward impulse at jump start; decays over CAMERA_JUMP_LIFT_DURATION)
+Constants.CAMERA_JUMP_LIFT_Y              = 0.22   -- studs; lift magnitude at jump takeoff
+Constants.CAMERA_JUMP_LIFT_DURATION       = 0.16   -- seconds; decay window for the lift impulse
+
+-- Fall offset (CAMERA_FALL_OFFSET_Y already set above; MAX_Y is a sanity clamp)
+Constants.CAMERA_FALL_OFFSET_MAX_Y        = -0.35  -- studs; max downward offset during freefall (clamp)
+
+-- Landing dip recovery (replaces CAMERA_POV_LAND_RECOVER_SPEED = 8 for Task D)
+Constants.CAMERA_LAND_RECOVERY_SPEED      = 18     -- decay rate; landing dip fades to zero at this speed
+
+-- ADS and reload multipliers (replace CAMERA_POV_ADS/RELOAD_MULTIPLIER for Task D)
+Constants.CAMERA_BODY_ADS_MULTIPLIER      = 0.45   -- scale applied to all body offsets + bob while ADS
+Constants.CAMERA_BODY_RELOAD_MULTIPLIER   = 0.65   -- scale applied to all body offsets + bob while reloading
 
 -- ── Task C: Criminality-style movement smoothing and body-yaw foundation ─────────────────
 -- Do NOT add MOVEMENT_DISABLE_SPRINT_WHILE_ADS or MOVEMENT_CANCEL_SPRINT_ON_ADS here —
