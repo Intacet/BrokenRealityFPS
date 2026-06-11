@@ -150,7 +150,7 @@ Constants.SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED = true
 -- Stage 3G: 0.18 — responsive enough to track direction changes within ~3–4 frames,
 -- slow enough to avoid the per-frame CFrame snap that caused the Stage 3E camera jerk.
 -- Has no effect when SPRINT_DIRECTIONAL_BODY_FACING_SMOOTHING_ENABLED is false.
-Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 0.18
+Constants.SPRINT_DIRECTIONAL_BODY_FACING_LERP_ALPHA = 0.10
 
 -- ── Stage 3G: Smooth sprint body-facing toward MoveDirection ──────────────────
 -- Master switch for the Stage 3G smooth body-facing path.
@@ -1345,10 +1345,10 @@ Constants.MOVEMENT_MIN_ACTIVE_INPUT       = 0.05   -- input magnitude below whic
 -- Body yaw smoothing — deg/frame at 60fps passed to rotateCharacterCapped().
 -- MOVEMENT_BODY_YAW_SPRINT_SMOOTH_SPEED equals MAX_DELTA / 60 so sprint caps at the global limit.
 Constants.MOVEMENT_BODY_YAW_SMOOTH_ENABLED               = true  -- master switch; false = use CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED
-Constants.MOVEMENT_BODY_YAW_WALK_SMOOTH_SPEED            = 18    -- deg/frame@60fps while walking
-Constants.MOVEMENT_BODY_YAW_CROUCH_SMOOTH_SPEED          = 20    -- deg/frame@60fps while crouching
+Constants.MOVEMENT_BODY_YAW_WALK_SMOOTH_SPEED            = 7     -- deg/frame@60fps while walking
+Constants.MOVEMENT_BODY_YAW_CROUCH_SMOOTH_SPEED          = 6     -- deg/frame@60fps while crouching
 Constants.MOVEMENT_BODY_YAW_SPRINT_SMOOTH_SPEED          = 9     -- deg/frame@60fps while sprinting
-Constants.MOVEMENT_BODY_YAW_BACKPEDAL_SMOOTH_SPEED       = 22    -- deg/frame@60fps while backpedaling
+Constants.MOVEMENT_BODY_YAW_BACKPEDAL_SMOOTH_SPEED       = 10    -- deg/frame@60fps while backpedaling
 Constants.MOVEMENT_BODY_YAW_MAX_DELTA_DEGREES_PER_SECOND = 540   -- global cap; 540 / 60 = 9 deg/frame (sprint value)
 
 return Constants
