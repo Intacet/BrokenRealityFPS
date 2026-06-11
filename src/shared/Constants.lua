@@ -1252,4 +1252,35 @@ Constants.VIEWMODEL_SWAY_ADS_WEIGHT    = 0.08
 Constants.VIEWMODEL_SWAY_RELOAD_WEIGHT = 0.15
 Constants.VIEWMODEL_SWAY_SPRINT_WEIGHT = 0.45
 
+-- ── Task A: ADS sprint disable + ADS focus zoom ────────────────────────────────────────────
+-- FOV values for the three camera states.  Sprint FOV (SPRINT_CAMERA_FOV,
+-- TACTICAL_SPRINT_CAMERA_FOV) still applies when not ADS — these are ADS-specific.
+-- CAMERA_DEFAULT_FOV mirrors DEFAULT_CAMERA_FOV (both = 70); the ADS system uses
+-- CAMERA_DEFAULT_FOV so tuning ADS behaviour touches one clearly-named constant.
+Constants.CAMERA_DEFAULT_FOV               = 70    -- no-ADS base FOV (matches DEFAULT_CAMERA_FOV)
+Constants.CAMERA_ADS_FOV                  = 62    -- FOV while ADS with no focus key
+Constants.CAMERA_ADS_FOCUS_FOV            = 52    -- FOV while ADS + CAMERA_ADS_FOCUS_KEY held
+Constants.CAMERA_FOV_TWEEN_SPEED          = 18    -- FOV units per second; ADS tween duration = Δ/speed
+Constants.CAMERA_ADS_FOCUS_KEY            = Enum.KeyCode.LeftShift  -- key for extra zoom while ADS
+Constants.MOVEMENT_DISABLE_SPRINT_WHILE_ADS = true  -- LeftShift while ADS → focus zoom, not sprint
+Constants.MOVEMENT_CANCEL_SPRINT_ON_ADS     = true  -- entering ADS while sprinting cancels sprint
+Constants.ADS_FOCUS_ZOOM_ENABLED           = true   -- master switch for focus zoom (false → Shift is no-op)
+
+-- ── Task B: First-person stance POV height offsets ────────────────────────────────────────
+-- Applied to Humanoid.CameraOffset.Y only (not camera.CFrame or FieldOfView).
+-- Additive on landing: dip is layered on top of current stance offset.
+-- ADS and reload multipliers scale the entire combined offset.
+Constants.CAMERA_POV_ENABLED              = true    -- master switch; false → no stance offset writes
+Constants.CAMERA_CROUCH_OFFSET_Y          = -1.0    -- studs; POV lowered while crouching
+Constants.CAMERA_SLIDE_OFFSET_Y           = -1.45   -- studs; POV lowered while sliding
+Constants.CAMERA_JUMP_OFFSET_Y            =  0.28   -- studs; lift during the jump arc
+Constants.CAMERA_FALL_OFFSET_Y            = -0.18   -- studs; subtle drop during freefall (ledge drop)
+Constants.CAMERA_LAND_LIGHT_DIP_Y         = -0.18   -- studs; landing impulse — light impact
+Constants.CAMERA_LAND_MEDIUM_DIP_Y        = -0.32   -- studs; landing impulse — medium impact
+Constants.CAMERA_LAND_HEAVY_DIP_Y         = -0.48   -- studs; landing impulse — heavy impact
+Constants.CAMERA_POV_SMOOTH_SPEED         =  14     -- lerp rate: how fast current tracks stance target
+Constants.CAMERA_POV_LAND_RECOVER_SPEED   =   8     -- decay rate: how fast landing dip fades to zero
+Constants.CAMERA_POV_ADS_MULTIPLIER       =  0.65   -- scale applied to offset while ADS
+Constants.CAMERA_POV_RELOAD_MULTIPLIER    =  0.80   -- scale applied to offset while reloading
+
 return Constants

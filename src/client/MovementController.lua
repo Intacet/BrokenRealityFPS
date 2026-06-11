@@ -225,6 +225,10 @@
 --   GetEquippedWeaponName()      → returns current equippedWeaponName (nil = Unarmed set active)
 --   SetCustomMouseLocked(bool)   → toggles custom mouse lock; writes UserInputService.MouseBehavior
 --   IsCustomMouseLocked()        → returns current customMouseLocked boolean
+--   SetAiming(bool)              → Task A: called by GunController on ADS toggle; cancels sprint, drives ADS FOV
+--   IsSprinting(): bool          → Task A: true while normal or tactical sprint active
+--   SetSprinting(bool)           → Task A: external sprint cancel (GunController optional use)
+--   SetReloading(bool)           → Task A/B: synced by GunController each frame; drives reload POV multiplier
 --   Start()                      → called by ClientInit after MatchController:Start()
 --   destroy()                    → disconnects all connections and resets state
 --
@@ -338,6 +342,20 @@ local currentFovTween: Tween? = nil
 -- starts a new tween when the desired target differs from this value.
 -- Reset to Constants.DEFAULT_CAMERA_FOV on respawn and in destroy().
 local targetFov: number = 70  -- will be synced to Constants.DEFAULT_CAMERA_FOV on Start/respawn
+
+-- Task A: ADS state — set by MovementController.SetAiming(bool).
+-- isAiming: true while MB2 ADS is active; governs FOV priority and sprint/focus-zoom gating.
+-- isFocusZoomed: true while CAMERA_ADS_FOCUS_KEY is held during ADS; selects CAMERA_ADS_FOCUS_FOV.
+-- isReloading: synced each frame by GunController; used by Task B stance POV multiplier.
+local isAiming:      boolean = false
+local isFocusZoomed: boolean = false
+local isReloading:   boolean = false  -- Task A/B: updated by SetReloading()
+
+-- Task B: first-person stance POV offset state.
+-- povOffsetCurrent: smoothed Y written to Humanoid.CameraOffset.Y each Heartbeat.
+-- povLandDip: transient impulse set on landing; decays toward 0 at CAMERA_POV_LAND_RECOVER_SPEED.
+local povOffsetCurrent: number = 0
+local povLandDip:       number = 0
 
 -- Stage 3A: jump and drop tracking ───────────────────────────────────────────
 -- World-Y position of HumanoidRootPart when the airborne phase began.
@@ -2213,15 +2231,28 @@ local function tweenCameraFov(target: number, duration: number)
 	end
 end
 
--- Determines the correct target FOV based on current sprint/tactical-sprint
--- state and phase, then calls tweenCameraFov only if the target differs from
--- the last-requested value (dedup guard prevents per-frame tween restarts).
+-- Determines the correct FOV target for the camera.  Priority order:
+--   1. Not ACTIVE phase         → DEFAULT_CAMERA_FOV
+--   2. Task A: ADS active       → CAMERA_ADS_FOV or CAMERA_ADS_FOCUS_FOV (focus zoom)
+--   3. Tactical sprint          → TACTICAL_SPRINT_CAMERA_FOV
+--   4. Normal sprint + moving   → SPRINT_CAMERA_FOV
+--   5. Otherwise                → DEFAULT_CAMERA_FOV
+-- ADS tweens use a speed-proportional duration (CAMERA_FOV_TWEEN_SPEED FOV units/s).
+-- Sprint tweens use SPRINT_FOV_TWEEN_TIME / SPRINT_FOV_RESTORE_TIME as before.
+-- Dedup guard (targetFov check) prevents per-frame tween restarts.
 local function updateSprintFov()
 	if Constants.SPRINT_FOV_ENABLED ~= true then return end
 	local newTarget: number
 	local phase = MatchController:GetPhase()
 	if phase ~= Constants.Phase.ACTIVE then
 		newTarget = Constants.DEFAULT_CAMERA_FOV
+	elseif isAiming then
+		-- Task A: ADS FOV overrides sprint FOV.
+		if isFocusZoomed and (Constants.ADS_FOCUS_ZOOM_ENABLED :: boolean) then
+			newTarget = Constants.CAMERA_ADS_FOCUS_FOV :: number
+		else
+			newTarget = Constants.CAMERA_ADS_FOV :: number
+		end
 	elseif isTacticalSprinting then
 		newTarget = Constants.TACTICAL_SPRINT_CAMERA_FOV
 	elseif movementState.isSprinting
@@ -2234,9 +2265,20 @@ local function updateSprintFov()
 	end
 	if newTarget == targetFov then return end
 	targetFov = newTarget
-	local duration: number = if newTarget == Constants.DEFAULT_CAMERA_FOV
-		then Constants.SPRINT_FOV_RESTORE_TIME
-		else Constants.SPRINT_FOV_TWEEN_TIME
+	local duration: number
+	if isAiming then
+		-- Task A: ADS tween duration proportional to FOV delta so transitions feel
+		-- consistent regardless of starting FOV (e.g. zooming from sprint FOV).
+		local cam = workspace.CurrentCamera
+		local currentFov = if cam then cam.FieldOfView else Constants.DEFAULT_CAMERA_FOV
+		local fovDelta = math.abs(newTarget - currentFov)
+		local speed = Constants.CAMERA_FOV_TWEEN_SPEED :: number
+		duration = if speed > 0 then math.max(0.04, fovDelta / speed) else 0.1
+	else
+		duration = if newTarget == Constants.DEFAULT_CAMERA_FOV
+			then Constants.SPRINT_FOV_RESTORE_TIME
+			else Constants.SPRINT_FOV_TWEEN_TIME
+	end
 	tweenCameraFov(newTarget, duration)
 end
 
@@ -3484,6 +3526,13 @@ local function loadMovementAnimations(character: Model)
     vmSwayY            = 0
     vmLandingDip       = 0
     vmSlideTilt        = 0
+    -- Task A: reset ADS/focus-zoom/reload state on respawn.
+    isAiming       = false
+    isFocusZoomed  = false
+    isReloading    = false
+    -- Task B: reset stance POV offset on respawn.
+    povOffsetCurrent = 0
+    povLandDip       = 0
     -- Reset set-change log guard so the first movement after respawn re-logs the active set.
     lastAnimationSet       = ""
     -- Reset strafe-blocked log guard so the first movement after respawn re-logs the state.
@@ -3973,6 +4022,18 @@ local function playLandingAnimation(animationName: string)
             vmLandingDip = Constants.VIEWMODEL_LANDING_DIP_HEAVY
         else
             vmLandingDip = Constants.VIEWMODEL_LANDING_DIP_MEDIUM
+        end
+    end
+
+    -- Task B: set stance POV landing dip impulse.
+    -- povLandDip decays back to zero in updateStancePovOffset() each Heartbeat.
+    if Constants.CAMERA_POV_ENABLED then
+        if animationName == "LandingLight" then
+            povLandDip = Constants.CAMERA_LAND_LIGHT_DIP_Y :: number
+        elseif animationName == "LandingHeavy" then
+            povLandDip = Constants.CAMERA_LAND_HEAVY_DIP_Y :: number
+        else
+            povLandDip = Constants.CAMERA_LAND_MEDIUM_DIP_Y :: number
         end
     end
 
@@ -4937,6 +4998,75 @@ function MovementController:IsADSBlocked(): boolean
     return movementState.isSprinting or isSliding or isVaulting    -- Stage 3O: slide; Stage 4A: vault
 end
 
+-- ── Task A: ADS sprint disable + focus zoom ────────────────────────────────────────────────
+
+-- Called by GunController on every ADS toggle.
+-- true  → ADS entered; cancels sprint if MOVEMENT_CANCEL_SPRINT_ON_ADS is set; starts ADS FOV.
+-- false → ADS exited; clears focus zoom; restores sprint/default FOV.
+-- Does NOT write camera.CFrame. Writes FieldOfView only via updateSprintFov().
+function MovementController.SetAiming(aiming: boolean)
+    assert(typeof(aiming) == "boolean",
+        "[MovementController] SetAiming: aiming must be a boolean")
+    if Constants.MOVEMENT_CANCEL_SPRINT_ON_ADS
+        and aiming
+        and movementState.isSprinting
+    then
+        if isTacticalSprinting then
+            isTacticalSprinting               = false
+            movementState.isTacticalSprinting = false
+            tacticalSprintStartTime           = 0
+            applyTacticalSprintSensitivity(false)
+            clearTacticalSprintStopConnection()
+        end
+        movementState.isSprinting = false
+        sprintStartTime           = nil
+        applySpeed()
+    end
+    isAiming = aiming
+    if not aiming then
+        isFocusZoomed = false
+    end
+    updateSprintFov()
+    if Constants.MOVEMENT_ANIMATION_DEBUG then
+        Logger.debug("[MovementController] SetAiming → " .. tostring(aiming))
+    end
+end
+
+-- Returns true while either normal sprint or tactical sprint is active.
+-- GunController and other systems may read this to gate sprint-dependent logic.
+function MovementController.IsSprinting(): boolean
+    return movementState.isSprinting or isTacticalSprinting
+end
+
+-- Explicitly sets sprint state from an external caller.
+-- false → cancels sprint (both normal and tactical); updates speed and FOV immediately.
+-- true  → starts sprint; callers are responsible for prerequisite checks.
+function MovementController.SetSprinting(sprinting: boolean)
+    assert(typeof(sprinting) == "boolean",
+        "[MovementController] SetSprinting: sprinting must be a boolean")
+    if not sprinting then
+        if isTacticalSprinting then
+            isTacticalSprinting               = false
+            movementState.isTacticalSprinting = false
+            tacticalSprintStartTime           = 0
+            applyTacticalSprintSensitivity(false)
+            clearTacticalSprintStopConnection()
+        end
+    end
+    movementState.isSprinting = sprinting
+    applySpeed()
+    updateSprintFov()
+end
+
+-- Task A/B: synced each frame by GunController (GetIsReloading() call in its Heartbeat).
+-- Used by Task B updateStancePovOffset() to apply the reload POV multiplier.
+-- Does NOT write camera.CFrame, FieldOfView, or CameraOffset directly.
+function MovementController.SetReloading(reloading: boolean)
+    assert(typeof(reloading) == "boolean",
+        "[MovementController] SetReloading: reloading must be a boolean")
+    isReloading = reloading
+end
+
 -- Stage 5A: returns the viewmodel offset CFrame pre-computed each Heartbeat.
 -- Composes walk/sprint/crouch bob, mouse sway, landing dip, and slide tilt.
 -- All effects are viewmodel-only; no camera.CFrame, CameraOffset, or FOV writes.
@@ -5143,6 +5273,13 @@ function MovementController:destroy()
     vmSwayY            = 0
     vmLandingDip       = 0
     vmSlideTilt        = 0
+    -- Task A: reset ADS/focus-zoom/reload state on destroy.
+    isAiming       = false
+    isFocusZoomed  = false
+    isReloading    = false
+    -- Task B: reset stance POV offset on destroy.
+    povOffsetCurrent = 0
+    povLandDip       = 0
     -- Stage 2E: restore AutoRotate if mouse lock is active before clearing state.
     if Constants.CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW and customMouseLocked then
         restoreCharacterAutoRotate()
@@ -5369,6 +5506,15 @@ function MovementController:Start()
             if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
             if movementState.isCrouching then return end
 
+            -- Task A: while ADS, LeftShift activates focus zoom instead of sprint.
+            if Constants.MOVEMENT_DISABLE_SPRINT_WHILE_ADS and isAiming then
+                if Constants.ADS_FOCUS_ZOOM_ENABLED then
+                    isFocusZoomed = true
+                    updateSprintFov()
+                end
+                return
+            end
+
             -- Stage 2P: double-tap LeftShift detection.
             -- Compare this press against the previous one. If within the double-tap window
             -- and the player is already moving forward, start tactical sprint.
@@ -5424,6 +5570,12 @@ function MovementController:Start()
     local sprintEndConn = UserInputService.InputEnded:Connect(
         function(input: InputObject, _gp: boolean)
             if input.KeyCode ~= Enum.KeyCode.LeftShift then return end
+            -- Task A: while ADS, Shift release clears focus zoom (not sprint end).
+            if isAiming and isFocusZoomed then
+                isFocusZoomed = false
+                updateSprintFov()
+                return
+            end
             if not movementState.isSprinting then return end
 
             -- Stage 2P/3C: Shift release ends sprint.
@@ -5813,6 +5965,62 @@ function MovementController:Start()
             )
     end
 
+    -- ── Task B: stance POV height offsets ─────────────────────────────────────
+    -- Writes Humanoid.CameraOffset.Y each Heartbeat based on movement stance.
+    -- Priority: landing dip (additive) > slide > crouch > jump/fall > idle.
+    -- ADS and reload multipliers scale the combined stance offset.
+    -- The existing X component (mouse-lock shoulder offset) is preserved via read-modify-write.
+    -- No camera.CFrame, FieldOfView, or CameraType writes.
+    local function updateStancePovOffset(dt: number)
+        if not Constants.CAMERA_POV_ENABLED then return end
+        local hum = humanoid
+        if not hum then return end
+
+        -- Stance target Y: mutually exclusive priority order.
+        local stanceY: number
+        if movementState.isSliding then
+            stanceY = Constants.CAMERA_SLIDE_OFFSET_Y :: number
+        elseif movementState.isCrouching then
+            stanceY = Constants.CAMERA_CROUCH_OFFSET_Y :: number
+        elseif wasJumpingThisAirborne then
+            -- Entire jump arc (ascent + descent from a jump) → lift offset.
+            stanceY = Constants.CAMERA_JUMP_OFFSET_Y :: number
+        elseif isFalling then
+            -- Freefall without a preceding jump (ledge drop) → subtle downward pull.
+            stanceY = Constants.CAMERA_FALL_OFFSET_Y :: number
+        else
+            stanceY = 0
+        end
+
+        -- Decay landing dip transient impulse.
+        if povLandDip ~= 0 then
+            local recoverSpeed = Constants.CAMERA_POV_LAND_RECOVER_SPEED :: number
+            povLandDip = povLandDip * math.max(0, 1 - math.min(1, dt * recoverSpeed))
+            if math.abs(povLandDip) < 0.002 then povLandDip = 0 end
+        end
+
+        -- ADS or reload multiplier scales the stance offset (dip is additive, not scaled).
+        local mult: number = 1
+        if isAiming then
+            mult = Constants.CAMERA_POV_ADS_MULTIPLIER :: number
+        elseif isReloading then
+            mult = Constants.CAMERA_POV_RELOAD_MULTIPLIER :: number
+        end
+        local combinedY = stanceY * mult + povLandDip
+
+        -- Smooth current toward combined target.
+        local smoothSpeed = Constants.CAMERA_POV_SMOOTH_SPEED :: number
+        povOffsetCurrent = povOffsetCurrent
+            + (combinedY - povOffsetCurrent) * math.min(1, dt * smoothSpeed)
+
+        -- Write Y only; preserve X (mouse-lock shoulder offset) and Z.
+        local existing = hum.CameraOffset
+        local newOffset = Vector3.new(existing.X, povOffsetCurrent, existing.Z)
+        if newOffset ~= existing then
+            hum.CameraOffset = newOffset
+        end
+    end
+
     -- ── Heartbeat: direction detection, speed maintenance, animation update ────
     -- Runs every physics step. Updates movementState, re-applies speed, and drives
     -- the Stage 2A animation layer. No camera writes.
@@ -5959,6 +6167,11 @@ function MovementController:Start()
         -- Stage 5A: update viewmodel bob, sway, landing dip, and slide tilt.
         -- Result stored in viewmodelAddCFrame; read by GetViewmodelAddCFrame().
         updateViewmodelEffects(_dt)
+
+        -- Task B: update stance POV CameraOffset.Y after all other updates so it reads
+        -- the final sprint/slide/crouch state for this frame. Runs after updateSprintCameraOffset
+        -- so the X component written by mouse-lock is visible in the read-modify-write.
+        updateStancePovOffset(_dt)
     end)
     table.insert(_connections, heartbeatConn)
 

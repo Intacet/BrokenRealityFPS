@@ -407,6 +407,9 @@ function GunController:Start()
                 FreeAimController:IsEnabled() and equippedWeaponName ~= nil
             )
         end
+        -- Task A/B: sync reload state to MovementController each frame so the stance POV
+        -- reload multiplier stays accurate without creating a VMC→MC dependency.
+        MovementController.SetReloading(ViewModelController:GetIsReloading())
 
         -- Full-auto: fire each frame while button is held; internal rate limit gates cadence.
         if isAutoFiring then
@@ -531,8 +534,11 @@ function GunController:Start()
         end
         -- Toggle ADS state.
         local currentlyAiming = ViewModelController:IsAiming()
-        ViewModelController:SetAiming(not currentlyAiming)
-        Logger.debug("[GunController] ADS toggled: " .. tostring(not currentlyAiming))
+        local newAiming = not currentlyAiming
+        ViewModelController:SetAiming(newAiming)
+        -- Task A: notify MovementController so it can cancel sprint and manage ADS FOV.
+        MovementController.SetAiming(newAiming)
+        Logger.debug("[GunController] ADS toggled: " .. tostring(newAiming))
     end)
     table.insert(_connections, adsConn)
 

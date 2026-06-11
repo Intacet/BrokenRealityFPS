@@ -1642,6 +1642,93 @@ Stage 5A in MovementController already implemented bob + mouse sway via `GetView
 
 ---
 
+## [DEBT-066] Task A (ADS sprint disable + focus zoom) is foundation only — advanced features deferred — ADDED 2026-06-11
+
+**Files:** `src/client/MovementController.lua`, `src/client/GunController.lua`, `src/shared/Constants.lua`
+**Severity:** Low (intentional deferral; Stage 1 is correct and complete by design)
+**Studio verification required:** Yes — verify in Studio before closing this entry
+
+**What Task A implements (2026-06-11):**
+- LeftShift while ADS activates focus zoom (FOV 62 → 52) instead of sprinting.
+- Entering ADS while sprinting immediately cancels sprint (normal + tactical) when `MOVEMENT_CANCEL_SPRINT_ON_ADS = true`.
+- ADS FOV tween uses `CAMERA_FOV_TWEEN_SPEED = 18` (FOV units/s); duration is proportional to FOV delta.
+- Sprint FOV stretch still applies when not in ADS; ADS takes priority in `updateSprintFov()`.
+- New public APIs: `SetAiming(bool)`, `IsSprinting(): bool`, `SetSprinting(bool)`, `SetReloading(bool)`.
+- GunController calls `SetAiming(bool)` on ADS toggle; calls `SetReloading(bool)` each frame.
+- 8 new constants gating all behaviour; master switch `ADS_FOCUS_ZOOM_ENABLED = false` disables focus zoom without touching sprint gating.
+
+**What Task A does NOT implement (deferred):**
+- Blind-fire accuracy penalty while ADS + focus zoom (server-side spread) — server still uses flat spread values.
+- ADS interrupt if the sprint-stop animation (SprintStop) is playing when ADS is entered — sprint is cancelled even during the stop animation; the character may briefly play SprintStop while entering ADS.
+- Server-side ADS awareness — `isAiming` is client-only; the server does not know the ADS state and cannot apply spread or accuracy modifiers per-aiming.
+- ADS holster-on-respawn — if the player dies while ADS, `SetAiming(false)` is called only from `loadMovementAnimations()` reset, not from a death event directly. GunController/VMC already handle holstering independently.
+- Sensitivity scaling while focus zoom is active (no `CAMERA_ADS_FOCUS_SENSITIVITY` constant yet).
+
+**DEBT-040 status (Updated — Task A):** ADS FOV is now managed by MovementController via `updateSprintFov()`. VMC ADS animation (`adsState`, `PlayADSFireAnimation`) is unchanged. GunController now calls `MovementController.SetAiming()` in addition to `ViewModelController:SetAiming()`. No ADS animation regression.
+**DEBT-065 status (Stable):** Sway ADS weight (`VIEWMODEL_SWAY_ADS_WEIGHT = 0.08`) is still driven by VMC's internal `inADS` via `ViewModelController:IsAiming()` — not from MovementController's `isAiming`. The two ADS flags are independent; both are set on the same MB2 press.
+
+**MCP / Studio verification — pending:**
+1. Spawn with AKS74 equipped. Stand still, not ADS. FOV = 70.
+2. Sprint (LeftShift). FOV stretches to SPRINT_CAMERA_FOV. Sprint animation plays.
+3. Press MB2 (ADS). Sprint cancels immediately. FOV tweens to 62 (CAMERA_ADS_FOV). Sprint animation stops.
+4. While ADS: press LeftShift. FOV tweens to 52 (CAMERA_ADS_FOCUS_FOV). No sprint starts.
+5. While ADS + Shift: release Shift. FOV tweens back to 62. No sprint starts.
+6. Press MB2 to exit ADS. FOV tweens to 70. Sprint is now available again.
+7. Crouch (C), then try LeftShift. Crouch blocks sprint as before; focus zoom is NOT triggered while crouching (isAiming would need to be true first).
+8. Holster weapon (Key 1). Press MB2 — ADS blocked (no weapon). No FOV change.
+9. Output panel shows no errors throughout.
+
+**Trigger for Stage 2:** Decision to add server-side ADS spread modifier, sensitivity scaling during focus zoom, or ADS interrupt during SprintStop. Each is a separate stage.
+
+---
+
+## [DEBT-067] Task B (stance POV height offsets) is foundation only — advanced features deferred — ADDED 2026-06-11
+
+**Files:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
+**Severity:** Low (intentional deferral; Stage 1 is correct and complete by design)
+**Studio verification required:** Yes — verify in Studio before closing this entry
+
+**What Task B implements (2026-06-11):**
+- Crouch lowers POV smoothly (-1.0 stud) via `Humanoid.CameraOffset.Y`.
+- Slide lowers POV further (-1.45 studs).
+- Jumps produce a transient upward lift (+0.28 stud) for the entire arc; cleared on landing.
+- Ledge drops (freefall without a preceding jump) produce a subtle downward pull (-0.18 stud).
+- Landing impulse: light (-0.18), medium (-0.32), heavy (-0.48); decays via `CAMERA_POV_LAND_RECOVER_SPEED = 8`.
+- ADS scales all stance offsets to 65%; reloading scales to 80%.
+- Mouse-lock X component (shoulder offset) is preserved via read-modify-write — no conflict.
+- All offsets smoothed at `CAMERA_POV_SMOOTH_SPEED = 14` (lerp units/s).
+- State resets on respawn and destroy.
+
+**What Task B does NOT implement (deferred):**
+- Prone stance offset (no prone system exists yet).
+- Lean left/right camera roll offset (no lean system exists yet).
+- Vault POV offset (vaulting already managed by vault arc; no extra Y offset added).
+- Per-weapon CameraOffset.Y bias (heavy weapon = lower carry height) — all weapons share the same offsets.
+- Camera shake on heavy landing (separate screen shake system, not CameraOffset).
+- Interaction with head-bob when crouching while walking (POV offset and walking bob are separate; both apply simultaneously, but combined feel is unverified).
+
+**Architecture note:**
+`updateStancePovOffset(dt)` runs inside the Heartbeat closure so it has access to all module-level state (`movementState`, `isFalling`, `wasJumpingThisAirborne`, `isSliding`, `isAiming`, `isReloading`, `povLandDip`). It runs AFTER `updateSprintCameraOffset()` so the X write from mouse-lock is visible in the read-modify-write. CameraOffset.X is preserved — no coordinate conflict.
+
+**DEBT-040 status (Stable):** ADS multiplier scales the POV offset but does not change the ADS animation, PivotTo chain, or CFrame anywhere. No ADS pose regression.
+**DEBT-066 status (Stable):** Task A `isAiming` flag used by Task B ADS multiplier — same flag, no duplication.
+
+**MCP / Studio verification — pending:**
+1. Spawn. Stand still. CameraOffset.Y should be 0 (no offset).
+2. Crouch (hold C). POV smoothly lowers ~1.0 stud. Release — POV smoothly returns to 0.
+3. Sprint forward, then slide (LeftCtrl while sprinting). POV should be at -1.45 stud during slide.
+4. Jump. POV should lift +0.28 briefly, settle back as the player descends.
+5. Walk off a ledge (ledge drop, no jump). POV drops -0.18 stud during freefall.
+6. Heavy landing (drop from high height). POV dips sharply (-0.48) and recovers over ~0.5s.
+7. ADS (MB2). All offsets should feel more subtle (×0.65).
+8. Reload (R). Offsets should feel slightly more subtle than hip (×0.80).
+9. Mouse lock (LeftControl) active — CameraOffset.X should still be 1.75 (shoulder offset preserved).
+10. Output panel shows no errors throughout.
+
+**Trigger for Stage 2:** Decision to add prone offset, lean roll, vault POV dip, or per-weapon carry height. Each is a separate stage.
+
+---
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.lua`

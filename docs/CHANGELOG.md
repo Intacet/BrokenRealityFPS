@@ -7,6 +7,45 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-11 — FEAT] — Task A: ADS sprint disable + ADS focus zoom; Task B: first-person stance POV height offsets
+
+### Summary
+
+**Task A:** While ADS (MB2 hold), LeftShift becomes a focus zoom key (not sprint). Entering ADS while sprinting immediately cancels the sprint. FOV is now managed in three tiers: default (70), ADS (62), focus zoom (52). Sprint FOV stretch still applies when not in ADS.
+
+**Task B:** `Humanoid.CameraOffset.Y` is now driven each Heartbeat based on movement stance. Crouch lowers POV (-1.0 stud), slide lowers more (-1.45), jumps lift (+0.28), falls pull down (-0.18). Landings apply a transient dip that decays smoothly. ADS scales the combined offset to 65%; reloading to 80%. Mouse-lock X offset is preserved via read-modify-write.
+
+No camera.CFrame changes. No new remotes. No server changes.
+
+### Features added
+
+**Task A — ADS sprint disable + focus zoom (`MovementController`, `GunController`, `Constants`):**
+- `MovementController.SetAiming(bool)` — new public API; called by GunController on every ADS toggle. Cancels sprint when `MOVEMENT_CANCEL_SPRINT_ON_ADS = true`.
+- `MovementController.IsSprinting(): bool` — returns true while normal or tactical sprint is active.
+- `MovementController.SetSprinting(bool)` — external sprint cancel; updates speed and FOV immediately.
+- `MovementController.SetReloading(bool)` — synced by GunController each frame; drives Task B reload multiplier.
+- `updateSprintFov()` updated to prioritise ADS FOV above sprint FOV. ADS tween duration is proportional to FOV delta (`CAMERA_FOV_TWEEN_SPEED = 18` units/s).
+- `sprintBeginConn`: LeftShift while ADS sets `isFocusZoomed = true` and calls `updateSprintFov()`. Sprint path is skipped.
+- `sprintEndConn`: Shift release while ADS + focus zoom clears `isFocusZoomed` and updates FOV. Sprint-end path is skipped.
+- 8 new constants: `CAMERA_DEFAULT_FOV`, `CAMERA_ADS_FOV`, `CAMERA_ADS_FOCUS_FOV`, `CAMERA_FOV_TWEEN_SPEED`, `CAMERA_ADS_FOCUS_KEY`, `MOVEMENT_DISABLE_SPRINT_WHILE_ADS`, `MOVEMENT_CANCEL_SPRINT_ON_ADS`, `ADS_FOCUS_ZOOM_ENABLED`.
+
+**Task B — Stance POV height offsets (`MovementController`, `Constants`):**
+- `updateStancePovOffset(dt)` — new private helper inside `Start()`; runs at the end of every Heartbeat after `updateSprintCameraOffset()`.
+- Stance target priority: slide (-1.45) > crouch (-1.0) > jump arc (+0.28) > ledge-fall (-0.18) > idle (0).
+- Landing dip: impulse set in existing landing handler (light -0.18, medium -0.32, heavy -0.48); decays toward 0 at `CAMERA_POV_LAND_RECOVER_SPEED = 8`.
+- ADS multiplier (`CAMERA_POV_ADS_MULTIPLIER = 0.65`) and reload multiplier (`CAMERA_POV_RELOAD_MULTIPLIER = 0.80`) scale the stance offset.
+- CameraOffset.X (mouse-lock shoulder offset) is preserved via read-modify-write; Y is updated independently.
+- 12 new constants: `CAMERA_POV_ENABLED`, `CAMERA_CROUCH_OFFSET_Y`, `CAMERA_SLIDE_OFFSET_Y`, `CAMERA_JUMP_OFFSET_Y`, `CAMERA_FALL_OFFSET_Y`, `CAMERA_LAND_LIGHT_DIP_Y`, `CAMERA_LAND_MEDIUM_DIP_Y`, `CAMERA_LAND_HEAVY_DIP_Y`, `CAMERA_POV_SMOOTH_SPEED`, `CAMERA_POV_LAND_RECOVER_SPEED`, `CAMERA_POV_ADS_MULTIPLIER`, `CAMERA_POV_RELOAD_MULTIPLIER`.
+
+### Files changed
+
+- `src/shared/Constants.lua` — 20 new constants (8 Task A + 12 Task B)
+- `src/client/MovementController.lua` — Task A + B implementation; 4 new public APIs; state resets on respawn/destroy
+- `src/client/GunController.lua` — calls `MovementController.SetAiming()` on ADS toggle; calls `MovementController.SetReloading()` each frame
+- `docs/TECHNICAL_DEBT.md` — DEBT-066, DEBT-067 added
+
+---
+
 ## [2026-06-10 — FEAT] — Stage 1 procedural weapon sway: mouse lag, movement bob, strafe roll, ADS weight
 
 ### Summary
