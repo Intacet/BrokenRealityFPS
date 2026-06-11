@@ -1873,11 +1873,12 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 
 ---
 
-## [DEBT-073] FootstepController uses timer-based footsteps — Stage 2 marker mode deferred — ADDED 2026-06-11
+## [DEBT-073] FootstepController uses timer-based footsteps — Stage 2 marker mode deferred — UPDATED 2026-06-11
 
-**Files:** `src/client/FootstepController.lua`, `src/shared/Constants.lua`
+**Files:** `src/client/FootstepController.lua`, `src/shared/Constants.lua`, `src/shared/FootstepData.lua`
 **Severity:** Low-Medium (timer cadence feels approximate; exact footstep timing requires markers)
 **Studio verification required:** Yes — verify footsteps play at approximately correct pace for walk/sprint/crouch; verify no double-step on respawn
+**Update (2026-06-11 — audio retune pass):** Intervals, volumes, and pitch ranges retuned to better match movement pace from Criminality reference clip. Single footstep ID (`rbxassetid://92132964739718`) now used for all tiers; old IDs (`rbxassetid://122170062498802`, `rbxassetid://100192350816880`) removed. Walk interval 0.46 s, run 0.32 s, sprint 0.25 s, crouch 0.58 s. FootstepController unchanged (single-element table handled safely by existing `math.random(1, #ids)`). Structural risk below unchanged.
 **Risk:** Timer-based footsteps accumulate `dt` and fire at fixed intervals regardless of the character's actual foot position in the animation. At some animation speeds the timer may fire too early (two close-together sounds) or too late (gap in audio). The intervals `FOOTSTEP_WALK_INTERVAL`, `FOOTSTEP_RUN_INTERVAL`, etc. must be manually tuned to match each clip's foot cadence. If animation playback speed changes (e.g. `AdjustSpeed()`), the timer will drift from actual foot contact.
 **Future marker path (Stage 2):**
 1. Bake `LeftFootstep` and `RightFootstep` markers into each walk/run/sprint/crouch/tactical-sprint animation clip in the Roblox Animation Editor.

@@ -7,6 +7,39 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-11 — TUNE] — Footstep audio retune: single ID + Criminality-style pacing
+
+### Summary
+
+Audio-only tuning pass on the Stage 1 timer-based footstep system. Replaces the two placeholder footstep IDs with a single production ID and resets all interval, volume, and pitch constants to better match movement pace from the Criminality reference clip. No controller logic or movement physics were changed.
+
+### Changes
+
+- `src/shared/FootstepData.lua` — replaced `rbxassetid://122170062498802` and `rbxassetid://100192350816880` with single ID `rbxassetid://92132964739718` across all four tiers (Walk, Run, Sprint, Crouch). All tiers share the same ID for this pass; material-specific variants remain deferred.
+- `src/shared/Constants.lua` — updated footstep constants:
+  - `FOOTSTEP_WALK_INTERVAL` 0.42 → 0.46 s
+  - `FOOTSTEP_SPRINT_INTERVAL` 0.24 → 0.25 s
+  - `FOOTSTEP_CROUCH_INTERVAL` 0.56 → 0.58 s
+  - `FOOTSTEP_WALK_VOLUME` 0.32 → 0.30
+  - `FOOTSTEP_CROUCH_VOLUME` 0.16 → 0.14
+  - `FOOTSTEP_WALK_PITCH_MIN/MAX` 0.95/1.05 → 0.94/1.03
+  - `FOOTSTEP_RUN_PITCH_MIN` 1.0 → 0.98
+  - `FOOTSTEP_SPRINT_PITCH_MIN/MAX` 1.05/1.15 → 1.03/1.13
+  - `FOOTSTEP_CROUCH_PITCH_MIN/MAX` 0.85/0.95 → 0.84/0.94
+  - Comment on `FOOTSTEP_MIN_SPEED` corrected (uses `AssemblyLinearVelocity`, not `MoveDirection`)
+
+### Not changed
+
+- `FootstepController.lua` — existing `math.random(1, #ids)` handles single-element tables safely; no logic change needed.
+- No camera, movement, animation, combat, or network changes.
+- Marker-based footsteps (Stage 2), material-specific sound sets, and multiplayer footstep replication remain deferred.
+
+### Debt entries
+
+- DEBT-073 — updated with retune details; structural timer-drift risk unchanged; marker mode still deferred.
+
+---
+
 ## [2026-06-11 — FEAT] — Footstep sound foundation (Stage 1 — timer-based)
 
 ### Summary

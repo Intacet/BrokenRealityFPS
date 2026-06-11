@@ -1408,31 +1408,31 @@ Constants.FOOTSTEPS_ENABLED             = true
 Constants.FOOTSTEP_DEBUG                = false
 Constants.FOOTSTEP_MODE                 = "Timer"           -- "Timer" | "Marker" (Marker not yet implemented)
 Constants.FOOTSTEP_MARKER_MODE_READY    = false             -- set true when marker events are wired
-Constants.FOOTSTEP_MIN_SPEED            = 1.5               -- MoveDirection magnitude below which footsteps stop
+Constants.FOOTSTEP_MIN_SPEED            = 1.5               -- horizontal studs/s below which footsteps stop (uses HRP AssemblyLinearVelocity)
 Constants.FOOTSTEP_GROUNDED_REQUIRED    = true              -- do not step while airborne
 Constants.FOOTSTEP_EMITTER_NAME         = "FootstepEmitter" -- Attachment name under HumanoidRootPart
 
 Constants.FOOTSTEP_ROLLOFF_MIN_DISTANCE = 5
 Constants.FOOTSTEP_ROLLOFF_MAX_DISTANCE = 55
 
-Constants.FOOTSTEP_WALK_INTERVAL        = 0.42  -- seconds between steps while walking
+Constants.FOOTSTEP_WALK_INTERVAL        = 0.46  -- seconds between steps while walking
 Constants.FOOTSTEP_RUN_INTERVAL         = 0.32  -- seconds between steps while running
-Constants.FOOTSTEP_SPRINT_INTERVAL      = 0.24  -- seconds between steps while sprinting
-Constants.FOOTSTEP_CROUCH_INTERVAL      = 0.56  -- seconds between steps while crouching
+Constants.FOOTSTEP_SPRINT_INTERVAL      = 0.25  -- seconds between steps while sprinting
+Constants.FOOTSTEP_CROUCH_INTERVAL      = 0.58  -- seconds between steps while crouching
 
-Constants.FOOTSTEP_WALK_VOLUME          = 0.32
+Constants.FOOTSTEP_WALK_VOLUME          = 0.30
 Constants.FOOTSTEP_RUN_VOLUME           = 0.46
 Constants.FOOTSTEP_SPRINT_VOLUME        = 0.62
-Constants.FOOTSTEP_CROUCH_VOLUME        = 0.16
+Constants.FOOTSTEP_CROUCH_VOLUME        = 0.14
 
-Constants.FOOTSTEP_WALK_PITCH_MIN       = 0.95
-Constants.FOOTSTEP_WALK_PITCH_MAX       = 1.05
-Constants.FOOTSTEP_RUN_PITCH_MIN        = 1.0
+Constants.FOOTSTEP_WALK_PITCH_MIN       = 0.94
+Constants.FOOTSTEP_WALK_PITCH_MAX       = 1.03
+Constants.FOOTSTEP_RUN_PITCH_MIN        = 0.98
 Constants.FOOTSTEP_RUN_PITCH_MAX        = 1.08
-Constants.FOOTSTEP_SPRINT_PITCH_MIN     = 1.05
-Constants.FOOTSTEP_SPRINT_PITCH_MAX     = 1.15
-Constants.FOOTSTEP_CROUCH_PITCH_MIN     = 0.85
-Constants.FOOTSTEP_CROUCH_PITCH_MAX     = 0.95
+Constants.FOOTSTEP_SPRINT_PITCH_MIN     = 1.03
+Constants.FOOTSTEP_SPRINT_PITCH_MAX     = 1.13
+Constants.FOOTSTEP_CROUCH_PITCH_MIN     = 0.84
+Constants.FOOTSTEP_CROUCH_PITCH_MAX     = 0.94
 
 Constants.FOOTSTEP_DEFAULT_SURFACE      = "Concrete"
 
