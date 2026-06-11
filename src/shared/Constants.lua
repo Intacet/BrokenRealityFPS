@@ -1390,4 +1390,50 @@ Constants.MOVEMENT_BODY_YAW_SPRINT_SMOOTH_SPEED          = 9     -- deg/frame@60
 Constants.MOVEMENT_BODY_YAW_BACKPEDAL_SMOOTH_SPEED       = 10    -- deg/frame@60fps while backpedaling
 Constants.MOVEMENT_BODY_YAW_MAX_DELTA_DEGREES_PER_SECOND = 540   -- global cap; 540 / 60 = 9 deg/frame (sprint value)
 
+-- ============================================================
+-- AKS74 shoot sound — first-person fire audio (Task: sound variants)
+-- ============================================================
+Constants.AKS74_SHOOT_SOUND_VOLUME              = 0.75
+Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MIN  = 0.96
+Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MAX  = 1.04
+Constants.AKS74_SHOOT_SOUND_ROLLOFF_MIN_DISTANCE = 8
+Constants.AKS74_SHOOT_SOUND_ROLLOFF_MAX_DISTANCE = 90
+Constants.AKS74_SHOOT_SOUND_DEBUG               = false
+
+-- ============================================================
+-- Footstep sounds — client-side timer-based Stage 1
+-- Stage 2: replace timer with animation marker listeners (LeftFootstep / RightFootstep).
+-- ============================================================
+Constants.FOOTSTEPS_ENABLED             = true
+Constants.FOOTSTEP_DEBUG                = false
+Constants.FOOTSTEP_MODE                 = "Timer"           -- "Timer" | "Marker" (Marker not yet implemented)
+Constants.FOOTSTEP_MARKER_MODE_READY    = false             -- set true when marker events are wired
+Constants.FOOTSTEP_MIN_SPEED            = 1.5               -- MoveDirection magnitude below which footsteps stop
+Constants.FOOTSTEP_GROUNDED_REQUIRED    = true              -- do not step while airborne
+Constants.FOOTSTEP_EMITTER_NAME         = "FootstepEmitter" -- Attachment name under HumanoidRootPart
+
+Constants.FOOTSTEP_ROLLOFF_MIN_DISTANCE = 5
+Constants.FOOTSTEP_ROLLOFF_MAX_DISTANCE = 55
+
+Constants.FOOTSTEP_WALK_INTERVAL        = 0.42  -- seconds between steps while walking
+Constants.FOOTSTEP_RUN_INTERVAL         = 0.32  -- seconds between steps while running
+Constants.FOOTSTEP_SPRINT_INTERVAL      = 0.24  -- seconds between steps while sprinting
+Constants.FOOTSTEP_CROUCH_INTERVAL      = 0.56  -- seconds between steps while crouching
+
+Constants.FOOTSTEP_WALK_VOLUME          = 0.32
+Constants.FOOTSTEP_RUN_VOLUME           = 0.46
+Constants.FOOTSTEP_SPRINT_VOLUME        = 0.62
+Constants.FOOTSTEP_CROUCH_VOLUME        = 0.16
+
+Constants.FOOTSTEP_WALK_PITCH_MIN       = 0.95
+Constants.FOOTSTEP_WALK_PITCH_MAX       = 1.05
+Constants.FOOTSTEP_RUN_PITCH_MIN        = 1.0
+Constants.FOOTSTEP_RUN_PITCH_MAX        = 1.08
+Constants.FOOTSTEP_SPRINT_PITCH_MIN     = 1.05
+Constants.FOOTSTEP_SPRINT_PITCH_MAX     = 1.15
+Constants.FOOTSTEP_CROUCH_PITCH_MIN     = 0.85
+Constants.FOOTSTEP_CROUCH_PITCH_MAX     = 0.95
+
+Constants.FOOTSTEP_DEFAULT_SURFACE      = "Concrete"
+
 return Constants

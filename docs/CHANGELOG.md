@@ -7,6 +7,229 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-11 — FEAT] — Footstep sound foundation (Stage 1 — timer-based)
+
+### Summary
+
+Client-side footstep audio using two concrete footstep sound variants. Stage 1 uses a timer-based heartbeat approach so it works without animation marker access. Stage 2 will replace the timer with `AnimationTrack:GetMarkerReachedSignal("LeftFootstep")` / `"RightFootstep"` once markers are baked into the walk/run/sprint clips.
+
+### New system
+
+`FootstepController` (new LocalScript-context module) runs a single `RunService.Heartbeat` loop. Each frame it:
+1. Checks `FOOTSTEPS_ENABLED`, grounded state (`Humanoid:GetState()`), and `MoveDirection.Magnitude >= FOOTSTEP_MIN_SPEED`.
+2. Calls `MovementController:GetMoveState()` to resolve the movement tier (Walk, Run, Sprint, Crouch).
+3. Accumulates `dt`; when elapsed time ≥ tier interval, plays one randomly chosen sound variant.
+4. Creates a one-shot `Sound` instance parented to a `FootstepEmitter` Attachment under `HumanoidRootPart`; destroys it on `Ended`.
+
+### New data module
+
+`FootstepData` (new shared module): `{ [surface]: { [tier]: { string } } }`. Stage 1 has Concrete only, two variants per tier. Add surfaces here as IDs are sourced; FootstepController never hardcodes IDs.
+
+### Files changed
+
+- `src/shared/FootstepData.lua` — new: Concrete surface, 2 variants × 4 tiers.
+- `src/client/FootstepController.lua` — new: Init/SetMovementState/Reset/Destroy API.
+- `src/shared/Constants.lua` — 22 footstep constants added.
+- `src/client/ClientInit.client.lua` — FootstepController added at position 11 (GunController moves to 12).
+
+### Debt entries
+
+- DEBT-017 (ClientInit count) — updated to 12.
+- DEBT-073 added: timer footsteps deferred to marker-based Stage 2.
+- DEBT-074 added: footstep sounds are local-player-only; 3D replication deferred.
+
+---
+
+## [2026-06-11 — FEAT] — AKS74 first-person shoot sound variants
+
+### Summary
+
+Two AKS74 shoot sound IDs added. `SoundController:PlayWeaponFire()` plays one random variant per shot as a one-shot Sound instance (created and destroyed per shot — no restart artifact). Pitch is randomized ±4% per shot. GunController uses `PlayWeaponFire` for any weapon that has `sounds.fireFirstPerson` in WeaponData; falls back to the legacy `PlayGunshot()` for weapons that predate sound data.
+
+### Files changed
+
+- `src/shared/WeaponData.lua` — `sounds.fireFirstPerson` table added to AKS74 entry.
+- `src/client/SoundController.lua` — `PlayWeaponFire(soundIds, parent?)` public method added; `Constants` and `workspace` required.
+- `src/client/GunController.lua` — fire audio block updated: checks `equippedDef.sounds.fireFirstPerson`, calls `PlayWeaponFire` if present, else `PlayGunshot`.
+- `src/shared/Constants.lua` — 6 AKS74 shoot sound constants added.
+
+### Debt entries
+
+- DEBT-024 (single-instance sound pooling) — partially resolved for weapon fire sounds. One-shot instances self-destroy; rapid fire no longer cuts previous shot. Legacy sounds (hit, reload, death, dryfire) unchanged.
+- DEBT-072 added: `PlayWeaponFire` volume/pitch constants are AKS74-specific; a generic per-weapon volume system is needed for future multi-weapon builds.
+
+---
+
+## [2026-06-11 — FIX] — Armed locomotion freeze repair: safe-mode forces Unarmed full-body locomotion while weapon equipped
+
+### Summary
+
+The two-track leg-base approach (previous fix, same date) failed because AR15 locomotion clips contain **full-body keyframes** — including legs animated in a stiff weapon-carry pose. Blending AR15 + Unarmed at equal priority produced 50% stiff-carry-legs + 50% running-legs, which still froze or looked wrong.
+
+Root cause: `getAnimationSetName()` was returning "AR15" while the weapon was equipped, causing AR15 locomotion tracks (full-body carry-pose clips) to play instead of Unarmed full-body running tracks.
+
+### Fix
+
+Safe-mode override in `getAnimationSetName()`: when `MOVEMENT_FORCE_FULL_BODY_LOCOMOTION_WHEN_ARMED`, `MOVEMENT_ARMED_LOCOMOTION_SAFE_MODE`, and `not MOVEMENT_ALLOW_UPPER_BODY_LOCOMOTION_CLIPS` are all true, always return "Unarmed". This routes all locomotion (walk, run, sprint, crouch, directional, slide, vault) to existing Unarmed full-body tracks regardless of equipped weapon. AR15_* locomotion tracks are never started in safe mode. The leg-base machinery from the previous fix is inert but harmless.
+
+### Wiring fix
+
+GunController line 439 was passing `Constants.MOVEMENT_ANIMATION_SET_AR15` ("AR15") to `MovementController.SetEquippedWeaponName` on equip. Changed to pass `Constants.DEFAULT_VIEWMODEL_WEAPON` ("AKS74") so MovementController receives the actual viewmodel weapon name.
+
+`SetEquippedWeaponName` updated to accept "AKS74" without warning and emit a `MOVEMENT_EQUIPPED_WEAPON_DEBUG` log (once per state change). `lastEquippedWeaponDebug` variable added with resets on respawn and destroy.
+
+### Constants added / changed
+
+- `MOVEMENT_FORCE_FULL_BODY_LOCOMOTION_WHEN_ARMED = true` — master gate for safe mode.
+- `MOVEMENT_ARMED_LOCOMOTION_SAFE_MODE = true` — must also be true to override animation set.
+- `MOVEMENT_ALLOW_UPPER_BODY_LOCOMOTION_CLIPS = false` — set true to re-enable AR15 locomotion tracks (defeats safe mode).
+- `MOVEMENT_EQUIPPED_WEAPON_DEBUG = false` — logs equipped-state changes when true.
+
+### Behaviour unchanged
+
+- All Unarmed locomotion (walk, run, directional, crouch, sprint, slide, vault) plays exactly as before when armed.
+- Unarmed (no weapon) locomotion is completely unaffected.
+- ADS, camera, FOV, combat, ammo, remotes, server files — not touched.
+
+### Files changed
+
+- `src/shared/Constants.lua` — 4 constants added.
+- `src/client/MovementController.lua` — `getAnimationSetName()` safe-mode override; `SetEquippedWeaponName()` accepts "AKS74"; `lastEquippedWeaponDebug` variable + respawn/destroy resets; `logActiveAnimationTracks()` extended with AnimationId, Priority, WeightTarget, IsPlaying.
+- `src/client/GunController.lua` — equip call changed from `MOVEMENT_ANIMATION_SET_AR15` to `DEFAULT_VIEWMODEL_WEAPON`.
+
+### Debt entries
+
+- DEBT-044 (x31) — safe-mode approach documented.
+- DEBT-050 — GunController wiring fixed; equippedWeaponName now receives "AKS74" on equip.
+
+---
+
+## [2026-06-11 — FIX] — Armed locomotion freeze: legs freeze/hold bad pose when running with weapon equipped
+
+### Summary
+
+AR15 locomotion clips (`RunForward`, `WalkForward`, `WalkLeft`, `WalkRight`, `Idle`, `EnterCrouch`, `ExitCrouch`) are upper-body-only animations — they keyframe torso, arms, and head for a weapon-hold pose but contain **no leg keyframes**. When the AR15 set is active and `Unarmed_RunForward` is stopped, no animation drives the leg joints; Roblox holds them at the last known pose, causing the freeze.
+
+### Fix
+
+Two-track playback when the AR15 set is active: a matching `Unarmed_*` clip plays as a silent "leg-base" track alongside the AR15 overlay. AR15 drives the upper body; Unarmed drives the legs. When the AR15 track switches (run → walk, walk → idle, etc.), the leg-base track switches to match.
+
+### Constants added
+
+- `MOVEMENT_ANIMATION_DEBUG_ACTIVE_TRACKS = false` — logs all playing AnimationTracks each Heartbeat when true.
+- `MOVEMENT_FIX_ARMED_LOCOMOTION_FREEZE = true` — master switch; set false to revert entirely.
+- `MOVEMENT_PREVENT_WEAPON_TRACKS_FROM_OVERRIDING_LEGS = true` — must also be true to enable leg-base playback.
+- `MOVEMENT_MIN_LOCOMOTION_TRACK_SPEED = 0.05` — skip starting a leg track below this playback speed.
+- `MOVEMENT_LOCOMOTION_FADE_TIME = 0.12` — fade time for the Unarmed leg-base track.
+- `MOVEMENT_WEAPON_TRACK_LOCOMOTION_FADE_TIME = 0.10` — fade time for the AR15 overlay track.
+
+### Behaviour unchanged
+
+- All Unarmed set animations play exactly as before.
+- One-shot states (landing, slide, vault, sprint-stop, crouch transitions) continue to own the Animator layer — the leg track stops whenever `stopCurrentMovementAnimation()` is called so it never outlives a one-shot state.
+- No camera changes. No new remotes. No server files touched.
+
+### Files changed
+
+- `src/shared/Constants.lua` — 6 constants added.
+- `src/client/MovementController.lua` — `currentLegTrackName` variable, `stopLegTrack` logic inside `stopCurrentMovementAnimation`, leg-base startup logic inside `playMovementAnimation`, `logActiveAnimationTracks` helper, respawn/destroy resets.
+
+### Debt entries
+
+- DEBT-044 (AR15 animation set completeness) — updated.
+- DEBT-050 (presentation-only equip state) — unchanged; fix works correctly when `SetEquippedWeaponName("AR15")` is called.
+
+---
+
+## [2026-06-11 — FEAT] — ADS gated behind first-person camera
+
+### Summary
+
+ADS (right-click) is now blocked when the player is in third-person. The player must scroll into first-person view before they can aim down sights.
+
+### Changes
+
+- `Constants.ADS_REQUIRE_FIRST_PERSON = true` — master switch; set false to revert.
+- `ViewModelController:IsFirstPerson()` — new public getter exposing the `isFirstPerson` state.
+- `GunController` ADS handler — checks `ViewModelController:IsFirstPerson()` before toggling ADS; silently blocks in third-person (same pattern as the tactical-sprint ADS block).
+
+### What did NOT change
+
+- Existing ADS perspective auto-switch in `ViewModelController:SetAiming()` is unreachable from third-person (input is blocked before `SetAiming` is called), so no changes were needed there.
+- `ADS_BLOCK_PERSPECTIVE_SWITCH` (blocks scroll-out during ADS) is unchanged.
+- No server files, remotes, or combat logic touched.
+
+### Files changed
+
+- `src/shared/Constants.lua` — 1 constant added.
+- `src/client/ViewModelController.lua` — `IsFirstPerson()` getter added.
+- `src/client/GunController.lua` — first-person gate in ADS handler.
+
+---
+
+## [2026-06-11 — FIX] — Task G follow-up: run animation hold on spawn
+
+### Summary
+
+`povOffsetCurrent` was reset to `0` on every spawn/respawn, but the standing target is `-0.20`. The camera drifted down 0.20 studs while the player started running — a shift 8× larger than the reduced sprint bob amplitude (0.024Y). This visually swamped the arm cycle and made the running animation appear to hold a static pose for ~0.2 s after spawn.
+
+### Fix
+
+In `loadMovementAnimations()` (respawn path) and `destroy()`, initialize `povOffsetCurrent` to `CAMERA_STANDING_OFFSET_Y` when `CAMERA_GROUNDED_OFFSET_ENABLED` is true, instead of always resetting to 0. First Heartbeat writes the correct CameraOffset.Y immediately; no visible drift.
+
+### Files changed
+
+- `src/client/MovementController.lua` — two reset sites (respawn + destroy).
+
+---
+
+## [2026-06-11 — TUNE] — Task G: First-person camera/FOV feel tuning (Criminality-style)
+
+### Summary
+
+Comprehensive retune of all first-person camera feel values to match a more grounded, closer-to-Criminality feel. Adds a standing Y offset so the camera sits slightly lower than the Roblox default. Replaces TweenService-based FOV transitions with per-frame dt lerping for more responsive control. Reduces all bob amplitudes ~70%, tightens sprint/ADS FOV, and heavily suppresses camera motion during ADS (×0.15).
+
+No camera.CFrame changes. No new remotes. No physics changes. Single ownership of FOV and CameraOffset preserved in MovementController.
+
+### Features added / changed
+
+- **Standing offset:** `CAMERA_STANDING_OFFSET_Y = -0.20` — POV sits slightly lower than Roblox default when standing (not crouching/sliding). Controlled by `CAMERA_GROUNDED_OFFSET_ENABLED = true` master switch. Transitions via `CAMERA_STANDING_OFFSET_SMOOTH_SPEED = 14`.
+- **FOV lerp:** `updateSprintFov(dt?)` now accepts optional dt and performs per-frame lerp (`CAMERA_FOV_SMOOTH_SPEED = 16` toward target, `CAMERA_FOV_RESET_SPEED = 20` back to default). TweenService no longer started. Input-handler calls (no dt) just update the target; the Heartbeat call does the lerp.
+- **`fovCurrent: number`** — new module-level variable tracks the actual written FOV value; reset on respawn/destroy.
+- **Sprint FOV:** 78 → 74.
+- **ADS FOV:** 62 → 60. ADS focus FOV unchanged (52).
+- **Bob amplitudes (~70% reduction):** walk Y 0.035→0.010, X 0.012→0.003 | sprint Y 0.075→0.024, X 0.022→0.007 | crouch Y 0.012→0.004, X 0.006→0.002.
+- **Bob speeds:** walk 6→5.5 rad/s, sprint 9→8 rad/s. Crouch unchanged (4).
+- **ADS multiplier:** 0.45→0.15 (camera nearly still while ADS).
+- **Reload multiplier:** 0.65→0.35.
+- **Crouch offset Y:** -1.0→-0.95. **Slide offset Y:** -1.45→-1.35. **Slide offset Z:** -0.15→-0.12.
+- **Jump lift Y:** 0.22→0.20. **Jump lift duration:** 0.26→0.16 s.
+- **Fall offset Y:** -0.16→-0.14. **Fall max clamp:** -0.35→-0.32.
+- **Land dips:** light -0.16→-0.14, medium -0.30→-0.28, heavy -0.45→-0.42.
+- **Land recovery speed:** 10→18 (faster dip recovery).
+
+### What did NOT change
+
+- `camera.CFrame` — not touched.
+- ADS alignment, ADS animation, viewmodel pose — not touched.
+- GunController / combat / remotes — not touched.
+- FOV priority logic — ADS > tactical sprint > sprint > default (unchanged).
+- CameraOffset ownership — `updateCameraBodyFeel()` still single owner.
+- Sprint/ADS input-handler calls to `updateSprintFov()` — still valid (no dt argument = no lerp = just target update).
+
+### Files changed
+
+- `src/shared/Constants.lua` — 22 values updated, 6 new constants added.
+- `src/client/MovementController.lua` — `fovCurrent` variable, `updateSprintFov(dt?)` lerp, `updateCameraBodyFeel()` standing offset + smooth speed.
+
+### Studio verification
+
+See DEBT-071 for 14-step test plan.
+
+MCP/Studio verification pending.
+
+---
+
 ## [2026-06-11 — FEAT] — Task F: Non-shift-lock forward locomotion animation
 
 ### Summary

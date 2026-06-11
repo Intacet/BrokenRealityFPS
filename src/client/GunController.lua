@@ -284,7 +284,16 @@ function GunController:Start()
         end
 
         -- ── Audio and visuals ─────────────────────────────────────────────────
-        SoundController:PlayGunshot()
+        -- Use per-weapon fire sounds when available (WeaponData[weapon].sounds.fireFirstPerson).
+        -- Falls back to the legacy PlayGunshot() for weapons that predate the sound data table.
+        local fireSounds = equippedDef ~= nil
+            and (equippedDef :: any).sounds
+            and (equippedDef :: any).sounds.fireFirstPerson
+        if typeof(fireSounds) == "table" and #(fireSounds :: { string }) > 0 then
+            SoundController:PlayWeaponFire(fireSounds :: { string })
+        else
+            SoundController:PlayGunshot()
+        end
         if ViewModelController:IsAiming() then
             ViewModelController:PlayADSFireAnimation()
         else

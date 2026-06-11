@@ -264,7 +264,7 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 **Severity:** Low-Medium
 **Studio verification required:** No
 **Risk:** `ClientInit.client.lua` holds an explicit ordered list of `loadAndStart()` / `loadInitAndStart()` calls. When a new controller is built (e.g. `MovementController`, `CutsceneController`), a developer must manually add its call in the correct position. If forgotten, the controller's `Start()` is never called and it silently does nothing — no error, no warning, just a non-functional system.
-**Current count:** 11 entries (MatchController, MatchUI, HUD, DeathScreen, KillFeedUI, CrosshairUI, ViewModelController, SoundController, MovementController, FreeAimController, GunController). **Updated 2026-06-09 — FreeAimController (Stage 1 free-aim) added as entry 10; GunController moved to 11.**
+**Current count:** 12 entries (MatchController, MatchUI, HUD, DeathScreen, KillFeedUI, CrosshairUI, ViewModelController, SoundController, MovementController, FreeAimController, FootstepController, GunController). **Updated 2026-06-11 — FootstepController (Stage 1 footsteps) added as entry 11; GunController moved to 12.**
 **Trigger:** Every time a new controller is built. The risk grows with each addition.
 **Fix when:** Self-registration or folder-scan pattern is added — the controller count is now at double digits. Consider a shared registry table that each ModuleScript adds itself to, with ClientInit iterating in dependency order. The explicit list is simpler but requires manual discipline on every new controller.
 
@@ -328,15 +328,16 @@ A running list of known maintenance risks, shortcuts, and deferred problems flag
 
 ---
 
-## [DEBT-024] SoundController uses single Sound instances with no pooling
+## [DEBT-024] SoundController uses single Sound instances with no pooling — PARTIALLY RESOLVED 2026-06-11
 
 **File:** `src/client/SoundController.lua`
-**Severity:** Medium
+**Severity:** Medium → Low-Medium (weapon fire sounds resolved)
 **Studio verification required:** Yes
 **Risk:** Each sound type (gunshot, hit, reload, death, dry-fire) is backed by exactly one `Sound` instance. Calling `Sound:Play()` when the instance is already playing restarts it from the beginning rather than spawning a concurrent playback. For `PlayGunshot()` called at `AssaultRifle.fireRate = 0.1 s` intervals, if the gunshot sound asset is longer than 0.1 s, each new shot cuts the previous one audibly. This produces a choppy, interrupted audio experience at the maximum fire rate.
-**Current exposure:** The gunshot asset (`rbxassetid://4792534948`) is a short percussive shot; restart-on-play produces an acceptable rapid-fire stutter at this fire rate. Risk grows if a slower, longer-sounding weapon is added.
-**Trigger:** Adding a weapon with a fire rate longer than the corresponding sound asset's duration, or adding a shotgun/burst weapon that plays multiple sounds at once.
-**Fix when:** A second weapon type with a noticeably longer sound is added. Implement a small sound pool per type (3–5 clones, round-robin `Play()`). Alternatively, use `SoundGroup` with `PolyphonyMode = SoundGroup.Polyphony` if that API is available.
+**Partially resolved (2026-06-11):** `PlayWeaponFire()` creates a new `Sound` instance per shot, plays it, and destroys it on `Ended`. AKS74 full-auto at 650 RPM can overlap sounds naturally — no restart artifact. Legacy sounds (`PlayGunshot`, `PlayHit`, `PlayReload`, `PlayDeath`, `PlayDryFire`) still use the single-instance pattern and are still subject to the restart-on-play issue.
+**Remaining exposure:** If a future weapon uses `PlayGunshot()` (no `sounds.fireFirstPerson` defined) and has a fire sound longer than its fire interval, the restart problem will recur. Fix: migrate all weapon fire sounds to `PlayWeaponFire()` and define `sounds.fireFirstPerson` in WeaponData for every weapon.
+**Trigger:** Adding a weapon with no `sounds.fireFirstPerson` field whose fire sound is longer than its fire interval.
+**Fix when:** All weapons have `sounds.fireFirstPerson` defined, and the legacy `PlayGunshot()` call site in GunController is removed entirely.
 
 ---
 
@@ -1858,6 +1859,44 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 12. Output panel: no errors. No per-frame spam. One-shot mode-change logs appear on mouse-lock toggle.
 
 **Trigger for Stage 2:** Decision to add dot-product direction classifier, per-direction crouch animations, or a manual body yaw path for non-mouse-lock mode.
+
+---
+
+## [DEBT-072] PlayWeaponFire volume/pitch constants are AKS74-specific — ADDED 2026-06-11
+
+**Files:** `src/client/SoundController.lua`, `src/shared/Constants.lua`, `src/shared/WeaponData.lua`
+**Severity:** Low (acceptable for single-weapon prototype; grows with weapon count)
+**Studio verification required:** Yes — verify AKS74 shots play correctly; verify volume/pitch feel
+**Risk:** `SoundController:PlayWeaponFire()` reads volume and pitch range from `Constants.AKS74_SHOOT_SOUND_VOLUME`, `Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MIN/MAX` — constants named after a specific weapon. When a second weapon is added with different fire-sound requirements (e.g. a pistol at lower volume, a sniper at a different pitch range), `PlayWeaponFire` will use AKS74 values for all weapons.
+**Trigger:** A second weapon with `sounds.fireFirstPerson` defined in WeaponData is added.
+**Fix when:** A second weapon needs distinct fire-sound volume or pitch. Correct approach: move `volume`, `pitchMin`, `pitchMax` into WeaponData's `sounds` table per-weapon (e.g. `sounds.fireVolume = 0.75`), and pass them as parameters to `PlayWeaponFire`. At that point remove the AKS74-named constants from Constants.lua and rename `PlayWeaponFire`'s parameter signature to accept a `soundConfig` table instead of bare `soundIds`.
+
+---
+
+## [DEBT-073] FootstepController uses timer-based footsteps — Stage 2 marker mode deferred — ADDED 2026-06-11
+
+**Files:** `src/client/FootstepController.lua`, `src/shared/Constants.lua`
+**Severity:** Low-Medium (timer cadence feels approximate; exact footstep timing requires markers)
+**Studio verification required:** Yes — verify footsteps play at approximately correct pace for walk/sprint/crouch; verify no double-step on respawn
+**Risk:** Timer-based footsteps accumulate `dt` and fire at fixed intervals regardless of the character's actual foot position in the animation. At some animation speeds the timer may fire too early (two close-together sounds) or too late (gap in audio). The intervals `FOOTSTEP_WALK_INTERVAL`, `FOOTSTEP_RUN_INTERVAL`, etc. must be manually tuned to match each clip's foot cadence. If animation playback speed changes (e.g. `AdjustSpeed()`), the timer will drift from actual foot contact.
+**Future marker path (Stage 2):**
+1. Bake `LeftFootstep` and `RightFootstep` markers into each walk/run/sprint/crouch/tactical-sprint animation clip in the Roblox Animation Editor.
+2. Set `Constants.FOOTSTEP_MARKER_MODE_READY = true`.
+3. In FootstepController, connect `AnimationTrack:GetMarkerReachedSignal("LeftFootstep")` and `"RightFootstep"` for each loaded locomotion track.
+4. In the marker callback, call `playStep(tier)` directly instead of using the timer.
+5. Disconnect marker signals when the track stops; reconnect when it resumes.
+6. Remove the Heartbeat timer accumulator entirely once markers are wired.
+**Trigger:** Movement animation clips receive marker bake, or footstep timing is noticeably off in Studio playtest.
+
+---
+
+## [DEBT-074] FootstepController footstep sounds are local-player-only — 3D replication deferred — ADDED 2026-06-11
+
+**Files:** `src/client/FootstepController.lua`
+**Severity:** Low (irrelevant in first-playable prototype; important once multiple players are present)
+**Studio verification required:** No (replication not yet built)
+**Risk:** Footstep `Sound` instances are created and parented to the local player's `HumanoidRootPart/FootstepEmitter`. In Roblox, `Sound` instances are not automatically replicated to other clients — other players will not hear the local player's footsteps. This is intentional for Stage 1 (local feedback only) but means no 3D audio footstep presence for other players.
+**Fix when:** Multi-player footstep presence is needed. Approach: a lightweight `FootstepEvent` remote (server-to-all-clients) that carries `{playerId, tier, position}`. Each receiving client creates a short one-shot `Sound` at the reported position. The server should rate-limit and validate position. Do not add this until the core loop is proven — adds remote traffic per step.
 
 ---
 

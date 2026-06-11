@@ -15,13 +15,15 @@
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService      = game:GetService("SoundService")
+local workspace         = game:GetService("Workspace")
 
 -- ============================================================
 -- Dependencies
 -- ============================================================
 
-local Modules = ReplicatedStorage:WaitForChild("Modules")
-local Logger  = require(Modules:WaitForChild("Logger"))
+local Modules    = ReplicatedStorage:WaitForChild("Modules")
+local Logger     = require(Modules:WaitForChild("Logger"))
+local Constants  = require(Modules:WaitForChild("Constants"))
 
 local Remotes        = ReplicatedStorage:WaitForChild("Remotes")
 local HitConfirmed   = Remotes:WaitForChild("HitConfirmed")   :: RemoteEvent
@@ -148,6 +150,47 @@ end
 -- outside of the normal damage pipeline).
 function SoundController:PlayDeath()
     deathSound:Play()
+end
+
+-- Plays one randomly chosen weapon fire sound per call.
+-- Creates a one-shot Sound instance parented to the camera (heard by local player only),
+-- then destroys it when playback ends. Volume and pitch are read from Constants.
+-- soundIds: array of rbxassetid:// strings (from WeaponData[weapon].sounds.fireFirstPerson)
+-- parent:   optional override; defaults to workspace.CurrentCamera
+function SoundController:PlayWeaponFire(soundIds: { string }, parent: Instance?)
+    assert(
+        typeof(soundIds) == "table",
+        "[SoundController] PlayWeaponFire: soundIds must be a table"
+    )
+    if #soundIds == 0 then
+        Logger.warn("[SoundController] PlayWeaponFire: soundIds table is empty — no sound played")
+        return
+    end
+
+    local chosenId: string = soundIds[math.random(1, #soundIds)]
+    local emitter: Instance = if parent ~= nil then parent else workspace.CurrentCamera
+
+    local s       = Instance.new("Sound")
+    s.SoundId     = chosenId
+    s.Volume      = Constants.AKS74_SHOOT_SOUND_VOLUME :: number
+    s.PlaybackSpeed = (Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MIN :: number)
+        + math.random() * (
+            (Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MAX :: number)
+            - (Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MIN :: number)
+        )
+    s.RollOffMinDistance = Constants.AKS74_SHOOT_SOUND_ROLLOFF_MIN_DISTANCE :: number
+    s.RollOffMaxDistance = Constants.AKS74_SHOOT_SOUND_ROLLOFF_MAX_DISTANCE :: number
+    s.Looped      = false
+    s.Parent      = emitter
+    s:Play()
+
+    s.Ended:Connect(function()
+        s:Destroy()
+    end)
+
+    if Constants.AKS74_SHOOT_SOUND_DEBUG :: boolean then
+        Logger.debug("[SoundController] PlayWeaponFire: played " .. chosenId)
+    end
 end
 
 return SoundController

@@ -93,6 +93,12 @@ WeaponData["AKS74"] = {
             reload = "rbxassetid://82861605710102",
         },
     },
+    sounds = {
+        fireFirstPerson = {
+            "rbxassetid://116842061471256",
+            "rbxassetid://131609668538198",
+        },
+    },
 }
 
 return WeaponData

@@ -25,7 +25,9 @@
 --   10. FreeAimController    — Stage 1 free-aim; requires only Constants + Logger (no circular);
 --                              must Init() before GunController:Start() so the RenderStepped loop
 --                              is live when GunController begins pushing state each frame
---   11. GunController        — reads MatchController:GetPhase(); calls ViewModelController,
+--   11. FootstepController   — Stage 1 timer-based footstep audio; requires MovementController
+--                              (position 9) for GetMoveState(); no dep on GunController
+--   12. GunController        — reads MatchController:GetPhase(); calls ViewModelController,
 --                              CrosshairUI, SoundController, MovementController, FreeAimController
 --
 -- GunController requires ViewModelController, CrosshairUI, SoundController, MovementController,
@@ -199,7 +201,15 @@ loadAndInit("FreeAimController", function()
     return require(script.Parent:WaitForChild("FreeAimController"))
 end)
 
--- 11. GunController — reads MatchController:GetPhase(); calls ViewModelController,
+-- 11. FootstepController — Stage 1 timer-based footstep audio. Requires MovementController
+--     (position 9) for GetMoveState(). No dependency on FreeAimController or GunController.
+--     Must start after MovementController so GetMoveState() returns valid state.
+--     Uses Init() pattern (starts Heartbeat loop inside Init; no separate Start()).
+loadAndInit("FootstepController", function()
+    return require(script.Parent:WaitForChild("FootstepController"))
+end)
+
+-- 12. GunController — reads MatchController:GetPhase(); calls ViewModelController,
 --     CrosshairUI, SoundController, MovementController, and FreeAimController at module
 --     level — all five must be initialized (Start()ed / Init()ed) first.
 loadAndStart("GunController", function()
