@@ -1415,10 +1415,10 @@ Constants.FOOTSTEP_EMITTER_NAME         = "FootstepEmitter" -- Attachment name u
 Constants.FOOTSTEP_ROLLOFF_MIN_DISTANCE = 5
 Constants.FOOTSTEP_ROLLOFF_MAX_DISTANCE = 55
 
-Constants.FOOTSTEP_WALK_INTERVAL        = 0.46  -- seconds between steps while walking
-Constants.FOOTSTEP_RUN_INTERVAL         = 0.32  -- seconds between steps while running
-Constants.FOOTSTEP_SPRINT_INTERVAL      = 0.25  -- seconds between steps while sprinting
-Constants.FOOTSTEP_CROUCH_INTERVAL      = 0.58  -- seconds between steps while crouching
+Constants.FOOTSTEP_WALK_INTERVAL        = 0.385 -- WalkForward clip 1.0s / 1.3x speed / 2 contacts per cycle
+Constants.FOOTSTEP_RUN_INTERVAL         = 0.385 -- same WalkForward clip as Walk tier
+Constants.FOOTSTEP_SPRINT_INTERVAL      = 0.25  -- RunForward clip 0.567s / 1.15x speed / 2 contacts ≈ 0.246s
+Constants.FOOTSTEP_CROUCH_INTERVAL      = 0.50  -- CrouchWalk clip 1.0s / 1.0x speed / 2 contacts per cycle
 
 Constants.FOOTSTEP_WALK_VOLUME          = 0.30
 Constants.FOOTSTEP_RUN_VOLUME           = 0.46
