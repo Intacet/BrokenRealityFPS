@@ -258,7 +258,7 @@ function GunController:Start()
         params.FilterType = Enum.RaycastFilterType.Exclude
         params.FilterDescendantsInstances = { character }
 
-        workspace:Raycast(origin, direction.Unit * defaultDef.range, params)
+        local hitResult = workspace:Raycast(origin, direction.Unit * defaultDef.range, params)
 
         lastShotTime = now
         WeaponFired:FireServer(origin, direction, now)
@@ -270,13 +270,18 @@ function GunController:Start()
         )
         recoilResetTimer = feel.recoilResetTime :: number
 
-        local kickUp    = math.rad((feel.recoilUp :: number) * (1 + recoilBuildup))
-        local kickRight = math.rad((feel.recoilRight :: number) * (1 + recoilBuildup))
-        if feel.recoilRightAlternate then
-            kickRight = recoilAltRight and kickRight or -kickRight
-            recoilAltRight = not recoilAltRight
+        -- Weapons with a per-weapon recoil profile use vmRecoilCF for rotation;
+        -- skip the WeaponFeel rotational kick so the two systems do not fight.
+        local hasPerWeaponProfile = equippedDef ~= nil and (equippedDef :: any).recoil ~= nil
+        if not hasPerWeaponProfile then
+            local kickUp    = math.rad((feel.recoilUp :: number) * (1 + recoilBuildup))
+            local kickRight = math.rad((feel.recoilRight :: number) * (1 + recoilBuildup))
+            if feel.recoilRightAlternate then
+                kickRight = recoilAltRight and kickRight or -kickRight
+                recoilAltRight = not recoilAltRight
+            end
+            recoilCFrame = recoilCFrame * CFrame.Angles(-kickUp, kickRight, 0)
         end
-        recoilCFrame = recoilCFrame * CFrame.Angles(-kickUp, kickRight, 0)
 
         -- ── Audio and visuals ─────────────────────────────────────────────────
         SoundController:PlayGunshot()
@@ -292,23 +297,49 @@ function GunController:Start()
             ViewModelController:ApplyRecoil(ViewModelController:IsAiming(), recoilProfile)
         end
 
-        -- ── Muzzle flash (existing behaviour preserved) ───────────────────────
-        local flash        = Instance.new("Part")
-        flash.Name         = "MuzzleFlash"
-        flash.Size         = Vector3.new(0.3, 0.3, 0.3)
-        flash.BrickColor   = BrickColor.new("Bright yellow")
-        flash.Material     = Enum.Material.Neon
-        flash.CanCollide   = false
-        flash.CastShadow   = false
-        flash.Anchored     = true
-        flash.CFrame       = ViewModelController:GetBarrelTipCFrame()
-        flash.Parent       = workspace.CurrentCamera
-        local flashMesh    = Instance.new("SpecialMesh")
-        flashMesh.MeshType = Enum.MeshType.Sphere
-        flashMesh.Parent   = flash
-        task.delay(feel.muzzleFlashDuration :: number, function()
-            flash:Destroy()
-        end)
+        -- ── Debug muzzle marker (disabled by default) ─────────────────────────
+        if Constants.DEBUG_BULLET_IMPACT_MARKERS then
+            local markerSize = Constants.DEBUG_BULLET_IMPACT_MARKER_SIZE :: number
+            local flash        = Instance.new("Part")
+            flash.Name         = "MuzzleFlash"
+            flash.Size         = Vector3.new(markerSize, markerSize, markerSize)
+            flash.BrickColor   = BrickColor.new("Bright yellow")
+            flash.Material     = Enum.Material.Neon
+            flash.Transparency = Constants.DEBUG_BULLET_IMPACT_MARKER_TRANSPARENCY :: number
+            flash.CanCollide   = false
+            flash.CastShadow   = false
+            flash.Anchored     = true
+            flash.CFrame       = ViewModelController:GetBarrelTipCFrame()
+            flash.Parent       = workspace.CurrentCamera
+            local flashMesh    = Instance.new("SpecialMesh")
+            flashMesh.MeshType = Enum.MeshType.Sphere
+            flashMesh.Parent   = flash
+            task.delay(Constants.DEBUG_BULLET_IMPACT_MARKER_LIFETIME :: number, function()
+                flash:Destroy()
+            end)
+        end
+
+        -- ── Bullet impact effect ──────────────────────────────────────────────
+        if Constants.BULLET_IMPACT_ENABLED and hitResult ~= nil then
+            local impactSize = Constants.BULLET_IMPACT_SIZE :: number
+            local impact        = Instance.new("Part")
+            impact.Name         = "BulletImpact"
+            impact.Size         = Vector3.new(impactSize, impactSize, impactSize)
+            impact.Color        = Constants.BULLET_IMPACT_COLOR :: Color3
+            impact.Material     = Enum.Material.SmoothPlastic
+            impact.Transparency = Constants.BULLET_IMPACT_TRANSPARENCY :: number
+            impact.CanCollide   = false
+            impact.CastShadow   = false
+            impact.Anchored     = true
+            impact.CFrame       = CFrame.new(hitResult.Position)
+            impact.Parent       = workspace.CurrentCamera
+            local impactMesh    = Instance.new("SpecialMesh")
+            impactMesh.MeshType = Enum.MeshType.Sphere
+            impactMesh.Parent   = impact
+            task.delay(Constants.BULLET_IMPACT_LIFETIME :: number, function()
+                impact:Destroy()
+            end)
+        end
 
         return true
     end

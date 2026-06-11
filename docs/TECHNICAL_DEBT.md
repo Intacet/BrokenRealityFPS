@@ -1522,11 +1522,11 @@ This worsens DEBT-013 (weapon name not sent in `WeaponFired` payload) by adding 
 
 ---
 
-## [DEBT-064] Stage 1 viewmodel recoil is foundation only — camera recoil and related systems deferred — ADDED 2026-06-10 — UPDATED 2026-06-10
+## [DEBT-064] Stage 1 viewmodel recoil is foundation only — camera recoil and related systems deferred — ADDED 2026-06-10 — UPDATED 2026-06-10 (x2)
 
 **Files:** `src/client/ViewModelController.lua`, `src/client/GunController.lua`, `src/shared/Constants.lua`, `src/shared/WeaponData.lua`
 **Severity:** Low (intentional deferral; Stage 1 is correct and complete by design)
-**Studio verification required:** Yes — see manual test steps below
+**Studio verification required:** Yes — partially verified 2026-06-10 (pass 1); remaining items below
 
 **What Stage 1 implements (2026-06-10, updated same day):**
 - `ViewModelController:ApplyRecoil(isAiming: boolean, recoilProfile: any?)` — data-driven per-weapon recoil. Each call reads `recoilProfile.hip` or `recoilProfile.ads` sub-table for positionBack, positionUp, pitchDegrees, yawDegrees, rollDegrees. Builds up over sustained fire (`buildupPerShot`, `maxBuildup`) scaling pitch per shot. Alternating yaw direction each shot (`alternatingYaw=true`). Kick/recovery speeds from profile. Falls back to `DEFAULT_VIEWMODEL_RECOIL_*` Constants when profile is nil or sub-table absent.
@@ -1536,46 +1536,57 @@ This worsens DEBT-013 (weapon name not sent in `WeaponFired` payload) by adding 
 - AKS74 full-auto at 650 RPM: `isAutoFiring` flag; InputBegan MB1 sets true + fires first shot; InputEnded MB1 clears; RenderStepped calls `attemptFire()` each frame. `attemptFire()` reads `WeaponData[equippedWeaponName].rpm` → `60/rpm` for client-side pacing; passes `equippedDef.recoil` to `ApplyRecoil`.
 - `GunService`: rate-limit derives `effectiveFireRate` from `weaponDef.rpm` when present; falls back to `weaponDef.fireRate`. DEFAULT_WEAPON = AR15 has no `rpm` field; server behaviour unchanged.
 
+**Pass 1 shot feedback repair (2026-06-10, second update):**
+- **WeaponFeel rotational kick gated:** `attemptFire()` computes `local hasPerWeaponProfile = equippedDef ~= nil and (equippedDef :: any).recoil ~= nil`. When true (AKS74), the WeaponFeel `recoilCFrame * CFrame.Angles(-kickUp, kickRight, 0)` rotation is skipped. WeaponFeel positional kick (`recoilOffset` via `PlayFireAnimation`) is preserved. This makes vmRecoilCF the sole rotational recoil system for profile weapons and eliminates net downward drift caused by the two systems fighting.
+- **Studio-verified (2026-06-10):** After 6 ApplyRecoil calls, viewmodel LookVector.Y = +0.0056, pitchAngle = +0.324° (muzzle UP). Correct direction confirmed via MCP.
+- **Debug muzzle marker gated:** The previous bright-yellow neon sphere at barrel tip (debug-quality, visible every shot) is now gated behind `Constants.DEBUG_BULLET_IMPACT_MARKERS = false`. Size and lifetime use `DEBUG_BULLET_IMPACT_MARKER_SIZE/LIFETIME/TRANSPARENCY` constants. Disabled by default.
+- **Bullet impact effect added:** `hitResult = workspace:Raycast(...)` now stored. When `Constants.BULLET_IMPACT_ENABLED = true` and `hitResult ~= nil`, a small neutral sphere (`BULLET_IMPACT_SIZE=0.12`, `BULLET_IMPACT_COLOR=Color3.fromRGB(170,170,170)`, `BULLET_IMPACT_TRANSPARENCY=0.45`) is rendered at the hit position for `BULLET_IMPACT_LIFETIME=0.10s`.
+- **AKS74 recoil profile retuned:** hip{positionBack=0.045, positionUp=0.006, pitchDegrees=1.2, yawDegrees=0.12, rollDegrees=0.18}, ads{positionBack=0.018, positionUp=0.002, pitchDegrees=0.45, yawDegrees=0.04, rollDegrees=0.06}, buildupPerShot=0.055, maxBuildup=0.42, recoverySpeed=24, kickSpeed=42, randomYawScale=0.6, randomRollScale=0.5.
+- **DEFAULT_VIEWMODEL_RECOIL_* retuned:** POSITION_BACK=0.035, POSITION_UP=0.004, PITCH_DEGREES=0.8, YAW_DEGREES=0.08, ROLL_DEGREES=0.08, RECOVERY_SPEED=22, KICK_SPEED=40, MAX_BUILDUP=0.4.
+
 **What Stage 1 does NOT do (intentional — all deferred):**
 - **No camera recoil.** `camera.CFrame` is not modified. DEBT-045 (camera-space recoil / CameraType.Scriptable) remains open.
 - **No spread bloom.** `computeSpread()` is unchanged. No hipfire spread increase per shot.
 - **No deterministic recoil pattern curves.** Yaw has alternating direction + random variation; no per-shot pattern table.
-- **No muzzle flash changes.** Existing Part-based flash is preserved as-is.
+- **No real muzzle flash art.** Debug marker disabled; no particle or texture muzzle flash added yet.
 - **No shell ejection.** Deferred.
-- **No impact VFX changes.** Deferred.
 - **No sound changes.** `SoundController:PlayGunshot()` unchanged.
 - **No new remotes.** `WeaponFired` payload unchanged.
 
-**Dual recoil system coexistence risk:**
-Two viewmodel recoil systems run simultaneously:
-1. **WeaponFeel-based** (`viewRecoilCFrame`, pushed by `GunController:SetRecoilOffset()`) — existing; driven by AR15/SCAR WeaponFeel values via `GunController` RenderStepped. Applies `CFrame.Angles(-kickUp, kickRight, 0)` and lerps to identity.
-2. **Profile-based** (`vmRecoilCF`, driven by `ViewModelController:ApplyRecoil()`) — data-driven; reads from `WeaponData[name].recoil` profile. Applied per-shot from GunController's `attemptFire()`.
-
-Both are composed into PivotTo: `... * viewRecoilCFrame * vmRecoilCF * ...`. Combined effect may feel too strong; tune `WeaponData["AKS74"].recoil.hip/ads` values after Studio playtest.
+**Dual recoil system coexistence — ADDRESSED (pass 1):**
+Previously two rotational recoil systems ran simultaneously for AKS74, causing net downward drift. Fixed: WeaponFeel rotational kick is now gated by `hasPerWeaponProfile` in `attemptFire()`. AKS74 (and any future weapon with a `.recoil` sub-table) uses vmRecoilCF exclusively for rotation. Weapons without a profile (AR15, SCAR) continue to use WeaponFeel rotation unchanged. WeaponFeel positional kick (`recoilOffset`) is preserved for all weapons.
 
 **DEBT-013 status (Stable):** GunService still uses DEFAULT_WEAPON = AR15. AKS74 shots always pass: AR15 rate limit (0.09 s) < AKS74 interval (0.0923 s). No worsening.
-**DEBT-039 status (Stable):** WeaponFeel.lua not modified. Existing recoil uses AR15/SCAR values for all weapons. No change.
+**DEBT-039 status (Updated — pass 1):** WeaponFeel.lua not modified. WeaponFeel rotational kick now gated in GunController for weapons with per-weapon recoil profiles. AR15/SCAR behaviour unchanged. AKS74 no longer uses WeaponFeel rotation.
 **DEBT-040 status (Stable):** ADS system preserved. `PlayADSFireAnimation()` called when aiming. ADS PivotTo chain updated correctly.
 **DEBT-045 status (Unchanged — partially addressed):** Camera recoil remains deferred. This task adds viewmodel-only recoil (Stage 1 of a multi-stage plan). DEBT-045 will be resolved when CameraType.Scriptable and per-frame camera management are implemented.
 **DEBT-059 status (Stable):** AKS74 equips client-side; server fires as AR15. No worsening — AKS74 shots always pass AR15 rate limit.
 **DEBT-063 status (Stable):** Free-aim is visual-only. Bullet direction unchanged. vmRecoilCF does not affect bullet direction.
 
-**MCP / Studio verification required (2026-06-10 — MCP unavailable at commit time):**
-1. No Output errors from `[GunController]` or `[ViewModelController]` on spawn.
-2. Press key 1 → AKS74 equips; viewmodel visible (when `FORCE_FIRST_PERSON = true`, phase ACTIVE).
-3. Hold MB1 → weapon fires continuously; gunshot plays each shot; fire animation restarts per shot.
-4. Release MB1 → firing stops immediately; no queued shots fire after release.
-5. Hold MB1 → fire rate visually matches ~10.8 shots/second (650 RPM). Time 10 shots.
-6. Hold MB1 → each shot produces visible viewmodel kick (weapon pushes toward screen, muzzle rises). Weapon returns to rest between shots.
-7. MB2 → ADS; hold MB1 → ADS fire animation plays; recoil visually smaller/tighter than hipfire.
-8. No camera movement during full-auto fire. Crosshair stays at screen center.
-9. Empty magazine → dry-fire sound plays on MB1; firing stops; magazine counter reaches 0.
-10. Press R → reload; MB1 during reload → no shots fired.
-11. Holster (key 1) mid-fire → `isAutoFiring` cleared; no shots after holster.
-12. Respawn during fire → `isAutoFiring` cleared; no shots after respawn.
-13. Tactical sprint active → fire blocked (if `TACTICAL_SPRINT_BLOCKS_GUN_USE = true`).
-14. `VIEWMODEL_RECOIL_ENABLED = false` → weapon still fires, no vmRecoilCF kick applied.
-15. Confirm `camera.CFrame` is never written (no FOV, no CameraOffset, no rotation change).
+**MCP / Studio verification — partially complete (2026-06-10 pass 1):**
+Verified via MCP:
+- No Output errors on spawn ✓
+- Constants loaded correctly (DEBUG_BULLET_IMPACT_MARKERS=false, BULLET_IMPACT_ENABLED=true, DEFAULT_PITCH=0.8, DEFAULT_MAX_BUILDUP=0.4) ✓
+- AKS74 recoil profile values match spec ✓
+- Viewmodel pitchAngle = +0.324° after 6 ApplyRecoil calls (muzzle UP confirmed) ✓
+- No MuzzleFlash Parts in workspace.CurrentCamera ✓
+
+**Remaining manual verification (fire in play mode):**
+1. Hold MB1 → weapon fires continuously; gunshot plays each shot; fire animation restarts per shot.
+2. Release MB1 → firing stops immediately; no queued shots fire after release.
+3. Hold MB1 → fire rate visually matches ~10.8 shots/second (650 RPM). Time 10 shots.
+4. Hold MB1 → each shot produces visible viewmodel kick (weapon pushes toward screen, muzzle rises). Weapon returns to rest between shots.
+5. MB2 → ADS; hold MB1 → ADS fire animation plays; recoil visually smaller/tighter than hipfire.
+6. No camera movement during full-auto fire. Crosshair stays at screen center.
+7. Empty magazine → dry-fire sound plays on MB1; firing stops; magazine counter reaches 0.
+8. Press R → reload; MB1 during reload → no shots fired.
+9. Holster (key 1) mid-fire → `isAutoFiring` cleared; no shots after holster.
+10. Respawn during fire → `isAutoFiring` cleared; no shots after respawn.
+11. Tactical sprint active → fire blocked (if `TACTICAL_SPRINT_BLOCKS_GUN_USE = true`).
+12. `VIEWMODEL_RECOIL_ENABLED = false` → weapon still fires, no vmRecoilCF kick applied.
+13. Confirm `camera.CFrame` is never written (no FOV, no CameraOffset, no rotation change).
+14. Fire at a wall → confirm small gray sphere appears at hit position for ~0.1 s; no yellow sphere appears.
+15. `DEBUG_BULLET_IMPACT_MARKERS = true` → small yellow sphere appears at barrel tip for ~0.08 s per shot; reset to false when done.
 
 **Trigger for Stage 2:** Design decision to add camera recoil (DEBT-045), spread bloom, or recoil pattern curves. Each of these is a separate stage.
 

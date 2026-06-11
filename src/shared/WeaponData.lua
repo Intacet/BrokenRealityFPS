@@ -53,25 +53,25 @@ WeaponData["AKS74"] = {
     reloadTime    = 2.2,
     recoil = {
         hip = {
-            positionBack = 0.055,   -- weapon moves toward camera each shot
-            positionUp   = 0.012,   -- weapon lifts slightly
-            pitchDegrees = 1.6,     -- positive = muzzle rises (verified for cam.CFrame * vmRecoilCF chain)
-            yawDegrees   = 0.22,
-            rollDegrees  = 0.35,
+            positionBack = 0.045,   -- weapon moves toward camera each shot
+            positionUp   = 0.006,   -- weapon lifts slightly
+            pitchDegrees = 1.2,     -- positive = muzzle rises; pending Studio verification
+            yawDegrees   = 0.12,
+            rollDegrees  = 0.18,
         },
         ads = {
-            positionBack = 0.025,
-            positionUp   = 0.004,
-            pitchDegrees = 0.65,
-            yawDegrees   = 0.08,
-            rollDegrees  = 0.12,
+            positionBack = 0.018,
+            positionUp   = 0.002,
+            pitchDegrees = 0.45,
+            yawDegrees   = 0.04,
+            rollDegrees  = 0.06,
         },
-        buildupPerShot  = 0.10,   -- buildup scalar added per shot [0, maxBuildup]
-        maxBuildup      = 0.75,   -- caps vmRecoilBuildup; pitch scales by (1 + buildup)
-        recoverySpeed   = 18,     -- lerp rate for vmRecoilTarget decay to identity
-        kickSpeed       = 38,     -- lerp rate for vmRecoilCurrent chasing vmRecoilTarget
-        randomYawScale  = 1.0,    -- ±variation on yaw per shot (0 = deterministic)
-        randomRollScale = 1.0,
+        buildupPerShot  = 0.055,  -- buildup scalar added per shot [0, maxBuildup]
+        maxBuildup      = 0.42,   -- caps vmRecoilBuildup; pitch scales by (1 + buildup)
+        recoverySpeed   = 24,     -- lerp rate for vmRecoilTarget decay to identity
+        kickSpeed       = 42,     -- lerp rate for vmRecoilCurrent chasing vmRecoilTarget
+        randomYawScale  = 0.6,    -- ±variation on yaw per shot (0 = deterministic)
+        randomRollScale = 0.5,
         alternatingYaw  = true,   -- flip yaw direction each shot (left-right-left...)
     },
     animations = {

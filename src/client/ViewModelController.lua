@@ -1599,7 +1599,7 @@ function ViewModelController:ApplyRecoil(isAiming: boolean, recoilProfile: any?)
     -- Read per-shot values with fallback to Constants defaults.
     -- positionBack > 0 = weapon moves toward camera (+Z camera-local = backward kick).
     -- positionUp   > 0 = weapon lifts upward (+Y camera-local).
-    -- pitchDegrees > 0 = muzzle rises; confirmed for cam.CFrame * ... * vmRecoilCF chain.
+    -- pitchDegrees > 0 = muzzle rises; pending Studio verification (WeaponFeel gate applied).
     local pz: number
     local py: number
     local pitch: number

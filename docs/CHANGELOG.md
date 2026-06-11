@@ -7,6 +7,51 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-10 — FIX] — AKS74 shot feedback pass 1: WeaponFeel gate + debug marker + bullet impact
+
+### Summary
+
+Repairs two AKS74 shot-feedback regressions. (1) The bright-yellow neon sphere that appeared on every shot was a debug-quality muzzle marker; it is now gated behind `Constants.DEBUG_BULLET_IMPACT_MARKERS = false` and disabled by default. A small neutral gray sphere is now rendered at the raycast hit point when `Constants.BULLET_IMPACT_ENABLED = true`. (2) The viewmodel was drifting downward because the WeaponFeel rotational kick and the vmRecoilCF pitch kick were fighting each other. Fixed by gating the WeaponFeel rotational kick in `attemptFire()` for weapons that have a per-weapon recoil profile (i.e. `equippedDef.recoil ~= nil`). AKS74 now uses vmRecoilCF exclusively for rotation; muzzle kicks upward (Studio-verified: pitchAngle = +0.324° after sustained fire). AKS74 recoil profile and DEFAULT_VIEWMODEL_RECOIL_* fallback constants retuned. No camera changes, no new remotes, no server changes.
+
+### Files changed
+
+- **`src/client/GunController.lua`** — `attemptFire()`: (a) stores raycast result as `local hitResult`; (b) computes `local hasPerWeaponProfile`; skips WeaponFeel rotational kick when true; (c) replaces unconditional yellow muzzle sphere with `if Constants.DEBUG_BULLET_IMPACT_MARKERS then` block using `DEBUG_BULLET_IMPACT_MARKER_*` constants; (d) adds `if Constants.BULLET_IMPACT_ENABLED and hitResult ~= nil then` block that renders a small gray sphere at the hit position.
+- **`src/shared/Constants.lua`** — Updated `DEFAULT_VIEWMODEL_RECOIL_*` to: POSITION_BACK=0.035, POSITION_UP=0.004, PITCH_DEGREES=0.8, YAW_DEGREES=0.08, ROLL_DEGREES=0.08, RECOVERY_SPEED=22, KICK_SPEED=40, MAX_BUILDUP=0.4. Added `DEBUG_BULLET_IMPACT_MARKERS=false`, `DEBUG_BULLET_IMPACT_MARKER_SIZE=0.18`, `DEBUG_BULLET_IMPACT_MARKER_LIFETIME=0.08`, `DEBUG_BULLET_IMPACT_MARKER_TRANSPARENCY=0.35`. Added `BULLET_IMPACT_ENABLED=true`, `BULLET_IMPACT_SIZE=0.12`, `BULLET_IMPACT_LIFETIME=0.10`, `BULLET_IMPACT_TRANSPARENCY=0.45`, `BULLET_IMPACT_COLOR=Color3.fromRGB(170,170,170)`.
+- **`src/shared/WeaponData.lua`** — AKS74 recoil profile retuned: hip{positionBack=0.045, positionUp=0.006, pitchDegrees=1.2, yawDegrees=0.12, rollDegrees=0.18}, ads{positionBack=0.018, positionUp=0.002, pitchDegrees=0.45, yawDegrees=0.04, rollDegrees=0.06}, buildupPerShot=0.055, maxBuildup=0.42, recoverySpeed=24, kickSpeed=42, randomYawScale=0.6, randomRollScale=0.5.
+- **`src/client/ViewModelController.lua`** — Updated pitch sign comment to "pending Studio verification (WeaponFeel gate applied)."
+- **`docs/TECHNICAL_DEBT.md`** — DEBT-064 updated with pass 1 details, verification results, and revised remaining checklist. DEBT-039 status updated.
+- **`docs/CHANGELOG.md`** — this entry.
+
+### Root cause analysis
+
+**Yellow flash:** The muzzle flash was a 0.3-stud bright-yellow neon sphere created on every `attemptFire()` call, regardless of whether the raycast hit anything. It was debug-quality VFX (no particle system, no texture) and appeared large from first-person view.
+
+**Downward recoil:** Two systems both applied rotational recoil simultaneously. WeaponFeel applied `CFrame.Angles(-kickUp, kickRight, 0)` with `recoilUp=1.8` and a 2.5× buildup multiplier. vmRecoilCF applied a positive-pitch rotation from the AKS74 profile. WeaponFeel dominated by 3–4× at sustained-fire buildup, overriding the vmRecoilCF upward kick and producing net downward drift.
+
+### Studio verification
+
+- Constants loaded correctly: `DEBUG_BULLET_IMPACT_MARKERS=false`, `BULLET_IMPACT_ENABLED=true`, `BULLET_IMPACT_COLOR=(170,170,170)`, `DEFAULT_PITCH=0.8`, `DEFAULT_MAX_BUILDUP=0.4` ✓
+- AKS74 profile values match spec ✓
+- Viewmodel pitchAngle = +0.324° after 6 ApplyRecoil calls (muzzle UP) ✓
+- No MuzzleFlash Parts in workspace.CurrentCamera ✓
+- No runtime errors ✓
+
+### Maintenance risks
+
+- **Bullet impact Parts are not pooled.** Each shot creates and destroys a Part+SpecialMesh. High fire rates (650 RPM = ~10.8/s) create ~10 objects/s in workspace.CurrentCamera. Acceptable at this stage; pool when profiling shows measurable GC pressure. See CLAUDE.md "Object pooling" rule.
+- **hitResult may be nil at wall/floor boundary.** Bullets that miss all geometry silently skip the impact effect — correct and intentional.
+
+### Test steps (remaining — fire in play mode required)
+
+1. Fire at a wall → gray sphere appears at hit point for ~0.1 s; no yellow sphere visible.
+2. `DEBUG_BULLET_IMPACT_MARKERS = true` → yellow sphere at barrel tip per shot; reset to false when done.
+3. Hold MB1 → muzzle visually rises (not falls) on each shot; weapon recovers between shots.
+4. Sustained fire → recoil builds gradually over ~7 shots; releases on MB1 release.
+5. No camera movement during fire; crosshair stays at center.
+6. MB2 → ADS recoil visually tighter than hipfire.
+
+---
+
 ## [2026-06-10 — FIX/REFACTOR] — Per-weapon data-driven viewmodel recoil + pitch sign fix
 
 ### Summary

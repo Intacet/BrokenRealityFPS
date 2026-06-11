@@ -1183,14 +1183,31 @@ Constants.VIEWMODEL_RECOIL_ENABLED = true
 -- Per-weapon overrides live in WeaponData["<name>"].recoil.{hip,ads}.
 -- positionBack > 0 moves the weapon toward the camera (+Z camera-local = backward).
 -- positionUp   > 0 lifts the weapon (+Y camera-local).
--- pitchDegrees > 0 = muzzle rises; verified for cam.CFrame * ... * vmRecoilCF chain.
-Constants.DEFAULT_VIEWMODEL_RECOIL_POSITION_BACK  = 0.04
-Constants.DEFAULT_VIEWMODEL_RECOIL_POSITION_UP    = 0.008
-Constants.DEFAULT_VIEWMODEL_RECOIL_PITCH_DEGREES  = 1.0
-Constants.DEFAULT_VIEWMODEL_RECOIL_YAW_DEGREES    = 0.1
-Constants.DEFAULT_VIEWMODEL_RECOIL_ROLL_DEGREES   = 0.1
-Constants.DEFAULT_VIEWMODEL_RECOIL_RECOVERY_SPEED = 18
-Constants.DEFAULT_VIEWMODEL_RECOIL_KICK_SPEED     = 38
-Constants.DEFAULT_VIEWMODEL_RECOIL_MAX_BUILDUP    = 0.75
+-- pitchDegrees > 0 = muzzle rises; pending Studio verification.
+Constants.DEFAULT_VIEWMODEL_RECOIL_POSITION_BACK  = 0.035
+Constants.DEFAULT_VIEWMODEL_RECOIL_POSITION_UP    = 0.004
+Constants.DEFAULT_VIEWMODEL_RECOIL_PITCH_DEGREES  = 0.8
+Constants.DEFAULT_VIEWMODEL_RECOIL_YAW_DEGREES    = 0.08
+Constants.DEFAULT_VIEWMODEL_RECOIL_ROLL_DEGREES   = 0.08
+Constants.DEFAULT_VIEWMODEL_RECOIL_RECOVERY_SPEED = 22
+Constants.DEFAULT_VIEWMODEL_RECOIL_KICK_SPEED     = 40
+Constants.DEFAULT_VIEWMODEL_RECOIL_MAX_BUILDUP    = 0.4
+
+-- ── Debug bullet impact markers ─────────────────────────────────────────────────────────
+-- When true, a neon sphere is rendered at the barrel tip each shot for visual debugging.
+-- Must be false in any build shown to players.
+Constants.DEBUG_BULLET_IMPACT_MARKERS             = false
+Constants.DEBUG_BULLET_IMPACT_MARKER_SIZE         = 0.18   -- studs; sphere diameter
+Constants.DEBUG_BULLET_IMPACT_MARKER_LIFETIME     = 0.08   -- seconds before destroy
+Constants.DEBUG_BULLET_IMPACT_MARKER_TRANSPARENCY = 0.35
+
+-- ── Bullet impact effect ────────────────────────────────────────────────────────────────
+-- Subtle neutral sphere rendered at the raycast hit point each shot.
+-- Set BULLET_IMPACT_ENABLED = false to disable entirely (no Part is created).
+Constants.BULLET_IMPACT_ENABLED      = true
+Constants.BULLET_IMPACT_SIZE         = 0.12    -- studs; sphere diameter
+Constants.BULLET_IMPACT_LIFETIME     = 0.10    -- seconds before destroy
+Constants.BULLET_IMPACT_TRANSPARENCY = 0.45
+Constants.BULLET_IMPACT_COLOR        = Color3.fromRGB(170, 170, 170)
 
 return Constants
