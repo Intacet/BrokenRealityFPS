@@ -131,10 +131,15 @@ local function isGrounded(): boolean
 end
 
 -- Returns true when the local player is moving fast enough to warrant footsteps.
+-- Uses HumanoidRootPart AssemblyLinearVelocity (horizontal component) so that
+-- FOOTSTEP_MIN_SPEED is a studs-per-second threshold. MoveDirection is a unit
+-- vector capped at 1.0 and cannot reach 1.5, so it must not be used here.
 local function isMoving(): boolean
-    local hum = humanoid
-    if hum == nil then return false end
-    return (hum :: Humanoid).MoveDirection.Magnitude >= (Constants.FOOTSTEP_MIN_SPEED :: number)
+    local root = hrp
+    if root == nil then return false end
+    local vel = (root :: BasePart).AssemblyLinearVelocity
+    local horizontalSpeed = math.sqrt(vel.X * vel.X + vel.Z * vel.Z)
+    return horizontalSpeed >= (Constants.FOOTSTEP_MIN_SPEED :: number)
 end
 
 -- Plays one one-shot footstep sound. The Sound instance is created, played,

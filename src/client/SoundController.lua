@@ -168,7 +168,9 @@ function SoundController:PlayWeaponFire(soundIds: { string }, parent: Instance?)
     end
 
     local chosenId: string = soundIds[math.random(1, #soundIds)]
-    local emitter: Instance = if parent ~= nil then parent else workspace.CurrentCamera
+    -- workspace.CurrentCamera is Camera? (nullable in strict mode). Fall back to workspace
+    -- itself on the rare early-load race where the camera isn't created yet.
+    local emitter: Instance = (parent or workspace.CurrentCamera or workspace) :: Instance
 
     local s       = Instance.new("Sound")
     s.SoundId     = chosenId

@@ -205,8 +205,13 @@ end)
 --     (position 9) for GetMoveState(). No dependency on FreeAimController or GunController.
 --     Must start after MovementController so GetMoveState() returns valid state.
 --     Uses Init() pattern (starts Heartbeat loop inside Init; no separate Start()).
+--     10-second timeout: if FootstepController.lua is not yet synced by Rojo, WaitForChild
+--     returns nil after 10 s, pcall catches the require(nil) error, and ClientInit continues
+--     to GunController rather than hanging the entire startup chain.
 loadAndInit("FootstepController", function()
-    return require(script.Parent:WaitForChild("FootstepController"))
+    local mod = script.Parent:WaitForChild("FootstepController", 10)
+    assert(mod ~= nil, "FootstepController not found — ensure rojo serve is running and the file is synced")
+    return require(mod)
 end)
 
 -- 12. GunController — reads MatchController:GetPhase(); calls ViewModelController,
