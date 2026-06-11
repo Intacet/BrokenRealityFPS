@@ -1266,6 +1266,7 @@ Constants.MOVEMENT_DISABLE_SPRINT_WHILE_ADS = true  -- LeftShift while ADS → f
 Constants.MOVEMENT_CANCEL_SPRINT_ON_ADS     = true  -- entering ADS while sprinting cancels sprint
 Constants.ADS_FOCUS_ZOOM_ENABLED           = true   -- master switch for focus zoom (false → Shift is no-op)
 Constants.ADS_BLOCK_PERSPECTIVE_SWITCH     = true   -- true → scroll-down cannot exit first-person while ADS active
+Constants.ADS_FORCE_FIRST_PERSON          = true   -- true → entering ADS snaps to first-person; exiting restores previous mode
 
 -- ── Task B: First-person stance POV height offsets ────────────────────────────────────────
 -- Applied to Humanoid.CameraOffset.Y only (not camera.CFrame or FieldOfView).

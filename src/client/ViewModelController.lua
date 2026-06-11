@@ -115,6 +115,11 @@ local currentPhase: string  = Constants.Phase.LOBBY
 -- Constants.CAMERA_PERSPECTIVE_SWITCH_ENABLED is true.
 local isFirstPerson: boolean = Constants.FORCE_FIRST_PERSON
 
+-- Perspective mode that was active before ADS entered.
+-- Saved by SetAiming(true) and restored by SetAiming(false) so exiting ADS returns
+-- the player to whatever mode they were in (first-person or third-person).
+local preAdsFirstPerson: boolean = Constants.FORCE_FIRST_PERSON
+
 -- Positional recoil offset (decays toward 0 each RenderStepped).
 local recoilOffset: number = 0
 
@@ -1492,6 +1497,12 @@ function ViewModelController:SetAiming(entering: boolean)
     end
 
     if entering then
+        -- ADS in: force first-person so the player cannot aim in third-person.
+        if Constants.ADS_FORCE_FIRST_PERSON then
+            preAdsFirstPerson = isFirstPerson
+            setFirstPerson(true)
+        end
+
         -- ADS in: stop idle/run, play adsIn, set state to Entering.
         -- RenderStepped will monitor TimePosition and freeze at final frame.
 
@@ -1557,6 +1568,11 @@ function ViewModelController:SetAiming(entering: boolean)
             adsState = "Hip"
         end
     else
+        -- ADS out: restore the perspective mode that was active before ADS entered.
+        if Constants.ADS_FORCE_FIRST_PERSON then
+            setFirstPerson(preAdsFirstPerson)
+        end
+
         -- ADS out: stop adsIn/adsIdle, play adsOut, set state to Exiting.
         adsIdleTime = 0
 
