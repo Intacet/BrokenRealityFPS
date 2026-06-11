@@ -3662,6 +3662,8 @@ local function loadMovementAnimations(character: Model)
         -- AR15 set — only plays when SetEquippedWeaponName("AR15") is called
         ["AR15_WalkForward"]          = r6.AR15.WalkForward,
         ["AR15_RunForward"]           = r6.AR15.RunForward,
+        ["AR15_WalkLeft"]             = r6.AR15.WalkLeft,             -- armed strafe left  (mouse-lock only)
+        ["AR15_WalkRight"]            = r6.AR15.WalkRight,            -- armed strafe right (mouse-lock only)
         ["AR15_Idle"]                 = r6.AR15.Idle,                 -- AR15 standing idle (Stage 2H)
         ["AR15_EnterCrouch"]          = r6.AR15.EnterCrouch,          -- AR15 enter-crouch one-shot (Stage 2H)
         ["AR15_ExitCrouch"]           = r6.AR15.ExitCrouch,           -- AR15 exit-crouch one-shot (Stage 2H)

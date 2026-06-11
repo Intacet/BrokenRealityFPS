@@ -7,6 +7,39 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-11 — FEAT] — Armed strafe animations (WalkLeft/WalkRight for AR15, shift-lock only)
+
+### Summary
+
+Added dedicated walk-left and walk-right strafe animations for the AR15 animation set, played when the player is armed and shift-lock (custom mouse lock) is active. Unarmed strafe animations are unchanged and continue to play when no gun is equipped. Transitions between the two sets (equip/unequip while strafing) use the existing `MOVEMENT_DIRECTION_CROSSFADE_TIME = 0.12 s` blend. No logic changes — the direction selection path for non-Unarmed sets already tries `<Set>_WalkLeft`/`<Set>_WalkRight` and falls back to `<Set>_WalkForward` when absent; adding the IDs and loading the tracks was sufficient.
+
+### Features added
+
+- `AR15.WalkLeft = rbxassetid://90637681602224` — armed strafe-left animation (shift-lock only).
+- `AR15.WalkRight = rbxassetid://87299213260935` — armed strafe-right animation (shift-lock only).
+- Both tracks pre-loaded at spawn alongside other AR15 tracks; no reload on equip/unequip.
+- Direction selection for armed Left/ForwardLeft/BackwardLeft → `AR15_WalkLeft`; Right/ForwardRight/BackwardRight → `AR15_WalkRight`; Backward/Forward → `AR15_WalkForward` (unchanged).
+- Transition from `Unarmed_WalkLeft` → `AR15_WalkLeft` (and right) on equip/unequip crossfades via `MOVEMENT_DIRECTION_CROSSFADE_TIME`.
+
+### Files changed
+
+- `src/shared/Constants.lua` — `WalkLeft` and `WalkRight` added to `MOVEMENT_ANIMATION_IDS.R6.AR15`.
+- `src/client/MovementController.lua` — `AR15_WalkLeft` and `AR15_WalkRight` added to `toLoad` in `loadMovementAnimations()`.
+
+### Studio verification
+
+1. Equip AR15 (`MovementController.SetEquippedWeaponName("AR15")`). Enable shift-lock (LeftControl).
+2. Strafe left (A). `AR15_WalkLeft` should play — confirm it is the new armed strafe clip, not the unarmed one.
+3. Strafe right (D). `AR15_WalkRight` should play.
+4. Unequip (`SetEquippedWeaponName(nil)`) while strafing. Animation should crossfade to `Unarmed_WalkLeft`/`Right` within ~0.12 s.
+5. Re-equip while strafing. Crossfade back to `AR15_WalkLeft`/`Right` within ~0.12 s.
+6. Disable shift-lock. Strafe left/right → `AR15_WalkForward` fallback (strafe blocked without mouse lock).
+7. No Output errors throughout.
+
+MCP/Studio verification pending.
+
+---
+
 ## [2026-06-11 — FEAT] — Task D: Criminality-style camera body feel
 
 ### Summary
