@@ -3839,10 +3839,6 @@ local function loadMovementAnimations(character: Model)
             toLoad["Unarmed_" .. cwName] = assetId
         end
     end
-    if r6.AR15.CrouchWalk then
-        toLoad["AR15_CrouchWalk"] = r6.AR15.CrouchWalk
-    end
-
     for key, assetId in pairs(toLoad) do
         if assetId == nil or assetId == "" then
             -- Warn for missing or empty asset IDs — these may indicate an unloaded
