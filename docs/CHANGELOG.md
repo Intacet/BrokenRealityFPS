@@ -7,6 +7,22 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-11 — FIX] — Footstep cadence: decouple accumulator from isGrounded() gate
+
+### Summary
+
+Separated the timer accumulation from the grounded check to eliminate cadence gaps caused by brief Humanoid state flickers.
+
+**Root cause:** `timeSinceLastStep` was only accumulated while `isGrounded()` returned true. `isGrounded()` calls `Humanoid:GetState()`, which can briefly leave the Running set during R6 terrain transitions or single-frame physics state changes even on flat ground. Each such frame paused the accumulator, inserting an extra (pause_duration) gap into the cadence and creating an audible skip.
+
+**Fix:** The accumulator now runs continuously whenever `tier != nil && isMoving()`. The `isGrounded()` check moved to the fire site only — when the interval threshold is reached and the character is not grounded, `timeSinceLastStep` is left above the threshold so the sound fires on the next grounded frame (at most ~16 ms late) instead of losing the beat and restarting from zero. The lag-spike double-fire protection (reset to zero instead of subtraction) remains from the previous fix.
+
+### Files changed
+
+- `src/client/FootstepController.lua` — `isGrounded()` moved from accumulation gate to fire-site guard; accumulator now runs through brief airborne frames
+
+---
+
 ## [2026-06-11 — FIX] — Footstep double-step eliminated: reset-to-zero timer, removed tier-change reset
 
 ### Summary

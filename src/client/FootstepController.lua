@@ -250,37 +250,43 @@ local function onHeartbeat(dt: number)
     if not (Constants.FOOTSTEPS_ENABLED :: boolean) then return end
     if humanoid == nil then return end
 
-    -- Gate: must be grounded and moving.
-    -- Do NOT reset timeSinceLastStep here — velocity and humanoid state can flicker
-    -- one frame per stride (double-support phase), which would break the cadence if we reset.
-    -- Pausing accumulation (just returning) keeps the phase intact through brief dips.
-    if not isGrounded() or not isMoving() then
-        return
-    end
-
-    -- Resolve movement tier; nil means no footstep (idle, sliding, vaulting, etc.)
     local moveState = MovementController:GetMoveState()
     local tier: MovementTier? = resolveMovementTier(moveState)
 
+    -- Tier nil = idle / sliding / vaulting — stop accumulating.
     if tier == nil then
         if Constants.FOOTSTEP_DEBUG :: boolean then
-            Logger.debug("[FootstepController] tier=nil mv=" .. tostring(isMoving()) .. " st=" .. moveState)
+            Logger.debug("[FootstepController] tier=nil st=" .. moveState)
         end
         return
     end
 
+    -- isMoving() catches crouching-in-place: the Crouch tier stays active even when
+    -- stationary, but MoveDirection drops to 0 when no movement key is held.
+    if not isMoving() then
+        return
+    end
+
+    -- Accumulate unconditionally — do NOT gate this on isGrounded().
+    -- Gating the accumulator on isGrounded caused audible skips: any frame where
+    -- Humanoid:GetState() briefly left the Running set (R6 terrain transitions,
+    -- single-frame physics state flickers) paused timeSinceLastStep, inserting an
+    -- extra (pause duration) gap into the cadence.  Accumulating through those frames
+    -- keeps the phase correct; the isGrounded() guard on the fire site below then
+    -- delays the actual sound by at most one frame (~16 ms) rather than losing the
+    -- entire beat and restarting from zero.
     local interval, _, _, _ = getTierParams(tier :: MovementTier)
     timeSinceLastStep += dt
 
     if timeSinceLastStep >= interval then
-        -- Reset to zero rather than subtracting the interval. Subtracting carries
-        -- over the remainder into the next step, which can leave timeSinceLastStep
-        -- still >= interval after a lag spike (large dt), causing the very next
-        -- Heartbeat to fire a second step ~16 ms later — the "double-step" artifact.
-        -- Resetting to zero ensures exactly one fire per Heartbeat regardless of
-        -- how large dt grows, at the cost of at most one frame of drift per step.
-        timeSinceLastStep = 0
-        playStep(tier :: MovementTier)
+        if isGrounded() then
+            -- Reset to zero (not -= interval) so a lag-spike large-dt can never leave
+            -- the remainder >= interval and cause a back-to-back double-fire next frame.
+            timeSinceLastStep = 0
+            playStep(tier :: MovementTier)
+        end
+        -- If not grounded, leave timeSinceLastStep above the threshold so the sound
+        -- fires on the very next grounded frame instead of being skipped entirely.
     end
 end
 
