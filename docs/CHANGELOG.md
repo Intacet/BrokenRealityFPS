@@ -7,6 +7,31 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-11 — FIX] — Footstep cadence skip eliminated + intervals aligned to animation data
+
+### Summary
+
+Two fixes to the timer-based footstep system:
+
+1. **Timer reset bug (skip):** `timeSinceLastStep` was reset to `0` whenever `isMoving()` or `isGrounded()` returned false. During a normal walk cycle, velocity briefly dips once per stride (double-support phase), causing the timer to reset and producing a periodic skip in the audio cadence. Fix: gates now `return` without resetting, so the timer pauses through brief dips and resumes from the same phase. MCP-verified: 12 consecutive steps measured at Avg 0.385 s, spread 0.017 s — no skips.
+
+2. **Intervals derived from actual animation clip data via MCP:** Previously hand-tuned. MCP was used to load each `AnimationTrack` and read `.Length` directly. Intervals now calculated as `clipLength / speedMultiplier / 2` (2 foot contacts per cycle):
+   - Walk: 1.000 s / 1.30× / 2 = **0.385 s** (was 0.46)
+   - Run: same WalkForward clip = **0.385 s** (was 0.32)
+   - Sprint: 0.567 s / 1.15× / 2 = 0.246 s → **0.25 s** (unchanged)
+   - Crouch: 1.000 s / 1.00× / 2 = **0.50 s** (was 0.58)
+
+### Files changed
+
+- `src/client/FootstepController.lua` — removed `timeSinceLastStep = 0` resets in gate branches
+- `src/shared/Constants.lua` — Walk/Run 0.46→0.385, Crouch 0.58→0.50; comments updated
+
+### Debt entries
+
+- DEBT-073 — timer intervals now derived from actual animation data; marker mode still deferred.
+
+---
+
 ## [2026-06-11 — TUNE] — Footstep audio retune: single ID + Criminality-style pacing
 
 ### Summary
