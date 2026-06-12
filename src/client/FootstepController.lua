@@ -250,8 +250,10 @@ local function onHeartbeat(dt: number)
     if humanoid == nil then return end
 
     -- Gate: must be grounded and moving.
+    -- Do NOT reset timeSinceLastStep here — velocity and humanoid state can flicker
+    -- one frame per stride (double-support phase), which would break the cadence if we reset.
+    -- Pausing accumulation (just returning) keeps the phase intact through brief dips.
     if not isGrounded() or not isMoving() then
-        timeSinceLastStep = 0
         return
     end
 
@@ -259,7 +261,6 @@ local function onHeartbeat(dt: number)
     local moveState = MovementController:GetMoveState()
     local tier: MovementTier? = resolveMovementTier(moveState)
     if tier == nil then
-        timeSinceLastStep = 0
         return
     end
 
