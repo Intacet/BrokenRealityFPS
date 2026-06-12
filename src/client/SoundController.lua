@@ -45,20 +45,22 @@ local DRYFIRE_VOLUME  = 0.5
 -- ============================================================
 -- Sound asset IDs
 -- ============================================================
-local ID_GUNSHOT  = "rbxassetid://9118294910"
-local ID_HIT      = "rbxassetid://9118294928"
-local ID_RELOAD   = "rbxassetid://9118294935"
-local ID_DEATH    = "rbxassetid://9118294942"
-local ID_DRYFIRE  = "rbxassetid://9118294950"
+local ID_GUNSHOT      = "rbxassetid://9118294910"
+local ID_HIT          = "rbxassetid://9118294928"
+local ID_RELOAD       = "rbxassetid://9118294935"
+local ID_DEATH        = "rbxassetid://9118294942"
+local ID_DRYFIRE      = "rbxassetid://9118294950"
+local ID_WEAPON_FIRE  = "rbxassetid://116842061471256"  -- ak2
 
 -- ============================================================
 -- Sound references (assigned in init(), read in Start() and public methods)
 -- ============================================================
-local gunshotSound:  Sound
-local hitSound:      Sound
-local reloadSound:   Sound
-local deathSound:    Sound
-local dryFireSound:  Sound
+local gunshotSound:    Sound
+local hitSound:        Sound
+local reloadSound:     Sound
+local deathSound:      Sound
+local dryFireSound:    Sound
+local weaponFireSound: Sound
 
 -- ============================================================
 -- Private helpers
@@ -87,11 +89,19 @@ function SoundController:init()
     folder.Name       = "GameSounds"
     folder.Parent     = SoundService
 
-    gunshotSound  = makeSound(folder, "Gunshot",    ID_GUNSHOT,  GUNSHOT_VOLUME)
-    hitSound      = makeSound(folder, "HitConfirm", ID_HIT,      HIT_VOLUME)
-    reloadSound   = makeSound(folder, "Reload",     ID_RELOAD,   RELOAD_VOLUME)
-    deathSound    = makeSound(folder, "Death",       ID_DEATH,    DEATH_VOLUME)
-    dryFireSound  = makeSound(folder, "DryFire",    ID_DRYFIRE,  DRYFIRE_VOLUME)
+    gunshotSound  = makeSound(folder, "Gunshot",    ID_GUNSHOT,      GUNSHOT_VOLUME)
+    hitSound      = makeSound(folder, "HitConfirm", ID_HIT,          HIT_VOLUME)
+    reloadSound   = makeSound(folder, "Reload",     ID_RELOAD,       RELOAD_VOLUME)
+    deathSound    = makeSound(folder, "Death",      ID_DEATH,        DEATH_VOLUME)
+    dryFireSound  = makeSound(folder, "DryFire",   ID_DRYFIRE,      DRYFIRE_VOLUME)
+
+    -- Pre-create the weapon fire sound so the asset is loaded before the first shot.
+    -- PlayWeaponFire reuses this instance (Stop + Play) rather than creating a new
+    -- Sound each call — eliminates the CDN-load stutter on the first trigger pull.
+    local wf = makeSound(folder, "WeaponFire", ID_WEAPON_FIRE, Constants.AKS74_SHOOT_SOUND_VOLUME :: number)
+    wf.RollOffMinDistance = Constants.AKS74_SHOOT_SOUND_ROLLOFF_MIN_DISTANCE :: number
+    wf.RollOffMaxDistance = Constants.AKS74_SHOOT_SOUND_ROLLOFF_MAX_DISTANCE :: number
+    weaponFireSound = wf
 
     Logger.debug("[SoundController] Sound instances created")
 end
@@ -152,46 +162,26 @@ function SoundController:PlayDeath()
     deathSound:Play()
 end
 
--- Plays one randomly chosen weapon fire sound per call.
--- Creates a one-shot Sound instance parented to the camera (heard by local player only),
--- then destroys it when playback ends. Volume and pitch are read from Constants.
--- soundIds: array of rbxassetid:// strings (from WeaponData[weapon].sounds.fireFirstPerson)
--- parent:   optional override; defaults to workspace.CurrentCamera
+-- Plays the weapon fire sound. Reuses the pre-cached Sound instance created in init()
+-- so there is no CDN-load stutter on the first shot.
+-- soundIds / parent are kept for API compatibility with GunController but are unused:
+-- the single ak2 asset is fixed at init time.
 function SoundController:PlayWeaponFire(soundIds: { string }, parent: Instance?)
-    assert(
-        typeof(soundIds) == "table",
-        "[SoundController] PlayWeaponFire: soundIds must be a table"
-    )
-    if #soundIds == 0 then
-        Logger.warn("[SoundController] PlayWeaponFire: soundIds table is empty — no sound played")
+    local s = weaponFireSound
+    if s == nil then
+        Logger.warn("[SoundController] PlayWeaponFire: sound not initialized")
         return
     end
 
-    local chosenId: string = soundIds[math.random(1, #soundIds)]
-    -- workspace.CurrentCamera is Camera? (nullable in strict mode). Fall back to workspace
-    -- itself on the rare early-load race where the camera isn't created yet.
-    local emitter: Instance = (parent or workspace.CurrentCamera or workspace) :: Instance
-
-    local s       = Instance.new("Sound")
-    s.SoundId     = chosenId
-    s.Volume      = Constants.AKS74_SHOOT_SOUND_VOLUME :: number
     s.PlaybackSpeed = (Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MIN :: number)
         + math.random() * (
             (Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MAX :: number)
             - (Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MIN :: number)
         )
-    s.RollOffMinDistance = Constants.AKS74_SHOOT_SOUND_ROLLOFF_MIN_DISTANCE :: number
-    s.RollOffMaxDistance = Constants.AKS74_SHOOT_SOUND_ROLLOFF_MAX_DISTANCE :: number
-    s.Looped      = false
-    s.Parent      = emitter
     s:Play()
 
-    s.Ended:Connect(function()
-        s:Destroy()
-    end)
-
     if Constants.AKS74_SHOOT_SOUND_DEBUG :: boolean then
-        Logger.debug("[SoundController] PlayWeaponFire: played " .. chosenId)
+        Logger.debug("[SoundController] PlayWeaponFire: played " .. ID_WEAPON_FIRE)
     end
 end
 

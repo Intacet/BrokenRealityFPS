@@ -53,9 +53,10 @@ local hrp: BasePart?            = nil
 local footstepEmitter: Attachment? = nil
 local heartbeatConn: RBXScriptConnection? = nil
 local characterConn: RBXScriptConnection? = nil
-local timeSinceLastStep: number = 0
+local timeSinceLastStep: number   = 0
 local lastGoodTier: MovementTier? = nil  -- last non-nil tier; used to ride through brief Idle flickers
 local tierNilSecs: number         = 0    -- seconds tier has been nil while still moving
+local wasMoving: boolean          = false -- tracks movement start so timer resets on a fresh stride
 local initialized: boolean        = false
 
 -- Grounded Humanoid states — footsteps play in these states only.
@@ -215,6 +216,7 @@ local function onCharacterAdded(character: Model)
     timeSinceLastStep = 0
     lastGoodTier    = nil
     tierNilSecs     = 0
+    wasMoving       = false
 
     local hum = character:WaitForChild("Humanoid", 5) :: Humanoid?
     if hum == nil then
@@ -260,9 +262,19 @@ local function onHeartbeat(dt: number)
     -- isMoving() catches crouching-in-place: the Crouch tier stays active even when
     -- stationary, but MoveDirection drops to 0 when no movement key is held.
     if not isMoving() then
+        -- Player stopped — clear state so a fresh stride starts with a clean timer.
         lastGoodTier = nil
         tierNilSecs  = 0
+        wasMoving    = false
         return
+    end
+
+    -- First frame of a new stride: reset the timer so the first sound fires exactly
+    -- one interval after movement starts rather than firing immediately from stale
+    -- carry-over left by the previous walk session.
+    if not wasMoving then
+        timeSinceLastStep = 0
+        wasMoving = true
     end
 
     if tier ~= nil then
@@ -367,6 +379,7 @@ function FootstepController:Destroy()
     timeSinceLastStep = 0
     lastGoodTier    = nil
     tierNilSecs     = 0
+    wasMoving       = false
     initialized     = false
     Logger.debug("[FootstepController] destroyed")
 end

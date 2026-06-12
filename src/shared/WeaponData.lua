@@ -95,8 +95,7 @@ WeaponData["AKS74"] = {
     },
     sounds = {
         fireFirstPerson = {
-            "rbxassetid://116842061471256",
-            "rbxassetid://131609668538198",
+            "rbxassetid://116842061471256",  -- ak2
         },
     },
 }
