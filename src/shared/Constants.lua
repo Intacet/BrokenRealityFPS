@@ -1214,9 +1214,9 @@ Constants.FREE_AIM_RESET_ON_ADS_EXIT       = false
 
 -- ── AKS74 fire configuration ──────────────────────────────────────────────────────────────
 -- AKS74_DEFAULT_RPM: fallback RPM used by GunController if WeaponData[equippedWeapon].rpm is
--- absent. Normally WeaponData["AKS74"].rpm = 650 takes precedence; this constant is the
+-- absent. Normally WeaponData["AKS74"].rpm = 550 takes precedence; this constant is the
 -- hard-coded sentinel so no magic number appears in controller code.
-Constants.AKS74_DEFAULT_RPM = 650
+Constants.AKS74_DEFAULT_RPM = 550
 
 -- ── Viewmodel recoil (data-driven per weapon; ApplyRecoil) ──────────────────────────────
 -- Master switch. When false, ViewModelController:ApplyRecoil() is a no-op and the
@@ -1302,7 +1302,7 @@ Constants.VIEWMODEL_SWAY_SPRINT_WEIGHT = 0.45
 -- CAMERA_DEFAULT_FOV mirrors DEFAULT_CAMERA_FOV (both = 70); the ADS system uses
 -- CAMERA_DEFAULT_FOV so tuning ADS behaviour touches one clearly-named constant.
 Constants.CAMERA_DEFAULT_FOV               = 70    -- no-ADS base FOV (matches DEFAULT_CAMERA_FOV)
-Constants.CAMERA_ADS_FOV                  = 62    -- FOV while ADS with no focus key
+Constants.CAMERA_ADS_FOV                  = 56    -- FOV while ADS with no focus key
 Constants.CAMERA_ADS_FOCUS_FOV            = 52    -- FOV while ADS + CAMERA_ADS_FOCUS_KEY held
 Constants.CAMERA_FOV_TWEEN_SPEED          = 18    -- FOV units per second; ADS tween duration = Δ/speed
 Constants.CAMERA_ADS_FOCUS_KEY            = Enum.KeyCode.LeftShift  -- key for extra zoom while ADS
@@ -1399,8 +1399,8 @@ Constants.MOVEMENT_BODY_YAW_MAX_DELTA_DEGREES_PER_SECOND = 540   -- global cap; 
 -- AKS74 shoot sound — first-person fire audio (Task: sound variants)
 -- ============================================================
 Constants.AKS74_SHOOT_SOUND_VOLUME              = 0.75
-Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MIN  = 0.96
-Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MAX  = 1.04
+Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MIN  = 0.82
+Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MAX  = 0.90
 Constants.AKS74_SHOOT_SOUND_ROLLOFF_MIN_DISTANCE = 8
 Constants.AKS74_SHOOT_SOUND_ROLLOFF_MAX_DISTANCE = 90
 Constants.AKS74_SHOOT_SOUND_DEBUG               = false

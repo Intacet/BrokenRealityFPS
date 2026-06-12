@@ -33,7 +33,7 @@ WeaponData["AR15"] = {
     reloadTime   = 2.2,
 }
 
--- AKS74 — full-auto 650 RPM viewmodel weapon (2026-06-10).
+-- AKS74 — full-auto 550 RPM viewmodel weapon (2026-06-10).
 -- displayName / viewModelName / animations are read by ViewModelController only.
 -- fireMode / rpm / fireRate are read by GunController for client-side pacing.
 -- damage / range / magazineSize / reserveAmmo / reloadTime are stored for future GunService use.
@@ -44,8 +44,8 @@ WeaponData["AKS74"] = {
     viewModelName = "AKS74",
     worldModelName = "AKS-74",  -- gun-only model in ReplicatedStorage/WorldModels/AKS-74
     fireMode      = "Auto",
-    rpm           = 650,
-    fireRate      = 60 / 650,   -- ~0.0923 s per shot; derived from rpm, not hardcoded
+    rpm           = 550,
+    fireRate      = 60 / 550,   -- ~0.1091 s per shot; derived from rpm, not hardcoded
     damage        = 30,
     range         = 450,
     magazineSize  = 30,
