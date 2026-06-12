@@ -419,6 +419,10 @@ Constants.MOVEMENT_ANIMATION_IDS = {
             Idle        = "rbxassetid://117989834436525",  -- AR15 standing idle (Stage 2H)
             EnterCrouch = "rbxassetid://79753647497328",   -- AR15 enter-crouch one-shot (Stage 2H)
             ExitCrouch  = "rbxassetid://91295776984408",   -- AR15 exit-crouch one-shot (Stage 2H)
+            -- Crouch idle/walk: reuse Unarmed clips until AR15-specific ones are made.
+            -- Avoids holdCrouchBottomPose() freeze when crouching while armed.
+            CrouchIdle  = "rbxassetid://81947601552045",   -- Unarmed CrouchIdle (same clip)
+            CrouchWalk  = "rbxassetid://70428646705219",   -- Unarmed CrouchWalkForward (same clip)
         },
     },
 }

@@ -3769,6 +3769,14 @@ local function loadMovementAnimations(character: Model)
     if r6.AR15.TacticalSprintForward1 and r6.AR15.TacticalSprintForward1 ~= "" then
         toLoad["AR15_TacticalSprintForward1"] = r6.AR15.TacticalSprintForward1
     end
+    -- AR15 crouch animations: optional — falls back to holdCrouchBottomPose() when absent.
+    -- Pointing at Unarmed clips until AR15-specific crouch animations are made.
+    if r6.AR15.CrouchIdle and r6.AR15.CrouchIdle ~= "" then
+        toLoad["AR15_CrouchIdle"] = r6.AR15.CrouchIdle
+    end
+    if r6.AR15.CrouchWalk and r6.AR15.CrouchWalk ~= "" then
+        toLoad["AR15_CrouchWalk"] = r6.AR15.CrouchWalk
+    end
     if r6.Unarmed.TacticalSprintForward2 and r6.Unarmed.TacticalSprintForward2 ~= "" then
         toLoad["Unarmed_TacticalSprintForward2"] = r6.Unarmed.TacticalSprintForward2
     end
