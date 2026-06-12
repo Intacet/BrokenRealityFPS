@@ -1107,6 +1107,11 @@ Constants.ADS_INPUT_USER_INPUT_TYPE = Enum.UserInputType.MouseButton2
 -- Fade time for ADS animation blend/transitions (in seconds).
 Constants.VIEWMODEL_ADS_TRACK_FADE_TIME = 0.03
 
+-- Crossfade duration for idle ↔ run and post-reload resume transitions.
+-- Longer than ADS (which needs to feel snappy) but short enough to feel responsive.
+Constants.VIEWMODEL_IDLE_RUN_FADE_TIME    = 0.18
+Constants.VIEWMODEL_RELOAD_RESUME_FADE_TIME = 0.20
+
 -- Disable procedural movement (mouse sway, move bob) while ADS to keep pose stable.
 Constants.VIEWMODEL_ADS_DISABLE_PROCEDURAL_MOVEMENT = true
 
@@ -1286,7 +1291,37 @@ Constants.VIEWMODEL_SPRINT_BOB_SPEED      = 9
 Constants.VIEWMODEL_CROUCH_BOB_AMOUNT     = 0.008
 Constants.VIEWMODEL_CROUCH_BOB_SPEED      = 4
 Constants.VIEWMODEL_MOVE_BOB_SMOOTH_SPEED = 12     -- rate at which vmBobTime decays to zero when stopped
-Constants.VIEWMODEL_WALK_BOB_LATERAL_FACTOR = 0.55  -- lateral sway as a fraction of vertical bob; sin(phase) frequency so one sway per step
+Constants.VIEWMODEL_WALK_BOB_LATERAL_FACTOR = 0.55  -- lateral sway as a fraction of vertical bob; cos(phase) for circular figure-8 path
+
+-- Bob amplitude / speed smoothing: lerp between states to eliminate pops on walk→sprint, etc.
+Constants.VIEWMODEL_BOB_AMOUNT_BLEND_SPEED  = 10    -- lerp speed for bob amplitude transitions
+Constants.VIEWMODEL_BOB_SPEED_BLEND_SPEED   = 6     -- lerp speed for bob cycle-speed transitions
+
+-- Vertical velocity tilt: gun pitches up when jumping, down when falling.
+Constants.VIEWMODEL_VERT_TILT_ENABLED       = true
+Constants.VIEWMODEL_VERT_TILT_SCALE         = 0.0012  -- radians of pitch per stud/s of Y velocity
+Constants.VIEWMODEL_VERT_TILT_MAX           = 0.065   -- maximum tilt in radians (~3.7°)
+Constants.VIEWMODEL_VERT_TILT_SMOOTH        = 8       -- lerp speed toward tilt target
+
+-- Forward lean: gun lags behind horizontal velocity (inertia/weight feel).
+Constants.VIEWMODEL_FORWARD_LEAN_ENABLED    = true
+Constants.VIEWMODEL_FORWARD_LEAN_SCALE      = 0.0017  -- studs of Z lean per stud/s of forward velocity
+Constants.VIEWMODEL_FORWARD_LEAN_MAX        = 0.05    -- maximum lean in studs
+Constants.VIEWMODEL_FORWARD_LEAN_SMOOTH     = 12      -- lerp speed toward lean target
+
+-- Landing dip spring: gun bounces down and recovers on landing.
+Constants.VIEWMODEL_LAND_DIP_ENABLED        = true
+Constants.VIEWMODEL_LAND_DIP_THRESHOLD      = -8      -- velY (studs/s) that triggers a dip
+Constants.VIEWMODEL_LAND_DIP_SCALE          = 0.003   -- dip amount per stud/s of impact velocity
+Constants.VIEWMODEL_LAND_DIP_SPRING         = 22      -- spring stiffness (higher = faster return)
+Constants.VIEWMODEL_LAND_DIP_DAMPING        = 8       -- spring damping (lower = more bounce)
+
+-- Idle breathing: subtle oscillation when the player is stationary.
+Constants.VIEWMODEL_BREATH_ENABLED          = true
+Constants.VIEWMODEL_BREATH_SPEED            = 0.25    -- breathing cycles per second (~4 s/breath)
+Constants.VIEWMODEL_BREATH_AMOUNT_Y         = 0.003   -- vertical amplitude in studs
+Constants.VIEWMODEL_BREATH_AMOUNT_X         = 0.0015  -- lateral amplitude in studs
+Constants.VIEWMODEL_BREATH_BLEND_SPEED      = 2       -- lerp speed for breath fade in/out
 
 -- Strafe roll: weapon rolls and slides when moving laterally relative to camera.
 Constants.VIEWMODEL_STRAFE_ROLL_ENABLED   = true

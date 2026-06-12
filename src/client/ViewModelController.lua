@@ -160,13 +160,30 @@ local vmActiveRecoverySpeed: number = 18
 -- vmSwayMouseTarget:  desired sway from accumulated mouse delta; clamped + decays to zero.
 -- vmSwayMouseCurrent: smoothed follower that chases vmSwayMouseTarget; drives swayCF.
 -- vmSwayWeight:       current weight [0, 1] lerped toward state-based target each frame.
--- vmBobTime:          sine phase accumulator; advanced while moving, decays when stopped.
+-- vmBobTime:          sine phase accumulator; advanced while amplitude > 0, decays to 0 when still.
+-- vmBobAmountCurrent: smoothly lerped bob amplitude (eliminates pop on state transitions).
+-- vmBobSpeedCurrent:  smoothly lerped bob speed (same purpose).
 -- vmStrafeLag:        smoothed strafe axis [-1 left, +1 right]; drives roll + translate.
+-- vmVertTilt:         smoothed pitch from HRP vertical velocity (jump up = nose up, fall = nose down).
+-- vmForwardLean:      smoothed Z translation from HRP forward velocity (inertia lag feel).
+-- vmLandDip/Vel:      spring state for landing impact dip; impulse applied on velY sign change.
+-- vmPrevVelY:         previous-frame Y velocity for landing-edge detection.
+-- vmBreathTime:       idle breathing oscillator phase; always advancing.
+-- vmBreathWeight:     lerped 0→1 when stationary, 1→0 when moving.
 local vmSwayMouseTarget:  Vector2 = Vector2.zero
 local vmSwayMouseCurrent: Vector2 = Vector2.zero
 local vmSwayWeight:       number  = 1
 local vmBobTime:          number  = 0
+local vmBobAmountCurrent: number  = 0
+local vmBobSpeedCurrent:  number  = 4
 local vmStrafeLag:        number  = 0
+local vmVertTilt:         number  = 0
+local vmForwardLean:      number  = 0
+local vmLandDip:          number  = 0
+local vmLandDipVel:       number  = 0
+local vmPrevVelY:         number  = 0
+local vmBreathTime:       number  = 0
+local vmBreathWeight:     number  = 0
 
 -- Name of the currently equipped weapon, or nil when holstered.
 local equippedWeaponName: string? = nil
@@ -411,7 +428,16 @@ function ViewModelController:init()
     vmSwayMouseCurrent = Vector2.zero
     vmSwayWeight       = 1
     vmBobTime          = 0
+    vmBobAmountCurrent = 0
+    vmBobSpeedCurrent  = Constants.VIEWMODEL_WALK_BOB_SPEED :: number
     vmStrafeLag        = 0
+    vmVertTilt         = 0
+    vmForwardLean      = 0
+    vmLandDip          = 0
+    vmLandDipVel       = 0
+    vmPrevVelY         = 0
+    vmBreathTime       = 0
+    vmBreathWeight     = 0
     -- Third-person character tracks: nil references only — do NOT call Stop/Destroy.
     -- init() is called from CharacterAdded where the old Humanoid.Animator may already be
     -- destroyed, making track method calls unsafe.  Same pattern as MovementController's
@@ -500,7 +526,16 @@ function ViewModelController:StopWeaponAnimations()
     vmSwayMouseCurrent = Vector2.zero
     vmSwayWeight       = 1
     vmBobTime          = 0
+    vmBobAmountCurrent = 0
+    vmBobSpeedCurrent  = Constants.VIEWMODEL_WALK_BOB_SPEED :: number
     vmStrafeLag        = 0
+    vmVertTilt         = 0
+    vmForwardLean      = 0
+    vmLandDip          = 0
+    vmLandDipVel       = 0
+    vmPrevVelY         = 0
+    vmBreathTime       = 0
+    vmBreathWeight     = 0
     -- Third-person character tracks: stop and destroy (character is alive in this path).
     -- AnimationTrack:Destroy() severs Stopped connections synchronously, preventing any
     -- deferred equip-chain or reload-chain callback from firing after holster.
@@ -546,10 +581,11 @@ function ViewModelController:IsWeaponEquipped(): boolean
 end
 
 -- Plays the loaded idle AnimationTrack (looped).
+-- fadeTime defaults to VIEWMODEL_IDLE_RUN_FADE_TIME for smooth crossfades from run/reload.
 -- No-op when no idle track is loaded.
-function ViewModelController:PlayIdleAnimation()
+function ViewModelController:PlayIdleAnimation(fadeTime: number?)
     if weaponIdleTrack then
-        weaponIdleTrack:Play()
+        weaponIdleTrack:Play(fadeTime or (Constants.VIEWMODEL_IDLE_RUN_FADE_TIME :: number))
         Logger.debug("[ViewModelController] PlayIdleAnimation: idle track started")
     else
         Logger.debug("[ViewModelController] PlayIdleAnimation: no idle track loaded — skipped")
@@ -1182,39 +1218,56 @@ function ViewModelController:Start()
             local swayTX    = -sv.X * (Constants.VIEWMODEL_SWAY_MOUSE_TRANSLATE_X :: number) * swayW
             local swayTY    = -sv.Y * (Constants.VIEWMODEL_SWAY_MOUSE_TRANSLATE_Y :: number) * swayW
 
-            -- Shared movement state for bob and strafe.
+            -- Shared movement + physics state for all procedural effects.
             local char = Players.LocalPlayer.Character
             local hum: Humanoid? = nil
+            local hrp: BasePart?  = nil
             if char then
                 hum = char:FindFirstChildOfClass("Humanoid") :: Humanoid?
+                hrp = char:FindFirstChild("HumanoidRootPart") :: BasePart?
             end
             local moveDir: Vector3 = if hum then hum.MoveDirection else Vector3.zero
+            local velXYZ:  Vector3 = if hrp then hrp.AssemblyLinearVelocity else Vector3.zero
 
-            -- Movement bob: sine oscillation that advances while moving, decays when stopped.
+            -- Movement bob: smoothly lerped amplitude and speed eliminate pops on state changes.
+            -- Horizontal velocity magnitude drives isMoving so sliding continues the bob and
+            -- standing still (pressed against wall) correctly zeroes it.
             local bobTX: number = 0
             local bobTY: number = 0
             if Constants.VIEWMODEL_MOVE_BOB_ENABLED then
-                local isMoving = moveDir.Magnitude > 0.1
-                local bobAmount: number = 0
-                local bobSpeed:  number = Constants.VIEWMODEL_WALK_BOB_SPEED :: number
+                local horizSpeed    = Vector2.new(velXYZ.X, velXYZ.Z).Magnitude
+                local isMoving      = horizSpeed > 0.5
+                local bobAmountTarget: number = 0
+                local bobSpeedTarget:  number = Constants.VIEWMODEL_WALK_BOB_SPEED :: number
                 if isMoving then
                     local ms = MovementController:GetMoveState()
                     if ms == "Sprinting" then
-                        bobAmount = Constants.VIEWMODEL_SPRINT_BOB_AMOUNT :: number
-                        bobSpeed  = Constants.VIEWMODEL_SPRINT_BOB_SPEED  :: number
+                        bobAmountTarget = Constants.VIEWMODEL_SPRINT_BOB_AMOUNT :: number
+                        bobSpeedTarget  = Constants.VIEWMODEL_SPRINT_BOB_SPEED  :: number
                     elseif ms == "Crouching" then
-                        bobAmount = Constants.VIEWMODEL_CROUCH_BOB_AMOUNT :: number
-                        bobSpeed  = Constants.VIEWMODEL_CROUCH_BOB_SPEED  :: number
+                        bobAmountTarget = Constants.VIEWMODEL_CROUCH_BOB_AMOUNT :: number
+                        bobSpeedTarget  = Constants.VIEWMODEL_CROUCH_BOB_SPEED  :: number
                     else
-                        bobAmount = Constants.VIEWMODEL_WALK_BOB_AMOUNT :: number
+                        bobAmountTarget = Constants.VIEWMODEL_WALK_BOB_AMOUNT :: number
                     end
-                    vmBobTime = (vmBobTime + dt * bobSpeed) % (math.pi * 2)
+                end
+                vmBobAmountCurrent = vmBobAmountCurrent
+                    + (bobAmountTarget - vmBobAmountCurrent)
+                    * math.min(1, dt * (Constants.VIEWMODEL_BOB_AMOUNT_BLEND_SPEED :: number))
+                vmBobSpeedCurrent = vmBobSpeedCurrent
+                    + (bobSpeedTarget - vmBobSpeedCurrent)
+                    * math.min(1, dt * (Constants.VIEWMODEL_BOB_SPEED_BLEND_SPEED :: number))
+                if vmBobAmountCurrent > 0.0001 then
+                    vmBobTime = (vmBobTime + dt * vmBobSpeedCurrent) % (math.pi * 2)
                 else
                     vmBobTime = vmBobTime
                         * math.max(0, 1 - dt * (Constants.VIEWMODEL_MOVE_BOB_SMOOTH_SPEED :: number))
                 end
-                bobTY = math.sin(vmBobTime) * bobAmount * swayW
-                bobTX = math.sin(vmBobTime) * bobAmount * (Constants.VIEWMODEL_WALK_BOB_LATERAL_FACTOR :: number) * swayW
+                bobTY = math.sin(vmBobTime) * vmBobAmountCurrent * swayW
+                -- Lateral: cos(t) is 90° offset from sin(t), creating a circular figure-8 path.
+                -- Feels more natural than sin(t) (diagonal) while keeping per-step timing.
+                bobTX = math.cos(vmBobTime) * vmBobAmountCurrent
+                    * (Constants.VIEWMODEL_WALK_BOB_LATERAL_FACTOR :: number) * swayW
             end
 
             -- Strafe roll: weapon tilts and slides when moving laterally relative to camera.
@@ -1229,8 +1282,72 @@ function ViewModelController:Start()
                 strafeTX   = -vmStrafeLag * (Constants.VIEWMODEL_STRAFE_TRANSLATE_X :: number) * swayW
             end
 
-            swayCF = CFrame.new(swayTX + strafeTX + bobTX, swayTY + bobTY, 0)
-                * CFrame.Angles(swayPitch, swayYaw, swayRoll + strafeRoll)
+            -- Vertical velocity tilt: gun pitches when jumping or falling.
+            -- velY > 0 = rising (muzzle up), velY < 0 = falling (muzzle down).
+            local vertTiltPitch: number = 0
+            if Constants.VIEWMODEL_VERT_TILT_ENABLED then
+                local tiltTarget = math.clamp(
+                    velXYZ.Y * (Constants.VIEWMODEL_VERT_TILT_SCALE :: number),
+                    -(Constants.VIEWMODEL_VERT_TILT_MAX :: number),
+                     (Constants.VIEWMODEL_VERT_TILT_MAX :: number))
+                vmVertTilt = vmVertTilt
+                    + (tiltTarget - vmVertTilt) * math.min(1, dt * (Constants.VIEWMODEL_VERT_TILT_SMOOTH :: number))
+                vertTiltPitch = vmVertTilt
+            end
+
+            -- Forward lean: gun lags behind horizontal velocity (inertia weight feel).
+            -- Moving forward → +Z lean (gun pulls back toward camera).
+            -- Stopping/reversing → lean decays to 0 with a slight forward swing.
+            local forwardLeanZ: number = 0
+            if Constants.VIEWMODEL_FORWARD_LEAN_ENABLED then
+                local forwardVel = cam.CFrame.LookVector:Dot(velXYZ)
+                local leanTarget = math.clamp(
+                    forwardVel * (Constants.VIEWMODEL_FORWARD_LEAN_SCALE :: number),
+                    -(Constants.VIEWMODEL_FORWARD_LEAN_MAX :: number),
+                     (Constants.VIEWMODEL_FORWARD_LEAN_MAX :: number))
+                vmForwardLean = vmForwardLean
+                    + (leanTarget - vmForwardLean) * math.min(1, dt * (Constants.VIEWMODEL_FORWARD_LEAN_SMOOTH :: number))
+                forwardLeanZ = vmForwardLean
+            end
+
+            -- Landing dip spring: gun bounces down and recovers on impact.
+            -- Impulse fired when Y velocity crosses the threshold from below (landing edge).
+            local landDipY: number = 0
+            if Constants.VIEWMODEL_LAND_DIP_ENABLED then
+                local velY = velXYZ.Y
+                if vmPrevVelY < (Constants.VIEWMODEL_LAND_DIP_THRESHOLD :: number)
+                    and velY >= (Constants.VIEWMODEL_LAND_DIP_THRESHOLD :: number)
+                then
+                    local impact = math.min(math.abs(vmPrevVelY), 60)
+                    vmLandDipVel = vmLandDipVel - impact * (Constants.VIEWMODEL_LAND_DIP_SCALE :: number)
+                end
+                vmPrevVelY = velY
+                local springF = -(Constants.VIEWMODEL_LAND_DIP_SPRING :: number)  * vmLandDip
+                              - (Constants.VIEWMODEL_LAND_DIP_DAMPING :: number) * vmLandDipVel
+                vmLandDipVel = vmLandDipVel + springF * dt
+                vmLandDip    = vmLandDip    + vmLandDipVel * dt
+                landDipY = vmLandDip
+            end
+
+            -- Idle breathing: subtle Y/X oscillation when stationary.
+            -- Two overlapping frequencies (1:0.5 ratio) for organic feel.
+            local breathX: number = 0
+            local breathY: number = 0
+            if Constants.VIEWMODEL_BREATH_ENABLED then
+                vmBreathTime = (vmBreathTime + dt * (Constants.VIEWMODEL_BREATH_SPEED :: number) * math.pi * 2)
+                    % (math.pi * 4)
+                local breathTarget = if vmBobAmountCurrent < 0.0005 then 1 else 0
+                vmBreathWeight = vmBreathWeight
+                    + (breathTarget - vmBreathWeight)
+                    * math.min(1, dt * (Constants.VIEWMODEL_BREATH_BLEND_SPEED :: number))
+                local bw = vmBreathWeight * swayW
+                breathY = math.sin(vmBreathTime) * (Constants.VIEWMODEL_BREATH_AMOUNT_Y :: number) * bw
+                breathX = math.sin(vmBreathTime * 0.5 + math.pi / 3)
+                    * (Constants.VIEWMODEL_BREATH_AMOUNT_X :: number) * bw
+            end
+
+            swayCF = CFrame.new(swayTX + strafeTX + bobTX + breathX, swayTY + bobTY + landDipY + breathY, forwardLeanZ)
+                * CFrame.Angles(swayPitch + vertTiltPitch, swayYaw, swayRoll + strafeRoll)
         else
             swayCF = CFrame.new()
         end
@@ -1336,10 +1453,11 @@ end
 
 -- Plays the run AnimationTrack (looped, Movement priority).
 -- Called by SetRunning when sprint begins and the base state transitions from idle to run.
+-- fadeTime defaults to VIEWMODEL_IDLE_RUN_FADE_TIME for smooth crossfades from idle/reload.
 -- No-op when no run track is loaded.
-function ViewModelController:PlayRunAnimation()
+function ViewModelController:PlayRunAnimation(fadeTime: number?)
     if weaponRunTrack then
-        weaponRunTrack:Play()
+        weaponRunTrack:Play(fadeTime or (Constants.VIEWMODEL_IDLE_RUN_FADE_TIME :: number))
         Logger.debug("[ViewModelController] PlayRunAnimation: run track started")
     else
         Logger.debug("[ViewModelController] PlayRunAnimation: no run track loaded — skipped")
@@ -1406,11 +1524,12 @@ function ViewModelController:PlayReloadAnimation()
     weaponReloadTrack.Stopped:Connect(function()
         if equippedWeaponName ~= capturedWeapon or self.model == nil then return end
         isReloading = false
-        -- If the player is still sprinting, resume FP run; otherwise return to FP idle.
+        -- Resume FP run or idle with a longer crossfade so the transition out of reload feels natural.
+        local resumeFade = Constants.VIEWMODEL_RELOAD_RESUME_FADE_TIME :: number
         if isRunning and weaponRunTrack ~= nil then
-            self:PlayRunAnimation()
+            self:PlayRunAnimation(resumeFade)
         else
-            self:PlayIdleAnimation()
+            self:PlayIdleAnimation(resumeFade)
         end
         Logger.debug("[ViewModelController] PlayReloadAnimation: reload complete, resumed "
             .. (isRunning and "run" or "idle"))
@@ -1434,16 +1553,17 @@ function ViewModelController:SetRunning(isSprinting: boolean)
     isRunning = isSprinting
     -- While reloading, update the flag but let the Stopped callback resume the correct track.
     if isReloading then return end
+    local fadeT = Constants.VIEWMODEL_IDLE_RUN_FADE_TIME :: number
     if isSprinting then
         -- Stop idle and start run.
         if weaponIdleTrack and weaponIdleTrack.IsPlaying then
-            weaponIdleTrack:Stop()
+            weaponIdleTrack:Stop(fadeT)
         end
         self:PlayRunAnimation()
     else
         -- Stop run and return to idle.
         if weaponRunTrack and weaponRunTrack.IsPlaying then
-            weaponRunTrack:Stop()
+            weaponRunTrack:Stop(fadeT)
         end
         self:PlayIdleAnimation()
     end
