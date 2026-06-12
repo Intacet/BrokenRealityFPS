@@ -423,6 +423,10 @@ Constants.MOVEMENT_ANIMATION_IDS = {
             -- Avoids holdCrouchBottomPose() freeze when crouching while armed.
             CrouchIdle  = "rbxassetid://81947601552045",   -- Unarmed CrouchIdle (same clip)
             CrouchWalk  = "rbxassetid://70428646705219",   -- Unarmed CrouchWalkForward (same clip)
+            -- Slide: reuse Unarmed clips until AR15-specific ones are made.
+            SlideInto = "rbxassetid://101320244227398",    -- Unarmed SlideInto (same clip)
+            SlideIdle = "rbxassetid://123763519906235",    -- Unarmed SlideIdle (same clip)
+            SlideExit = "rbxassetid://89774397391406",     -- Unarmed SlideExit (same clip)
         },
     },
 }

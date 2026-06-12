@@ -3797,6 +3797,16 @@ local function loadMovementAnimations(character: Model)
     if r6.Unarmed.SlideExit and r6.Unarmed.SlideExit ~= "" then
         toLoad["Unarmed_SlideExit"] = r6.Unarmed.SlideExit
     end
+    -- AR15 slide animations: reuse Unarmed clips until AR15-specific ones are made.
+    if r6.AR15.SlideInto and r6.AR15.SlideInto ~= "" then
+        toLoad["AR15_SlideInto"] = r6.AR15.SlideInto
+    end
+    if r6.AR15.SlideIdle and r6.AR15.SlideIdle ~= "" then
+        toLoad["AR15_SlideIdle"] = r6.AR15.SlideIdle
+    end
+    if r6.AR15.SlideExit and r6.AR15.SlideExit ~= "" then
+        toLoad["AR15_SlideExit"] = r6.AR15.SlideExit
+    end
 
     -- Stage 4A: Vault animations — Unarmed set only.
     -- LowVault: one-shot played for obstacles 1.5–3.5 studs tall.
