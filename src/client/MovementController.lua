@@ -2325,8 +2325,9 @@ local function updateSprintFov()
 	local phase = MatchController:GetPhase()
 	if phase ~= Constants.Phase.ACTIVE then
 		newTarget = Constants.DEFAULT_CAMERA_FOV
-	elseif isAiming then
+	elseif isAiming and not isReloading then
 		-- Task A: ADS FOV overrides sprint FOV.
+		-- Suppressed during reload so the FOV returns to default while the animation plays.
 		if isFocusZoomed and (Constants.ADS_FOCUS_ZOOM_ENABLED :: boolean) then
 			newTarget = Constants.CAMERA_ADS_FOCUS_FOV :: number
 		else
@@ -5192,6 +5193,7 @@ function MovementController.SetReloading(reloading: boolean)
     assert(typeof(reloading) == "boolean",
         "[MovementController] SetReloading: reloading must be a boolean")
     isReloading = reloading
+    updateSprintFov()
 end
 
 -- Stage 5A: returns the viewmodel offset CFrame pre-computed each Heartbeat.

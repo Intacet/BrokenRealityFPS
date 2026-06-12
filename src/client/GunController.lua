@@ -551,9 +551,12 @@ function GunController:Start()
         then
             return
         end
-        -- Toggle ADS state.
+        -- Block ADS entry from third-person: player must scroll into first-person first.
         local currentlyAiming = ViewModelController:IsAiming()
         local newAiming = not currentlyAiming
+        if newAiming and LocalPlayer.CameraMode ~= Enum.CameraMode.LockFirstPerson then
+            return
+        end
         ViewModelController:SetAiming(newAiming)
         -- Task A: notify MovementController so it can cancel sprint and manage ADS FOV.
         MovementController.SetAiming(newAiming)
