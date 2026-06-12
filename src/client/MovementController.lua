@@ -3762,10 +3762,12 @@ local function loadMovementAnimations(character: Model)
     -- TacticalSprintForward1: primary forward clip (looped); selected when isTacticalSprinting.
     -- TacticalSprintForward2: alternate forward clip; loaded but not yet selected — deferred.
     -- TacticalSprintStop: one-shot stop clip; plays when tactical sprint ends.
-    -- AR15 set has no tactical sprint IDs; the animationTracks[key] ~= nil guard in
-    -- updateMovementAnimation() falls back to RunForward cleanly when the key is absent.
     if r6.Unarmed.TacticalSprintForward1 and r6.Unarmed.TacticalSprintForward1 ~= "" then
         toLoad["Unarmed_TacticalSprintForward1"] = r6.Unarmed.TacticalSprintForward1
+    end
+    -- AR15 tactical sprint: optional — falls back to AR15_RunForward when absent.
+    if r6.AR15.TacticalSprintForward1 and r6.AR15.TacticalSprintForward1 ~= "" then
+        toLoad["AR15_TacticalSprintForward1"] = r6.AR15.TacticalSprintForward1
     end
     if r6.Unarmed.TacticalSprintForward2 and r6.Unarmed.TacticalSprintForward2 ~= "" then
         toLoad["Unarmed_TacticalSprintForward2"] = r6.Unarmed.TacticalSprintForward2

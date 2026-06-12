@@ -412,7 +412,8 @@ Constants.MOVEMENT_ANIMATION_IDS = {
         },
         AR15 = {
             WalkForward = "rbxassetid://138802532485746",
-            RunForward  = "rbxassetid://135119369971434",  -- TacticalSprintForward1; aggressive forward lean, clean leg motion
+            RunForward              = "rbxassetid://79045069356901",   -- basic run (Shift once); no apex-pause artifact
+            TacticalSprintForward1  = "rbxassetid://135119369971434",  -- aggressive lean sprint (Shift twice)
             WalkLeft    = "rbxassetid://90637681602224",   -- armed strafe left  (mouse-lock only)
             WalkRight   = "rbxassetid://87299213260935",   -- armed strafe right (mouse-lock only)
             Idle        = "rbxassetid://117989834436525",  -- AR15 standing idle (Stage 2H)
