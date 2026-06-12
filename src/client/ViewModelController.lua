@@ -1052,12 +1052,11 @@ function ViewModelController:Start()
         -- This comment block preserved for code archaeology; epsilon-based freeze removed to fix visual cutoff.
 
         -- Procedural movement suppression while ADS.
-        -- When ADS is active (Entering or Aiming), zero out procedural movement to keep pose stable.
+        -- Scale procedural movement by (1 - adsAimAlpha) so it fades out smoothly as ADS
+        -- engages and fades back in as it exits — no snap when crossing state boundaries.
         local finalMoveCF = moveCF
-        if Constants.VIEWMODEL_ADS_DISABLE_PROCEDURAL_MOVEMENT then
-            if adsState == "Entering" or adsState == "Aiming" then
-                finalMoveCF = CFrame.new()
-            end
+        if Constants.VIEWMODEL_ADS_DISABLE_PROCEDURAL_MOVEMENT and adsAimAlpha > 0 then
+            finalMoveCF = CFrame.new():Lerp(moveCF, 1 - adsAimAlpha)
         end
 
         -- Free-aim viewmodel lean + mouse inertia + weight system.
@@ -1687,7 +1686,9 @@ function ViewModelController:StopADSAnimations()
     end
     adsState               = "Hip"
     adsIdleTime            = 0
-    adsAimAlpha            = 0
+    -- Do NOT hard-reset adsAimAlpha: the RenderStepped lerp decays it to 0
+    -- smoothly (adsAimTarget = 0 when adsState == "Hip"). Resetting it here
+    -- caused an instant pivot snap when reload cancelled ADS mid-animation.
 end
 
 -- ============================================================
