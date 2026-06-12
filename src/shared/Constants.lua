@@ -1324,10 +1324,37 @@ Constants.VIEWMODEL_BREATH_AMOUNT_X         = 0.0015  -- lateral amplitude in st
 Constants.VIEWMODEL_BREATH_BLEND_SPEED      = 2       -- lerp speed for breath fade in/out
 
 -- Strafe roll: weapon rolls and slides when moving laterally relative to camera.
+-- Spring-damper replaces the old lerp so reversing direction produces a subtle overshoot.
 Constants.VIEWMODEL_STRAFE_ROLL_ENABLED   = true
 Constants.VIEWMODEL_STRAFE_ROLL_DEGREES   = 0.9    -- degrees of roll at full strafe
 Constants.VIEWMODEL_STRAFE_TRANSLATE_X    = 0.012  -- studs of lateral translation at full strafe
-Constants.VIEWMODEL_STRAFE_SMOOTH_SPEED   = 14     -- lerp rate for vmStrafeLag toward current strafe dot
+Constants.VIEWMODEL_STRAFE_SMOOTH_SPEED   = 14     -- legacy (unused; kept to avoid nil reads)
+Constants.VIEWMODEL_STRAFE_SPRING_K       = 35     -- spring stiffness (higher = snappier return)
+Constants.VIEWMODEL_STRAFE_SPRING_D       = 9      -- spring damping (lower = more overshoot)
+
+-- Forward lean spring: replaces lerp so stopping causes a slight forward swing.
+Constants.VIEWMODEL_FORWARD_LEAN_SPRING_K = 25     -- spring stiffness
+Constants.VIEWMODEL_FORWARD_LEAN_SPRING_D = 7      -- spring damping
+
+-- Vertical tilt spring: replaces lerp so jump apex / landing has organic bounce.
+Constants.VIEWMODEL_VERT_TILT_SPRING_K    = 18     -- spring stiffness
+Constants.VIEWMODEL_VERT_TILT_SPRING_D    = 5      -- spring damping
+
+-- Acceleration tilt: gun pitches back when accelerating, forward when decelerating.
+Constants.VIEWMODEL_ACCEL_TILT_ENABLED    = true
+Constants.VIEWMODEL_ACCEL_TILT_SCALE      = 0.0015  -- radians per stud/s² of horizontal acceleration
+Constants.VIEWMODEL_ACCEL_TILT_MAX        = 0.045   -- maximum tilt in radians (~2.6°)
+Constants.VIEWMODEL_ACCEL_TILT_SMOOTH     = 8       -- lerp speed for vmAccelTilt chasing target
+
+-- Bob depth and pitch: per-step Z compression and muzzle-nod on each footfall.
+Constants.VIEWMODEL_BOB_DEPTH_FACTOR      = 0.20    -- Z amplitude as fraction of Y bob amplitude
+Constants.VIEWMODEL_BOB_PITCH_FACTOR      = 1.4     -- pitch (rad) per stud of Y bob amplitude
+
+-- Landing dip roll: subtle sideways tilt derived from the dip spring displacement.
+Constants.VIEWMODEL_LAND_DIP_ROLL_SCALE   = 0.30    -- roll (rad) per stud of dip displacement
+
+-- Breathing roll: third Lissajous frequency added to idle breathing oscillation.
+Constants.VIEWMODEL_BREATH_AMOUNT_ROLL    = 0.0006  -- roll amplitude in radians
 
 -- State weights [0, 1]: how much sway applies in each state.
 -- ADS is nearly zero; all effects become imperceptible while aiming.

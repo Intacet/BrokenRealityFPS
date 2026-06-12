@@ -163,13 +163,15 @@ local vmActiveRecoverySpeed: number = 18
 -- vmBobTime:          sine phase accumulator; advanced while amplitude > 0, decays to 0 when still.
 -- vmBobAmountCurrent: smoothly lerped bob amplitude (eliminates pop on state transitions).
 -- vmBobSpeedCurrent:  smoothly lerped bob speed (same purpose).
--- vmStrafeLag:        smoothed strafe axis [-1 left, +1 right]; drives roll + translate.
--- vmVertTilt:         smoothed pitch from HRP vertical velocity (jump up = nose up, fall = nose down).
--- vmForwardLean:      smoothed Z translation from HRP forward velocity (inertia lag feel).
+-- vmStrafeLag/Vel:    spring displacement+velocity for strafe; Vel enables overshoot on reversal.
+-- vmVertTilt/Vel:     spring displacement+velocity for vertical tilt; Vel gives organic bounce.
+-- vmForwardLean/Vel:  spring displacement+velocity for forward lean; Vel gives swing when stopping.
 -- vmLandDip/Vel:      spring state for landing impact dip; impulse applied on velY sign change.
 -- vmPrevVelY:         previous-frame Y velocity for landing-edge detection.
 -- vmBreathTime:       idle breathing oscillator phase; always advancing.
 -- vmBreathWeight:     lerped 0→1 when stationary, 1→0 when moving.
+-- vmAccelTilt:        pitch from horizontal acceleration (leans back when sprinting, forward on stop).
+-- vmHorizSpeedPrev:   previous frame horizontal speed for per-frame acceleration estimate.
 local vmSwayMouseTarget:  Vector2 = Vector2.zero
 local vmSwayMouseCurrent: Vector2 = Vector2.zero
 local vmSwayWeight:       number  = 1
@@ -177,13 +179,18 @@ local vmBobTime:          number  = 0
 local vmBobAmountCurrent: number  = 0
 local vmBobSpeedCurrent:  number  = 4
 local vmStrafeLag:        number  = 0
+local vmStrafeLagVel:     number  = 0
 local vmVertTilt:         number  = 0
+local vmVertTiltVel:      number  = 0
 local vmForwardLean:      number  = 0
+local vmForwardLeanVel:   number  = 0
 local vmLandDip:          number  = 0
 local vmLandDipVel:       number  = 0
 local vmPrevVelY:         number  = 0
 local vmBreathTime:       number  = 0
 local vmBreathWeight:     number  = 0
+local vmAccelTilt:        number  = 0
+local vmHorizSpeedPrev:   number  = 0
 
 -- Name of the currently equipped weapon, or nil when holstered.
 local equippedWeaponName: string? = nil
@@ -431,13 +438,18 @@ function ViewModelController:init()
     vmBobAmountCurrent = 0
     vmBobSpeedCurrent  = Constants.VIEWMODEL_WALK_BOB_SPEED :: number
     vmStrafeLag        = 0
+    vmStrafeLagVel     = 0
     vmVertTilt         = 0
+    vmVertTiltVel      = 0
     vmForwardLean      = 0
+    vmForwardLeanVel   = 0
     vmLandDip          = 0
     vmLandDipVel       = 0
     vmPrevVelY         = 0
     vmBreathTime       = 0
     vmBreathWeight     = 0
+    vmAccelTilt        = 0
+    vmHorizSpeedPrev   = 0
     -- Third-person character tracks: nil references only — do NOT call Stop/Destroy.
     -- init() is called from CharacterAdded where the old Humanoid.Animator may already be
     -- destroyed, making track method calls unsafe.  Same pattern as MovementController's
@@ -529,13 +541,18 @@ function ViewModelController:StopWeaponAnimations()
     vmBobAmountCurrent = 0
     vmBobSpeedCurrent  = Constants.VIEWMODEL_WALK_BOB_SPEED :: number
     vmStrafeLag        = 0
+    vmStrafeLagVel     = 0
     vmVertTilt         = 0
+    vmVertTiltVel      = 0
     vmForwardLean      = 0
+    vmForwardLeanVel   = 0
     vmLandDip          = 0
     vmLandDipVel       = 0
     vmPrevVelY         = 0
     vmBreathTime       = 0
     vmBreathWeight     = 0
+    vmAccelTilt        = 0
+    vmHorizSpeedPrev   = 0
     -- Third-person character tracks: stop and destroy (character is alive in this path).
     -- AnimationTrack:Destroy() severs Stopped connections synchronously, preventing any
     -- deferred equip-chain or reload-chain callback from firing after holster.
@@ -1228,15 +1245,18 @@ function ViewModelController:Start()
             end
             local moveDir: Vector3 = if hum then hum.MoveDirection else Vector3.zero
             local velXYZ:  Vector3 = if hrp then hrp.AssemblyLinearVelocity else Vector3.zero
+            local horizSpeed = Vector2.new(velXYZ.X, velXYZ.Z).Magnitude
 
             -- Movement bob: smoothly lerped amplitude and speed eliminate pops on state changes.
             -- Horizontal velocity magnitude drives isMoving so sliding continues the bob and
             -- standing still (pressed against wall) correctly zeroes it.
-            local bobTX: number = 0
-            local bobTY: number = 0
+            -- Four outputs: Y (vertical), X (lateral figure-8), Z (depth per step), bobPitch (nod).
+            local bobTX:    number = 0
+            local bobTY:    number = 0
+            local bobTZ:    number = 0
+            local bobPitch: number = 0
             if Constants.VIEWMODEL_MOVE_BOB_ENABLED then
-                local horizSpeed    = Vector2.new(velXYZ.X, velXYZ.Z).Magnitude
-                local isMoving      = horizSpeed > 0.5
+                local isMoving = horizSpeed > 0.5
                 local bobAmountTarget: number = 0
                 local bobSpeedTarget:  number = Constants.VIEWMODEL_WALK_BOB_SPEED :: number
                 if isMoving then
@@ -1263,26 +1283,34 @@ function ViewModelController:Start()
                     vmBobTime = vmBobTime
                         * math.max(0, 1 - dt * (Constants.VIEWMODEL_MOVE_BOB_SMOOTH_SPEED :: number))
                 end
-                bobTY = math.sin(vmBobTime) * vmBobAmountCurrent * swayW
-                -- Lateral: cos(t) is 90° offset from sin(t), creating a circular figure-8 path.
-                -- Feels more natural than sin(t) (diagonal) while keeping per-step timing.
-                bobTX = math.cos(vmBobTime) * vmBobAmountCurrent
-                    * (Constants.VIEWMODEL_WALK_BOB_LATERAL_FACTOR :: number) * swayW
+                local sinT = math.sin(vmBobTime)
+                local cosT = math.cos(vmBobTime)
+                local amt  = vmBobAmountCurrent
+                -- Vertical: rises between footfalls, dips at footfall.
+                bobTY = sinT * amt * swayW
+                -- Lateral: cos(t) is 90° out-of-phase — creates a circular figure-8 path.
+                bobTX = cosT * amt * (Constants.VIEWMODEL_WALK_BOB_LATERAL_FACTOR :: number) * swayW
+                -- Depth: gun compresses toward camera at each footfall (sinT < 0 → +Z toward cam).
+                bobTZ = -sinT * amt * (Constants.VIEWMODEL_BOB_DEPTH_FACTOR :: number) * swayW
+                -- Pitch nod: muzzle dips in phase with vertical bob for natural weight feel.
+                bobPitch = sinT * amt * (Constants.VIEWMODEL_BOB_PITCH_FACTOR :: number) * swayW
             end
 
-            -- Strafe roll: weapon tilts and slides when moving laterally relative to camera.
+            -- Strafe roll + translate: spring-damper for organic overshoot on direction reversal.
+            -- Using moveDir (normalised input) so wall-pressing produces no false strafe.
             local strafeRoll: number = 0
             local strafeTX:   number = 0
             if Constants.VIEWMODEL_STRAFE_ROLL_ENABLED then
                 local strafeDot = cam.CFrame.RightVector:Dot(moveDir)
-                vmStrafeLag = vmStrafeLag
-                    + (strafeDot - vmStrafeLag)
-                    * math.min(1, dt * (Constants.VIEWMODEL_STRAFE_SMOOTH_SPEED :: number))
+                local sF = (Constants.VIEWMODEL_STRAFE_SPRING_K :: number) * (strafeDot - vmStrafeLag)
+                         - (Constants.VIEWMODEL_STRAFE_SPRING_D :: number) * vmStrafeLagVel
+                vmStrafeLagVel = vmStrafeLagVel + sF * dt
+                vmStrafeLag    = math.clamp(vmStrafeLag + vmStrafeLagVel * dt, -1.5, 1.5)
                 strafeRoll = math.rad(-vmStrafeLag * (Constants.VIEWMODEL_STRAFE_ROLL_DEGREES :: number)) * swayW
                 strafeTX   = -vmStrafeLag * (Constants.VIEWMODEL_STRAFE_TRANSLATE_X :: number) * swayW
             end
 
-            -- Vertical velocity tilt: gun pitches when jumping or falling.
+            -- Vertical velocity tilt: spring-damper so jump apex and landing have organic bounce.
             -- velY > 0 = rising (muzzle up), velY < 0 = falling (muzzle down).
             local vertTiltPitch: number = 0
             if Constants.VIEWMODEL_VERT_TILT_ENABLED then
@@ -1290,14 +1318,16 @@ function ViewModelController:Start()
                     velXYZ.Y * (Constants.VIEWMODEL_VERT_TILT_SCALE :: number),
                     -(Constants.VIEWMODEL_VERT_TILT_MAX :: number),
                      (Constants.VIEWMODEL_VERT_TILT_MAX :: number))
-                vmVertTilt = vmVertTilt
-                    + (tiltTarget - vmVertTilt) * math.min(1, dt * (Constants.VIEWMODEL_VERT_TILT_SMOOTH :: number))
+                local vF = (Constants.VIEWMODEL_VERT_TILT_SPRING_K :: number) * (tiltTarget - vmVertTilt)
+                         - (Constants.VIEWMODEL_VERT_TILT_SPRING_D :: number) * vmVertTiltVel
+                vmVertTiltVel = vmVertTiltVel + vF * dt
+                vmVertTilt    = vmVertTilt    + vmVertTiltVel * dt
                 vertTiltPitch = vmVertTilt
             end
 
-            -- Forward lean: gun lags behind horizontal velocity (inertia weight feel).
-            -- Moving forward → +Z lean (gun pulls back toward camera).
-            -- Stopping/reversing → lean decays to 0 with a slight forward swing.
+            -- Forward lean: spring-damper so stopping produces a slight forward swing.
+            -- Moving forward → +Z (gun toward camera, inertia lag feel).
+            -- Stopping → spring overshoots slightly to -Z then returns (gun swings forward).
             local forwardLeanZ: number = 0
             if Constants.VIEWMODEL_FORWARD_LEAN_ENABLED then
                 local forwardVel = cam.CFrame.LookVector:Dot(velXYZ)
@@ -1305,14 +1335,35 @@ function ViewModelController:Start()
                     forwardVel * (Constants.VIEWMODEL_FORWARD_LEAN_SCALE :: number),
                     -(Constants.VIEWMODEL_FORWARD_LEAN_MAX :: number),
                      (Constants.VIEWMODEL_FORWARD_LEAN_MAX :: number))
-                vmForwardLean = vmForwardLean
-                    + (leanTarget - vmForwardLean) * math.min(1, dt * (Constants.VIEWMODEL_FORWARD_LEAN_SMOOTH :: number))
+                local fF = (Constants.VIEWMODEL_FORWARD_LEAN_SPRING_K :: number) * (leanTarget - vmForwardLean)
+                         - (Constants.VIEWMODEL_FORWARD_LEAN_SPRING_D :: number) * vmForwardLeanVel
+                vmForwardLeanVel = vmForwardLeanVel + fF * dt
+                vmForwardLean    = vmForwardLean    + vmForwardLeanVel * dt
                 forwardLeanZ = vmForwardLean
+            end
+
+            -- Acceleration tilt: gun pitches back when player accelerates, forward when decelerating.
+            -- Captures the rotational inertia component that forward lean (translational) misses.
+            -- rawAccel > 0 = speeding up → muzzle up (positive pitch); < 0 = braking → muzzle dips.
+            local accelTiltPitch: number = 0
+            if Constants.VIEWMODEL_ACCEL_TILT_ENABLED then
+                local rawAccel = (horizSpeed - vmHorizSpeedPrev) / math.max(dt, 0.001)
+                vmHorizSpeedPrev = horizSpeed
+                local accelTarget = math.clamp(
+                    rawAccel * (Constants.VIEWMODEL_ACCEL_TILT_SCALE :: number),
+                    -(Constants.VIEWMODEL_ACCEL_TILT_MAX :: number),
+                     (Constants.VIEWMODEL_ACCEL_TILT_MAX :: number))
+                vmAccelTilt = vmAccelTilt
+                    + (accelTarget - vmAccelTilt)
+                    * math.min(1, dt * (Constants.VIEWMODEL_ACCEL_TILT_SMOOTH :: number))
+                accelTiltPitch = vmAccelTilt
             end
 
             -- Landing dip spring: gun bounces down and recovers on impact.
             -- Impulse fired when Y velocity crosses the threshold from below (landing edge).
-            local landDipY: number = 0
+            -- Roll is derived from dip displacement — follows the same spring at no extra cost.
+            local landDipY:    number = 0
+            local landDipRoll: number = 0
             if Constants.VIEWMODEL_LAND_DIP_ENABLED then
                 local velY = velXYZ.Y
                 if vmPrevVelY < (Constants.VIEWMODEL_LAND_DIP_THRESHOLD :: number)
@@ -1322,17 +1373,20 @@ function ViewModelController:Start()
                     vmLandDipVel = vmLandDipVel - impact * (Constants.VIEWMODEL_LAND_DIP_SCALE :: number)
                 end
                 vmPrevVelY = velY
-                local springF = -(Constants.VIEWMODEL_LAND_DIP_SPRING :: number)  * vmLandDip
-                              - (Constants.VIEWMODEL_LAND_DIP_DAMPING :: number) * vmLandDipVel
-                vmLandDipVel = vmLandDipVel + springF * dt
+                local dF = -(Constants.VIEWMODEL_LAND_DIP_SPRING :: number) * vmLandDip
+                         - (Constants.VIEWMODEL_LAND_DIP_DAMPING :: number) * vmLandDipVel
+                vmLandDipVel = vmLandDipVel + dF * dt
                 vmLandDip    = vmLandDip    + vmLandDipVel * dt
-                landDipY = vmLandDip
+                landDipY    = vmLandDip
+                landDipRoll = vmLandDip * (Constants.VIEWMODEL_LAND_DIP_ROLL_SCALE :: number)
             end
 
-            -- Idle breathing: subtle Y/X oscillation when stationary.
-            -- Two overlapping frequencies (1:0.5 ratio) for organic feel.
-            local breathX: number = 0
-            local breathY: number = 0
+            -- Idle breathing: three-frequency Lissajous for a non-repeating organic idle.
+            -- Frequencies 1 : 0.5 : 0.75 (incommensurable ratios) prevent audible looping.
+            -- breathWeight fades in when stationary, out when moving.
+            local breathX:    number = 0
+            local breathY:    number = 0
+            local breathRoll: number = 0
             if Constants.VIEWMODEL_BREATH_ENABLED then
                 vmBreathTime = (vmBreathTime + dt * (Constants.VIEWMODEL_BREATH_SPEED :: number) * math.pi * 2)
                     % (math.pi * 4)
@@ -1341,13 +1395,23 @@ function ViewModelController:Start()
                     + (breathTarget - vmBreathWeight)
                     * math.min(1, dt * (Constants.VIEWMODEL_BREATH_BLEND_SPEED :: number))
                 local bw = vmBreathWeight * swayW
-                breathY = math.sin(vmBreathTime) * (Constants.VIEWMODEL_BREATH_AMOUNT_Y :: number) * bw
-                breathX = math.sin(vmBreathTime * 0.5 + math.pi / 3)
+                breathY    = math.sin(vmBreathTime)
+                    * (Constants.VIEWMODEL_BREATH_AMOUNT_Y :: number) * bw
+                breathX    = math.sin(vmBreathTime * 0.5 + math.pi / 3)
                     * (Constants.VIEWMODEL_BREATH_AMOUNT_X :: number) * bw
+                breathRoll = math.sin(vmBreathTime * 0.75 + math.pi / 6)
+                    * (Constants.VIEWMODEL_BREATH_AMOUNT_ROLL :: number) * bw
             end
 
-            swayCF = CFrame.new(swayTX + strafeTX + bobTX + breathX, swayTY + bobTY + landDipY + breathY, forwardLeanZ)
-                * CFrame.Angles(swayPitch + vertTiltPitch, swayYaw, swayRoll + strafeRoll)
+            swayCF = CFrame.new(
+                swayTX + strafeTX + bobTX + breathX,
+                swayTY + bobTY + landDipY + breathY,
+                forwardLeanZ + bobTZ
+            ) * CFrame.Angles(
+                swayPitch + vertTiltPitch + bobPitch + accelTiltPitch,
+                swayYaw,
+                swayRoll + strafeRoll + landDipRoll + breathRoll
+            )
         else
             swayCF = CFrame.new()
         end
