@@ -1286,6 +1286,7 @@ Constants.VIEWMODEL_SPRINT_BOB_SPEED      = 9
 Constants.VIEWMODEL_CROUCH_BOB_AMOUNT     = 0.008
 Constants.VIEWMODEL_CROUCH_BOB_SPEED      = 4
 Constants.VIEWMODEL_MOVE_BOB_SMOOTH_SPEED = 12     -- rate at which vmBobTime decays to zero when stopped
+Constants.VIEWMODEL_WALK_BOB_LATERAL_FACTOR = 0.55  -- lateral sway as a fraction of vertical bob; sin(phase) frequency so one sway per step
 
 -- Strafe roll: weapon rolls and slides when moving laterally relative to camera.
 Constants.VIEWMODEL_STRAFE_ROLL_ENABLED   = true
@@ -1345,17 +1346,17 @@ Constants.CAMERA_BODY_OFFSET_RESET_SPEED  = 7      -- lerp rate (units/s) for bo
 -- Walk bob
 Constants.CAMERA_WALK_BOB_ENABLED         = true   -- master switch for all bob types
 Constants.CAMERA_WALK_BOB_AMOUNT_Y        = 0.035  -- studs; vertical bob amplitude while walking
-Constants.CAMERA_WALK_BOB_AMOUNT_X        = 0.012  -- studs; horizontal sway amplitude while walking
+Constants.CAMERA_WALK_BOB_AMOUNT_X        = 0.005  -- studs; horizontal sway amplitude while walking
 Constants.CAMERA_WALK_BOB_SPEED           = 6      -- radians/s; sine phase advance while walking
 
 -- Sprint bob
 Constants.CAMERA_SPRINT_BOB_AMOUNT_Y      = 0.075  -- studs; vertical bob amplitude while sprinting
-Constants.CAMERA_SPRINT_BOB_AMOUNT_X      = 0.022  -- studs; horizontal sway amplitude while sprinting
+Constants.CAMERA_SPRINT_BOB_AMOUNT_X      = 0.009  -- studs; horizontal sway amplitude while sprinting
 Constants.CAMERA_SPRINT_BOB_SPEED         = 9      -- radians/s; sine phase advance while sprinting
 
 -- Crouch bob
 Constants.CAMERA_CROUCH_BOB_AMOUNT_Y      = 0.012  -- studs; vertical bob amplitude while crouching
-Constants.CAMERA_CROUCH_BOB_AMOUNT_X      = 0.006  -- studs; horizontal sway amplitude while crouching
+Constants.CAMERA_CROUCH_BOB_AMOUNT_X      = 0.003  -- studs; horizontal sway amplitude while crouching
 Constants.CAMERA_CROUCH_BOB_SPEED         = 4      -- radians/s; sine phase advance while crouching
 
 -- Stance Z offsets (applied to CameraOffset.Z; negative = camera pulls backward)

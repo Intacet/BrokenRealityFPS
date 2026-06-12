@@ -1215,7 +1215,7 @@ function ViewModelController:Start()
                         * math.max(0, 1 - dt * (Constants.VIEWMODEL_MOVE_BOB_SMOOTH_SPEED :: number))
                 end
                 bobTY = math.sin(vmBobTime) * bobAmount * swayW
-                bobTX = math.sin(vmBobTime * 0.5) * bobAmount * 0.4 * swayW
+                bobTX = math.sin(vmBobTime) * bobAmount * (Constants.VIEWMODEL_WALK_BOB_LATERAL_FACTOR :: number) * swayW
             end
 
             -- Strafe roll: weapon tilts and slides when moving laterally relative to camera.
