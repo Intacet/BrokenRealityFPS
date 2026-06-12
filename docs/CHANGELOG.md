@@ -7,6 +7,79 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-12 — FEAT] — PBR concrete material + security cleanup
+
+### Summary
+
+Added `MaterialSetup.server.lua` to apply a PBR concrete MaterialVariant game-wide via MaterialService. All BaseParts with `Material = Enum.Material.Concrete` now render with the PBR textures (colour, normal, roughness maps sourced from Creator Store asset "PBR Concrete Material", verified 2026-06-12). `MaterialService.Use2022Materials` is enabled by the script to activate the variant system.
+
+Also deleted a "Vaccine" malware Script that arrived inside a free Creator Store insert ("PBR Metal Material") from the previous session. The model and its four sibling test inserts (PBR Asphalt Material, PBR Brick Material, PBR Concrete Material MaterialVariant, PBR Metal Material) were removed from workspace.
+
+### Files changed
+
+- `src/server/MaterialSetup.server.lua` — created; applies ConcretePBR MaterialVariant at run-time
+
+---
+
+## [2026-06-12 — FEAT] — Gritty overcast urban lighting (Criminality-style) + environment scales
+
+### Summary
+
+Created `LightingSetup.server.lua` (server Script, no client counterpart needed — Lighting changes replicate automatically). Sets `Technology = Future`, deep cold ambient colours, low-brightness overcast sun, and five PostEffect/Atmosphere children: Atmosphere (high density/haze, cold grey-blue), ColorCorrectionEffect (desaturated, cold tint), BloomEffect (high threshold — only lamps bloom), SunRaysEffect (disabled — overcast), DepthOfFieldEffect (near-sharp, subtle far blur).
+
+A second commit added `EnvironmentDiffuseScale = 0.4` and `EnvironmentSpecularScale = 0.6` so metal/smooth surfaces catch the cold sky colour (wet-pavement and gun-metal look). A third commit removed the client-side `GraphicsQuality.client.lua` script that had forced max render quality (`QualityLevel21`), as this was overriding the user's own quality settings.
+
+### Files changed
+
+- `src/server/LightingSetup.server.lua` — created; applies all Lighting properties and PostEffects
+- `src/client/GraphicsQuality.client.lua` — deleted (was forcing QualityLevel21 on all clients)
+
+---
+
+## [2026-06-12 — FEAT] — Accurate camera-space recoil, reload fire gate, reduced bob
+
+### Summary
+
+Three improvements to the gun feel system:
+
+**Camera recoil for per-weapon profiles:** `GunController` was skipping `recoilCFrame` (the screen-space kick) entirely when `hasPerWeaponProfile = true`. Added an explicit camera kick path that reads `profile.camera.hip` / `profile.camera.ads` and applies `kickUp`/`kickRight` (degrees) per shot. Falls back to `Constants.DEFAULT_CAMERA_RECOIL_KICK_UP` / `DEFAULT_CAMERA_RECOIL_KICK_RIGHT` if the weapon profile has no camera sub-table.
+
+AKS74 recoil profile updated: `buildupPerShot 0.055→0.08`, `maxBuildup 0.42→0.60`, `recoverySpeed 24→8` (slower recovery lets recoil stack under sustained fire). Added `camera = { hip = {kickUp=0.45, kickRight=0.06}, ads = {kickUp=0.16, kickRight=0.02} }`.
+
+**Reload fire gate:** `GunController:TryFire()` now returns false immediately if `ViewModelController:GetIsReloading()` is true. Players can no longer interrupt a reload by clicking.
+
+**Bob reduction:** Three bob constants reduced by ~25 %: `WALK_BOB_AMOUNT 0.018→0.013`, `SPRINT_BOB_AMOUNT 0.035→0.026`, `CROUCH_BOB_AMOUNT 0.008→0.006`.
+
+### Files changed
+
+- `src/client/GunController.lua` — camera recoil path for per-weapon profiles; reload fire gate
+- `src/shared/WeaponData.lua` — AKS74 recoil profile (camera sub-table, buildup, recovery)
+- `src/shared/Constants.lua` — `DEFAULT_CAMERA_RECOIL_KICK_UP`, `DEFAULT_CAMERA_RECOIL_KICK_RIGHT`; bob constant reductions
+
+---
+
+## [2026-06-12 — FEAT] — Procedural viewmodel movement V2 (spring physics)
+
+### Summary
+
+Replaced the simple lerp-based sway in `ViewModelController` with a full spring-damper procedural system. All movement layers now use `F = K*(target − pos) − D*vel` integrated per frame.
+
+**New layers added:**
+- **Strafe lag spring** — weapon lags against horizontal strafing (`VIEWMODEL_STRAFE_SPRING_K = 35`, `D = 9`)
+- **Vertical tilt spring** — weapon tilts on vertical velocity (`VIEWMODEL_VERT_TILT_SPRING_K = 18`, `D = 5`)
+- **Forward lean spring** — weapon pushes forward on sprint start (`VIEWMODEL_FORWARD_LEAN_SPRING_K = 25`, `D = 7`)
+- **Acceleration tilt** — weapon pitches back during horizontal acceleration bursts (`VIEWMODEL_ACCEL_TILT_SCALE = 0.0015`, `VIEWMODEL_ACCEL_TILT_MAX = 0.045`)
+- **Bob depth and pitch nod** — footfall now compresses the weapon toward the camera (`VIEWMODEL_BOB_DEPTH_FACTOR = 0.20`) and pitches the muzzle down (`VIEWMODEL_BOB_PITCH_FACTOR = 1.4`)
+- **Landing dip roll** — existing land-dip also produces a roll offset (`VIEWMODEL_LAND_DIP_ROLL_SCALE = 0.30`)
+- **Breathing roll** — third Lissajous frequency adds a slow organic roll (`VIEWMODEL_BREATH_AMOUNT_ROLL = 0.0006`)
+
+### Files changed
+
+- `src/client/ViewModelController.lua` — swayCF block rewritten; 5 new spring-state variables; both reset blocks updated
+- `src/shared/Constants.lua` — 14 new constants for V2 spring parameters
+
+---
+
 ## [2026-06-11 — FIX] — Footstep cadence: decouple accumulator from isGrounded() gate
 
 ### Summary
