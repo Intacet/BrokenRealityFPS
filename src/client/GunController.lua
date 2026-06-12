@@ -125,6 +125,10 @@ local recoilAltRight:  boolean = true -- alternates sign of lateral kick each sh
 -- gates actual shot cadence to the weapon's fireRate.
 local isAutoFiring: boolean = false
 
+-- Tracks the previous-frame reload state so RenderStepped can detect the reload→done edge
+-- and exit ADS automatically.
+local wasReloading: boolean = false
+
 -- ============================================================
 -- Private helpers
 -- ============================================================
@@ -418,7 +422,14 @@ function GunController:Start()
         end
         -- Task A/B: sync reload state to MovementController each frame so the stance POV
         -- reload multiplier stays accurate without creating a VMC→MC dependency.
-        MovementController.SetReloading(ViewModelController:GetIsReloading())
+        local nowReloading = ViewModelController:GetIsReloading()
+        MovementController.SetReloading(nowReloading)
+        -- On the reload→done edge, exit ADS so the weapon returns to hip idle.
+        if wasReloading and not nowReloading then
+            ViewModelController:SetAiming(false)
+            MovementController.SetAiming(false)
+        end
+        wasReloading = nowReloading
 
         -- Full-auto: fire each frame while button is held; internal rate limit gates cadence.
         if isAutoFiring then
