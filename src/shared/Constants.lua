@@ -720,7 +720,7 @@ Constants.CUSTOM_MOUSE_LOCK_APPLIES_CAMERA_OFFSET = true
 -- Normal sprint (LeftShift) and tactical sprint both trigger the zero-offset path.
 -- Walking, idle, crouching, sprint-stop, and landing lock all keep the normal offset.
 -- Set false to always use CUSTOM_MOUSE_LOCK_CAMERA_OFFSET regardless of sprint state.
-Constants.SPRINT_DISABLES_CAMERA_OFFSET = true
+Constants.SPRINT_DISABLES_CAMERA_OFFSET = false
 
 -- ============================================================
 -- Timing constants
