@@ -261,7 +261,11 @@ local function onHeartbeat(dt: number)
     -- Resolve movement tier; nil means no footstep (idle, sliding, vaulting, etc.)
     local moveState = MovementController:GetMoveState()
     local tier: MovementTier? = resolveMovementTier(moveState)
+
     if tier == nil then
+        if Constants.FOOTSTEP_DEBUG :: boolean then
+            Logger.debug("[FootstepController] tier=nil mv=" .. tostring(isMoving()) .. " st=" .. moveState)
+        end
         return
     end
 
@@ -269,7 +273,13 @@ local function onHeartbeat(dt: number)
     timeSinceLastStep += dt
 
     if timeSinceLastStep >= interval then
-        timeSinceLastStep -= interval   -- carry leftover so cadence stays accurate
+        -- Reset to zero rather than subtracting the interval. Subtracting carries
+        -- over the remainder into the next step, which can leave timeSinceLastStep
+        -- still >= interval after a lag spike (large dt), causing the very next
+        -- Heartbeat to fire a second step ~16 ms later — the "double-step" artifact.
+        -- Resetting to zero ensures exactly one fire per Heartbeat regardless of
+        -- how large dt grows, at the cost of at most one frame of drift per step.
+        timeSinceLastStep = 0
         playStep(tier :: MovementTier)
     end
 end

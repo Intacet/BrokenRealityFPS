@@ -1873,7 +1873,7 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 
 ---
 
-## [DEBT-073] FootstepController uses timer-based footsteps — Stage 2 marker mode deferred — UPDATED 2026-06-11
+## [DEBT-073] FootstepController uses timer-based footsteps — Stage 2 marker mode deferred — UPDATED 2026-06-11 (double-step fix)
 
 **Files:** `src/client/FootstepController.lua`, `src/shared/Constants.lua`, `src/shared/FootstepData.lua`
 **Severity:** Low-Medium (timer cadence feels approximate; exact footstep timing requires markers)
@@ -1888,6 +1888,11 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 4. In the marker callback, call `playStep(tier)` directly instead of using the timer.
 5. Disconnect marker signals when the track stops; reconnect when it resumes.
 6. Remove the Heartbeat timer accumulator entirely once markers are wired.
+**2026-06-11 fix notes:** Three cadence fixes applied this session:
+- (1) Gate reset bug: removed `timeSinceLastStep = 0` from gate-failure branches — timer now pauses rather than resetting on brief velocity/state dips.
+- (2) `isMoving()` gate: replaced `AssemblyLinearVelocity >= FOOTSTEP_MIN_SPEED` with `MoveDirection.Magnitude > 0` — R6 impulse-cycle velocity drops no longer pause the accumulator.
+- (3) Double-step fix: replaced `timeSinceLastStep -= interval` (carry-over) with `timeSinceLastStep = 0` (reset); removed `lastTier` tier-change reset that was creating long gaps at Walk↔Sprint transitions.
+
 **Trigger:** Movement animation clips receive marker bake, or footstep timing is noticeably off in Studio playtest.
 
 ---

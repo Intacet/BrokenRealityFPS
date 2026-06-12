@@ -7,6 +7,22 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-11 — FIX] — Footstep double-step eliminated: reset-to-zero timer, removed tier-change reset
+
+### Summary
+
+Fixed "two footstep noises playing almost simultaneously" caused by two separate issues introduced or exposed by prior fixes.
+
+**Issue 1 — lag-spike double-fire (`timeSinceLastStep -= interval`):** The timer subtracted the interval on step fire and carried the remainder forward. A lag spike (large `dt`, e.g. from an animation loop computation hitch) could leave the remainder `>= interval` after subtraction, causing the NEXT Heartbeat (one frame, ~16 ms later) to fire immediately — two sounds 16 ms apart. Fix: replaced `timeSinceLastStep -= interval` with `timeSinceLastStep = 0`. After reset the next Heartbeat starts from zero, so no lag spike can cause a back-to-back fire. Drift cost: at most one `dt` (~16 ms) per step — imperceptible.
+
+**Issue 2 — tier-change reset creating long gaps at Walk→Sprint:** The `lastTier` tracking added previously reset `timeSinceLastStep = 0` whenever the tier changed. If the walk timer had built up to, say, 0.37 s when the user pressed Shift, those 0.37 s were discarded and the first sprint step was delayed a full 0.25 s from sprint activation — a ~620 ms gap from the last walk step. This was the "skip" heard at sprint start. Fix: removed `lastTier` and the tier-change reset entirely. The accumulator carries directly into the new tier, so the first sprint step fires at `sprintInterval - carryOver` from activation (between 0 and 0.25 s), which is always cadence-correct.
+
+### Files changed
+
+- `src/client/FootstepController.lua` — `timeSinceLastStep = 0` on step fire (was `-= interval`); removed `lastTier` state variable and tier-change reset block
+
+---
+
 ## [2026-06-11 — FIX] — Footstep isMoving() gate: replace AssemblyLinearVelocity with MoveDirection
 
 ### Summary
