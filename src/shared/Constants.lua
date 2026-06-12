@@ -412,7 +412,7 @@ Constants.MOVEMENT_ANIMATION_IDS = {
         },
         AR15 = {
             WalkForward = "rbxassetid://138802532485746",
-            RunForward  = "rbxassetid://79735501581082",
+            RunForward  = "rbxassetid://79045069356901",   -- uses Unarmed run forward; previous ID had easing pause at leg apex
             WalkLeft    = "rbxassetid://90637681602224",   -- armed strafe left  (mouse-lock only)
             WalkRight   = "rbxassetid://87299213260935",   -- armed strafe right (mouse-lock only)
             Idle        = "rbxassetid://117989834436525",  -- AR15 standing idle (Stage 2H)
