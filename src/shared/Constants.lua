@@ -693,14 +693,14 @@ Constants.CUSTOM_MOUSE_LOCK_ROTATION_DEBUG = true
 -- Do NOT set CameraType to Scriptable or write camera.CFrame to enforce these.
 -- Roblox's built-in camera system respects these player-property limits.
 -- ============================================================
-Constants.THIRD_PERSON_MIN_ZOOM_DISTANCE = 4    -- minimum camera zoom (studs); player can scroll in to 4 studs
-Constants.THIRD_PERSON_MAX_ZOOM_DISTANCE = 14   -- maximum camera zoom (studs); player cannot scroll out beyond 14 studs
+Constants.THIRD_PERSON_MIN_ZOOM_DISTANCE = 3    -- minimum camera zoom (studs); player can scroll in to 3 studs
+Constants.THIRD_PERSON_MAX_ZOOM_DISTANCE = 8    -- maximum camera zoom (studs); player cannot scroll out beyond 8 studs
 
 -- Custom mouse-lock camera settings (Stage 2K — 2026-05-20)
 -- Applied when custom mouse lock is enabled; restored to normal third-person limits on disable.
 -- CameraMinZoom = CameraMaxZoom = CUSTOM_MOUSE_LOCK_CAMERA_DISTANCE locks the zoom to a single
 -- over-the-shoulder distance. Roblox's default camera controller handles the actual orbit.
-Constants.CUSTOM_MOUSE_LOCK_CAMERA_DISTANCE       = 8                       -- locked zoom distance (studs) while mouse lock is on
+Constants.CUSTOM_MOUSE_LOCK_CAMERA_DISTANCE       = 6                       -- locked zoom distance (studs) while mouse lock is on
 Constants.CUSTOM_MOUSE_LOCK_CAMERA_OFFSET         = Vector3.new(1.75, 0, 0) -- Humanoid.CameraOffset while mouse lock is on (right-shoulder)
 Constants.CUSTOM_MOUSE_LOCK_RESTORE_CAMERA_OFFSET = Vector3.zero            -- Humanoid.CameraOffset when mouse lock is off (no offset)
 
