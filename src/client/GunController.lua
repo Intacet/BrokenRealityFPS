@@ -231,6 +231,9 @@ function GunController:Start()
             return false
         end
 
+        -- Guard: cannot fire while reloading.
+        if ViewModelController:GetIsReloading() then return false end
+
         -- Guard: client-side rate limit (mirrors server; server re-validates independently).
         local now = os.clock()
         if now - lastShotTime < interval then return false end
@@ -274,10 +277,24 @@ function GunController:Start()
         )
         recoilResetTimer = feel.recoilResetTime :: number
 
-        -- Weapons with a per-weapon recoil profile use vmRecoilCF for rotation;
-        -- skip the WeaponFeel rotational kick so the two systems do not fight.
+        -- Camera-space recoil kick: shifts the entire viewmodel up/right so the screen appears to
+        -- recoil even though we do not modify workspace.CurrentCamera.CFrame.
+        -- Per-weapon profiles supply a camera sub-table; weapons without a profile use WeaponFeel.
         local hasPerWeaponProfile = equippedDef ~= nil and (equippedDef :: any).recoil ~= nil
-        if not hasPerWeaponProfile then
+        if hasPerWeaponProfile then
+            -- Read camera kick from profile.camera.{hip,ads} sub-tables.
+            local profile = (equippedDef :: any).recoil
+            local camSub: any = if isADS then ((profile :: any).camera :: any) and ((profile :: any).camera :: any).ads
+                                          else ((profile :: any).camera :: any) and ((profile :: any).camera :: any).hip
+            local kickUpDeg    = if camSub and typeof((camSub :: any).kickUp)    == "number" then (camSub :: any).kickUp    :: number else (Constants.DEFAULT_CAMERA_RECOIL_KICK_UP    :: number)
+            local kickRightDeg = if camSub and typeof((camSub :: any).kickRight) == "number" then (camSub :: any).kickRight :: number else (Constants.DEFAULT_CAMERA_RECOIL_KICK_RIGHT :: number)
+            local kickUp    = math.rad(kickUpDeg    * (1 + recoilBuildup))
+            local kickRight = math.rad(kickRightDeg * (1 + recoilBuildup))
+            kickRight = recoilAltRight and kickRight or -kickRight
+            recoilAltRight = not recoilAltRight
+            recoilCFrame = recoilCFrame * CFrame.Angles(-kickUp, kickRight, 0)
+        else
+            -- WeaponFeel fallback (weapons that have no per-weapon recoil profile).
             local kickUp    = math.rad((feel.recoilUp :: number) * (1 + recoilBuildup))
             local kickRight = math.rad((feel.recoilRight :: number) * (1 + recoilBuildup))
             if feel.recoilRightAlternate then

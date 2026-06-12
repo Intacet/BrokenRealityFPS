@@ -52,10 +52,11 @@ WeaponData["AKS74"] = {
     reserveAmmo   = 120,
     reloadTime    = 2.2,
     recoil = {
+        -- Viewmodel gun kick (spring inside the arm/frame — vmRecoilCF).
         hip = {
             positionBack = 0.045,   -- weapon moves toward camera each shot
-            positionUp   = 0.006,   -- weapon lifts slightly
-            pitchDegrees = 1.2,     -- positive = muzzle rises; pending Studio verification
+            positionUp   = 0.006,
+            pitchDegrees = 1.2,     -- muzzle rise per shot in viewmodel space
             yawDegrees   = 0.12,
             rollDegrees  = 0.18,
         },
@@ -66,13 +67,19 @@ WeaponData["AKS74"] = {
             yawDegrees   = 0.04,
             rollDegrees  = 0.06,
         },
-        buildupPerShot  = 0.055,  -- buildup scalar added per shot [0, maxBuildup]
-        maxBuildup      = 0.42,   -- caps vmRecoilBuildup; pitch scales by (1 + buildup)
-        recoverySpeed   = 24,     -- lerp rate for vmRecoilTarget decay to identity
-        kickSpeed       = 42,     -- lerp rate for vmRecoilCurrent chasing vmRecoilTarget
-        randomYawScale  = 0.6,    -- ±variation on yaw per shot (0 = deterministic)
+        -- Camera-space screen kick (viewRecoilCFrame — shifts entire screen up/right).
+        -- Distinct from the viewmodel gun kick so both run independently without fighting.
+        camera = {
+            hip = { kickUp = 0.45, kickRight = 0.06 },  -- degrees per shot, hip fire
+            ads = { kickUp = 0.16, kickRight = 0.02 },  -- reduced while ADS
+        },
+        buildupPerShot  = 0.08,   -- buildup scalar added per shot [0, maxBuildup]
+        maxBuildup      = 0.60,   -- caps vmRecoilBuildup; pitch scales by (1 + buildup)
+        recoverySpeed   = 8,      -- slower decay lets recoil stack under sustained fire
+        kickSpeed       = 42,     -- vmRecoilCurrent chase speed (fast snap feel)
+        randomYawScale  = 0.6,
         randomRollScale = 0.5,
-        alternatingYaw  = true,   -- flip yaw direction each shot (left-right-left...)
+        alternatingYaw  = true,
     },
     animations = {
         firstPerson = {

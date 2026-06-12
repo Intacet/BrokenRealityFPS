@@ -1246,6 +1246,11 @@ Constants.DEFAULT_VIEWMODEL_RECOIL_RECOVERY_SPEED = 22
 Constants.DEFAULT_VIEWMODEL_RECOIL_KICK_SPEED     = 40
 Constants.DEFAULT_VIEWMODEL_RECOIL_MAX_BUILDUP    = 0.4
 
+-- Fallback camera-space recoil kick for weapons that have a per-weapon recoil profile
+-- but no camera sub-table.  Per-weapon values in WeaponData override these.
+Constants.DEFAULT_CAMERA_RECOIL_KICK_UP    = 0.35   -- degrees of screen kick per shot
+Constants.DEFAULT_CAMERA_RECOIL_KICK_RIGHT = 0.05
+
 -- ── Debug bullet impact markers ─────────────────────────────────────────────────────────
 -- When true, a neon sphere is rendered at the barrel tip each shot for visual debugging.
 -- Must be false in any build shown to players.
@@ -1284,11 +1289,11 @@ Constants.VIEWMODEL_SWAY_MOUSE_MAX           = 0.65   -- maximum magnitude of ac
 
 -- Movement bob: sine oscillation while moving. Replaces Stage 5A VIEWMODEL_BOB_ENABLED.
 Constants.VIEWMODEL_MOVE_BOB_ENABLED      = true
-Constants.VIEWMODEL_WALK_BOB_AMOUNT       = 0.018  -- studs; max vertical bob while walking
+Constants.VIEWMODEL_WALK_BOB_AMOUNT       = 0.013  -- studs; max vertical bob while walking
 Constants.VIEWMODEL_WALK_BOB_SPEED        = 6      -- rad/s sine phase advance while walking
-Constants.VIEWMODEL_SPRINT_BOB_AMOUNT     = 0.035
+Constants.VIEWMODEL_SPRINT_BOB_AMOUNT     = 0.026
 Constants.VIEWMODEL_SPRINT_BOB_SPEED      = 9
-Constants.VIEWMODEL_CROUCH_BOB_AMOUNT     = 0.008
+Constants.VIEWMODEL_CROUCH_BOB_AMOUNT     = 0.006
 Constants.VIEWMODEL_CROUCH_BOB_SPEED      = 4
 Constants.VIEWMODEL_MOVE_BOB_SMOOTH_SPEED = 12     -- rate at which vmBobTime decays to zero when stopped
 Constants.VIEWMODEL_WALK_BOB_LATERAL_FACTOR = 0.55  -- lateral sway as a fraction of vertical bob; cos(phase) for circular figure-8 path
