@@ -6241,9 +6241,13 @@ function MovementController:Start()
         -- ── Compose and write CameraOffset (single write per frame) ───────────
         -- Landing dip is additive on smoothed stance Y (not scaled by mult — raw impulse).
         -- Bob is composited after mult so ADS/reload reduces both stance + bob uniformly.
-        local finalY: number = (povOffsetCurrent + povLandDip) * mult + bobY
+        -- Static stance offset (crouch/slide Y and Z) is excluded from mult.
+        -- Scaling it by the ADS multiplier would lift the camera from the crouched
+        -- position when aiming, making the viewmodel visually jump upward.
+        -- Only transient dynamic effects (bob, landing dip) are damped by ADS.
+        local finalY: number = povOffsetCurrent + (povLandDip + bobY) * mult
         local finalX: number = bobX * mult
-        local finalZ: number = camBodyOffsetZ * mult
+        local finalZ: number = camBodyOffsetZ
 
         -- Preserve mouse-lock shoulder X via read-modify-write.
         -- updateSprintCameraOffset() runs before this function and owns CameraOffset.X.

@@ -1704,13 +1704,14 @@ function ViewModelController:SetAiming(entering: boolean)
         end
 
         -- Stop any active adsOut (cancel exit if re-entering).
+        -- Fade so the rig doesn't snap to rest-pose for one frame mid-transition.
         if weaponAdsOutTrack and weaponAdsOutTrack.IsPlaying then
-            weaponAdsOutTrack:Stop()
+            weaponAdsOutTrack:Stop(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
         end
 
         -- Stop any active adsIdle (in case re-entering from Aiming).
         if weaponAdsIdleTrack and weaponAdsIdleTrack.IsPlaying then
-            weaponAdsIdleTrack:Stop()
+            weaponAdsIdleTrack:Stop(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
         end
 
         if weaponAdsInTrack then
@@ -1760,13 +1761,14 @@ function ViewModelController:SetAiming(entering: boolean)
         adsIdleTime = 0
 
         -- Stop adsIn if still entering.
+        -- Fade so the rig doesn't snap to rest-pose for one frame before adsOut fades in.
         if weaponAdsInTrack and weaponAdsInTrack.IsPlaying then
-            weaponAdsInTrack:Stop()
+            weaponAdsInTrack:Stop(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
         end
 
         -- Stop adsIdle if currently aiming.
         if weaponAdsIdleTrack and weaponAdsIdleTrack.IsPlaying then
-            weaponAdsIdleTrack:Stop()
+            weaponAdsIdleTrack:Stop(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
         end
 
         if weaponAdsOutTrack then
@@ -1856,11 +1858,14 @@ end
 -- Stops all ADS animations and clears ADS state.
 -- Called internally when holstering, reloading, or resetting.
 function ViewModelController:StopADSAnimations()
+    -- adsIn and adsIdle hold the weapon in the ADS pose while active.
+    -- Stopping them without a fade snaps the rig to its rest T-pose for one frame,
+    -- causing the gun-into-camera glitch when reload or holster interrupts ADS.
     if weaponAdsInTrack and weaponAdsInTrack.IsPlaying then
-        weaponAdsInTrack:Stop()
+        weaponAdsInTrack:Stop(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
     end
     if weaponAdsIdleTrack and weaponAdsIdleTrack.IsPlaying then
-        weaponAdsIdleTrack:Stop()
+        weaponAdsIdleTrack:Stop(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
     end
     if weaponAdsOutTrack and weaponAdsOutTrack.IsPlaying then
         weaponAdsOutTrack:Stop()
