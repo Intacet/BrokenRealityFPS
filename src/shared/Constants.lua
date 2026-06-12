@@ -1403,6 +1403,7 @@ Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MIN  = 0.82
 Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MAX  = 0.90
 Constants.AKS74_SHOOT_SOUND_ROLLOFF_MIN_DISTANCE = 8
 Constants.AKS74_SHOOT_SOUND_ROLLOFF_MAX_DISTANCE = 90
+Constants.AKS74_SHOOT_SOUND_FADE_TIME           = 0.30  -- seconds for volume to decay to 0 after each shot
 Constants.AKS74_SHOOT_SOUND_DEBUG               = false
 
 -- ============================================================

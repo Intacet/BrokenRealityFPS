@@ -15,6 +15,7 @@
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService      = game:GetService("SoundService")
+local TweenService      = game:GetService("TweenService")
 local workspace         = game:GetService("Workspace")
 
 -- ============================================================
@@ -61,6 +62,7 @@ local reloadSound:     Sound
 local deathSound:      Sound
 local dryFireSound:    Sound
 local weaponFireSound: Sound
+local weaponFireFadeTween: Tween?
 
 -- ============================================================
 -- Private helpers
@@ -173,12 +175,26 @@ function SoundController:PlayWeaponFire(soundIds: { string }, parent: Instance?)
         return
     end
 
+    -- Cancel any in-progress fade and restore full volume before each shot.
+    if weaponFireFadeTween then
+        weaponFireFadeTween:Cancel()
+        weaponFireFadeTween = nil
+    end
+    s.Volume = Constants.AKS74_SHOOT_SOUND_VOLUME :: number
+
     s.PlaybackSpeed = (Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MIN :: number)
         + math.random() * (
             (Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MAX :: number)
             - (Constants.AKS74_SHOOT_SOUND_PLAYBACK_SPEED_MIN :: number)
         )
     s:Play()
+
+    -- Fade volume to 0 over the tail so shots decay naturally instead of cutting off.
+    local fadeTime = Constants.AKS74_SHOOT_SOUND_FADE_TIME :: number
+    local tweenInfo = TweenInfo.new(fadeTime, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(s, tweenInfo, { Volume = 0 })
+    tween:Play()
+    weaponFireFadeTween = tween
 
     if Constants.AKS74_SHOOT_SOUND_DEBUG :: boolean then
         Logger.debug("[SoundController] PlayWeaponFire: played " .. ID_WEAPON_FIRE)
