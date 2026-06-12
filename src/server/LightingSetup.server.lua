@@ -42,6 +42,13 @@ Lighting.ColorShift_Top       = Color3.fromRGB(16, 19, 30)
 Lighting.TimeOfDay            = "15:30:00"
 Lighting.GeographicLatitude   = 41.88          -- roughly Chicago
 
+-- Environment scales: how much the sky/environment contributes to surface lighting.
+-- EnvironmentDiffuseScale: cold grey sky bleeds onto diffuse surfaces (dark, overcast feel).
+-- EnvironmentSpecularScale: metal and smooth surfaces catch the environment colour —
+--   gives wet-pavement and gun-metal the reflective quality visible in the reference shots.
+Lighting.EnvironmentDiffuseScale  = 0.4
+Lighting.EnvironmentSpecularScale = 0.6
+
 -- Legacy fog: disabled in favour of the Atmosphere effect below.
 Lighting.FogEnd               = 100000
 
