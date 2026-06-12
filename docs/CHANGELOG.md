@@ -7,6 +7,22 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-11 — FIX] — Footstep isMoving() gate: replace AssemblyLinearVelocity with MoveDirection
+
+### Summary
+
+Root-cause fix for the remaining footstep cadence skip after the timer-reset fix.
+
+MCP instrumentation revealed that Roblox R6 locomotion applies movement via impulses every ~3-4 physics frames. Between impulses, `HumanoidRootPart.AssemblyLinearVelocity` drops to 0.31–0.83 studs/s — below the 1.5 stud/s `FOOTSTEP_MIN_SPEED` threshold — even though the player is holding a movement key. MCP data: 29 frames per 2 seconds where the velocity gate failed while `MoveDirection = 1.0`. Each missed frame paused the accumulator, causing the perceived cadence gap.
+
+Fix: `isMoving()` now checks `Humanoid.MoveDirection.Magnitude > 0` instead of `AssemblyLinearVelocity >= FOOTSTEP_MIN_SPEED`. `MoveDirection` is set by the input system, not the physics solver, so it stays at 1.0 throughout any movement key hold without impulse-cycle fluctuation.
+
+### Files changed
+
+- `src/client/FootstepController.lua` — `isMoving()` rewritten to use `MoveDirection`
+
+---
+
 ## [2026-06-11 — FIX] — Footstep cadence skip eliminated + intervals aligned to animation data
 
 ### Summary

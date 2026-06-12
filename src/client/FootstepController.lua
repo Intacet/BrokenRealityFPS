@@ -130,16 +130,17 @@ local function isGrounded(): boolean
     return GROUNDED_STATES[state] == true
 end
 
--- Returns true when the local player is moving fast enough to warrant footsteps.
--- Uses HumanoidRootPart AssemblyLinearVelocity (horizontal component) so that
--- FOOTSTEP_MIN_SPEED is a studs-per-second threshold. MoveDirection is a unit
--- vector capped at 1.0 and cannot reach 1.5, so it must not be used here.
+-- Returns true when the local player is pressing a movement key.
+-- Uses Humanoid.MoveDirection rather than AssemblyLinearVelocity: R6 locomotion
+-- applies impulses every ~3-4 physics frames, dropping AssemblyLinearVelocity
+-- near-zero between impulses. Those drops fail the velocity gate and pause the
+-- accumulator for ~25% of each stride, producing the audible cadence skip.
+-- MoveDirection stays at magnitude 1 the entire time a movement key is held,
+-- so it never flickers with the physics impulse cycle.
 local function isMoving(): boolean
-    local root = hrp
-    if root == nil then return false end
-    local vel = (root :: BasePart).AssemblyLinearVelocity
-    local horizontalSpeed = math.sqrt(vel.X * vel.X + vel.Z * vel.Z)
-    return horizontalSpeed >= (Constants.FOOTSTEP_MIN_SPEED :: number)
+    local hum = humanoid
+    if hum == nil then return false end
+    return (hum :: Humanoid).MoveDirection.Magnitude > 0
 end
 
 -- Plays one one-shot footstep sound. The Sound instance is created, played,
