@@ -54,7 +54,9 @@ local footstepEmitter: Attachment? = nil
 local heartbeatConn: RBXScriptConnection? = nil
 local characterConn: RBXScriptConnection? = nil
 local timeSinceLastStep: number = 0
-local initialized: boolean      = false
+local lastGoodTier: MovementTier? = nil  -- last non-nil tier; used to ride through brief Idle flickers
+local tierNilSecs: number         = 0    -- seconds tier has been nil while still moving
+local initialized: boolean        = false
 
 -- Grounded Humanoid states — footsteps play in these states only.
 local GROUNDED_STATES: { [Enum.HumanoidStateType]: boolean } = {
@@ -211,6 +213,8 @@ local function onCharacterAdded(character: Model)
     hrp             = nil
     footstepEmitter = nil
     timeSinceLastStep = 0
+    lastGoodTier    = nil
+    tierNilSecs     = 0
 
     local hum = character:WaitForChild("Humanoid", 5) :: Humanoid?
     if hum == nil then
@@ -253,17 +257,33 @@ local function onHeartbeat(dt: number)
     local moveState = MovementController:GetMoveState()
     local tier: MovementTier? = resolveMovementTier(moveState)
 
-    -- Tier nil = idle / sliding / vaulting — stop accumulating.
-    if tier == nil then
-        if Constants.FOOTSTEP_DEBUG :: boolean then
-            Logger.debug("[FootstepController] tier=nil st=" .. moveState)
-        end
-        return
-    end
-
     -- isMoving() catches crouching-in-place: the Crouch tier stays active even when
     -- stationary, but MoveDirection drops to 0 when no movement key is held.
     if not isMoving() then
+        lastGoodTier = nil
+        tierNilSecs  = 0
+        return
+    end
+
+    if tier ~= nil then
+        -- Valid locomotion tier — clear any pending nil window.
+        lastGoodTier = tier
+        tierNilSecs  = 0
+    elseif moveState == "Idle" and lastGoodTier ~= nil and tierNilSecs < 0.10 then
+        -- Brief "Idle" flicker while still pressing a movement key (≤ 100 ms).
+        -- MovementController momentarily returns "Idle" at animation loop boundaries;
+        -- accumulating through it prevents a cadence gap at every loop point.
+        -- "Sliding" and "Vaulting" fall through to the else branch so those states
+        -- correctly stop the accumulator even with a short duration.
+        tierNilSecs += dt
+        tier = lastGoodTier
+    else
+        -- Genuine stop, slide, vault, or Idle that has lasted > 100 ms.
+        lastGoodTier = nil
+        tierNilSecs  = 0
+        if Constants.FOOTSTEP_DEBUG :: boolean then
+            Logger.debug("[FootstepController] tier=nil st=" .. moveState)
+        end
         return
     end
 
@@ -345,6 +365,8 @@ function FootstepController:Destroy()
     hrp             = nil
     footstepEmitter = nil
     timeSinceLastStep = 0
+    lastGoodTier    = nil
+    tierNilSecs     = 0
     initialized     = false
     Logger.debug("[FootstepController] destroyed")
 end
