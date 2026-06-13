@@ -7,11 +7,25 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-13 — FIX] — AKS74 locomotion: corrected walk / run / sprint state detection
+
+- **Bug:** Original state detection (see ANIMATION entry below) used `GetMoveState() == "Sprinting"` to trigger `"Sprint"` for BOTH shift-held run AND double-tap tactical sprint → sprint anim played when only running. Also used HRP horizontal speed to separate walk/run; normal walk speed (~16 studs/s) exceeded the 10 stud/s run threshold → walk anim never played.
+- **Fix (`src/client/GunController.lua`):** Removed speed-based detection entirely. State now maps from `MovementController` directly:
+  - `GetMoveState() == "Sprinting" AND IsTacticalSprinting()` → `"Sprint"` (double-tap tactical sprint only)
+  - `GetMoveState() == "Sprinting"` (shift-held, not tactical) → `"Run"`
+  - `GetMoveState() == "Walking"` → `"Walk"`
+  - All other states (Idle, Crouching, Sliding, Vaulting) → `"Idle"`
+- `char`, `hrp`, `horizSpeed` locals removed from the Heartbeat update loop (were dead code once speed detection was removed).
+- `VIEWMODEL_LOCOMOTION_RUN_SPEED_THRESHOLD`, `VIEWMODEL_LOCOMOTION_WALK_SPEED_THRESHOLD`, `VIEWMODEL_LOCOMOTION_SPRINT_SPEED_THRESHOLD` in `Constants.lua` are now unused by GunController — retained in Constants pending a removal decision (see DEBT-078).
+- Only `src/client/GunController.lua` changed. No ViewModelController, MovementController, Constants, or WeaponData changes.
+
+---
+
 ## [2026-06-13 — ANIMATION] — AKS74 FP locomotion animations (walk / enter-run / run / sprint)
 
 - Added four first-person viewmodel locomotion animation tracks for the AKS74: walk (looped), enterRun (one-shot), run (looped, new ID replaces old), sprint (looped).
 - **New public API:** `ViewModelController:SetLocomotionState(state: string)` — replaces the binary `SetRunning(isSprinting)` call. States: "Idle" | "Walk" | "Run" | "Sprint".
-- **State detection (GunController):** `GetMoveState() == "Sprinting"` → Sprint; horizontal speed ≥ 10 studs/s → Run; ≥ 1.5 studs/s → Walk; else Idle. Only calls SetLocomotionState on state edge (no per-frame restarts).
+- **State detection (GunController):** ~~`GetMoveState() == "Sprinting"` → Sprint; horizontal speed ≥ 10 studs/s → Run; ≥ 1.5 studs/s → Walk; else Idle.~~ Superseded by the FIX entry above — see that entry for the corrected state mapping using `IsTacticalSprinting()` and no speed thresholds. Only calls SetLocomotionState on state edge (no per-frame restarts).
 - **EnterRun one-shot:** plays on Walk/Idle → Run transition via `Stopped:Once` callback, then chains to run loop. Sprint → Run skips enterRun (already at speed).
 - **Priority blocking:** reload Stopped, equip Stopped, and ADS-exit Stopped callbacks all resume via `SetLocomotionState`. ADS suppresses sprint anim visually (plays run instead); state flag preserved so sprint resumes on ADS exit.
 - **Cleanup:** walk/enterRun/sprint tracks stopped and destroyed in `StopWeaponAnimations()`, `HolsterWeapon()`, and `init()`. State vars reset to defaults.

@@ -414,26 +414,19 @@ function GunController:Start()
         -- so the viewmodel smoothly returns to rest as recoilCFrame decays.
         ViewModelController:SetRecoilOffset(recoilCFrame)
 
-        -- Locomotion state: compute from movement state + horizontal speed each frame.
-        -- Only call SetLocomotionState when state changes to avoid per-frame restarts.
-        -- GunController already requires MovementController and LocalPlayer — no new deps.
+        -- Locomotion state: map MovementController state to viewmodel locomotion.
+        -- GetMoveState() returns "Sprinting" for both shift-held run and tactical sprint;
+        -- IsTacticalSprinting() is the only reliable way to separate the two.
+        -- Speed-based detection is intentionally absent: normal walk speed (~16 studs/s)
+        -- exceeds any reasonable "run" speed threshold and would misfire constantly.
         if equippedWeaponName ~= nil then
-            local char = LocalPlayer.Character
-            local hrp: BasePart? = if char
-                then char:FindFirstChild("HumanoidRootPart") :: BasePart?
-                else nil
-            local horizSpeed: number = if hrp
-                then Vector2.new(
-                    (hrp :: BasePart).AssemblyLinearVelocity.X,
-                    (hrp :: BasePart).AssemblyLinearVelocity.Z).Magnitude
-                else 0
             local moveState = MovementController:GetMoveState()
             local locomotionState: string
-            if moveState == "Sprinting" then
+            if moveState == "Sprinting" and MovementController.IsTacticalSprinting() then
                 locomotionState = "Sprint"
-            elseif horizSpeed >= (Constants.VIEWMODEL_LOCOMOTION_RUN_SPEED_THRESHOLD :: number) then
+            elseif moveState == "Sprinting" then
                 locomotionState = "Run"
-            elseif horizSpeed >= (Constants.VIEWMODEL_LOCOMOTION_WALK_SPEED_THRESHOLD :: number) then
+            elseif moveState == "Walking" then
                 locomotionState = "Walk"
             else
                 locomotionState = "Idle"

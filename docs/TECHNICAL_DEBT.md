@@ -2025,7 +2025,7 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 - `WeaponData["AKS74"].animations.firstPerson`: `walk` (125395339753686), `enterRun` (131163456590831), `run` replaced (73261579857067), `sprint` (126248731863931) added.
 - `ViewModelController:SetLocomotionState(state)` — new public API replacing the binary `SetRunning(isSprinting)`. States: "Idle" | "Walk" | "Run" | "Sprint". Only transitions on state change; blocked while reloading (flag updated; Stopped callback resumes); ADS suppresses sprint anim to Run visually.
 - EnterRun one-shot plays on Walk/Idle → Run transition; `Stopped:Once` callback chains to run loop. Sprint → Run skips enterRun (already at speed).
-- `GunController.update()`: replaces `SetRunning()` with `SetLocomotionState()` computed from `GetMoveState() == "Sprinting"` + HRP horizontal speed vs thresholds (Walk ≥ 1.5, Run ≥ 10 studs/s).
+- `GunController.update()`: replaces `SetRunning()` with `SetLocomotionState()` mapped from `MovementController` state directly — `GetMoveState() == "Sprinting" AND IsTacticalSprinting()` → "Sprint"; `GetMoveState() == "Sprinting"` → "Run"; `GetMoveState() == "Walking"` → "Walk"; else "Idle". Speed-based detection was removed (see CHANGELOG 2026-06-13 FIX entry). Constants `VIEWMODEL_LOCOMOTION_RUN_SPEED_THRESHOLD`, `VIEWMODEL_LOCOMOTION_WALK_SPEED_THRESHOLD`, `VIEWMODEL_LOCOMOTION_SPRINT_SPEED_THRESHOLD` are now dead code in GunController — still present in Constants.lua pending removal.
 - All priority blocks wired: reload Stopped, equip Stopped, adsOut Stopped, no-adsOut path all resume via locomotion state.
 - `VIEWMODEL_LOCOMOTION_DEBUG = false` — set true for per-transition debug logging.
 
@@ -2033,9 +2033,9 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 1. Press key 1 → equip AKS74. Confirm equip animation plays; idle loops. No Output errors.
 2. Stand still → "Idle" state. Confirm idle plays.
 3. Walk forward slowly → "Walk" state. Confirm walk FP anim plays.
-4. Accelerate to run speed (≥ 10 studs/s) → "Run" state. Confirm enterRun plays once, then run loop.
-5. Sprint (LeftShift) → "Sprint" state. Confirm sprint FP anim plays.
-6. Stop sprinting → "Run" or "Walk" or "Idle" depending on speed. Confirm crossfade, no pop.
+4. Hold Shift to run (no double-tap) → "Run" state (`GetMoveState() == "Sprinting"` + `IsTacticalSprinting() == false`). Confirm enterRun plays once, then run loop.
+5. Double-tap Shift for tactical sprint → "Sprint" state (`IsTacticalSprinting() == true`). Confirm sprint FP anim plays.
+6. Release Shift (stop sprinting) → "Walk" or "Idle" depending on whether WASD is held. Confirm crossfade, no pop.
 7. Stop moving → "Idle". Confirm idle resumes.
 8. Walk → Run → Sprint → back to Walk in sequence. Confirm enterRun plays only on Walk/Idle → Run.
 9. Walk → press R (reload). Confirm reload plays; walk anim stops. Walk again after reload → walk anim resumes.
@@ -2050,7 +2050,7 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 
 **Risk:** Walk/enterRun/run/sprint animation IDs have not been tested against the AKS74 rig in Studio. If any ID targets a different rig or has zero length, the track loads without error but may play incorrectly. In that case: inspect the failing ID in Animation Editor with the AKS74 rig; request a corrected ID.
 
-**Risk:** `horizSpeed` computed from `HumanoidRootPart.AssemblyLinearVelocity` XZ magnitude. On a moving platform or ramp this may fluctuate and cause rapid Walk↔Run toggling. If this happens, add a hysteresis band (e.g. ±2 studs/s) around the threshold constants.
+**Risk resolved (2026-06-13):** The original speed-based Walk↔Run detection using `HumanoidRootPart.AssemblyLinearVelocity` XZ magnitude was removed. The moving-platform fluctuation risk no longer applies. Speed threshold constants in `Constants.lua` (`VIEWMODEL_LOCOMOTION_RUN_SPEED_THRESHOLD`, `WALK_SPEED_THRESHOLD`, `SPRINT_SPEED_THRESHOLD`) are now dead code — consider removing them from Constants.lua in a future cleanup pass.
 
 **Fix when:** All 17 checklist items pass in a live Studio session. Mark RESOLVED.
 - CHANGELOG.md (2026-06-12 MAP entry) documents all dimensions, part counts, and MCP verification results.
