@@ -232,10 +232,15 @@ local adsState: ADSState = "Hip"
 local adsIdleTime: number = 0
 
 -- ADS pivot alignment alpha (0 = hip pivot, 1 = FakeCamera-at-camera-centre pivot).
--- Lerped each RenderStepped toward 1 during Entering/Aiming and toward 0 during Exiting/Hip.
+-- Lerped each RenderStepped toward 1 during Entering/Aiming/Exiting and toward 0 once Hip.
 -- At alpha=1 the pivot removes CAMERA_EXTRA_OFFSET so the ADS animation's sights land at
 -- screen centre.  Uses BASE_OFFSET which was already derived from FakeCamera in EquipWeapon.
 local adsAimAlpha: number = 0
+
+-- Countdown (seconds) that holds adsAimAlpha at 1 after StopADSAnimations() is called.
+-- Gives the adsIdle/adsIn fade time to finish before the pivot starts shifting toward basePivot,
+-- preventing the gun-into-camera glitch when reload interrupts ADS.
+local adsAimHoldTimer: number = 0
 
 
 -- Third-person character weapon AnimationTracks.
@@ -422,6 +427,7 @@ function ViewModelController:init()
     adsState             = "Hip"
     adsIdleTime          = 0
     adsAimAlpha          = 0
+    adsAimHoldTimer      = 0
     vmMouseInertiaDelta  = Vector2.zero
     vmMouseInertia       = Vector2.zero
     vmInertiaCurrent     = 1
@@ -525,6 +531,7 @@ function ViewModelController:StopWeaponAnimations()
     adsState               = "Hip"
     adsIdleTime            = 0
     adsAimAlpha            = 0
+    adsAimHoldTimer        = 0
     vmMouseInertiaDelta    = Vector2.zero
     vmMouseInertia         = Vector2.zero
     vmInertiaCurrent       = 1
@@ -1422,8 +1429,21 @@ function ViewModelController:Start()
         -- blends the pivot toward a chain that omits CAMERA_EXTRA_OFFSET so BASE_OFFSET places
         -- FakeCamera exactly at cam.CFrame when alpha=1 — matching where the animation aims.
         -- freeAimCF and finalMoveCF are already CFrame.new() during ADS (zeroed above).
+        -- Tick down the hold timer that prevents pivot decay immediately after
+        -- StopADSAnimations (reload-interrupts-ADS path).
+        if adsAimHoldTimer > 0 then
+            adsAimHoldTimer = math.max(0, adsAimHoldTimer - dt)
+        end
+
+        -- adsAimTarget = 1 whenever any ADS activity is in progress:
+        --   Entering/Aiming  — ADS engaging or held
+        --   Exiting          — adsOut playing; pivot must stay ADS-aligned for its full
+        --                      duration so the barrel doesn't clip through the camera as
+        --                      the animation and the pivot shift at different rates
+        --   adsAimHoldTimer  — brief grace window after StopADSAnimations so the
+        --                      adsIdle/adsIn fade completes before the pivot moves
         local adsAimTarget: number = 0
-        if adsState == "Entering" or adsState == "Aiming" then
+        if adsState ~= "Hip" or adsAimHoldTimer > 0 then
             adsAimTarget = 1
         end
         adsAimAlpha = adsAimAlpha
@@ -1875,9 +1895,15 @@ function ViewModelController:StopADSAnimations()
     end
     adsState               = "Hip"
     adsIdleTime            = 0
+    -- Hold adsAimAlpha at 1 for FADE_TIME after interruption so the adsIdle/adsIn
+    -- fade completes before the pivot starts shifting toward basePivot.
+    -- Without this, the pivot decays during the fade window, and the mid-fade rig
+    -- pose (between ADS and rest) combined with partial pivot shift places the gun
+    -- inside the camera.
+    adsAimHoldTimer        = Constants.VIEWMODEL_ADS_TRACK_FADE_TIME :: number
     -- Do NOT hard-reset adsAimAlpha: the RenderStepped lerp decays it to 0
-    -- smoothly (adsAimTarget = 0 when adsState == "Hip"). Resetting it here
-    -- caused an instant pivot snap when reload cancelled ADS mid-animation.
+    -- smoothly once adsAimHoldTimer expires. Resetting it here causes an instant
+    -- pivot snap (CAMERA_EXTRA_OFFSET jump) visible as a one-frame position pop.
 end
 
 -- ============================================================
