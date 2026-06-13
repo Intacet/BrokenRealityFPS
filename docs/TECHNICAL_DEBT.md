@@ -1714,7 +1714,7 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 
 **What Task C implements (2026-06-11):**
 - `moveSmoothSpeed` lerps toward `getTargetMoveSpeed()` each Heartbeat using acceleration/deceleration constants.
-- State-appropriate acceleration: walk=42 studs/s², sprint=34, crouch=48, air=14, deceleration=58.
+- State-appropriate acceleration: walk=34 studs/s², sprint=26, crouch=40, air=14; deceleration two-path after 2026-06-12 body-weight update (see below).
 - Hard-zero cases (phase, landing lock, sprint-stop lock, slide, vault) snap WalkSpeed=0 immediately.
 - Body yaw in mouse-lock walk/crouch mode picks speed by state: walk=18, crouch=20, sprint=9, backpedal=22 deg/frame@60fps.
 - Master switches: `MOVEMENT_SMOOTH_SPEED_ENABLED` and `MOVEMENT_BODY_YAW_SMOOTH_ENABLED` (both default true).
@@ -1746,6 +1746,17 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 11. Set `MOVEMENT_SMOOTH_SPEED_ENABLED = false`. Legacy instant-snap behavior fully restored.
 12. Set `MOVEMENT_BODY_YAW_SMOOTH_ENABLED = false`. Body yaw falls back to `CUSTOM_MOUSE_LOCK_BODY_YAW_LERP_SPEED = 18` flat.
 13. Output panel shows no errors or unexpected warns throughout.
+
+**Updated (2026-06-12 — Body-weight movement speed smoothing):**
+- Acceleration values retuned for body-weight feel: walk 42→34 studs/s², sprint 34→26, crouch 48→40. Deceleration base 58→52.
+- Two-path deceleration added in `updateMoveSmoothSpeed()`:
+  - Sprint-exit path (was at ≥ `SPRINT_SPEED - STOP_EPSILON`, no longer actively sprinting): `MOVEMENT_SPRINT_DECELERATION × MOVEMENT_SPRINT_EXIT_EXTRA_DRAG` = 46 × 1.05 = 48.30 studs/s².
+  - Normal stop path (all other deceleration): `MOVEMENT_DECELERATION × MOVEMENT_STOP_EXTRA_DRAG` = 52 × 1.15 = 59.80 studs/s².
+- New master switch `MOVEMENT_BODY_WEIGHT_ENABLED = true`; when false both paths use base `MOVEMENT_DECELERATION` with no scaling.
+- New debug flag `MOVEMENT_BODY_WEIGHT_DEBUG = false` — change-gated via `lastBodyWeightDecelPath`, fires once per path change via `Logger.debug`. Must remain false in production.
+- New state variable `lastBodyWeightDecelPath: string` tracks current decel path for change-gating.
+- 5 new constants, 4 existing values changed. MCP Studio verified 2026-06-12: all 18 checks passed; no runtime errors.
+- **Tuning risk:** `MOVEMENT_STOP_EXTRA_DRAG = 1.15` and `MOVEMENT_SPRINT_EXIT_EXTRA_DRAG = 1.05` were set analytically (sprint→walk in ~0.17 s, normal stop snappy at ~0.13 s). Live playtest may require adjustment — tune only these multipliers and the base deceleration values; no logic changes needed.
 
 **Trigger for Stage 2:** Decision to add directional acceleration bias, slide-into-walk momentum transfer, or sprint-stop deceleration smoothing. Each is a separate stage.
 

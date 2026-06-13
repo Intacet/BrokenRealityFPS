@@ -1449,14 +1449,21 @@ Constants.CAMERA_BODY_RELOAD_MULTIPLIER   = 0.65   -- scale applied to all body 
 -- those were added in Task A and already exist above.
 
 -- Movement speed smoothing — WalkSpeed ramps via acceleration/deceleration instead of snapping.
-Constants.MOVEMENT_SMOOTH_SPEED_ENABLED   = true   -- master switch; false = instant snap (legacy)
-Constants.MOVEMENT_ACCELERATION           = 42     -- studs/s²: idle → walk ramp-up
-Constants.MOVEMENT_DECELERATION           = 58     -- studs/s²: any state → idle ramp-down
-Constants.MOVEMENT_SPRINT_ACCELERATION    = 34     -- studs/s²: walk → sprint ramp-up
-Constants.MOVEMENT_CROUCH_ACCELERATION    = 48     -- studs/s²: crouch speed transition
-Constants.MOVEMENT_AIR_ACCELERATION       = 14     -- studs/s²: while airborne (jump/fall)
-Constants.MOVEMENT_STOP_EPSILON           = 0.05   -- studs/s; snap to target when |diff| < this
-Constants.MOVEMENT_MIN_ACTIVE_INPUT       = 0.05   -- input magnitude below which idle is assumed
+Constants.MOVEMENT_SMOOTH_SPEED_ENABLED    = true   -- master switch; false = instant snap (legacy)
+-- Body weight: extra-drag multipliers applied to deceleration for a grounded, physical feel.
+-- When false, sprint-exit and normal stop both use the base DECELERATION value with no scaling.
+Constants.MOVEMENT_BODY_WEIGHT_ENABLED     = true   -- master switch for body-weight drag multipliers
+Constants.MOVEMENT_BODY_WEIGHT_DEBUG       = false  -- log decel path changes via Logger.debug()
+Constants.MOVEMENT_ACCELERATION            = 34     -- studs/s²: idle → walk ramp-up
+Constants.MOVEMENT_DECELERATION            = 52     -- studs/s²: walk-state ramp-down (STOP_EXTRA_DRAG applies on top)
+Constants.MOVEMENT_SPRINT_ACCELERATION     = 26     -- studs/s²: walk → sprint ramp-up (slower for body-weight feel)
+Constants.MOVEMENT_SPRINT_DECELERATION     = 46     -- studs/s²: sprint-exit ramp-down (SPRINT_EXIT_EXTRA_DRAG applies on top)
+Constants.MOVEMENT_CROUCH_ACCELERATION     = 40     -- studs/s²: crouch speed transition
+Constants.MOVEMENT_AIR_ACCELERATION        = 14     -- studs/s²: while airborne (jump/fall)
+Constants.MOVEMENT_STOP_EPSILON            = 0.05   -- studs/s; snap to target when |diff| < this
+Constants.MOVEMENT_MIN_ACTIVE_INPUT        = 0.05   -- input magnitude below which idle is assumed
+Constants.MOVEMENT_STOP_EXTRA_DRAG         = 1.15   -- multiplier on DECELERATION during normal walk ramp-down
+Constants.MOVEMENT_SPRINT_EXIT_EXTRA_DRAG  = 1.05   -- multiplier on SPRINT_DECELERATION when exiting sprint
 
 -- Body yaw smoothing — deg/frame at 60fps passed to rotateCharacterCapped().
 -- MOVEMENT_BODY_YAW_SPRINT_SMOOTH_SPEED equals MAX_DELTA / 60 so sprint caps at the global limit.

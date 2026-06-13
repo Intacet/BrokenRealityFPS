@@ -7,6 +7,42 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-12 — MOVEMENT] — Body-weight movement speed smoothing
+
+### Summary
+
+Added body-weight acceleration / deceleration feel to the existing Task C speed smoothing system. The two new perceptible effects are:
+
+- **Acceleration into sprint:** `MOVEMENT_SPRINT_ACCELERATION` reduced 34 → 26 studs/s², so the character takes ~0.31 s to fully ramp from walk (14) to sprint (22) instead of ~0.24 s. Body feels planted before breaking into a run.
+- **Deceleration when stopping / exiting sprint:** Two-path deceleration branch replaces the single `MOVEMENT_DECELERATION` value:
+  - **Sprint-exit path** (WalkSpeed was at SPRINT_SPEED or above, player no longer sprinting): `MOVEMENT_SPRINT_DECELERATION (46) × MOVEMENT_SPRINT_EXIT_EXTRA_DRAG (1.05) = 48.3 studs/s²` — ~0.166 s from sprint speed to walk speed.
+  - **Normal decel path** (all other state transitions): `MOVEMENT_DECELERATION (52) × MOVEMENT_STOP_EXTRA_DRAG (1.15) = 59.8 studs/s²` — crisp, planted stop.
+
+All other systems unchanged: no camera changes, no animation changes, no combat changes, no remotes, no ADS or footstep behavior changes.
+
+**MCP verified (Client, 2026-06-12):** All 18 constant checks passed — 5 new constants exist with correct values, 5 updated constants have correct new values, 3 unchanged constants still correct. Sprint-exit accel = 48.30 ✓ — normal decel accel = 59.80 ✓ — no errors in Output.
+
+### Constants changed (`src/shared/Constants.lua`)
+
+| Constant | Old | New | Notes |
+|---|---|---|---|
+| `MOVEMENT_ACCELERATION` | 42 | 34 | idle → walk ramp-up, slower for body weight |
+| `MOVEMENT_DECELERATION` | 58 | 52 | base walk ramp-down (drag multiplier applies on top) |
+| `MOVEMENT_SPRINT_ACCELERATION` | 34 | 26 | walk → sprint ramp-up, notably slower |
+| `MOVEMENT_CROUCH_ACCELERATION` | 48 | 40 | crouch transition, slightly slower |
+| `MOVEMENT_BODY_WEIGHT_ENABLED` | — | true | master switch for drag multipliers |
+| `MOVEMENT_BODY_WEIGHT_DEBUG` | — | false | change-gated Logger.debug() for decel path |
+| `MOVEMENT_SPRINT_DECELERATION` | — | 46 | dedicated sprint-exit deceleration |
+| `MOVEMENT_STOP_EXTRA_DRAG` | — | 1.15 | multiplier on DECELERATION (normal path) |
+| `MOVEMENT_SPRINT_EXIT_EXTRA_DRAG` | — | 1.05 | multiplier on SPRINT_DECELERATION (sprint exit) |
+
+### Files changed
+
+- `src/shared/Constants.lua` — 4 value updates + 5 new constants in Task C block
+- `src/client/MovementController.lua` — `lastBodyWeightDecelPath` debug state variable added; `updateMoveSmoothSpeed()` deceleration branch split into sprint-exit and normal paths
+
+---
+
 ## [2026-06-12 — MAP] — Richmond Test Lane blockout (Workspace.Map.Blockout.RichmondTestLane)
 
 ### Summary

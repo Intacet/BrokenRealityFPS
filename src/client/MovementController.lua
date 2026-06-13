@@ -367,6 +367,8 @@ local povLandDip:       number = 0
 -- Hard-zero cases (phase not ACTIVE, landing lock, sprint-stop lock, slide, vault) snap this to 0
 -- immediately via applySpeed() and skip the smooth update.
 local moveSmoothSpeed: number = 0
+-- Change-gated decel path label for MOVEMENT_BODY_WEIGHT_DEBUG logging (fires once per path change).
+local lastBodyWeightDecelPath: string = ""
 
 -- Task D: camera body feel state (extends Task B's stance offset system).
 -- updateCameraBodyFeel() is the single owner of Humanoid.CameraOffset per Heartbeat.
@@ -6294,8 +6296,34 @@ function MovementController:Start()
                 end
                 moveSmoothSpeed = math.min(moveSmoothSpeed + accel * dt, target)
             else
-                -- Decelerating toward a lower target speed (or stopping).
-                accel = Constants.MOVEMENT_DECELERATION :: number
+                -- Decelerating toward a lower target speed.
+                -- Sprint-exit path: WalkSpeed was at or above SPRINT_SPEED and the player
+                -- is no longer actively sprinting — use the dedicated sprint deceleration
+                -- with its extra-drag multiplier so the body feels planted on exit.
+                local isSprintExit = Constants.MOVEMENT_BODY_WEIGHT_ENABLED :: boolean
+                    and moveSmoothSpeed >= Constants.SPRINT_SPEED - (Constants.MOVEMENT_STOP_EPSILON :: number)
+                    and not (movementState.isSprinting and movementState.isMoving)
+                    and not isTacticalSprinting
+                if isSprintExit then
+                    accel = (Constants.MOVEMENT_SPRINT_DECELERATION :: number)
+                        * (Constants.MOVEMENT_SPRINT_EXIT_EXTRA_DRAG :: number)
+                else
+                    -- Normal deceleration: walk-to-stop, crouch exit, or any non-sprint ramp-down.
+                    local drag: number = if Constants.MOVEMENT_BODY_WEIGHT_ENABLED :: boolean
+                        then Constants.MOVEMENT_STOP_EXTRA_DRAG :: number
+                        else 1
+                    accel = (Constants.MOVEMENT_DECELERATION :: number) * drag
+                end
+                if Constants.MOVEMENT_BODY_WEIGHT_DEBUG :: boolean then
+                    local path = if isSprintExit then "sprint-exit" else "normal"
+                    if path ~= lastBodyWeightDecelPath then
+                        lastBodyWeightDecelPath = path
+                        Logger.debug(string.format(
+                            "[MovementController] body-weight decel → %s (speed=%.1f target=%.1f accel=%.1f)",
+                            path, moveSmoothSpeed, target, accel
+                        ))
+                    end
+                end
                 moveSmoothSpeed = math.max(moveSmoothSpeed - accel * dt, target)
             end
         end
