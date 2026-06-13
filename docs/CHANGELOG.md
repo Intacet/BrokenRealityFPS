@@ -7,6 +7,20 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-13 — RECOIL] — AKS74 recoil retune + rpm correction
+
+- Replaced the AKS74 viewmodel gun-kick profile in `WeaponData["AKS74"].recoil` with physically tuned values.
+- **Root cause fixed:** old `recoverySpeed = 8` gave only 42% recovery between shots at 650 RPM; the gun stacked recoil uncontrollably in full-auto. New `recoverySpeed = 22` gives 92% recovery between shots — controlled climb.
+- **Hip profile:** positionBack 0.045 → 0.052, positionUp 0.006 → 0.008, pitchDegrees 1.2 → 1.15, rollDegrees 0.18 → 0.16. Slightly more physical backward kick, trimmed roll.
+- **ADS profile:** positionBack 0.018 → 0.020, positionUp 0.002 → 0.003, pitchDegrees 0.45 → 0.38. ADS is 33% of hip pitch — noticeably tighter.
+- **Scalars:** buildupPerShot 0.08 → 0.065, maxBuildup 0.60 → 0.46, recoverySpeed 8 → 22, kickSpeed 42 → 44, randomYawScale 0.6 → 0.55, randomRollScale 0.5 → 0.45.
+- **Camera kick preserved:** `recoil.camera` sub-table (drives `viewRecoilCFrame`) unchanged — hip 0.45°/0.06°, ADS 0.16°/0.02°.
+- **rpm corrected:** 550 → 650 (spec value); `fireRate` updated to `60/650 ≈ 0.0923 s/shot`.
+- Added `Constants.VIEWMODEL_RECOIL_DEBUG = false` (missing from prior commit).
+- Sign convention comment added to WeaponData (Studio-verified 2026-06-13: positionBack/Up/pitch all correct direction).
+- No ViewModelController.lua or GunController.lua changes — logic and call site were already correct.
+- MCP Studio verified 2026-06-13: 25/25 value checks, sign convention confirmed, feel math verified, console clean.
+
 ## [2026-06-13 — MOVEMENT] — Grounded turning weight
 
 - Added angular inertia to body yaw in custom mouse-lock mode. The character now "catches up" to the camera direction rather than snapping instantly, giving a Criminality-like turn-weight feel.

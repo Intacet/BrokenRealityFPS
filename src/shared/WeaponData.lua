@@ -33,7 +33,7 @@ WeaponData["AR15"] = {
     reloadTime   = 2.2,
 }
 
--- AKS74 — full-auto 550 RPM viewmodel weapon (2026-06-10).
+-- AKS74 — full-auto 650 RPM viewmodel weapon (2026-06-13 recoil retune).
 -- displayName / viewModelName / animations are read by ViewModelController only.
 -- fireMode / rpm / fireRate are read by GunController for client-side pacing.
 -- damage / range / magazineSize / reserveAmmo / reloadTime are stored for future GunService use.
@@ -44,41 +44,45 @@ WeaponData["AKS74"] = {
     viewModelName = "AKS74",
     worldModelName = "AKS-74",  -- gun-only model in ReplicatedStorage/WorldModels/AKS-74
     fireMode      = "Auto",
-    rpm           = 550,
-    fireRate      = 60 / 550,   -- ~0.1091 s per shot; derived from rpm, not hardcoded
+    rpm           = 650,
+    fireRate      = 60 / 650,   -- ~0.0923 s per shot; derived from rpm, not hardcoded
     damage        = 30,
     range         = 450,
     magazineSize  = 30,
     reserveAmmo   = 120,
     reloadTime    = 2.2,
     recoil = {
-        -- Viewmodel gun kick (spring inside the arm/frame — vmRecoilCF).
+        -- Viewmodel gun kick applied via ViewModelController:ApplyRecoil() (vmRecoilCF path).
+        -- Sign convention (Studio-verified 2026-06-13):
+        --   positionBack > 0 → +Z camera-local → weapon moves toward player (backward kick). ✓
+        --   positionUp   > 0 → +Y camera-local → weapon lifts upward.                        ✓
+        --   pitchDegrees > 0 → CFrame.Angles(pitch,...) → muzzle rises.                      ✓
         hip = {
-            positionBack = 0.045,   -- weapon moves toward camera each shot
-            positionUp   = 0.006,
-            pitchDegrees = 1.2,     -- muzzle rise per shot in viewmodel space
+            positionBack = 0.052,   -- weapon moves toward camera each shot
+            positionUp   = 0.008,
+            pitchDegrees = 1.15,    -- muzzle rise per shot in viewmodel space
             yawDegrees   = 0.12,
-            rollDegrees  = 0.18,
+            rollDegrees  = 0.16,
         },
         ads = {
-            positionBack = 0.018,
-            positionUp   = 0.002,
-            pitchDegrees = 0.45,
-            yawDegrees   = 0.04,
-            rollDegrees  = 0.06,
+            positionBack = 0.020,   -- ~38% of hip: noticeably tighter while aiming
+            positionUp   = 0.003,
+            pitchDegrees = 0.38,
+            yawDegrees   = 0.035,
+            rollDegrees  = 0.045,
         },
-        -- Camera-space screen kick (viewRecoilCFrame — shifts entire screen up/right).
-        -- Distinct from the viewmodel gun kick so both run independently without fighting.
+        -- Camera-space screen kick (viewRecoilCFrame — shifts entire viewmodel up/right).
+        -- Distinct from the gun-kick above; both paths run independently without fighting.
         camera = {
             hip = { kickUp = 0.45, kickRight = 0.06 },  -- degrees per shot, hip fire
             ads = { kickUp = 0.16, kickRight = 0.02 },  -- reduced while ADS
         },
-        buildupPerShot  = 0.08,   -- buildup scalar added per shot [0, maxBuildup]
-        maxBuildup      = 0.60,   -- caps vmRecoilBuildup; pitch scales by (1 + buildup)
-        recoverySpeed   = 8,      -- slower decay lets recoil stack under sustained fire
-        kickSpeed       = 42,     -- vmRecoilCurrent chase speed (fast snap feel)
-        randomYawScale  = 0.6,
-        randomRollScale = 0.5,
+        buildupPerShot  = 0.065,  -- buildup scalar added per shot [0, maxBuildup]
+        maxBuildup      = 0.46,   -- caps vmRecoilBuildup; pitch reaches 1.46× base at max
+        recoverySpeed   = 22,     -- ~91.8% recovery between shots at 650 RPM (was 8 = 42%)
+        kickSpeed       = 44,     -- vmRecoilCurrent chase speed (fast snap feel)
+        randomYawScale  = 0.55,
+        randomRollScale = 0.45,
         alternatingYaw  = true,
     },
     animations = {

@@ -1113,6 +1113,7 @@ When `CUSTOM_MOUSE_LOCK_FACE_CAMERA_YAW = true`, enabling custom mouse lock (Lef
 **Risk:** The recoil CFrame is composed into `ViewModelController`'s PivotTo call, rotating the viewmodel assembly in camera space. The camera itself does not move. In most competitive FPS games, camera recoil (the crosshair rising on screen) is a core mechanic that requires compensating pull-down; without it the weapon feels "floaty" and aiming is trivially easy. Implementing camera recoil requires switching to `CameraType.Scriptable` and managing the full camera transform per frame, which would need to be coordinated with the viewmodel's `PivotTo` call to avoid desync.
 **Trigger:** Any feel review where the lack of camera kick is flagged as making the gun feel disconnected.
 **Fix when:** A full camera-management refactor is scheduled. Switch `workspace.CurrentCamera.CameraType` to `Scriptable`; manage yaw/pitch from raw mouse delta; compose the recoil CFrame on top each frame; revert to the engine camera on focus loss.
+**Updated 2026-06-13 — AKS74 recoil retune:** The AKS74 recoil profile has been retuned (recoverySpeed 8 → 22, maxBuildup 0.60 → 0.46, etc.) for a much more controlled feel. The underlying gap (no true camera recoil) is unchanged and still deferred.
 
 ---
 
@@ -1965,6 +1966,42 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 
 **Mitigations in place:**
 - Full build script exists in session transcript (9 MCP chunks, fully reproducible in ≤5 minutes if the place is lost).
+
+---
+
+## [DEBT-077] AKS74 recoil values are analytically tuned — live-playtest feel verification pending — ADDED 2026-06-13
+
+**Files:** `src/shared/WeaponData.lua`, `src/shared/Constants.lua`
+**Severity:** Low (MCP logic and math verified; observable feel requires manual live play)
+**Studio verification required:** Yes — requires manual AKS74 equip and fire test in play mode
+
+**What was implemented (2026-06-13):**
+- hip: positionBack=0.052, positionUp=0.008, pitchDeg=1.15, yawDeg=0.12, rollDeg=0.16.
+- ads: positionBack=0.020, positionUp=0.003, pitchDeg=0.38, yawDeg=0.035, rollDeg=0.045.
+- buildupPerShot=0.065, maxBuildup=0.46, recoverySpeed=22, kickSpeed=44, randomYawScale=0.55, randomRollScale=0.45.
+- rpm corrected from 550 → 650.
+
+**Feel verification checklist (manual Studio play required):**
+1. Press key 1 to equip AKS74. Confirm no errors in Output.
+2. Tap fire once (hip). Confirm gun kicks slightly up and back — muzzle rises, stock moves toward camera. Gun must NOT kick downward.
+3. Tap fire repeatedly. Confirm each shot has a controlled impulse and smooth return to rest between shots.
+4. Hold fire (full-auto, hip). Confirm recoil climbs slightly but stays controllable over 8+ shots.
+5. Release fire. Confirm smooth, quick recovery to rest position.
+6. Press right-click (ADS). Tap fire once. Confirm ADS kick is noticeably tighter than hip (expect ~33% of hip pitch).
+7. Hold fire (full-auto, ADS). Confirm ADS climb is tight and sights stay on target.
+8. Confirm horizontal variation exists (alternating yaw) but is not wild.
+9. Reload (R). Confirm no recoil fires during reload.
+10. Holster and re-equip (key 1 twice). Confirm recoil state resets — first shot has zero accumulated buildup.
+11. Confirm AKS74 sound, muzzle flash, and firing behavior are unchanged.
+
+**Tuning guidance (if feel is off):**
+- Recoil too heavy / climbs too fast: lower `pitchDegrees` by 0.1 and/or `buildupPerShot` to 0.045.
+- Recoil too flat: raise `pitchDegrees` by 0.15 and `buildupPerShot` to 0.08.
+- Recovery too slow: raise `recoverySpeed` toward 26.
+- ADS misaligned: reduce `ads.positionBack` and `ads.pitchDegrees` by 30% each.
+- Tune only data in `WeaponData["AKS74"].recoil`; no logic changes needed.
+
+**Fix when:** All 11 checklist items pass in a live Studio session. Mark RESOLVED.
 - CHANGELOG.md (2026-06-12 MAP entry) documents all dimensions, part counts, and MCP verification results.
 
 **Fix when:** A map geometry tracking solution is decided. Options: (a) commit the `.rbxlx` to git (simplest, binary-diff only); (b) export the `RichmondTestLane` as a `.rbxmx` model file and track that in `src/` or `assets/`; (c) promote the blockout to a Rojo-managed data model format once a standard is established for the project. Until then, **save the Studio place file after every session that modifies the blockout**.

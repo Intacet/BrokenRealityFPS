@@ -1231,6 +1231,7 @@ Constants.AKS74_DEFAULT_RPM = 550
 -- Master switch. When false, ViewModelController:ApplyRecoil() is a no-op and the
 -- vmRecoilCF inserted into PivotTo is CFrame.new() (identity — zero visual change).
 Constants.VIEWMODEL_RECOIL_ENABLED = true
+Constants.VIEWMODEL_RECOIL_DEBUG   = false  -- when true, Logger.debug fires on each ApplyRecoil call
 
 -- Fallback values used when a weapon's WeaponData entry has no recoil sub-table.
 -- Per-weapon overrides live in WeaponData["<name>"].recoil.{hip,ads}.
