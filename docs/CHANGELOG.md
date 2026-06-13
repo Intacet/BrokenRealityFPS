@@ -7,6 +7,19 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-13 — ANIMATION] — AKS74 FP locomotion animations (walk / enter-run / run / sprint)
+
+- Added four first-person viewmodel locomotion animation tracks for the AKS74: walk (looped), enterRun (one-shot), run (looped, new ID replaces old), sprint (looped).
+- **New public API:** `ViewModelController:SetLocomotionState(state: string)` — replaces the binary `SetRunning(isSprinting)` call. States: "Idle" | "Walk" | "Run" | "Sprint".
+- **State detection (GunController):** `GetMoveState() == "Sprinting"` → Sprint; horizontal speed ≥ 10 studs/s → Run; ≥ 1.5 studs/s → Walk; else Idle. Only calls SetLocomotionState on state edge (no per-frame restarts).
+- **EnterRun one-shot:** plays on Walk/Idle → Run transition via `Stopped:Once` callback, then chains to run loop. Sprint → Run skips enterRun (already at speed).
+- **Priority blocking:** reload Stopped, equip Stopped, and ADS-exit Stopped callbacks all resume via `SetLocomotionState`. ADS suppresses sprint anim visually (plays run instead); state flag preserved so sprint resumes on ADS exit.
+- **Cleanup:** walk/enterRun/sprint tracks stopped and destroyed in `StopWeaponAnimations()`, `HolsterWeapon()`, and `init()`. State vars reset to defaults.
+- **Constants added:** 12 `VIEWMODEL_LOCOMOTION_*` constants in `Constants.lua` (master switch, debug flag, fade times, speed thresholds, priority block flags).
+- **WeaponData:** run ID updated `111133092181267 → 73261579857067`; walk, enterRun, sprint fields added to AKS74.
+- **isRunning flag:** now `state == "Sprint"` only (preserved for sway/inertia weight system).
+- MCP Studio verification not yet performed. See DEBT-078 for 17-item checklist.
+
 ## [2026-06-13 — RECOIL] — AKS74 recoil retune + rpm correction
 
 - Replaced the AKS74 viewmodel gun-kick profile in `WeaponData["AKS74"].recoil` with physically tuned values.

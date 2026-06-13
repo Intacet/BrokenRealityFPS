@@ -1411,6 +1411,9 @@ This worsens DEBT-013 (weapon name not sent in `WeaponFired` payload) by adding 
 
 **Resolve when:** Steps 1–7 pass in a live Studio session with no visual glitches.
 
+**Updated 2026-06-13 — locomotion animations added:**
+Walk, enterRun, run (new ID), and sprint tracks now also loaded in `_setupWeaponAnimations()`. Equip Stopped callback updated to resume via `SetLocomotionState()` rather than legacy `PlayRunAnimation()`. Equip/idle Studio verification still open — see DEBT-078 for the full locomotion checklist.
+
 ---
 
 ## [DEBT-061] AKS74 fire / reload / run viewmodel animation playback not verified in Studio — ADDED 2026-05-29
@@ -1442,6 +1445,13 @@ This worsens DEBT-013 (weapon name not sent in `WeaponFired` payload) by adding 
 12. Check Output → no errors from `[ViewModelController]` or `[GunController]` during any of the above states.
 
 **Resolve when:** All 12 checklist items pass in a live Studio session.
+
+**Updated 2026-06-13 — locomotion animations supersede the binary run path:**
+- Old run ID `rbxassetid://111133092181267` replaced by `rbxassetid://73261579857067` (new run loop).
+- Walk (`rbxassetid://125395339753686`), enterRun one-shot (`rbxassetid://131163456590831`), and sprint (`rbxassetid://126248731863931`) added.
+- Binary `SetRunning(isSprinting)` path in GunController replaced by `SetLocomotionState(state)` with speed-based Walk/Run/Sprint detection.
+- `PlayReloadAnimation()` Stopped callback now resumes via `SetLocomotionState` (locomotion-aware).
+- Fire, reload, ADS, equip animation behavior is unchanged. The 12-item checklist above still applies; the full locomotion checklist is in DEBT-078.
 
 ---
 
@@ -2002,6 +2012,47 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 - Tune only data in `WeaponData["AKS74"].recoil`; no logic changes needed.
 
 **Fix when:** All 11 checklist items pass in a live Studio session. Mark RESOLVED.
+
+---
+
+## [DEBT-078] AKS74 FP locomotion animations — Studio play-mode verification pending — ADDED 2026-06-13
+
+**Files:** `src/client/ViewModelController.lua`, `src/client/GunController.lua`, `src/shared/WeaponData.lua`, `src/shared/Constants.lua`
+**Severity:** Medium
+**Studio verification required:** Yes — requires manual play-through with walk, run, sprint, reload, ADS, and holster
+
+**What was implemented (2026-06-13):**
+- `WeaponData["AKS74"].animations.firstPerson`: `walk` (125395339753686), `enterRun` (131163456590831), `run` replaced (73261579857067), `sprint` (126248731863931) added.
+- `ViewModelController:SetLocomotionState(state)` — new public API replacing the binary `SetRunning(isSprinting)`. States: "Idle" | "Walk" | "Run" | "Sprint". Only transitions on state change; blocked while reloading (flag updated; Stopped callback resumes); ADS suppresses sprint anim to Run visually.
+- EnterRun one-shot plays on Walk/Idle → Run transition; `Stopped:Once` callback chains to run loop. Sprint → Run skips enterRun (already at speed).
+- `GunController.update()`: replaces `SetRunning()` with `SetLocomotionState()` computed from `GetMoveState() == "Sprinting"` + HRP horizontal speed vs thresholds (Walk ≥ 1.5, Run ≥ 10 studs/s).
+- All priority blocks wired: reload Stopped, equip Stopped, adsOut Stopped, no-adsOut path all resume via locomotion state.
+- `VIEWMODEL_LOCOMOTION_DEBUG = false` — set true for per-transition debug logging.
+
+**Studio verification checklist (manual play required):**
+1. Press key 1 → equip AKS74. Confirm equip animation plays; idle loops. No Output errors.
+2. Stand still → "Idle" state. Confirm idle plays.
+3. Walk forward slowly → "Walk" state. Confirm walk FP anim plays.
+4. Accelerate to run speed (≥ 10 studs/s) → "Run" state. Confirm enterRun plays once, then run loop.
+5. Sprint (LeftShift) → "Sprint" state. Confirm sprint FP anim plays.
+6. Stop sprinting → "Run" or "Walk" or "Idle" depending on speed. Confirm crossfade, no pop.
+7. Stop moving → "Idle". Confirm idle resumes.
+8. Walk → Run → Sprint → back to Walk in sequence. Confirm enterRun plays only on Walk/Idle → Run.
+9. Walk → press R (reload). Confirm reload plays; walk anim stops. Walk again after reload → walk anim resumes.
+10. Sprint → press R (reload). Confirm reload plays; after reload, sprint anim resumes if still sprinting.
+11. Walk → right-click ADS → confirm walk anim stops. Exit ADS → walk anim resumes.
+12. Sprint → right-click ADS → confirm sprint anim is suppressed (run anim plays). Exit ADS → sprint resumes.
+13. Left-click fire while walking → fire plays on top; walk continues after fire one-shot.
+14. Holster (key 1) → all locomotion tracks stop. Re-equip → equip animation plays, then correct locomotion state resumes.
+15. Respawn → locomotion state resets to "Idle". Re-equip → equip plays, idle loops.
+16. Set `VIEWMODEL_LOCOMOTION_DEBUG = true` → confirm per-transition log lines appear in Output with correct state names.
+17. Output panel clean (no unexpected errors from ViewModelController or GunController).
+
+**Risk:** Walk/enterRun/run/sprint animation IDs have not been tested against the AKS74 rig in Studio. If any ID targets a different rig or has zero length, the track loads without error but may play incorrectly. In that case: inspect the failing ID in Animation Editor with the AKS74 rig; request a corrected ID.
+
+**Risk:** `horizSpeed` computed from `HumanoidRootPart.AssemblyLinearVelocity` XZ magnitude. On a moving platform or ramp this may fluctuate and cause rapid Walk↔Run toggling. If this happens, add a hysteresis band (e.g. ±2 studs/s) around the threshold constants.
+
+**Fix when:** All 17 checklist items pass in a live Studio session. Mark RESOLVED.
 - CHANGELOG.md (2026-06-12 MAP entry) documents all dimensions, part counts, and MCP verification results.
 
 **Fix when:** A map geometry tracking solution is decided. Options: (a) commit the `.rbxlx` to git (simplest, binary-diff only); (b) export the `RichmondTestLane` as a `.rbxmx` model file and track that in `src/` or `assets/`; (c) promote the blockout to a Rojo-managed data model format once a standard is established for the project. Until then, **save the Studio place file after every session that modifies the blockout**.

@@ -87,15 +87,18 @@ WeaponData["AKS74"] = {
     },
     animations = {
         firstPerson = {
-            equip   = "rbxassetid://139265999638776",
-            idle    = "rbxassetid://75961893882956",
-            fire    = "rbxassetid://116185608269786",
-            reload  = "rbxassetid://84867185321281",
-            run     = "rbxassetid://111133092181267",
-            adsIn   = "rbxassetid://112260183627854",   -- ADS enter animation (new)
-            adsOut  = "rbxassetid://108479441252268",   -- ADS exit animation (new)
-            adsIdle = "rbxassetid://105305883052870",   -- ADS idle loop (new - replaces fake freeze)
-            adsFire = "rbxassetid://138021695403324",   -- fire while ADS (preserved)
+            equip    = "rbxassetid://139265999638776",
+            idle     = "rbxassetid://75961893882956",
+            fire     = "rbxassetid://116185608269786",
+            reload   = "rbxassetid://84867185321281",
+            walk     = "rbxassetid://125395339753686",   -- FP walk loop
+            enterRun = "rbxassetid://131163456590831",   -- FP enter-run one-shot (Walk/Idle → Run)
+            run      = "rbxassetid://73261579857067",    -- FP run loop (replaces old: 111133092181267)
+            sprint   = "rbxassetid://126248731863931",   -- FP sprint loop
+            adsIn    = "rbxassetid://112260183627854",   -- ADS enter animation
+            adsOut   = "rbxassetid://108479441252268",   -- ADS exit animation
+            adsIdle  = "rbxassetid://105305883052870",   -- ADS idle loop
+            adsFire  = "rbxassetid://138021695403324",   -- fire while ADS
         },
         thirdPerson = {
             equip  = "rbxassetid://124808012153849",

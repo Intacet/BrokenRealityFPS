@@ -129,6 +129,10 @@ local isAutoFiring: boolean = false
 -- and exit ADS automatically.
 local wasReloading: boolean = false
 
+-- Last locomotion state sent to ViewModelController.
+-- Compared each RenderStepped to detect changes; SetLocomotionState is called only on edge.
+local lastLocomotionState: string = "Idle"
+
 -- ============================================================
 -- Private helpers
 -- ============================================================
@@ -410,13 +414,34 @@ function GunController:Start()
         -- so the viewmodel smoothly returns to rest as recoilCFrame decays.
         ViewModelController:SetRecoilOffset(recoilCFrame)
 
-        -- Sprint detection: inform ViewModelController of current sprint state so it can
-        -- manage the run ↔ idle base-layer animation transition.
-        -- Only sent while a weapon is equipped (SetRunning no-ops while holstered).
-        -- GunController already requires MovementController so no new dependency is added.
+        -- Locomotion state: compute from movement state + horizontal speed each frame.
+        -- Only call SetLocomotionState when state changes to avoid per-frame restarts.
+        -- GunController already requires MovementController and LocalPlayer — no new deps.
         if equippedWeaponName ~= nil then
-            local isSprinting = MovementController:GetMoveState() == "Sprinting"
-            ViewModelController:SetRunning(isSprinting)
+            local char = LocalPlayer.Character
+            local hrp: BasePart? = if char
+                then char:FindFirstChild("HumanoidRootPart") :: BasePart?
+                else nil
+            local horizSpeed: number = if hrp
+                then Vector2.new(
+                    (hrp :: BasePart).AssemblyLinearVelocity.X,
+                    (hrp :: BasePart).AssemblyLinearVelocity.Z).Magnitude
+                else 0
+            local moveState = MovementController:GetMoveState()
+            local locomotionState: string
+            if moveState == "Sprinting" then
+                locomotionState = "Sprint"
+            elseif horizSpeed >= (Constants.VIEWMODEL_LOCOMOTION_RUN_SPEED_THRESHOLD :: number) then
+                locomotionState = "Run"
+            elseif horizSpeed >= (Constants.VIEWMODEL_LOCOMOTION_WALK_SPEED_THRESHOLD :: number) then
+                locomotionState = "Walk"
+            else
+                locomotionState = "Idle"
+            end
+            if locomotionState ~= lastLocomotionState then
+                lastLocomotionState = locomotionState
+                ViewModelController:SetLocomotionState(locomotionState)
+            end
         end
 
         -- Stage 1 free-aim sync.
@@ -479,6 +504,7 @@ function GunController:Start()
             ViewModelController:HolsterWeapon()
             equippedWeaponName = nil
             isAutoFiring = false
+            lastLocomotionState = "Idle"
             -- Clear ADS state in MovementController so focus zoom and sprint-lock
             -- do not persist after the gun is put away.
             MovementController.SetAiming(false)
@@ -504,6 +530,7 @@ function GunController:Start()
     local respawnConn = LocalPlayer.CharacterAdded:Connect(function(_character: Model)
         equippedWeaponName = nil
         isAutoFiring = false
+        lastLocomotionState = "Idle"
         -- Clear ADS state and movement animation set in MovementController on respawn.
         MovementController.SetAiming(false)
         MovementController.SetEquippedWeaponName(nil)

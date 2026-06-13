@@ -205,10 +205,23 @@ local weaponReloadTrack:  AnimationTrack? = nil
 local weaponRunTrack:     AnimationTrack? = nil
 
 -- Animation state flags.
--- isReloading: true while reload one-shot is playing; blocks fire and run.
--- isRunning:   true while GunController reports sprint state and a weapon is equipped.
+-- isReloading: true while reload one-shot is playing; blocks fire and locomotion.
+-- isRunning:   true while locomotion state is "Sprint"; used by sway/inertia weight system.
 local isReloading: boolean = false
 local isRunning:   boolean = false
+
+-- Locomotion animation tracks (walk / enterRun / sprint).
+-- weaponRunTrack already declared above; walk/enterRun/sprint extend it.
+-- All three share Movement priority and are mutually exclusive at runtime.
+local weaponWalkTrack:     AnimationTrack? = nil
+local weaponEnterRunTrack: AnimationTrack? = nil
+local weaponSprintTrack:   AnimationTrack? = nil
+
+-- Locomotion FSM state: "Idle" | "Walk" | "Run" | "Sprint".
+-- Managed by SetLocomotionState(); cleared on StopWeaponAnimations / init.
+-- vmEnterRunPlaying guards the Stopped:Once callback so it fires only once per transition.
+local vmLocomotionState:   string  = "Idle"
+local vmEnterRunPlaying:   boolean = false
 
 -- First-person ADS (aim down sights) animation tracks.
 -- adsIn plays once on SetAiming(true).
@@ -401,6 +414,21 @@ function ViewModelController:init()
         weaponRunTrack:Destroy()
         weaponRunTrack = nil
     end
+    if weaponWalkTrack then
+        weaponWalkTrack:Stop()
+        weaponWalkTrack:Destroy()
+        weaponWalkTrack = nil
+    end
+    if weaponEnterRunTrack then
+        weaponEnterRunTrack:Stop()
+        weaponEnterRunTrack:Destroy()
+        weaponEnterRunTrack = nil
+    end
+    if weaponSprintTrack then
+        weaponSprintTrack:Stop()
+        weaponSprintTrack:Destroy()
+        weaponSprintTrack = nil
+    end
     -- Stop and destroy ADS tracks.
     if weaponAdsInTrack then
         weaponAdsInTrack:Stop()
@@ -424,6 +452,8 @@ function ViewModelController:init()
     end
     isReloading          = false
     isRunning            = false
+    vmLocomotionState    = "Idle"
+    vmEnterRunPlaying    = false
     adsState             = "Hip"
     adsIdleTime          = 0
     adsAimAlpha          = 0
@@ -505,6 +535,21 @@ function ViewModelController:StopWeaponAnimations()
         weaponRunTrack:Destroy()
         weaponRunTrack = nil
     end
+    if weaponWalkTrack then
+        weaponWalkTrack:Stop()
+        weaponWalkTrack:Destroy()
+        weaponWalkTrack = nil
+    end
+    if weaponEnterRunTrack then
+        weaponEnterRunTrack:Stop()
+        weaponEnterRunTrack:Destroy()
+        weaponEnterRunTrack = nil
+    end
+    if weaponSprintTrack then
+        weaponSprintTrack:Stop()
+        weaponSprintTrack:Destroy()
+        weaponSprintTrack = nil
+    end
     -- Stop and destroy ADS tracks.
     if weaponAdsInTrack then
         weaponAdsInTrack:Stop()
@@ -528,6 +573,8 @@ function ViewModelController:StopWeaponAnimations()
     end
     isReloading            = false
     isRunning              = false
+    vmLocomotionState      = "Idle"
+    vmEnterRunPlaying      = false
     adsState               = "Hip"
     adsIdleTime            = 0
     adsAimAlpha            = 0
@@ -631,8 +678,13 @@ function ViewModelController:PlayEquipAnimation()
         weaponEquipTrack.Stopped:Connect(function()
             -- Guard: only proceed if same weapon is still equipped.
             if equippedWeaponName ~= capturedWeapon or self.model == nil then return end
-            -- Resume run if GunController already flagged sprint, else start idle.
-            if isRunning and weaponRunTrack ~= nil then
+            -- Resume current locomotion state (bypasses guard by clearing cached state).
+            if Constants.VIEWMODEL_LOCOMOTION_ANIMS_ENABLED :: boolean then
+                local saved = vmLocomotionState
+                vmLocomotionState = ""
+                vmEnterRunPlaying = false
+                self:SetLocomotionState(saved)
+            elseif isRunning and weaponRunTrack ~= nil then
                 self:PlayRunAnimation()
             elseif weaponIdleTrack ~= nil then
                 self:PlayIdleAnimation()
@@ -640,9 +692,14 @@ function ViewModelController:PlayEquipAnimation()
         end)
         Logger.debug("[ViewModelController] PlayEquipAnimation: equip track started")
     else
-        -- No equip track or zero-length clip — start run or idle directly.
+        -- No equip track or zero-length clip — start locomotion or idle directly.
         Logger.debug("[ViewModelController] PlayEquipAnimation: no equip track — starting base directly")
-        if isRunning and weaponRunTrack ~= nil then
+        if Constants.VIEWMODEL_LOCOMOTION_ANIMS_ENABLED :: boolean then
+            local saved = vmLocomotionState
+            vmLocomotionState = ""
+            vmEnterRunPlaying = false
+            self:SetLocomotionState(saved)
+        elseif isRunning and weaponRunTrack ~= nil then
             self:PlayRunAnimation()
         else
             self:PlayIdleAnimation()
@@ -898,7 +955,7 @@ function ViewModelController:_setupWeaponAnimations(weaponName: string, data: an
             .. weaponName)
     end
 
-    -- Load run track (looped, Movement priority — replaces idle while sprinting).
+    -- Load run track (looped, Movement priority — plays in Run locomotion state).
     local runId: string = tostring(fp.run or "")
     if runId ~= "" and runId ~= "rbxassetid://0" then
         local runAnim = Instance.new("Animation")
@@ -909,6 +966,48 @@ function ViewModelController:_setupWeaponAnimations(weaponName: string, data: an
         weaponRunTrack = track
     else
         Logger.debug("[ViewModelController] _setupWeaponAnimations: no run animation ID for: "
+            .. weaponName)
+    end
+
+    -- Load walk track (looped, Movement priority — plays in Walk locomotion state).
+    local walkId: string = tostring(fp.walk or "")
+    if walkId ~= "" and walkId ~= "rbxassetid://0" then
+        local walkAnim = Instance.new("Animation")
+        walkAnim.AnimationId = walkId
+        local track = (animator :: Animator):LoadAnimation(walkAnim)
+        track.Looped   = true
+        track.Priority = Enum.AnimationPriority.Movement
+        weaponWalkTrack = track
+    else
+        Logger.debug("[ViewModelController] _setupWeaponAnimations: no walk animation ID for: "
+            .. weaponName)
+    end
+
+    -- Load enterRun track (one-shot, Movement priority — plays once on Walk/Idle → Run).
+    local enterRunId: string = tostring(fp.enterRun or "")
+    if enterRunId ~= "" and enterRunId ~= "rbxassetid://0" then
+        local enterRunAnim = Instance.new("Animation")
+        enterRunAnim.AnimationId = enterRunId
+        local track = (animator :: Animator):LoadAnimation(enterRunAnim)
+        track.Looped   = false
+        track.Priority = Enum.AnimationPriority.Movement
+        weaponEnterRunTrack = track
+    else
+        Logger.debug("[ViewModelController] _setupWeaponAnimations: no enterRun animation ID for: "
+            .. weaponName)
+    end
+
+    -- Load sprint track (looped, Movement priority — plays in Sprint locomotion state).
+    local sprintId: string = tostring(fp.sprint or "")
+    if sprintId ~= "" and sprintId ~= "rbxassetid://0" then
+        local sprintAnim = Instance.new("Animation")
+        sprintAnim.AnimationId = sprintId
+        local track = (animator :: Animator):LoadAnimation(sprintAnim)
+        track.Looped   = true
+        track.Priority = Enum.AnimationPriority.Movement
+        weaponSprintTrack = track
+    else
+        Logger.debug("[ViewModelController] _setupWeaponAnimations: no sprint animation ID for: "
             .. weaponName)
     end
 
@@ -1572,13 +1671,23 @@ function ViewModelController:PlayReloadAnimation()
     if adsState ~= "Hip" then
         self:StopADSAnimations()
     end
-    -- Stop fire and run so reload plays unobstructed.
+    -- Stop fire and all locomotion tracks so reload plays unobstructed.
     if weaponFireTrack and weaponFireTrack.IsPlaying then
         weaponFireTrack:Stop(0)
     end
     if weaponRunTrack and weaponRunTrack.IsPlaying then
         weaponRunTrack:Stop()
     end
+    if weaponWalkTrack and weaponWalkTrack.IsPlaying then
+        weaponWalkTrack:Stop()
+    end
+    if weaponSprintTrack and weaponSprintTrack.IsPlaying then
+        weaponSprintTrack:Stop()
+    end
+    if weaponEnterRunTrack and weaponEnterRunTrack.IsPlaying then
+        weaponEnterRunTrack:Stop(Constants.VIEWMODEL_LOCOMOTION_ENTER_RUN_FADE_TIME :: number)
+    end
+    vmEnterRunPlaying = false
     if weaponIdleTrack and weaponIdleTrack.IsPlaying then
         weaponIdleTrack:Stop()
     end
@@ -1608,15 +1717,22 @@ function ViewModelController:PlayReloadAnimation()
     weaponReloadTrack.Stopped:Connect(function()
         if equippedWeaponName ~= capturedWeapon or self.model == nil then return end
         isReloading = false
-        -- Resume FP run or idle with a longer crossfade so the transition out of reload feels natural.
-        local resumeFade = Constants.VIEWMODEL_RELOAD_RESUME_FADE_TIME :: number
-        if isRunning and weaponRunTrack ~= nil then
-            self:PlayRunAnimation(resumeFade)
+        -- Resume current locomotion state (or legacy run/idle on disabled path).
+        if Constants.VIEWMODEL_LOCOMOTION_ANIMS_ENABLED :: boolean then
+            local saved = vmLocomotionState
+            vmLocomotionState = ""
+            vmEnterRunPlaying = false
+            self:SetLocomotionState(saved)
         else
-            self:PlayIdleAnimation(resumeFade)
+            local resumeFade = Constants.VIEWMODEL_RELOAD_RESUME_FADE_TIME :: number
+            if isRunning and weaponRunTrack ~= nil then
+                self:PlayRunAnimation(resumeFade)
+            else
+                self:PlayIdleAnimation(resumeFade)
+            end
         end
         Logger.debug("[ViewModelController] PlayReloadAnimation: reload complete, resumed "
-            .. (isRunning and "run" or "idle"))
+            .. vmLocomotionState)
     end)
     Logger.debug("[ViewModelController] PlayReloadAnimation: reload track started (FP + TP)")
 end
@@ -1652,6 +1768,151 @@ function ViewModelController:SetRunning(isSprinting: boolean)
         self:PlayIdleAnimation()
     end
     Logger.debug("[ViewModelController] SetRunning: isRunning=" .. tostring(isRunning))
+end
+
+-- Called by GunController when the locomotion state changes.
+-- state: "Idle" | "Walk" | "Run" | "Sprint"
+-- Only transitions when state changes (no-op on repeated identical calls).
+-- Priority rules:
+--   1. Reload in progress → update state flag; let reload Stopped callback resume.
+--   2. ADS active + Sprint → treat as Run (sprint anim suppressed during ADS).
+--   3. Otherwise → start the correct locomotion track with crossfade.
+-- EnterRun plays once on Walk/Idle → Run, then transitions to the run loop.
+-- Falls back to legacy SetRunning(isSprinting) when VIEWMODEL_LOCOMOTION_ANIMS_ENABLED = false.
+function ViewModelController:SetLocomotionState(state: string)
+    assert(typeof(state) == "string",
+        "[ViewModelController] SetLocomotionState: state must be a string")
+
+    -- No-op while holstered.
+    if equippedWeaponName == nil then return end
+
+    -- Legacy fallback path.
+    if not (Constants.VIEWMODEL_LOCOMOTION_ANIMS_ENABLED :: boolean) then
+        self:SetRunning(state == "Sprint")
+        return
+    end
+
+    -- No-op when state has not changed.
+    if state == vmLocomotionState then return end
+
+    local prevState = vmLocomotionState
+    vmLocomotionState = state
+
+    -- Update isRunning flag for the sway/inertia weight system (Sprint-only, not Run).
+    isRunning = (state == "Sprint")
+
+    -- Priority block: reload in progress.
+    -- Update state flag so the reload Stopped callback resumes the correct track.
+    if (Constants.VIEWMODEL_LOCOMOTION_RELOAD_PRIORITY_BLOCK :: boolean) and isReloading then
+        if (Constants.VIEWMODEL_LOCOMOTION_DEBUG :: boolean) then
+            Logger.debug("[ViewModelController] SetLocomotionState: blocked by reload ("
+                .. prevState .. " → " .. state .. ")")
+        end
+        return
+    end
+
+    local ft   = Constants.VIEWMODEL_LOCOMOTION_FADE_TIME :: number
+    local erft = Constants.VIEWMODEL_LOCOMOTION_ENTER_RUN_FADE_TIME :: number
+
+    -- ADS blocks sprint anim: downgrade Sprint to Run visually so the sprint track
+    -- does not fight the ADS pivot. vmLocomotionState remains "Sprint" so when ADS
+    -- exits, the adsOut Stopped callback resumes sprint correctly.
+    local effectiveState = state
+    if state == "Sprint"
+        and (Constants.VIEWMODEL_LOCOMOTION_ADS_BLOCKS_SPRINT_ANIM :: boolean)
+        and adsState ~= "Hip"
+    then
+        effectiveState = "Run"
+    end
+
+    -- Stop all looped locomotion tracks.
+    local function stopLoops(fade: number?)
+        local f = fade or ft
+        if weaponWalkTrack and weaponWalkTrack.IsPlaying then
+            weaponWalkTrack:Stop(f)
+        end
+        if weaponRunTrack and weaponRunTrack.IsPlaying then
+            weaponRunTrack:Stop(f)
+        end
+        if weaponSprintTrack and weaponSprintTrack.IsPlaying then
+            weaponSprintTrack:Stop(f)
+        end
+    end
+
+    -- Cancel any in-flight enterRun one-shot.
+    local function cancelEnterRun()
+        if weaponEnterRunTrack and weaponEnterRunTrack.IsPlaying then
+            weaponEnterRunTrack:Stop(erft)
+        end
+        vmEnterRunPlaying = false
+    end
+
+    if effectiveState == "Idle" then
+        cancelEnterRun()
+        stopLoops()
+        self:PlayIdleAnimation(ft)
+
+    elseif effectiveState == "Walk" then
+        cancelEnterRun()
+        stopLoops()
+        if weaponWalkTrack then
+            weaponWalkTrack:Play(ft)
+        else
+            self:PlayIdleAnimation(ft)
+        end
+
+    elseif effectiveState == "Run" then
+        -- Walk/Idle → Run: play enterRun once, then run loop.
+        -- Sprint → Run, or no enterRun track: crossfade directly to run loop.
+        local useEnterRun = (prevState == "Walk" or prevState == "Idle")
+            and weaponEnterRunTrack ~= nil
+            and not vmEnterRunPlaying
+
+        if useEnterRun then
+            stopLoops()
+            cancelEnterRun()
+            vmEnterRunPlaying = true
+            local capturedWeapon = equippedWeaponName
+            weaponEnterRunTrack:Play(erft)
+            weaponEnterRunTrack.Stopped:Once(function()
+                if equippedWeaponName ~= capturedWeapon then return end
+                vmEnterRunPlaying = false
+                -- Only start run loop if still in Run state (not transitioned away).
+                if vmLocomotionState ~= "Run" then return end
+                if weaponRunTrack then
+                    weaponRunTrack:Play(erft)
+                end
+                if (Constants.VIEWMODEL_LOCOMOTION_DEBUG :: boolean) then
+                    Logger.debug("[ViewModelController] enterRun complete → run loop started")
+                end
+            end)
+        else
+            cancelEnterRun()
+            stopLoops()
+            if weaponRunTrack then
+                weaponRunTrack:Play(ft)
+            else
+                self:PlayIdleAnimation(ft)
+            end
+        end
+
+    elseif effectiveState == "Sprint" then
+        cancelEnterRun()
+        stopLoops()
+        if weaponSprintTrack then
+            weaponSprintTrack:Play(ft)
+        elseif weaponRunTrack then
+            weaponRunTrack:Play(ft)
+        else
+            self:PlayIdleAnimation(ft)
+        end
+    end
+
+    if (Constants.VIEWMODEL_LOCOMOTION_DEBUG :: boolean) then
+        Logger.debug(string.format(
+            "[ViewModelController] SetLocomotionState: %s → %s (effective: %s)",
+            prevState, state, effectiveState))
+    end
 end
 
 -- External setter for the isReloading flag.
@@ -1709,11 +1970,21 @@ function ViewModelController:SetAiming(entering: boolean)
         -- ADS in: stop idle/run, play adsIn, set state to Entering.
         -- RenderStepped will monitor TimePosition and freeze at final frame.
 
-        -- Stop run (ADS suppresses run visually).
+        -- Stop all locomotion tracks (ADS suppresses all movement animations).
         if Constants.VIEWMODEL_ADS_DISABLE_RUN_WHILE_AIMING then
             if weaponRunTrack and weaponRunTrack.IsPlaying then
                 weaponRunTrack:Stop()
             end
+            if weaponWalkTrack and weaponWalkTrack.IsPlaying then
+                weaponWalkTrack:Stop()
+            end
+            if weaponSprintTrack and weaponSprintTrack.IsPlaying then
+                weaponSprintTrack:Stop()
+            end
+            if weaponEnterRunTrack and weaponEnterRunTrack.IsPlaying then
+                weaponEnterRunTrack:Stop(Constants.VIEWMODEL_LOCOMOTION_ENTER_RUN_FADE_TIME :: number)
+            end
+            vmEnterRunPlaying = false
         end
 
         -- Stop idle (ADS suppresses idle visually).
@@ -1811,10 +2082,17 @@ function ViewModelController:SetAiming(entering: boolean)
                     -- Without unconditional resumption here, the weapon freezes on the final
                     -- adsOut frame with no looping animation (idle-after-ADS bug — DEBT-040).
                     if not isReloading then
-                        if isRunning and weaponRunTrack ~= nil then
-                            self:PlayRunAnimation()
+                        if Constants.VIEWMODEL_LOCOMOTION_ANIMS_ENABLED :: boolean then
+                            local saved = vmLocomotionState
+                            vmLocomotionState = ""
+                            vmEnterRunPlaying = false
+                            self:SetLocomotionState(saved)
                         else
-                            self:PlayIdleAnimation()
+                            if isRunning and weaponRunTrack ~= nil then
+                                self:PlayRunAnimation()
+                            else
+                                self:PlayIdleAnimation()
+                            end
                         end
                     end
                     Logger.debug("[ViewModelController] adsOut complete: hip animation resumed")
@@ -1822,13 +2100,20 @@ function ViewModelController:SetAiming(entering: boolean)
             end)
             Logger.debug("[ViewModelController] SetAiming: adsOut started (state = Exiting)")
         else
-            -- No adsOut track: immediately return to Hip and resume idle/run.
+            -- No adsOut track: immediately return to Hip and resume locomotion.
             adsState = "Hip"
             if not isReloading then
-                if isRunning and weaponRunTrack ~= nil then
-                    self:PlayRunAnimation()
+                if Constants.VIEWMODEL_LOCOMOTION_ANIMS_ENABLED :: boolean then
+                    local saved = vmLocomotionState
+                    vmLocomotionState = ""
+                    vmEnterRunPlaying = false
+                    self:SetLocomotionState(saved)
                 else
-                    self:PlayIdleAnimation()
+                    if isRunning and weaponRunTrack ~= nil then
+                        self:PlayRunAnimation()
+                    else
+                        self:PlayIdleAnimation()
+                    end
                 end
             end
         end

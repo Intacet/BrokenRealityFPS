@@ -1233,6 +1233,22 @@ Constants.AKS74_DEFAULT_RPM = 550
 Constants.VIEWMODEL_RECOIL_ENABLED = true
 Constants.VIEWMODEL_RECOIL_DEBUG   = false  -- when true, Logger.debug fires on each ApplyRecoil call
 
+-- First-person viewmodel locomotion animations (walk / enter-run / run / sprint).
+-- Data-driven per weapon via WeaponData[name].animations.firstPerson.{walk,enterRun,run,sprint}.
+-- When disabled, SetLocomotionState falls back to the binary SetRunning(isSprinting) path.
+Constants.VIEWMODEL_LOCOMOTION_ANIMS_ENABLED           = true
+Constants.VIEWMODEL_LOCOMOTION_DEBUG                   = false
+Constants.VIEWMODEL_LOCOMOTION_FADE_TIME               = 0.14   -- crossfade between locomotion states (seconds)
+Constants.VIEWMODEL_LOCOMOTION_ENTER_RUN_FADE_TIME     = 0.08   -- blend-in time for enterRun one-shot
+Constants.VIEWMODEL_LOCOMOTION_ENTER_RUN_MIN_DURATION  = 0.12   -- reserved; enterRun plays to natural completion
+Constants.VIEWMODEL_LOCOMOTION_MIN_SPEED               = 1.5    -- horizSpeed below this → Idle
+Constants.VIEWMODEL_LOCOMOTION_WALK_SPEED_THRESHOLD    = 1.5    -- horizSpeed ≥ this → Walk
+Constants.VIEWMODEL_LOCOMOTION_RUN_SPEED_THRESHOLD     = 10     -- horizSpeed ≥ this → Run (non-sprint movement)
+Constants.VIEWMODEL_LOCOMOTION_SPRINT_SPEED_THRESHOLD  = 18     -- reserved; Sprint driven by GetMoveState()
+Constants.VIEWMODEL_LOCOMOTION_ADS_BLOCKS_SPRINT_ANIM  = true   -- sprint anim suppressed during ADS; falls back to Run
+Constants.VIEWMODEL_LOCOMOTION_RELOAD_PRIORITY_BLOCK   = true   -- reload blocks locomotion transitions; resumes after
+Constants.VIEWMODEL_LOCOMOTION_EQUIP_PRIORITY_BLOCK    = true   -- equip plays fully before locomotion starts
+
 -- Fallback values used when a weapon's WeaponData entry has no recoil sub-table.
 -- Per-weapon overrides live in WeaponData["<name>"].recoil.{hip,ads}.
 -- positionBack > 0 moves the weapon toward the camera (+Z camera-local = backward).
