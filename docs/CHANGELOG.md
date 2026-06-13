@@ -7,6 +7,25 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-12 — FIX] — ADS pivot synchronisation: gun no longer clips camera on exit or reload
+
+### Summary
+
+Two independent root causes for the gun/barrel clipping through the camera during ADS transitions, both in `ViewModelController.lua`:
+
+**ADS exit clip (adsOut animation path):** `adsAimTarget` was `0` during the `"Exiting"` state, so the pivot decayed from ADS-aligned to hip while the adsOut animation played simultaneously. Because `CAMERA_EXTRA_OFFSET` offsets the hip pivot 0.7 studs in camera-Z, the concurrent pivot shift + animation let the barrel pass through the camera plane. Fixed by setting `adsAimTarget = 1` for any `adsState != "Hip"`, so the pivot holds until the adsOut animation concludes and the state returns to `"Hip"`.
+
+**Reload-interrupts-ADS clip (StopADSAnimations path):** `StopADSAnimations()` immediately set `adsState = "Hip"`, triggering pivot decay during the 30 ms `adsIdle`/`adsIn` `Stop()` fade window. The overlapping rig-fade + pivot-shift caused the clip. Fixed with a new `adsAimHoldTimer` (initialised to `VIEWMODEL_ADS_TRACK_FADE_TIME`), which keeps `adsAimTarget = 1` until the fade completes before letting the pivot move.
+
+First-round fix (commit `2fa8b4a`) also added `Stop(VIEWMODEL_ADS_TRACK_FADE_TIME)` fade times to all ADS animation `Stop()` calls (previously hard-stopped) to remove the single-frame snap on ADS exit.
+
+### Files changed
+
+- `src/client/ViewModelController.lua` — added `adsAimHoldTimer` state variable; updated `StopADSAnimations()`, `init()`, `StopWeaponAnimations()`, and RenderStepped `adsAimTarget` logic
+- `src/client/MovementController.lua` — excluded `povOffsetCurrent` (crouch stance Y) from `CAMERA_BODY_ADS_MULTIPLIER` scaling so crouching while ADS no longer lifts the camera 55% toward standing height
+
+---
+
 ## [2026-06-12 — FEAT] — PBR concrete material + security cleanup
 
 ### Summary
