@@ -99,16 +99,16 @@ WeaponData["AKS74"] = {
     },
     animations = {
         firstPerson = {
-            equip    = "rbxassetid://139265999638776",
-            idle     = "rbxassetid://75961893882956",
+            equip    = "rbxassetid://116603307218326",
+            idle     = "rbxassetid://129190523127392",
             fire     = "rbxassetid://116185608269786",
-            reload   = "rbxassetid://84867185321281",
+            reload   = "rbxassetid://114049192340507",
             walk     = "rbxassetid://125395339753686",   -- FP walk loop
-            enterRun = "rbxassetid://131163456590831",   -- FP enter-run one-shot (Walk/Idle → Run)
-            run      = "rbxassetid://73261579857067",    -- FP run loop (replaces old: 111133092181267)
+            enterRun = "rbxassetid://112145779427488",   -- FP enter-run one-shot (Walk/Idle → Run)
+            run      = "rbxassetid://120544335351994",   -- FP run loop
             sprint   = "rbxassetid://126248731863931",   -- FP sprint loop
-            adsIn    = "rbxassetid://112260183627854",   -- ADS enter animation
-            adsOut   = "rbxassetid://108479441252268",   -- ADS exit animation
+            adsIn    = "rbxassetid://95580286378408",    -- ADS enter animation
+            adsOut   = "rbxassetid://137378017559953",   -- ADS exit animation
             adsIdle  = "rbxassetid://105305883052870",   -- ADS idle loop
             adsFire  = "rbxassetid://138021695403324",   -- fire while ADS
         },
