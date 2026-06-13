@@ -1907,6 +1907,28 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 
 ---
 
+## [DEBT-075] RichmondTestLane blockout exists only in the Studio DataModel — not tracked by Rojo or git — ADDED 2026-06-12
+
+**Files:** Studio DataModel only (`Workspace.Map.Blockout.RichmondTestLane`)
+**Severity:** Medium
+**Studio verification required:** Not applicable (geometry, not runtime code)
+**Risk:** The entire blockout (road, sidewalks, two buildings, alley, cover, props, streetlights, boundaries, DevSpawns — ~170 parts across 10 folders) is stored in the Studio `.rbxlx` place file. It is **not** represented in the Rojo `src/` source tree and therefore does not appear in git. This means:
+- The blockout is lost if Studio's place file is overwritten or not saved after edits.
+- Git history provides no record of which parts were added, moved, or deleted.
+- There is no diff or rollback path for geometry changes made in Studio.
+- If the team adds a second developer, the blockout must be shared by copying the place file, not by pulling from git.
+
+**Coordinate reference (for reconstruction if lost):**
+- World origin: X=500, Y=0, Z=500. Lane runs Z=390–610 (220 studs). Street 32 wide, sidewalks 7 wide. Left building X=447–477, H=48, 4 floors. Right building X=523–547, H=28, 2 floors, starts Z=450. Alley X=547–559, outer wall at X=560.
+
+**Mitigations in place:**
+- Full build script exists in session transcript (9 MCP chunks, fully reproducible in ≤5 minutes if the place is lost).
+- CHANGELOG.md (2026-06-12 MAP entry) documents all dimensions, part counts, and MCP verification results.
+
+**Fix when:** A map geometry tracking solution is decided. Options: (a) commit the `.rbxlx` to git (simplest, binary-diff only); (b) export the `RichmondTestLane` as a `.rbxmx` model file and track that in `src/` or `assets/`; (c) promote the blockout to a Rojo-managed data model format once a standard is established for the project. Until then, **save the Studio place file after every session that modifies the blockout**.
+
+---
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.lua`

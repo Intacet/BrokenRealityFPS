@@ -7,6 +7,38 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-12 — MAP] — Richmond Test Lane blockout (Workspace.Map.Blockout.RichmondTestLane)
+
+### Summary
+
+Created a first-person/third-person combat test lane inspired by the narrow red-brick urban streets of Richmond, Virginia (N Foushee St / Temple Alley area). The blockout is a pure geometry pass — no scripts, no remotes, no gameplay systems. Placed at world offset X=500, Z=500 inside `Workspace.Map.Blockout.RichmondTestLane` to keep it fully separate from existing map content.
+
+**Dimensions:** 220-stud lane (Z=390–610), 32-stud street width, 7-stud sidewalks each side. World origin at (500, 0, 500).
+
+**Left building (4-story):** 48H × 30D × 220L studs. `Enum.Material.Brick`, deep red. 3 horizontal floor strips, rooftop parapet, 36 window recesses (9 columns × 4 rows), 2 recessed doorways with lintels and entrance steps, north/south cap walls. `PrimaryPart` set to `LB_MainBody`.
+
+**Right building (2-story):** 28H × 24D × 160L studs (Z=450–610). Rooftop parapet on all four sides, 8 window recesses (4 columns × 2 rows), recessed service door, garage-door-style panel, north/south cap walls. `PrimaryPart` set to `RB_MainBody`.
+
+**Alley (RightAlley):** 12-stud wide corridor at X=547–559, Z=390–610. Outer wall (H=32) at X=560, north dead-end cap, open south entrance. Utility nook at Z=512 breaks alley sightline. Props: 2 dumpsters, 2 utility boxes, 2 trash piles.
+
+**Street cover:** 5 parked car models (3 left-curb, 2 right-curb, each with body + roof + 4 wheels), 1 delivery van (right side at Z=518), 2 Jersey-style concrete barriers (mid-street at Z=468 and Z=536), 2 street dumpsters, 4 sidewalk utility/trash props.
+
+**Lighting props:** 6 streetlight models (3 left side at Z=410/490/570, 3 right side at Z=450/530/600, staggered). Each has post, arm, lamp head, and base.
+
+**Boundaries:** 4 semi-transparent (Transparency=0.92) blue boundary walls — North (Z=614), South (Z=386), Left (X=440), Right (X=566). All CanCollide=true.
+
+**DevSpawns:** 3 Neon placeholder pads — `TestSpawn_AttackerSide` (Z=405, yellow), `TestSpawn_DefenderSide` (Z=595, green), `TestSpawn_Alley` (Z=415, cyan). Not wired to match spawning.
+
+**MCP verification (Edit mode, 2026-06-12):** Road 32×2×220 ✓ — sidewalks 7 wide ✓ — alley 12 wide ✓ — left building H=48 ✓ — right building H=28 ✓ — 0 scripts ✓ — all 68 building parts + 48 cover parts + 4 boundary + road + sidewalks: Anchored=true ✓ — road + boundaries CanCollide=true ✓ — road + all non-window building parts CanQuery=true ✓ — all 3 DevSpawns present ✓.
+
+### Files changed
+
+- `docs/CHANGELOG.md` — this entry
+- `docs/TECHNICAL_DEBT.md` — DEBT-075 added (blockout not tracked by Rojo/git)
+- Studio DataModel only — no Rojo-tracked source files modified
+
+---
+
 ## [2026-06-12 — FIX] — ADS pivot synchronisation: gun no longer clips camera on exit or reload
 
 ### Summary
