@@ -7,6 +7,34 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-13 — FEATURE] — AKS74 viewmodel movement velocity inertia
+
+- **New CFrame layer:** `movementInertiaCF` inserted between `cameraInertiaCF` and `viewRecoilCFrame` in the ViewModelController RenderStepped PivotTo chain. Excluded from `aimAlignedPivot` — ADS alignment is exact and bullet direction is unaffected.
+- **Mechanism:** Per-frame HRP `AssemblyLinearVelocity` projected onto camera axes (`RightVector:Dot`, `LookVector:Dot`, `vel.Y`). Accumulates opposite-direction offset; hard-clamps to max displacement; decays via exponential spring (effectiveDecayRate = 14 × 0.22 = 3.08 /s → half-life ≈ 0.22 s). Gun shifts opposite to movement, then catches up — gives the weapon a sense of carried weight.
+- **Strafe:** right → gun drifts left (−X) with a tiny roll; left → gun drifts right (+X). **Forward:** start moving → gun settles back (+Z); stop → recovers. **Vertical:** jump → gun drops slightly; land → recovers.
+- **Min-speed gate:** horizontal speed below 1.5 studs/s produces no accumulation — suppresses idle physics jitter.
+- **State multiplier:** ADS=0.08 (nearly off — sights stay stable), reload=0.50, crouch=0.65, sprint=1.20 (slightly amplified), hip=1.0. Lerped smoothly at SPRING_SPEED rate.
+- **Rotation derived inline:** roll from X offset (strafe cant); pitch from Z offset (forward tilt). No extra spring state.
+- **Constants (20 new):** `VIEWMODEL_MOVEMENT_INERTIA_ENABLED`, `_DEBUG`, `_STRAFE_X/FORWARD_Z/VERTICAL_Y_STRENGTH`, `_MAX_X/Y/Z`, `_ROLL/PITCH_STRENGTH`, `_MAX_ROLL/PITCH_DEGREES`, `_SPRING_SPEED`, `_DAMPING`, `_ADS/RELOAD/SPRINT/CROUCH_MULTIPLIER`, `_MIN_SPEED`, `_MAX_SPEED_REFERENCE`.
+- **No GunController changes.** No new public API. No new remotes. No camera.CFrame, FOV, CameraOffset, raycast, or gameplay behavior changed.
+- **Layers independently:** Camera rotation inertia (Task 4) and movement velocity inertia (Task 5) sit adjacent in the CFrame chain and combine naturally; neither affects the other's state.
+- **DEBT-081 added:** Sign convention (strafe/forward/vertical directions) and ADS safety need Studio play-mode confirmation. See DEBT-081 for full MCP verification checklist.
+
+---
+
+## [2026-06-13 — FEATURE] — AKS74 viewmodel camera rotation inertia
+
+- **New CFrame layer:** `cameraInertiaCF` inserted between `CAMERA_EXTRA_OFFSET` and `viewRecoilCFrame` in the ViewModelController RenderStepped PivotTo chain. Excluded from `aimAlignedPivot` — ADS alignment is exact and unaffected.
+- **Mechanism:** Per-frame camera rotation delta extracted via `vmPrevCamCFrame:ToObjectSpace(cam.CFrame):ToEulerAnglesYXZ()`. Each frame: adds `-delta × strength × weight` to angular/translational displacement; clamps to max; decays via exponential spring (effectiveDecayRate = 18 × 0.18 = 3.24 /s → half-life ≈ 0.21 s). Gun lags behind camera turns, then catches up — gives the weapon a sense of mass.
+- **Large-delta guard:** if `|rx| + |ry| > 45°` in one frame (camera teleport / death / respawn), all displacement is reset to zero silently.
+- **State multiplier:** ADS=0.10 (near-zero so sights stay stable), reload=0.45, equip=0.35, sprint/run=1.10, hip=1.0. Lerped smoothly at SPRING_SPEED rate.
+- **CFrame stack documentation:** Module-level comment and basePivot in-line comment both updated to include `cameraInertiaCF` in the chain.
+- **Constants (20 new):** `VIEWMODEL_CAMERA_INERTIA_ENABLED`, `_DEBUG`, `_YAW_STRENGTH`, `_PITCH_STRENGTH`, `_ROLL_STRENGTH`, `_MAX_YAW/PITCH/ROLL_DEGREES`, `_POSITION_X/Y_STRENGTH`, `_MAX_POSITION_X/Y`, `_SPRING_SPEED`, `_DAMPING`, `_ADS/RELOAD/EQUIP/SPRINT_MULTIPLIER`.
+- **No GunController changes.** No new public API. No new remotes. No camera.CFrame, FOV, CameraOffset, raycast, or gameplay behavior changed.
+- **DEBT-080 added:** Sign convention (yaw/pitch/roll directions) needs Studio play-mode confirmation. See DEBT-080 for full MCP verification checklist.
+
+---
+
 ## [2026-06-13 — BALLISTICS] — Virtual projectile ballistics foundation (data + math layer)
 
 - **New module:** `src/shared/Ballistics.lua` — pure math library. No Instances, no RunService, no raycasts. Safe to require from client and server. Public API:

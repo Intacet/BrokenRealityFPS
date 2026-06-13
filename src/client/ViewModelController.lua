@@ -14,9 +14,11 @@
 --   HolsterWeapon() stops animations, destroys the model clone, and clears all equip state.
 --
 -- PivotTo camera follow (every RenderStepped, only when self.model is non-nil):
---   m:PivotTo(cam.CFrame * CAMERA_EXTRA_OFFSET * viewRecoilCFrame
+--   m:PivotTo(cam.CFrame * CAMERA_EXTRA_OFFSET * cameraInertiaCF * movementInertiaCF * viewRecoilCFrame
 --             * vmRecoilCF * freeAimCF * swayCF * finalMoveCF * BASE_OFFSET * CFrame.new(0,0,recoilOffset))
 --   CAMERA_EXTRA_OFFSET — constant base offset from the camera reference point (hipfire).
+--   cameraInertiaCF     — camera-turn inertia lag (viewmodel-only; excluded from ADS pivot).
+--   movementInertiaCF   — movement velocity inertia lag (viewmodel-only; excluded from ADS pivot).
 --   swayCF — procedural sway: mouse lag, movement bob, strafe roll (weight ADS≈0/hip=100%).
 --   No code-level ADS alignment offset: the ADS animation positions the iron sights.
 --   BASE_OFFSET is computed from the rig's FakeCamera CFrame relative to HumanoidRootPart.
@@ -191,6 +193,31 @@ local vmBreathTime:       number  = 0
 local vmBreathWeight:     number  = 0
 local vmAccelTilt:        number  = 0
 local vmHorizSpeedPrev:   number  = 0
+
+-- Camera rotation inertia: angular/translational displacement that lags behind camera turns.
+-- vmPrevCamCFrame:    camera CFrame from the PREVIOUS frame (used to compute per-frame rotation delta).
+-- vmCamInertia{Yaw/Pitch/Roll}: current angular offset (radians); accumulated each frame, springs to zero.
+-- vmCamInertia{TX/TY}:          current positional offset (studs); pendulum-mass companion to rotation.
+-- vmCamInertiaWeight:           current state multiplier [0, >1]; lerped toward state-based target.
+-- vmCamInertiaLastTarget:       previous target value; used to gate change-only Logger.debug calls.
+local vmPrevCamCFrame:       CFrame = CFrame.new()
+local vmCamInertiaYaw:       number = 0
+local vmCamInertiaPitch:     number = 0
+local vmCamInertiaRoll:      number = 0
+local vmCamInertiaTX:        number = 0
+local vmCamInertiaTY:        number = 0
+local vmCamInertiaWeight:    number = 1
+local vmCamInertiaLastTarget:number = 1
+
+-- Movement velocity inertia: positional offset that lags behind player velocity changes.
+-- vmMovInertia{X/Y/Z}: camera-local offset (studs). +Z = toward viewer (backward), -X = left, -Y = down.
+-- vmMovInertiaWeight:   state multiplier [0, >1]; lerped toward state-based target each frame.
+-- vmMovInertiaLastTarget: previous target; gates change-only debug logs.
+local vmMovInertiaX:          number = 0
+local vmMovInertiaY:          number = 0
+local vmMovInertiaZ:          number = 0
+local vmMovInertiaWeight:     number = 1
+local vmMovInertiaLastTarget: number = 1
 
 -- Name of the currently equipped weapon, or nil when holstered.
 local equippedWeaponName: string? = nil
@@ -486,6 +513,19 @@ function ViewModelController:init()
     vmBreathWeight     = 0
     vmAccelTilt        = 0
     vmHorizSpeedPrev   = 0
+    vmPrevCamCFrame       = CFrame.new()
+    vmCamInertiaYaw       = 0
+    vmCamInertiaPitch     = 0
+    vmCamInertiaRoll      = 0
+    vmCamInertiaTX        = 0
+    vmCamInertiaTY        = 0
+    vmCamInertiaWeight    = 1
+    vmCamInertiaLastTarget= 1
+    vmMovInertiaX         = 0
+    vmMovInertiaY         = 0
+    vmMovInertiaZ         = 0
+    vmMovInertiaWeight    = 1
+    vmMovInertiaLastTarget= 1
     -- Third-person character tracks: nil references only — do NOT call Stop/Destroy.
     -- init() is called from CharacterAdded where the old Humanoid.Animator may already be
     -- destroyed, making track method calls unsafe.  Same pattern as MovementController's
@@ -1571,9 +1611,223 @@ function ViewModelController:Start()
             vmRecoilCF = CFrame.new()
         end
 
+        -- ── Camera rotation inertia ───────────────────────────────────────────────────────
+        -- Measures camera rotation delta frame-to-frame and applies an opposite angular/
+        -- translational offset so the gun appears to have weight behind camera turns.
+        -- Excluded from aimAlignedPivot → ADS alignment is exact and unaffected.
+        -- CFrame stack position: after CAMERA_EXTRA_OFFSET, before recoil layers.
+        local cameraInertiaCF: CFrame = CFrame.new()
+        do
+            -- State-based multiplier (lerped, not snapped, for smooth transitions).
+            -- isMovingFast covers both Run (shift-held) and Sprint (tactical) locomotion.
+            local isMovingFast = vmLocomotionState == "Run" or vmLocomotionState == "Sprint"
+            local isEquipping  = weaponEquipTrack ~= nil
+                and (weaponEquipTrack :: AnimationTrack).IsPlaying
+            local inertiaTarget: number
+            if inADS then
+                inertiaTarget = Constants.VIEWMODEL_CAMERA_INERTIA_ADS_MULTIPLIER
+            elseif isReloading then
+                inertiaTarget = Constants.VIEWMODEL_CAMERA_INERTIA_RELOAD_MULTIPLIER
+            elseif isEquipping then
+                inertiaTarget = Constants.VIEWMODEL_CAMERA_INERTIA_EQUIP_MULTIPLIER
+            elseif isMovingFast then
+                inertiaTarget = Constants.VIEWMODEL_CAMERA_INERTIA_SPRINT_MULTIPLIER
+            else
+                inertiaTarget = 1
+            end
+            if Constants.VIEWMODEL_CAMERA_INERTIA_DEBUG
+                and inertiaTarget ~= vmCamInertiaLastTarget
+            then
+                vmCamInertiaLastTarget = inertiaTarget
+                Logger.debug(string.format(
+                    "[VMC] Camera inertia multiplier → %.2f (ads=%s reload=%s equip=%s fast=%s)",
+                    inertiaTarget, tostring(inADS), tostring(isReloading),
+                    tostring(isEquipping), tostring(isMovingFast)
+                ))
+            end
+            vmCamInertiaWeight = vmCamInertiaWeight
+                + (inertiaTarget - vmCamInertiaWeight)
+                * math.min(1, dt * (Constants.VIEWMODEL_CAMERA_INERTIA_SPRING_SPEED :: number))
+
+            if Constants.VIEWMODEL_CAMERA_INERTIA_ENABLED then
+                -- Rotation delta in previous frame's camera-local space.
+                -- ToObjectSpace(cur) = prevInverse * cur = "how much did cam rotate since last frame"
+                local rotDelta = vmPrevCamCFrame:ToObjectSpace(cam.CFrame)
+                local rx, ry, _ = rotDelta:ToEulerAnglesYXZ()
+                -- rx: pitch delta (negative when camera looks up in Roblox convention)
+                -- ry: yaw delta   (positive when camera turns right)
+
+                -- Guard: large angular jump (teleport, respawn, death) → reset displacement to zero.
+                -- Threshold: 45° total angular change is impossible at normal sensitivity in one frame.
+                if math.abs(rx) + math.abs(ry) > math.rad(45) then
+                    vmCamInertiaYaw   = 0
+                    vmCamInertiaPitch = 0
+                    vmCamInertiaRoll  = 0
+                    vmCamInertiaTX    = 0
+                    vmCamInertiaTY    = 0
+                    if Constants.VIEWMODEL_CAMERA_INERTIA_DEBUG then
+                        Logger.debug(string.format(
+                            "[VMC] Camera inertia: large-delta reset (Δyaw=%.1f° Δpitch=%.1f°)",
+                            math.deg(ry), math.deg(rx)
+                        ))
+                    end
+                else
+                    local w = vmCamInertiaWeight
+                    -- Accumulate opposite-direction displacement (gun lags behind camera turn).
+                    -- Sign convention (verified in Studio — invert here if observed backwards):
+                    --   camera right (+ry) → gun lags left  → negative yaw offset
+                    --   camera up   (-rx)  → gun lags down  → positive pitch offset (+pitch = muzzle down)
+                    --   camera right (+ry) → barrel tilts   → negative roll offset
+                    vmCamInertiaYaw   -= ry * (Constants.VIEWMODEL_CAMERA_INERTIA_YAW_STRENGTH   :: number) * w
+                    vmCamInertiaPitch -= rx * (Constants.VIEWMODEL_CAMERA_INERTIA_PITCH_STRENGTH :: number) * w
+                    vmCamInertiaRoll  -= ry * (Constants.VIEWMODEL_CAMERA_INERTIA_ROLL_STRENGTH  :: number) * w
+                    vmCamInertiaTX    -= ry * (Constants.VIEWMODEL_CAMERA_INERTIA_POSITION_X_STRENGTH :: number) * w
+                    vmCamInertiaTY    -= rx * (Constants.VIEWMODEL_CAMERA_INERTIA_POSITION_Y_STRENGTH :: number) * w
+
+                    -- Clamp to maximum displacement (prevents wild swings on high-speed camera moves).
+                    local maxYr = math.rad(Constants.VIEWMODEL_CAMERA_INERTIA_MAX_YAW_DEGREES   :: number)
+                    local maxPr = math.rad(Constants.VIEWMODEL_CAMERA_INERTIA_MAX_PITCH_DEGREES :: number)
+                    local maxRr = math.rad(Constants.VIEWMODEL_CAMERA_INERTIA_MAX_ROLL_DEGREES  :: number)
+                    local maxTX = Constants.VIEWMODEL_CAMERA_INERTIA_MAX_POSITION_X :: number
+                    local maxTY = Constants.VIEWMODEL_CAMERA_INERTIA_MAX_POSITION_Y :: number
+                    vmCamInertiaYaw   = math.clamp(vmCamInertiaYaw,   -maxYr, maxYr)
+                    vmCamInertiaPitch = math.clamp(vmCamInertiaPitch, -maxPr, maxPr)
+                    vmCamInertiaRoll  = math.clamp(vmCamInertiaRoll,  -maxRr, maxRr)
+                    vmCamInertiaTX    = math.clamp(vmCamInertiaTX,    -maxTX, maxTX)
+                    vmCamInertiaTY    = math.clamp(vmCamInertiaTY,    -maxTY, maxTY)
+
+                    -- Spring decay toward zero.
+                    -- effectiveDecayRate = SPRING_SPEED * (1 - DAMPING) = 18 * 0.18 = 3.24 /s
+                    -- → half-life ≈ 0.21 s; gun settles in ~0.5 s after camera stops.
+                    local returnRate  = (Constants.VIEWMODEL_CAMERA_INERTIA_SPRING_SPEED :: number)
+                        * (1 - (Constants.VIEWMODEL_CAMERA_INERTIA_DAMPING :: number))
+                    local decayFactor = math.max(0, 1 - dt * returnRate)
+                    vmCamInertiaYaw   *= decayFactor
+                    vmCamInertiaPitch *= decayFactor
+                    vmCamInertiaRoll  *= decayFactor
+                    vmCamInertiaTX    *= decayFactor
+                    vmCamInertiaTY    *= decayFactor
+                end
+
+                -- Always update prev CFrame (avoids stale large-delta on re-enable or next frame).
+                vmPrevCamCFrame = cam.CFrame
+
+                cameraInertiaCF = CFrame.new(vmCamInertiaTX, vmCamInertiaTY, 0)
+                    * CFrame.Angles(vmCamInertiaPitch, vmCamInertiaYaw, vmCamInertiaRoll)
+            else
+                -- Disabled: keep prev CFrame current so re-enable has no jump.
+                vmPrevCamCFrame = cam.CFrame
+            end
+        end
+
+        -- Movement velocity inertia: gun lags behind player movement, giving the weapon a sense of mass.
+        -- Strafe right → gun shifts left; move forward → gun settles back; stop → gun catches up.
+        -- Excluded from aimAlignedPivot so ADS alignment stays exact and bullet direction is unaffected.
+        local movementInertiaCF: CFrame = CFrame.new()
+        do
+            -- State-based multiplier (same lerp pattern as camera rotation inertia).
+            local movInertiaTarget: number = 1
+            if inADS then
+                movInertiaTarget = Constants.VIEWMODEL_MOVEMENT_INERTIA_ADS_MULTIPLIER :: number
+            elseif isReloading then
+                movInertiaTarget = Constants.VIEWMODEL_MOVEMENT_INERTIA_RELOAD_MULTIPLIER :: number
+            elseif vmLocomotionState == "Sprint" then
+                movInertiaTarget = Constants.VIEWMODEL_MOVEMENT_INERTIA_SPRINT_MULTIPLIER :: number
+            elseif MovementController:GetMoveState() == "Crouching" then
+                movInertiaTarget = Constants.VIEWMODEL_MOVEMENT_INERTIA_CROUCH_MULTIPLIER :: number
+            end
+            if Constants.VIEWMODEL_MOVEMENT_INERTIA_DEBUG :: boolean
+                and movInertiaTarget ~= vmMovInertiaLastTarget
+            then
+                vmMovInertiaLastTarget = movInertiaTarget
+                Logger.debug(string.format(
+                    "[VMC] Movement inertia weight → %.2f (ads=%s reload=%s loco=%s)",
+                    movInertiaTarget, tostring(inADS), tostring(isReloading), vmLocomotionState
+                ))
+            end
+            vmMovInertiaWeight = vmMovInertiaWeight
+                + (movInertiaTarget - vmMovInertiaWeight)
+                * math.min(1, dt * (Constants.VIEWMODEL_MOVEMENT_INERTIA_SPRING_SPEED :: number))
+
+            if Constants.VIEWMODEL_MOVEMENT_INERTIA_ENABLED :: boolean then
+                -- Independent HRP lookup — not scoped to the sway block; works even when sway is off.
+                local char3 = Players.LocalPlayer.Character
+                local hrp3: BasePart? = if char3 then char3:FindFirstChild("HumanoidRootPart") :: BasePart? else nil
+                local velWorld: Vector3 = if hrp3 then hrp3.AssemblyLinearVelocity else Vector3.zero
+
+                -- Min-speed gate: ignore physics jitter below MIN_SPEED.
+                local hSpd3 = Vector2.new(velWorld.X, velWorld.Z).Magnitude
+                if hSpd3 >= (Constants.VIEWMODEL_MOVEMENT_INERTIA_MIN_SPEED :: number) then
+                    local maxRef = Constants.VIEWMODEL_MOVEMENT_INERTIA_MAX_SPEED_REFERENCE :: number
+                    -- Project world velocity onto camera axes.
+                    local localX   = math.clamp(cam.CFrame.RightVector:Dot(velWorld),  -maxRef, maxRef)
+                    local localFwd = math.clamp(cam.CFrame.LookVector:Dot(velWorld),   -maxRef, maxRef)
+                    local localY   = math.clamp(velWorld.Y,                             -maxRef, maxRef)
+
+                    local w  = vmMovInertiaWeight
+                    local sx = Constants.VIEWMODEL_MOVEMENT_INERTIA_STRAFE_X_STRENGTH   :: number
+                    local sz = Constants.VIEWMODEL_MOVEMENT_INERTIA_FORWARD_Z_STRENGTH  :: number
+                    local sy = Constants.VIEWMODEL_MOVEMENT_INERTIA_VERTICAL_Y_STRENGTH :: number
+
+                    -- Accumulate opposite to velocity: strafe right → gun left (−X);
+                    -- move forward → gun settles back (+Z toward viewer); move up → gun drops (−Y).
+                    vmMovInertiaX -= localX   * sx * w * dt
+                    vmMovInertiaZ += localFwd * sz * w * dt
+                    vmMovInertiaY -= localY   * sy * w * dt
+                end
+
+                -- Hard clamp to maximum displacement.
+                local maxX = Constants.VIEWMODEL_MOVEMENT_INERTIA_MAX_X :: number
+                local maxY = Constants.VIEWMODEL_MOVEMENT_INERTIA_MAX_Y :: number
+                local maxZ = Constants.VIEWMODEL_MOVEMENT_INERTIA_MAX_Z :: number
+                vmMovInertiaX = math.clamp(vmMovInertiaX, -maxX, maxX)
+                vmMovInertiaY = math.clamp(vmMovInertiaY, -maxY, maxY)
+                vmMovInertiaZ = math.clamp(vmMovInertiaZ, -maxZ, maxZ)
+
+                -- Exponential spring decay toward zero.
+                local returnRate3 = (Constants.VIEWMODEL_MOVEMENT_INERTIA_SPRING_SPEED :: number)
+                    * (1 - (Constants.VIEWMODEL_MOVEMENT_INERTIA_DAMPING :: number))
+                local decayFactor3 = math.max(0, 1 - dt * returnRate3)
+                vmMovInertiaX *= decayFactor3
+                vmMovInertiaY *= decayFactor3
+                vmMovInertiaZ *= decayFactor3
+
+                -- Derive rotation from position offsets (computed each frame from position state; no extra spring).
+                local maxRollR  = math.rad(Constants.VIEWMODEL_MOVEMENT_INERTIA_MAX_ROLL_DEGREES  :: number)
+                local maxPitchR = math.rad(Constants.VIEWMODEL_MOVEMENT_INERTIA_MAX_PITCH_DEGREES :: number)
+                -- Roll: strafe right → X offset positive → gun rolls right (same direction as shift).
+                local movRoll  = math.clamp(
+                    vmMovInertiaX * (Constants.VIEWMODEL_MOVEMENT_INERTIA_ROLL_STRENGTH :: number),
+                    -maxRollR, maxRollR
+                )
+                -- Pitch: forward settle → Z offset positive (+Z) → gun tips slightly down (−pitch).
+                local movPitch = math.clamp(
+                    -vmMovInertiaZ * (Constants.VIEWMODEL_MOVEMENT_INERTIA_PITCH_STRENGTH :: number),
+                    -maxPitchR, maxPitchR
+                )
+
+                movementInertiaCF = CFrame.new(vmMovInertiaX, vmMovInertiaY, vmMovInertiaZ)
+                    * CFrame.Angles(movPitch, 0, movRoll)
+            end
+        end
+
         -- Hip base pivot (full chain).
+        -- CFrame stack (hip):
+        --   cam.CFrame                — world camera reference
+        --   CAMERA_EXTRA_OFFSET       — constant screen-space base offset
+        --   cameraInertiaCF           — camera-turn inertia lag (viewmodel-only; not in ADS pivot)
+        --   movementInertiaCF         — movement velocity inertia lag (viewmodel-only; not in ADS pivot)
+        --   viewRecoilCFrame          — camera-space rotational recoil from GunController
+        --   vmRecoilCF                — data-driven gun-kick recoil (pitch/yaw/roll spring)
+        --   freeAimCF                 — free-aim drift offset (mouse deadzone visual)
+        --   swayCF                    — procedural sway (mouse lag, bob, strafe, breath)
+        --   finalMoveCF               — movement/bob CFrame from MovementController
+        --   BASE_OFFSET               — rig FakeCamera-relative alignment offset
+        --   CFrame.new(0,0,recoilOffset) — positional push-back recoil
         local basePivot = cam.CFrame
             * CAMERA_EXTRA_OFFSET
+            * cameraInertiaCF
+            * movementInertiaCF
             * viewRecoilCFrame
             * vmRecoilCF
             * freeAimCF

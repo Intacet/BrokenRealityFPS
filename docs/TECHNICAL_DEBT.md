@@ -2099,6 +2099,124 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 
 ---
 
+## [DEBT-080] Camera rotation inertia — Studio play-mode sign verification pending — ADDED 2026-06-13
+
+**Files:** `src/client/ViewModelController.lua`, `src/shared/Constants.lua`
+**Severity:** Low (intentional deferral; feature is complete; sign convention needs runtime confirmation)
+**Studio verification required:** Yes — verify signs before closing this entry
+
+**What was implemented (2026-06-13):**
+- Camera rotation inertia added as a new CFrame layer in the ViewModelController RenderStepped PivotTo chain.
+- Inserted between `CAMERA_EXTRA_OFFSET` and `viewRecoilCFrame` in `basePivot`; excluded from `aimAlignedPivot` so ADS alignment is exact and unaffected.
+- Per-frame camera rotation delta extracted via `vmPrevCamCFrame:ToObjectSpace(cam.CFrame)` → `ToEulerAnglesYXZ()` for pitch (rx) and yaw (ry).
+- Each frame: adds `-delta * strength * weight` to inertia displacement; clamps to max; applies exponential spring decay at effectiveDecayRate = `SPRING_SPEED * (1 - DAMPING)` = 18 * 0.18 = 3.24 /s (half-life ≈ 0.21 s).
+- Large-delta guard: if `|rx| + |ry| > 45°`, resets all displacement to zero (covers teleport, death, respawn, camera snap).
+- State multiplier: ADS=0.10, reload=0.45, equip=0.35, sprint/run=1.10, hip=1.0. Multiplier lerped at SPRING_SPEED rate — smooth transitions, no snap.
+- All 20 new constants in `Constants.lua` under `VIEWMODEL_CAMERA_INERTIA_*` prefix.
+- `vmPrevCamCFrame` reset to `CFrame.new()` in `init()` (large-delta guard absorbs any stale-CFrame jump on equip).
+- No GunController changes. No new public API. No new remotes.
+
+**Sign convention (implemented; needs Studio confirmation):**
+- Camera right (+ry) → gun lags left → negative yaw offset ✓ (expected)
+- Camera up (−rx) → gun lags down → `−rx * pitch_strength` → positive pitch = muzzle down ✓ (expected)
+- Camera right → roll → negative roll offset ✓ (expected)
+- If any axis feels reversed in Studio: negate only that axis in the `vmCamInertia*` accumulation line and document the confirmed sign below.
+
+**Confirmed sign convention:** PENDING — verify in Studio and update this entry.
+
+**MCP / Studio verification checklist:**
+1. Equip AKS74. Stand still. Move mouse slowly right → gun visibly lags left, catches up smoothly.
+2. Move mouse left → gun lags right, catches up.
+3. Look up slowly → gun subtly dips (muzzle down), recovers.
+4. Look down → gun subtly rises (muzzle up), recovers.
+5. Move mouse fast right then stop → gun reaches max yaw (≤2.8°), settles in ≈0.5 s. No wild swing.
+6. ADS (MB2): move camera left/right. Inertia barely perceptible; iron sights stay centred.
+7. Exit ADS (MB2): inertia smoothly returns to hip strength.
+8. Reload (R): inertia at ≈45% of hip. Returns to full on reload complete.
+9. Sprint/run: inertia slightly stronger (1.10×). Controlled, not wild.
+10. Holster (Key 1) → re-equip: inertia resets cleanly. No stuck offset.
+11. Respawn/die: inertia resets. No stuck offset.
+12. Check Output: zero new errors or unexpected warns.
+13. Confirm camera.CFrame, FieldOfView, Humanoid.CameraOffset, raycast direction are unchanged.
+14. Confirm no new remotes. Confirm server combat/damage/ammo/reload behavior unchanged.
+15. Confirm VIEWMODEL_CAMERA_INERTIA_ENABLED = false → cameraInertiaCF = identity; weapon holds still.
+
+**Deferred:**
+- Movement velocity inertia (gun lags behind player movement direction changes) — separate future feature.
+- Body visibility adjustment when looking down sharply — separate future feature.
+- Per-weapon inertia weight (heavier gun = more lag) — requires weapon-weight tag in WeaponData.
+
+**DEBT-064 status (Stable):** Inertia sits BEFORE vmRecoilCF in the chain; recoil is applied on top and remains visually distinct. No shared state with recoil system.
+**DEBT-065 status (Stable):** Inertia is a separate CFrame layer before swayCF. No shared state with sway mouse-lag. Both contribute to lag feel via independent mechanisms (inertia: camera angle delta; sway: mouse pixel accumulation).
+**DEBT-040 status (Stable):** `cameraInertiaCF` excluded from `aimAlignedPivot`. ADS alignment is unaffected.
+**DEBT-063 status (Stable):** `cameraInertiaCF` does not affect `vmFreeAimBlended` or raycast direction.
+
+**Fix when:** Studio verification passes all 15 checklist items above and sign convention is confirmed. Mark RESOLVED.
+
+---
+
+## [DEBT-081] Movement velocity inertia — Studio play-mode sign and feel verification pending — ADDED 2026-06-13
+
+**Files:** `src/client/ViewModelController.lua`, `src/shared/Constants.lua`
+**Severity:** Low (intentional deferral; feature is complete; sign conventions and feel tuning need runtime confirmation)
+**Studio verification required:** Yes — verify signs, feel, and ADS safety before closing this entry
+
+**What was implemented (2026-06-13):**
+- Movement velocity inertia added as `movementInertiaCF` in the ViewModelController RenderStepped PivotTo chain.
+- Inserted after `cameraInertiaCF` and before `viewRecoilCFrame` in `basePivot`; excluded from `aimAlignedPivot` — ADS alignment is exact and unaffected.
+- Per-frame HRP `AssemblyLinearVelocity` projected onto camera axes via `RightVector:Dot(vel)` (strafe), `LookVector:Dot(vel)` (forward), and `vel.Y` (vertical).
+- Each frame: accumulates opposite-direction offset (`vmMovInertiaX/Y/Z`); clamps to max; decays via exponential spring at `returnRate = SPRING_SPEED * (1 - DAMPING) = 14 * 0.22 = 3.08 /s`.
+- Min-speed gate: horizontal speed below `MIN_SPEED = 1.5 studs/s` produces no accumulation (idle jitter suppression).
+- Rotation derived from position offsets inline: roll from X offset, pitch from Z offset — no extra spring state.
+- State multiplier: ADS=0.08, reload=0.50, crouch=0.65, sprint=1.20, hip=1.0. Multiplier lerped at SPRING_SPEED rate.
+- All 20 new constants in `Constants.lua` under `VIEWMODEL_MOVEMENT_INERTIA_*` prefix.
+- `vmMovInertia{X/Y/Z/Weight/LastTarget}` reset to zero/1/1 in `init()`.
+- No GunController changes. No new public API. No new remotes.
+
+**Sign convention (implemented; needs Studio confirmation):**
+- Strafe right (`localX > 0`) → `vmMovInertiaX -= localX * sx * w * dt` → negative X → gun shifts left ✓ (expected)
+- Move forward (`localFwd > 0`) → `vmMovInertiaZ += localFwd * sz * w * dt` → positive Z (+Z = toward viewer = backward) → gun settles back ✓ (expected)
+- Move up (`localY > 0`) → `vmMovInertiaY -= localY * sy * w * dt` → negative Y → gun drops ✓ (expected)
+- Roll: `movRoll = vmMovInertiaX * ROLL_STRENGTH` → strafe right → positive X → gun rolls right (tiny cant) ✓ (expected)
+- Pitch: `movPitch = -vmMovInertiaZ * PITCH_STRENGTH` → forward move → positive Z → negative pitch → gun tips slightly down ✓ (expected)
+- If any axis feels reversed in Studio: negate only that axis's accumulation line and confirm the sign below.
+
+**Confirmed sign convention:** PENDING — verify in Studio and update this entry.
+
+**MCP / Studio verification checklist:**
+1. Equip AKS74. Walk left/right — gun visibly drifts opposite to strafe, catches up smoothly.
+2. Walk right → gun shifts left with a tiny roll in the same direction. Walk left → gun shifts right with roll.
+3. Start walking forward → gun settles slightly back (+Z). Stop → gun recovers forward smoothly.
+4. Jump → gun drops slightly on ascent. Land → gun settles back to center.
+5. Sprint: effect is slightly stronger (1.20×) — visible but not wild.
+6. Crouch-walk: effect is reduced (0.65×) — more controlled than hipfire walk.
+7. ADS (MB2): start strafing — inertia nearly imperceptible (0.08×). Iron sights stay on target.
+8. Exit ADS (MB2): inertia returns smoothly to hip weight.
+9. Reload (R): inertia at 50% — reduced but still present.
+10. Stand still: no drift. Idle jitter below 1.5 studs/s produces no accumulation.
+11. Move then stop abruptly: spring decays fully within ≈0.3 s. No residual offset.
+12. Holster (Key 1) → re-equip: inertia resets cleanly. No stuck offset.
+13. Respawn/die: inertia resets. No stuck offset.
+14. Check Output: zero new errors or unexpected warns.
+15. Confirm camera.CFrame, FieldOfView, Humanoid.CameraOffset, raycast direction are unchanged.
+16. Confirm no new remotes. Confirm server combat/damage/ammo/reload behavior unchanged.
+17. Confirm `VIEWMODEL_MOVEMENT_INERTIA_ENABLED = false` → `movementInertiaCF` = identity; weapon holds perfectly still even while moving.
+18. Confirm camera rotation inertia from Task 4 still works (move camera while strafing — both layers should combine naturally).
+
+**DEBT-064 status (Stable):** `movementInertiaCF` sits before `vmRecoilCF` in the chain; recoil is applied on top and remains visually distinct. No shared state with recoil system.
+**DEBT-065 status (Stable):** `movementInertiaCF` is a separate CFrame layer. No shared state with sway mouse-lag. Both contribute to lag feel via independent mechanisms.
+**DEBT-040 status (Stable):** `movementInertiaCF` excluded from `aimAlignedPivot`. ADS alignment is unaffected; bullet direction is exact.
+**DEBT-063 status (Stable):** `movementInertiaCF` does not affect `vmFreeAimBlended` or raycast direction.
+**DEBT-080 status (Stable):** Camera rotation inertia (`cameraInertiaCF`) is unchanged; still present in basePivot before `movementInertiaCF`. Both layers combine independently.
+
+**Deferred:**
+- Per-weapon inertia weight (heavier gun = more movement lag) — requires weapon-weight tag in WeaponData.
+- Vertical jump/land inertia separate tuning — currently uses same VERTICAL_Y_STRENGTH as walking; may warrant a separate constant after Studio verification.
+
+**Fix when:** Studio verification passes all 18 checklist items above and sign convention is confirmed. Mark RESOLVED.
+
+---
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.lua`

@@ -1385,7 +1385,80 @@ Constants.VIEWMODEL_SWAY_ADS_WEIGHT    = 0.08
 Constants.VIEWMODEL_SWAY_RELOAD_WEIGHT = 0.15
 Constants.VIEWMODEL_SWAY_SPRINT_WEIGHT = 0.45
 
--- ── Task A: ADS sprint disable + ADS focus zoom ────────────────────────────────────────────
+-- ── Camera rotation inertia (viewmodel-only — no camera movement) ──────────────────────────
+-- Gun lags behind camera rotation and catches up smoothly, giving the weapon a sense of mass.
+-- Only the viewmodel CFrame is offset; camera.CFrame, FieldOfView, and CameraOffset are untouched.
+-- All rotation/translation offsets are in camera-local space.
+Constants.VIEWMODEL_CAMERA_INERTIA_ENABLED = true   -- master switch; false = cameraInertiaCF is identity
+Constants.VIEWMODEL_CAMERA_INERTIA_DEBUG   = false  -- Logger.debug on state changes and large-delta resets
+
+-- Rotation strength: multiplied by camera yaw/pitch delta per frame; higher = stronger lag.
+Constants.VIEWMODEL_CAMERA_INERTIA_YAW_STRENGTH   = 0.70  -- yaw lag per radian of camera yaw turn
+Constants.VIEWMODEL_CAMERA_INERTIA_PITCH_STRENGTH = 0.52  -- pitch lag per radian of camera pitch turn
+Constants.VIEWMODEL_CAMERA_INERTIA_ROLL_STRENGTH  = 0.24  -- roll tilt derived from yaw speed
+
+-- Maximum angular displacement (degrees). Hard clamp; prevents wild swings.
+Constants.VIEWMODEL_CAMERA_INERTIA_MAX_YAW_DEGREES   = 2.8
+Constants.VIEWMODEL_CAMERA_INERTIA_MAX_PITCH_DEGREES = 2.1
+Constants.VIEWMODEL_CAMERA_INERTIA_MAX_ROLL_DEGREES  = 1.1
+
+-- Position offset: gun also translates slightly opposite to rotation (pendulum-mass illusion).
+Constants.VIEWMODEL_CAMERA_INERTIA_POSITION_X_STRENGTH = 0.035  -- studs per radian of yaw delta
+Constants.VIEWMODEL_CAMERA_INERTIA_POSITION_Y_STRENGTH = 0.025  -- studs per radian of pitch delta
+Constants.VIEWMODEL_CAMERA_INERTIA_MAX_POSITION_X      = 0.055  -- hard clamp in studs
+Constants.VIEWMODEL_CAMERA_INERTIA_MAX_POSITION_Y      = 0.040
+
+-- Spring return: controls how quickly inertia settles back to neutral after camera stops.
+-- effectiveDecayRate = SPRING_SPEED * (1 - DAMPING) = 18 * 0.18 = 3.24 /s → half-life ≈ 0.21 s.
+-- Higher SPRING_SPEED = faster return. Lower DAMPING = faster return (less "stickiness").
+Constants.VIEWMODEL_CAMERA_INERTIA_SPRING_SPEED = 18   -- per-second spring rate
+Constants.VIEWMODEL_CAMERA_INERTIA_DAMPING      = 0.82 -- damping coefficient (0 = instant, 1 = never returns)
+
+-- State multipliers. ADS is strongly suppressed so iron sight alignment stays stable.
+-- During ADS transition (0 < adsAimAlpha < 1) both the multiplier AND the Lerp blend reduce inertia.
+Constants.VIEWMODEL_CAMERA_INERTIA_ADS_MULTIPLIER    = 0.10  -- barely perceptible while aiming
+Constants.VIEWMODEL_CAMERA_INERTIA_RELOAD_MULTIPLIER = 0.45  -- slightly reduced during reload
+Constants.VIEWMODEL_CAMERA_INERTIA_EQUIP_MULTIPLIER  = 0.35  -- reduced during equip animation
+Constants.VIEWMODEL_CAMERA_INERTIA_SPRINT_MULTIPLIER = 1.10  -- slightly amplified while running/sprinting
+
+-- ── Viewmodel movement velocity inertia ───────────────────────────────────────────────────────
+-- Gun shifts opposite to player movement velocity, giving the weapon a sense of carried weight.
+-- Only the viewmodel CFrame is offset; camera.CFrame, velocity, animations, and gameplay are untouched.
+Constants.VIEWMODEL_MOVEMENT_INERTIA_ENABLED = true   -- master switch; false = movementInertiaCF is identity
+Constants.VIEWMODEL_MOVEMENT_INERTIA_DEBUG   = false  -- Logger.debug on weight changes
+
+-- Position strengths: viewmodel offset (studs) per stud/s of camera-local velocity × dt per frame.
+Constants.VIEWMODEL_MOVEMENT_INERTIA_STRAFE_X_STRENGTH   = 0.075  -- lateral strafe offset
+Constants.VIEWMODEL_MOVEMENT_INERTIA_FORWARD_Z_STRENGTH  = 0.055  -- forward/back weight
+Constants.VIEWMODEL_MOVEMENT_INERTIA_VERTICAL_Y_STRENGTH = 0.030  -- vertical velocity carry
+
+-- Maximum positional displacement (studs). Hard clamp; prevents wild swings on velocity spikes.
+Constants.VIEWMODEL_MOVEMENT_INERTIA_MAX_X = 0.090
+Constants.VIEWMODEL_MOVEMENT_INERTIA_MAX_Y = 0.045
+Constants.VIEWMODEL_MOVEMENT_INERTIA_MAX_Z = 0.075
+
+-- Derived rotation from position offset (no separate spring — computed inline from position each frame).
+Constants.VIEWMODEL_MOVEMENT_INERTIA_ROLL_STRENGTH     = 1.25  -- radians of roll per stud of X offset
+Constants.VIEWMODEL_MOVEMENT_INERTIA_PITCH_STRENGTH    = 0.75  -- radians of pitch per stud of Z offset
+Constants.VIEWMODEL_MOVEMENT_INERTIA_MAX_ROLL_DEGREES  = 1.4
+Constants.VIEWMODEL_MOVEMENT_INERTIA_MAX_PITCH_DEGREES = 0.8
+
+-- Spring return: effectiveDecayRate = SPRING_SPEED * (1 - DAMPING) = 14 * 0.22 = 3.08 /s.
+Constants.VIEWMODEL_MOVEMENT_INERTIA_SPRING_SPEED = 14   -- per-second spring rate
+Constants.VIEWMODEL_MOVEMENT_INERTIA_DAMPING      = 0.78 -- damping coefficient (0 = instant, 1 = never)
+
+-- State multipliers: same pattern as camera rotation inertia.
+Constants.VIEWMODEL_MOVEMENT_INERTIA_ADS_MULTIPLIER    = 0.08  -- nearly off while aiming (sights must stay stable)
+Constants.VIEWMODEL_MOVEMENT_INERTIA_RELOAD_MULTIPLIER = 0.50  -- reduced during reload
+Constants.VIEWMODEL_MOVEMENT_INERTIA_SPRINT_MULTIPLIER = 1.20  -- slightly amplified while sprinting
+Constants.VIEWMODEL_MOVEMENT_INERTIA_CROUCH_MULTIPLIER = 0.65  -- reduced while crouching
+
+-- Velocity gate: ignore speeds below MIN_SPEED (idle jitter / physics noise).
+-- MAX_SPEED_REFERENCE caps velocity input range — no spike from a one-frame physics outlier.
+Constants.VIEWMODEL_MOVEMENT_INERTIA_MIN_SPEED           = 1.5  -- studs/s — below this: no accumulation
+Constants.VIEWMODEL_MOVEMENT_INERTIA_MAX_SPEED_REFERENCE = 24   -- studs/s — each axis clamped to this
+
+-- ── Task A: ADS sprint disable + ADS focus zoom ─────────────────────────────────────────────
 -- FOV values for the three camera states.  Sprint FOV (SPRINT_CAMERA_FOV,
 -- TACTICAL_SPRINT_CAMERA_FOV) still applies when not ADS — these are ADS-specific.
 -- CAMERA_DEFAULT_FOV mirrors DEFAULT_CAMERA_FOV (both = 70); the ADS system uses
