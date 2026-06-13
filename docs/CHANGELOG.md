@@ -7,6 +7,20 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-13 — MOVEMENT] — Grounded turning weight
+
+- Added angular inertia to body yaw in custom mouse-lock mode. The character now "catches up" to the camera direction rather than snapping instantly, giving a Criminality-like turn-weight feel.
+- New module-level variable `turnWeightCurrentSpeed` ramps toward a per-state peak turn rate each Heartbeat using a smooth ramp factor (smooth factor × dt). The result is passed directly to `rotateCharacterCapped()` as `fastDegPerFrame60`.
+- Per-state peak caps: walk/backward 420 deg/s (7.0 deg/frame), forward-run 360 deg/s (6.0), crouch 360 deg/s (6.0), sprint reserve 280 deg/s (4.7).
+- Per-state smooth factors: backward-walk 14, forward-run 12, sprint 8 (most inertia), crouch 16 (least inertia).
+- Guards: turn weight skips (and resets angular speed to 0) when airborne, sliding, `moveSmoothSpeed < 1.5`, or `moveVector.Magnitude < 0.08`.
+- Additional reset when `moveSmoothSpeed < 0.75` (nearly stopped) to prevent residual carry-over.
+- Legacy `MOVEMENT_BODY_YAW_SMOOTH_ENABLED` path preserved as fallback when `MOVEMENT_TURN_WEIGHT_ENABLED = false` or a guard fires mid-frame.
+- 15 new constants added to `Constants.lua` under `MOVEMENT_TURN_WEIGHT_*` namespace.
+- `turnWeightCurrentSpeed` and `lastTurnWeightDebugActive` reset on respawn, mouse-lock disable, and destroy().
+- Non-mouse-lock path (`AutoRotate = true`) untouched. No animation IDs, movement speeds, camera, or combat changed.
+- MCP Studio verified 2026-06-13: 18/18 constant checks, 6/6 runtime checks (ramp math, guard logic, console clean).
+
 ## [2026-06-12 — MOVEMENT] — Body-weight movement speed smoothing
 
 ### Summary

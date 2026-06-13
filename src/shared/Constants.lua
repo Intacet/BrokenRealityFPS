@@ -1474,6 +1474,34 @@ Constants.MOVEMENT_BODY_YAW_SPRINT_SMOOTH_SPEED          = 9     -- deg/frame@60
 Constants.MOVEMENT_BODY_YAW_BACKPEDAL_SMOOTH_SPEED       = 10    -- deg/frame@60fps while backpedaling
 Constants.MOVEMENT_BODY_YAW_MAX_DELTA_DEGREES_PER_SECOND = 540   -- global cap; 540 / 60 = 9 deg/frame (sprint value)
 
+-- ── Grounded turning weight (2026-06-13) ─────────────────────────────────────
+-- Adds angular inertia to body yaw in custom mouse-lock so the character
+-- "catches up" to camera direction rather than snapping instantly.
+-- Only active in custom mouse-lock; normal mode uses Humanoid.AutoRotate.
+-- SMOOTH_SPEED: dimensionless ramp rate (higher = faster build-up = less inertia).
+-- MAX_DEGREES_PER_SECOND: peak turn rate the ramping speed asymptotes toward.
+Constants.MOVEMENT_TURN_WEIGHT_ENABLED                       = true
+Constants.MOVEMENT_TURN_WEIGHT_DEBUG                         = false
+
+-- Per-state smooth factors (applied as factor * dt each Heartbeat toward peak rate).
+Constants.MOVEMENT_TURN_WEIGHT_WALK_SMOOTH_SPEED             = 14   -- backward / strafe walk
+Constants.MOVEMENT_TURN_WEIGHT_RUN_SMOOTH_SPEED              = 12   -- forward walk at WALK_SPEED
+Constants.MOVEMENT_TURN_WEIGHT_SPRINT_SMOOTH_SPEED           = 8    -- sprint (reserved; Stage 3G owns sprint yaw)
+Constants.MOVEMENT_TURN_WEIGHT_CROUCH_SMOOTH_SPEED           = 16   -- crouched movement (most responsive)
+
+-- Per-state peak turn rate caps (deg/s). The current angular speed ramps toward this.
+Constants.MOVEMENT_TURN_WEIGHT_MAX_DEGREES_PER_SECOND_WALK   = 420  -- ≈ 7.0 deg/frame@60fps (backward/strafe)
+Constants.MOVEMENT_TURN_WEIGHT_MAX_DEGREES_PER_SECOND_RUN    = 360  -- ≈ 6.0 deg/frame@60fps (forward walk)
+Constants.MOVEMENT_TURN_WEIGHT_MAX_DEGREES_PER_SECOND_SPRINT = 280  -- ≈ 4.7 deg/frame@60fps (sprint reserve)
+Constants.MOVEMENT_TURN_WEIGHT_MAX_DEGREES_PER_SECOND_CROUCH = 360  -- ≈ 6.0 deg/frame@60fps (crouch)
+
+-- Guards and resets.
+Constants.MOVEMENT_TURN_WEIGHT_INPUT_DEADZONE                = 0.08  -- skip when moveVector.Magnitude < this
+Constants.MOVEMENT_TURN_WEIGHT_MIN_MOVE_SPEED                = 1.5   -- skip when moveSmoothSpeed < this
+Constants.MOVEMENT_TURN_WEIGHT_DISABLE_WHILE_AIRBORNE        = true  -- no inertia while falling / jumping
+Constants.MOVEMENT_TURN_WEIGHT_DISABLE_WHILE_SLIDING         = true  -- no inertia during slide
+Constants.MOVEMENT_TURN_WEIGHT_RESET_ON_STOP_SPEED           = 0.75  -- zero angular speed when nearly stopped
+
 -- ============================================================
 -- AKS74 shoot sound — first-person fire audio (Task: sound variants)
 -- ============================================================

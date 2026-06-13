@@ -1293,6 +1293,9 @@ Two guards added to `canAttemptVault()`: (1) XZ speed threshold (`VAULT_MIN_APPR
 
 **Fix when:** All 8 checklist items pass in a manual Studio play session. Update this entry with the date of verification. If any item fails, add a sub-item with the failure description and the tuning constant to adjust.
 
+**Updated 2026-06-13 — Grounded turning weight extends this system:**
+`updateCustomMouseLockBodyYaw()` now routes through an inertia-ramp path when `MOVEMENT_TURN_WEIGHT_ENABLED = true` (new default), before falling through to the legacy fixed-speed path. The verification checklist above still applies and now additionally covers turn-weight feel — see DEBT-076 for the dedicated turn-weight checklist.
+
 ---
 
 ## [DEBT-055] Shift-lock backpedal bug fixes (Bugs 1–3) — UPDATED 2026-05-28
@@ -1915,6 +1918,34 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 **Studio verification required:** No (replication not yet built)
 **Risk:** Footstep `Sound` instances are created and parented to the local player's `HumanoidRootPart/FootstepEmitter`. In Roblox, `Sound` instances are not automatically replicated to other clients — other players will not hear the local player's footsteps. This is intentional for Stage 1 (local feedback only) but means no 3D audio footstep presence for other players.
 **Fix when:** Multi-player footstep presence is needed. Approach: a lightweight `FootstepEvent` remote (server-to-all-clients) that carries `{playerId, tier, position}`. Each receiving client creates a short one-shot `Sound` at the reported position. The server should rate-limit and validate position. Do not add this until the core loop is proven — adds remote traffic per step.
+
+---
+
+## [DEBT-076] Grounded turning weight — Studio play-mode feel verification pending — ADDED 2026-06-13
+
+**Files:** `src/client/MovementController.lua`, `src/shared/Constants.lua`
+**Severity:** Low (MCP logic checks passed; observable feel requires manual play-through)
+**Studio verification required:** Yes — requires manual shift-lock walking test to confirm the inertia feel
+
+**What was implemented (2026-06-13):**
+- `turnWeightCurrentSpeed` ramps toward a per-state peak turn rate (deg/frame@60fps) each Heartbeat via `smoothFactor × dt` lerp.
+- Smooth factors: backward-walk=14, forward-run=12, sprint=8, crouch=16. Peak caps: walk=420 deg/s, run=360, sprint=280, crouch=360.
+- Guards skip turn weight (and zero the current speed) when airborne, sliding, `moveSmoothSpeed < 1.5`, or input deadzone < 0.08.
+- `MOVEMENT_TURN_WEIGHT_ENABLED = false` reverts to the legacy `MOVEMENT_BODY_YAW_SMOOTH_ENABLED` fixed-speed path.
+
+**Feel verification checklist (requires manual Studio play):**
+1. Enable shift-lock (LeftControl). Walk forward (W). Body yaw should lag slightly behind camera rotation, snapping in over ~5–10 frames, not instantly.
+2. Walk backward (S). Body should face camera yaw; same angular lag feel as forward.
+3. Walk forward then quickly strafe left/right (A/D). Character turn should feel slightly weighted, not instant.
+4. Stop walking. `turnWeightCurrentSpeed` resets — next walk start should ramp from 0 again.
+5. Jump. While airborne, body yaw should NOT apply turn weight (guards disable it). On land, weight resumes.
+6. Slide (LeftShift+C). During slide, no turn weight. After slide ends, weight resumes.
+7. Enable `MOVEMENT_TURN_WEIGHT_DEBUG = true`. Walk while mouse-locked → Output should log "turn-weight active" once per activation, "turn-weight skip" once per deactivation.
+8. Set `MOVEMENT_TURN_WEIGHT_ENABLED = false`. Walking should revert to legacy fixed yaw speed (no ramping) without errors.
+
+**Tuning risk:** Current constants (`SMOOTH_SPEED_*` and `MAX_DEGREES_PER_SECOND_*`) were derived analytically. Live playtest may find forward-run (12/360) feels too heavy or sprint (8/280) feels too light. Tune only these constants; no logic changes needed. See `docs/CHANGELOG.md [2026-06-13]` for values.
+
+**Fix when:** All 8 checklist items pass in a manual Studio play session. Update this entry with the date and mark as RESOLVED.
 
 ---
 

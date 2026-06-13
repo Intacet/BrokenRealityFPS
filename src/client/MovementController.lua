@@ -369,6 +369,11 @@ local povLandDip:       number = 0
 local moveSmoothSpeed: number = 0
 -- Change-gated decel path label for MOVEMENT_BODY_WEIGHT_DEBUG logging (fires once per path change).
 local lastBodyWeightDecelPath: string = ""
+-- Grounded turning weight: current angular speed in deg/frame@60fps passed to rotateCharacterCapped().
+-- Ramps toward the per-state MAX_DEGREES_PER_SECOND/60 cap using the per-state SMOOTH_SPEED factor.
+-- Cleared on respawn, mouse-lock disable, phase exit, and when nearly stopped.
+local turnWeightCurrentSpeed: number   = 0
+local lastTurnWeightDebugActive: boolean = false  -- change-gated flag for MOVEMENT_TURN_WEIGHT_DEBUG
 
 -- Task D: camera body feel state (extends Task B's stance offset system).
 -- updateCameraBodyFeel() is the single owner of Humanoid.CameraOffset per Heartbeat.
@@ -1124,6 +1129,66 @@ local function updateCustomMouseLockBodyYaw()
     -- Camera-yaw CFrame write path: rotate toward flat camera look direction.
     local flatLook = getFlatCameraYawDirection()
     if not flatLook then return end
+
+    -- Grounded turning weight: ramp angular speed toward per-state cap each Heartbeat.
+    -- When disabled or when a guard fires, falls through to the legacy fixed-speed path.
+    if Constants.MOVEMENT_TURN_WEIGHT_ENABLED :: boolean then
+        local skip =
+            ((Constants.MOVEMENT_TURN_WEIGHT_DISABLE_WHILE_AIRBORNE :: boolean) and isFalling)
+            or ((Constants.MOVEMENT_TURN_WEIGHT_DISABLE_WHILE_SLIDING :: boolean) and isSliding)
+            or moveSmoothSpeed < (Constants.MOVEMENT_TURN_WEIGHT_MIN_MOVE_SPEED :: number)
+            or movementState.moveVector.Magnitude < (Constants.MOVEMENT_TURN_WEIGHT_INPUT_DEADZONE :: number)
+
+        if skip then
+            turnWeightCurrentSpeed = 0
+        else
+            -- Zero residual angular speed when nearly stopped to prevent carry-over momentum.
+            if moveSmoothSpeed < (Constants.MOVEMENT_TURN_WEIGHT_RESET_ON_STOP_SPEED :: number) then
+                turnWeightCurrentSpeed = 0
+            end
+            -- Per-state peak cap (deg/s) and smooth ramp factor.
+            local targetMaxDegPerSec: number
+            local smoothFactor: number
+            local dirName = movementState.directionName
+            if movementState.isSprinting or isTacticalSprinting then
+                targetMaxDegPerSec = Constants.MOVEMENT_TURN_WEIGHT_MAX_DEGREES_PER_SECOND_SPRINT :: number
+                smoothFactor       = Constants.MOVEMENT_TURN_WEIGHT_SPRINT_SMOOTH_SPEED :: number
+            elseif movementState.isCrouching then
+                targetMaxDegPerSec = Constants.MOVEMENT_TURN_WEIGHT_MAX_DEGREES_PER_SECOND_CROUCH :: number
+                smoothFactor       = Constants.MOVEMENT_TURN_WEIGHT_CROUCH_SMOOTH_SPEED :: number
+            elseif dirName == "Backward" or dirName == "BackLeft" or dirName == "BackRight" then
+                targetMaxDegPerSec = Constants.MOVEMENT_TURN_WEIGHT_MAX_DEGREES_PER_SECOND_WALK :: number
+                smoothFactor       = Constants.MOVEMENT_TURN_WEIGHT_WALK_SMOOTH_SPEED :: number
+            else
+                targetMaxDegPerSec = Constants.MOVEMENT_TURN_WEIGHT_MAX_DEGREES_PER_SECOND_RUN :: number
+                smoothFactor       = Constants.MOVEMENT_TURN_WEIGHT_RUN_SMOOTH_SPEED :: number
+            end
+            -- Lerp current speed toward target (deg/frame@60fps) using smooth factor * dt.
+            local targetDegPerFrame = targetMaxDegPerSec / 60
+            local alpha = math.min(smoothFactor * lastHeartbeatDt, 1)
+            turnWeightCurrentSpeed = turnWeightCurrentSpeed + (targetDegPerFrame - turnWeightCurrentSpeed) * alpha
+            if Constants.MOVEMENT_TURN_WEIGHT_DEBUG :: boolean then
+                if not lastTurnWeightDebugActive then
+                    lastTurnWeightDebugActive = true
+                    Logger.debug(string.format(
+                        "[MovementController] turn-weight active (movSpd=%.1f targetDeg/s=%.0f smooth=%.0f)",
+                        moveSmoothSpeed, targetMaxDegPerSec, smoothFactor
+                    ))
+                end
+            end
+        end
+
+        if not skip then
+            rotateCharacterCapped(flatLook, turnWeightCurrentSpeed)
+            return
+        end
+        if Constants.MOVEMENT_TURN_WEIGHT_DEBUG :: boolean and lastTurnWeightDebugActive then
+            lastTurnWeightDebugActive = false
+            Logger.debug("[MovementController] turn-weight skip (airborne/sliding/stopped/no-input)")
+        end
+    end
+
+    -- Legacy fixed-speed path (MOVEMENT_TURN_WEIGHT_ENABLED = false, or guard skipped above).
     -- Task C: pick rotation speed based on current movement state.
     -- rotateCharacterCapped sets AutoRotate = false internally.
     local yawSpeed: number
@@ -1519,6 +1584,9 @@ local function applyCustomMouseLock()
         end
         -- Stage 3E: clear natural-AutoRotate sprint flag so the next lock session starts clean.
         lastNaturalSprintAutoRotateActive = false
+        -- Turning weight: reset angular speed so the next lock session starts with no residual inertia.
+        turnWeightCurrentSpeed   = 0
+        lastTurnWeightDebugActive = false
         -- Stage 4: reset hysteresis state so the next lock session starts fresh.
         lastStableDirectionName = ""
         lastDirectionSwitchTime = 0
@@ -3635,6 +3703,9 @@ local function loadMovementAnimations(character: Model)
     lastSprintFacingMode              = ""
     -- Stage 3E: reset natural-AutoRotate sprint state on respawn.
     lastNaturalSprintAutoRotateActive = false
+    -- Turning weight: reset angular speed and debug flag on respawn.
+    turnWeightCurrentSpeed   = 0
+    lastTurnWeightDebugActive = false
     -- Stage 4: reset hysteresis state on respawn.
     lastStableDirectionName = ""
     lastDirectionSwitchTime = 0
@@ -5400,6 +5471,8 @@ function MovementController:destroy()
     lastSprintAnimName        = ""   -- Stage 2R
     lastSprintFacingMode              = ""    -- Stage 3D
     lastNaturalSprintAutoRotateActive = false -- Stage 3E
+    turnWeightCurrentSpeed   = 0     -- turning weight
+    lastTurnWeightDebugActive = false -- turning weight debug
     lastStableDirectionName = "" -- Stage 4
     lastDirectionSwitchTime = 0  -- Stage 4
     crouchBottomPoseWarned    = false
