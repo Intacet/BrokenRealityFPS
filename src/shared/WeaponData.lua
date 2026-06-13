@@ -85,6 +85,18 @@ WeaponData["AKS74"] = {
         randomRollScale = 0.45,
         alternatingYaw  = true,
     },
+    -- Ballistics data — read by Ballistics.GetConfig(); not yet read by GunService or DamageService.
+    -- mode = "Projectile" declares intent; hitscan gameplay is unchanged while
+    -- PROJECTILE_BALLISTICS_ENABLED = false. See DEBT-079.
+    ballistics = {
+        mode              = "Projectile",
+        muzzleVelocity    = 2800,                  -- studs/s (AKS74 spec ≈ 880 m/s)
+        gravityMultiplier = 0.0,                   -- no drop yet; set to 1.0 when bullet drop is enabled
+        maxDistance       = 900,                   -- studs; matches WeaponData.range upper bound
+        maxLifetime       = 1.25,                  -- seconds
+        simulationStep    = 0.008333333333333333,  -- ≈ 120 Hz sub-step
+        maxStepDistance   = 55,                    -- studs per sub-step cap
+    },
     animations = {
         firstPerson = {
             equip    = "rbxassetid://139265999638776",

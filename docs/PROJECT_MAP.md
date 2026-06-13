@@ -1180,7 +1180,21 @@ Constants    -- single source of truth for all tunable numbers and phase enums.
              --       sweep. Higher than sprint (0.18) for a quicker 180° body turn (~8–10
              --       frames at 60 fps). 1.0 = instant snap. Tune without code changes.
 WeaponData   -- per-weapon stat table (damage, range, fireRate, magazineSize, reserveAmmo)
+             --   AKS74 entry includes a ballistics sub-table (data-only; read by Ballistics.GetConfig()).
+             --   GunService and DamageService do not read ballistics fields yet (see DEBT-079).
 WeaponFeel   -- per-weapon gunplay feel (recoil, spread, ADS time, muzzle flash duration)
+Ballistics   -- virtual projectile math library (added 2026-06-13). Public API:
+             --   GetConfig(weaponDef)                             → BallisticsConfig
+             --   ComputeInitialVelocity(origin, direction, cfg)  → Vector3
+             --   ComputeGravity(cfg)                             → Vector3
+             --   Step(position, velocity, dt, gravity)           → (Vector3, Vector3)
+             --   ShouldExpire(origin, position, age, cfg)        → boolean
+             --   Pure data/math; no Instances, no RunService, no raycasts.
+             --   Safe to require from client and server.
+             --   GetConfig falls back to PROJECTILE_DEFAULT_* constants when a
+             --   WeaponData.ballistics field is absent.
+             --   PROJECTILE_BALLISTICS_ENABLED = false: no active gameplay effect yet.
+             --   No remotes. Not wired to GunController, GunService, or DamageService. See DEBT-079.
 Logger       -- debug/warn wrapper; suppressed in release via DEBUG_MODE flag
 ```
 

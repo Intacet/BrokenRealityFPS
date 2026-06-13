@@ -2059,6 +2059,46 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 
 ---
 
+## [DEBT-079] Ballistics module and WeaponData ballistics fields are data-only — gameplay remains hitscan — ADDED 2026-06-13
+
+**Files:** `src/shared/Ballistics.lua`, `src/shared/WeaponData.lua`, `src/shared/Constants.lua`
+**Severity:** Low (intentional deferral; foundation is correct and complete by design)
+**Studio verification required:** Yes — verify no Output errors on require; verify AKS74 fires identically to before
+
+**What was added (2026-06-13):**
+- `src/shared/Ballistics.lua` — pure math module: `GetConfig`, `ComputeInitialVelocity`, `ComputeGravity`, `Step`, `ShouldExpire`. No Instances, no RunService, no raycasts. Safe to require from client and server.
+- `WeaponData["AKS74"].ballistics` sub-table: `mode="Projectile"`, `muzzleVelocity=2800`, `gravityMultiplier=0.0`, `maxDistance=900`, `maxLifetime=1.25`, `simulationStep=0.008333...`, `maxStepDistance=55`.
+- `Constants.PROJECTILE_BALLISTICS_ENABLED = false` and 7 `PROJECTILE_DEFAULT_*` fallback constants.
+
+**Why this is deferred:**
+- `PROJECTILE_BALLISTICS_ENABLED = false` — the master switch is off. No caller reads ballistics fields during active gameplay.
+- `GunController` still fires a single client-side raycast per shot (hitscan). `GunService` still validates with a server-side raycast. Neither reads `weaponDef.ballistics`.
+- `DamageService` is unchanged. Damage, hit validation, ammo, and reload are unchanged.
+
+**Analogous pattern:** This follows the same data-stored-but-not-read pattern as `WeaponData.reloadTime` (see DEBT-030). Both fields are intentionally inert until the corresponding system is built.
+
+**Integration path (future — when ready):**
+1. Set `PROJECTILE_BALLISTICS_ENABLED = true`.
+2. On server (`GunService`): for each `WeaponFired`, call `Ballistics.GetConfig(weaponDef)`, then simulate the projectile path sub-step by sub-step (each sub-step: `Step()` → raycast segment → check `ShouldExpire()`). First raycast hit that passes distance and lifetime is the authoritative impact point.
+3. On client (`GunController`): optionally run the same simulation for tracer/VFX prediction only. Server result is authoritative.
+4. No new remotes needed for the math layer — `WeaponFired` payload is unchanged. Impact point VFX may need a new remote (document in PROJECT_MAP.md before adding).
+5. Bullet drop: set `gravityMultiplier = 1.0` in `WeaponData["AKS74"].ballistics` and verify server drop matches client prediction.
+
+**Studio verification checklist (manual play required after PROJECTILE_BALLISTICS_ENABLED = true):**
+1. Equip AKS74 (key 1). Confirm no Output errors.
+2. Fire hip — confirm hit detection unchanged, damage unchanged, hitmarker unchanged.
+3. Fire ADS — confirm ADS hit detection unchanged.
+4. Reload — confirm reload works, no Output errors.
+5. Check Output: no `[Ballistics]` errors during normal play.
+6. Set `PROJECTILE_BALLISTICS_DEBUG = true` → confirm fallback logs appear only for weapons without a `ballistics` sub-table.
+7. Confirm no tracers, no physical bullet Parts, no new remotes.
+
+**Risk:** `Ballistics.ComputeGravity` reads `workspace.Gravity`. If a future ZoneService changes workspace gravity for a zone effect, bullet drop will automatically reflect the zone gravity — which may be desired or may produce unexpected flight curves. If zone gravity overrides should NOT affect bullet physics, clamp `ComputeGravity` to a fixed constant instead.
+
+**Fix when:** Server-authoritative projectile simulation is built and the checklist above passes. Mark RESOLVED.
+
+---
+
 ## [DEBT-008] pcall on GetMatchConfig silently swallows server errors — RESOLVED 2026-05-06
 
 **File:** `src/client/MatchController.lua`

@@ -7,6 +7,23 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-13 — BALLISTICS] — Virtual projectile ballistics foundation (data + math layer)
+
+- **New module:** `src/shared/Ballistics.lua` — pure math library. No Instances, no RunService, no raycasts. Safe to require from client and server. Public API:
+  - `GetConfig(weaponDef) → BallisticsConfig` — normalises a weapon's `ballistics` sub-table against `PROJECTILE_DEFAULT_*` fallbacks.
+  - `ComputeInitialVelocity(origin, direction, config) → Vector3` — returns `direction.Unit * muzzleVelocity`.
+  - `ComputeGravity(config) → Vector3` — returns `(0, -workspace.Gravity × gravityMultiplier, 0)`.
+  - `Step(position, velocity, dt, gravity) → (Vector3, Vector3)` — semi-implicit Euler integration step.
+  - `ShouldExpire(origin, position, age, config) → boolean` — discards when age > maxLifetime or distance > maxDistance.
+  - All public functions validate parameters with `assert()`. Debug fallback logging via `Logger.debug()` when `PROJECTILE_BALLISTICS_DEBUG = true`.
+- **WeaponData:** Added `ballistics` sub-table to `WeaponData["AKS74"]`: `mode="Projectile"`, `muzzleVelocity=2800`, `gravityMultiplier=0.0`, `maxDistance=900`, `maxLifetime=1.25`, `simulationStep=1/120`, `maxStepDistance=55`. Data-only; hitscan gameplay unchanged.
+- **Constants:** 8 new `PROJECTILE_*` constants added — master switch (`PROJECTILE_BALLISTICS_ENABLED = false`), debug flag, and 6 `PROJECTILE_DEFAULT_*` fallback values used by `Ballistics.GetConfig()`.
+- **Behaviour unchanged:** `PROJECTILE_BALLISTICS_ENABLED = false`. `GunController` raycast, `GunService` raycast, `DamageService`, ammo, reload, recoil, viewmodel, sounds, and remotes are all unchanged. No tracers, no bullet Parts, no new remotes.
+- **DEBT-079 added:** Integration plan for server-authoritative simulation when the system is activated.
+- MCP Studio verification pending — see DEBT-079 checklist.
+
+---
+
 ## [2026-06-13 — FIX] — AKS74 locomotion: corrected walk / run / sprint state detection
 
 - **Bug:** Original state detection (see ANIMATION entry below) used `GetMoveState() == "Sprinting"` to trigger `"Sprint"` for BOTH shift-held run AND double-tap tactical sprint → sprint anim played when only running. Also used HRP horizontal speed to separate walk/run; normal walk speed (~16 studs/s) exceeded the 10 stud/s run threshold → walk anim never played.

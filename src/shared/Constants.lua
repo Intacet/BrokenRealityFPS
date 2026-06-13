@@ -1566,4 +1566,21 @@ Constants.FOOTSTEP_CROUCH_PITCH_MAX     = 0.80
 
 Constants.FOOTSTEP_DEFAULT_SURFACE      = "Concrete"
 
+-- ============================================================
+-- Projectile ballistics foundation — data-driven defaults
+-- PROJECTILE_BALLISTICS_ENABLED = false: all existing gameplay remains hitscan.
+-- These constants are fallbacks used by Ballistics.GetConfig() when a weapon's
+-- WeaponData.ballistics table omits a field. No code reads them during active
+-- gameplay yet — they exist only for Ballistics module normalisation.
+-- See DEBT-079 for the integration roadmap.
+-- ============================================================
+Constants.PROJECTILE_BALLISTICS_ENABLED         = false
+Constants.PROJECTILE_BALLISTICS_DEBUG           = false
+Constants.PROJECTILE_DEFAULT_MUZZLE_VELOCITY    = 2800    -- studs/s (AKS74 spec ≈ 880 m/s ≈ 2800 studs/s)
+Constants.PROJECTILE_DEFAULT_GRAVITY_MULTIPLIER = 0.0     -- 0 = no drop; 1 = workspace.Gravity (≈ 196.2 studs/s²)
+Constants.PROJECTILE_DEFAULT_MAX_DISTANCE       = 900     -- studs; discard projectile beyond this range
+Constants.PROJECTILE_DEFAULT_MAX_LIFETIME       = 1.25    -- seconds; hard cap on simulation age
+Constants.PROJECTILE_DEFAULT_SIMULATION_STEP    = 0.008333333333333333  -- seconds per sub-step (≈ 120 Hz)
+Constants.PROJECTILE_DEFAULT_MAX_STEP_DISTANCE  = 55      -- studs; max travel per sub-step before forced subdivision
+
 return Constants
