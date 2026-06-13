@@ -24,6 +24,14 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-06-13 — FIX] — MovementController: clear sprint state on window focus loss
+
+- **Bug:** If the player held LeftShift and the Roblox window lost focus (e.g. clicked away), `UserInputService.InputEnded` for LeftShift never fired — `movementState.isSprinting` stayed `true`. `GetMoveState()` continued returning `"Sprinting"`, so GunController kept sending `SetLocomotionState("Run")` → run animation played indefinitely while the player walked after re-focusing.
+- **Fix (`src/client/MovementController.lua`):** Added `UserInputService.WindowFocusReleased` connection after the sprint `InputEnded` block. On focus loss, if `isSprinting` is true: clears any in-flight `SprintStop` lock, clears all tactical sprint state, sets `isSprinting = false`, calls `applySpeed()` and `updateSprintFov()`. Mirrors the regular Shift-release code path without the sprint-stop animation (no momentum to carry since the player left the window).
+- Connection stored in `_connections` for proper cleanup via `destroy()`.
+
+---
+
 ## [2026-06-13 — FIX] — AKS74 locomotion: corrected walk / run / sprint state detection
 
 - **Bug:** Original state detection (see ANIMATION entry below) used `GetMoveState() == "Sprinting"` to trigger `"Sprint"` for BOTH shift-held run AND double-tap tactical sprint → sprint anim played when only running. Also used HRP horizontal speed to separate walk/run; normal walk speed (~16 studs/s) exceeded the 10 stud/s run threshold → walk anim never played.

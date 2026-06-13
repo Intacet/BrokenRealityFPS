@@ -5834,6 +5834,30 @@ function MovementController:Start()
     )
     table.insert(_connections, sprintEndConn)
 
+    -- ── Input: Focus-loss sprint clear (stuck-key fix) ───────────────────────
+    -- If Shift is held when the window loses focus, InputEnded for LeftShift
+    -- never fires and isSprinting stays true — causing the run animation to
+    -- persist even though the player is walking normally after re-focusing.
+    -- Mirror the regular Shift-release path here (no stop animation; no
+    -- momentum to carry since the player stopped interacting with the window).
+    local focusReleasedConn = UserInputService.WindowFocusReleased:Connect(function()
+        if not movementState.isSprinting then return end
+        if isSprintStopPlaying then
+            clearSprintStopLock()
+        end
+        if isTacticalSprinting then
+            isTacticalSprinting               = false
+            movementState.isTacticalSprinting = false
+            tacticalSprintStartTime           = 0
+            clearTacticalSprintStopConnection()
+        end
+        movementState.isSprinting = false
+        sprintStartTime           = nil
+        applySpeed()
+        updateSprintFov()
+    end)
+    table.insert(_connections, focusReleasedConn)
+
     -- ── Input: Custom mouse-lock toggle (LeftControl via ContextActionService) ──────
     -- Priority 3000 > CoreScript default 2000 — LeftControl is intercepted before CoreScripts
     -- can delay or consume it, eliminating the ~1-frame toggle lag seen with InputBegan.
