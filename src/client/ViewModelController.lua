@@ -9,7 +9,7 @@
 --   workspace.CurrentCamera.  The weapon stays holstered (self.model == nil) until EquipWeapon is
 --   called.  GunController calls EquipWeapon / HolsterWeapon in response to key 1 input.
 --   PlayEquipAnimation() plays the first-person equip track once, then chains into PlayIdleAnimation().
---   If the equip track has zero length or is absent, PlayIdleAnimation() starts immediately.
+--   If the equip track is absent, PlayIdleAnimation() starts immediately.
 --   StopWeaponAnimations() stops and destroys all loaded weapon AnimationTracks.
 --   HolsterWeapon() stops animations, destroys the model clone, and clears all equip state.
 --
@@ -704,13 +704,15 @@ function ViewModelController:PlayIdleAnimation(fadeTime: number?)
 end
 
 -- Plays the equip AnimationTrack once, then chains to PlayIdleAnimation() via the
--- Stopped signal.  If the equip track has zero length or is absent, PlayIdleAnimation()
--- starts immediately without blocking.
+-- Stopped signal.  If the equip track is absent, PlayIdleAnimation() starts immediately
+-- without blocking.
+-- NOTE: do NOT gate on weaponEquipTrack.Length > 0 — Length is 0 until the animation
+-- asset loads from the Roblox server, which happens asynchronously after LoadAnimation().
 function ViewModelController:PlayEquipAnimation()
     -- Capture weapon identity so the Stopped callback can guard against stale calls.
     local capturedWeapon = equippedWeaponName
 
-    if weaponEquipTrack and weaponEquipTrack.Length > 0 then
+    if weaponEquipTrack then
         weaponEquipTrack:Play()
         -- Chain to run or idle when the equip one-shot ends.
         -- AnimationTrack:Destroy() disconnects all signals synchronously, so the
@@ -873,16 +875,27 @@ function ViewModelController:EquipWeapon(weaponName: string)
     -- and by other players).  Runs regardless of current camera perspective.
     self:_setupThirdPersonWeaponAnimations(weaponName, data)
 
-    -- Apply current phase-based visibility.
-    local show = shouldShowViewModel()
-    visible    = show
-    setVisibility(show)
-
     -- Begin first-person equip → idle animation sequence.
+    -- The model is still invisible at this point so the animation system can evaluate
+    -- Motor6D CFrames before the first render — this prevents the bind-pose flash.
     self:PlayEquipAnimation()
 
     -- Begin third-person equip → idle sequence on the character body.
     startThirdPersonEquipSequence()
+
+    -- Reveal after one RenderStepped so Motor6Ds are in animation pose, not bind pose.
+    -- RenderStepped fires after PreAnimation (Motor6D evaluation) but before the render.
+    if shouldShowViewModel() then
+        local capturedClone = clone
+        local revealConn: RBXScriptConnection
+        revealConn = RunService.RenderStepped:Connect(function()
+            revealConn:Disconnect()
+            if self.model == capturedClone then
+                visible = true
+                setVisibility(true)
+            end
+        end)
+    end
 end
 
 -- Private: finds or creates AnimationController + Animator on the cloned viewmodel, then
