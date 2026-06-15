@@ -1134,27 +1134,48 @@ Constants.VIEWMODEL_ADS_AIM_BLEND_SPEED = 18
 -- ============================================================
 
 -- Master switch: set false to disable all free-aim behaviour instantly.
-Constants.FREE_AIM_ENABLED                 = true
+Constants.FREE_AIM_ENABLED                        = true
+-- Debug: Logger.debug on weight changes and large-delta resets.
+Constants.FREE_AIM_DEBUG                          = false
 
 -- Hipfire deadzone radius in pixels (how far the crosshair can drift from center).
-Constants.FREE_AIM_RADIUS_PIXELS           = 145
+Constants.FREE_AIM_RADIUS_PIXELS                  = 55
 
--- ADS deadzone radius in pixels (tighter; makes ADS feel steadier).
-Constants.FREE_AIM_ADS_RADIUS_PIXELS       = 18
+-- ADS deadzone radius in pixels (tighter; makes ADS feel almost locked).
+Constants.FREE_AIM_ADS_RADIUS_PIXELS              = 4
 
--- Scale factor applied to raw mouse delta before adding to aim offset.
+-- Scale factor applied to raw mouse delta before adding to aim offset (hipfire).
 -- 1.0 = one-to-one with raw delta; lower = sluggish/heavy; higher = hair-trigger.
-Constants.FREE_AIM_MOUSE_GAIN              = 1.15
+Constants.FREE_AIM_MOUSE_GAIN                     = 0.26
+
+-- Scale factor applied to raw mouse delta during ADS. Near-zero so sights feel locked.
+Constants.FREE_AIM_ADS_MOUSE_GAIN                 = 0.025
+
+-- Maximum crosshair travel speed (pixels/s). Caps how far a fast flick can push the dot in one frame.
+Constants.FREE_AIM_CROSSHAIR_MAX_SPEED_PIXELS     = 420
+
+-- Input deadzone (pixels of raw delta). Movements below this threshold are ignored (jitter suppression).
+Constants.FREE_AIM_CROSSHAIR_INPUT_DEADZONE_PIXELS = 0.65
 
 -- Return-to-center speed (lerp per second) when mouse is idle, hipfire.
-Constants.FREE_AIM_RETURN_SPEED            = 7
+Constants.FREE_AIM_RETURN_SPEED                   = 7
 
 -- Return-to-center speed (lerp per second) when mouse is idle, ADS.
-Constants.FREE_AIM_ADS_RETURN_SPEED        = 22
+Constants.FREE_AIM_ADS_RETURN_SPEED               = 22
+
+-- Return speed used when suppressed (weapon holstered, sprint/reload suppress).
+Constants.FREE_AIM_CROSSHAIR_RETURN_SPEED         = 11
 
 -- Speed at which the visible crosshair position lerps toward the raw aim offset.
 -- Higher = snappier tracking; lower = more pronounced trailing lag.
-Constants.FREE_AIM_CROSSHAIR_SMOOTH_SPEED  = 18
+Constants.FREE_AIM_CROSSHAIR_SMOOTH_SPEED         = 9
+
+-- Recenter: smoothly pull aim offset back to zero after the player stops moving the mouse.
+Constants.FREE_AIM_RECENTER_ENABLED               = true
+-- Seconds of idle input before recentering begins.
+Constants.FREE_AIM_RECENTER_DELAY                 = 0.08
+-- Lerp speed for the gentle recenter pull (slower than suppressed return).
+Constants.FREE_AIM_RECENTER_SPEED                 = 7
 
 -- Speed at which the viewmodel lean and inertia weight lerp toward their targets each frame.
 -- Also governs how quickly the lean drains to zero during ADS.
@@ -1162,16 +1183,16 @@ Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED   = 13
 
 -- Maximum yaw (left/right) tilt of the viewmodel toward the aim point, in degrees.
 -- Suppressed during ADS so iron sights stay centered (see ViewModelController).
-Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES   = 7
+Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES   = 0.65
 
 -- Maximum pitch (up/down) tilt of the viewmodel toward the aim point, in degrees.
 -- Suppressed during ADS so iron sights stay centered (see ViewModelController).
-Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES = 5
+Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES = 0.45
 
 -- Maximum roll (clockwise tilt) of the viewmodel as the crosshair and inertia move horizontally.
 -- Combined with mouse inertia contribution for a weighted, grounded feel.
 -- Suppressed during ADS so iron sights stay centered (see ViewModelController).
-Constants.FREE_AIM_VIEWMODEL_ROLL_DEGREES  = 4
+Constants.FREE_AIM_VIEWMODEL_ROLL_DEGREES  = 0.12
 
 -- Translation: viewmodel shifts slightly opposite to the aim/inertia direction.
 -- Gives the AK a sense of physical mass — the gun lags behind the look direction.
@@ -1201,8 +1222,8 @@ Constants.FREE_AIM_MOUSE_INERTIA_MAX       = 1.0
 -- Per-state inertia weight. 1.0 = full effect applied; 0.0 = suppressed completely.
 -- Lerped each frame at FREE_AIM_VIEWMODEL_BLEND_SPEED so transitions are smooth.
 -- ADS is kept very low so iron sights remain steady; sprint/reload are partial.
-Constants.FREE_AIM_HIP_WEIGHT              = 1.0
-Constants.FREE_AIM_ADS_WEIGHT              = 0.18
+Constants.FREE_AIM_HIP_WEIGHT              = 0.24
+Constants.FREE_AIM_ADS_WEIGHT              = 0.0
 Constants.FREE_AIM_SPRINT_WEIGHT           = 0.35
 Constants.FREE_AIM_RELOAD_WEIGHT           = 0.15
 

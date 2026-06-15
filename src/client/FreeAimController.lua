@@ -36,6 +36,9 @@ local aimOffset: Vector2 = Vector2.zero
 -- Smoothed version of aimOffset; CrosshairUI uses this for display.
 local smoothedOffset: Vector2 = Vector2.zero
 
+-- Seconds elapsed since the last significant mouse input (used for recenter delay).
+local timeSinceLastInput: number = 0
+
 -- Master enabled flag.  Can be toggled at runtime; suppressed when false.
 local enabled: boolean = true
 
@@ -91,57 +94,79 @@ function FreeAimController:Init(): ()
 
     local renderConn = RunService.RenderStepped:Connect(function(dt: number)
         if not Constants.FREE_AIM_ENABLED then
-            aimOffset      = Vector2.zero
-            smoothedOffset = Vector2.zero
+            aimOffset         = Vector2.zero
+            smoothedOffset    = Vector2.zero
+            timeSinceLastInput = 0
             return
         end
 
         local suppressed = isSuppressed()
 
         if suppressed then
-            -- Smoothly return offset toward zero while suppressed.
+            -- Smoothly return offset toward zero while suppressed (holster, sprint, reload).
             local returnSpeed = isAiming
-                and Constants.FREE_AIM_ADS_RETURN_SPEED
-                or  Constants.FREE_AIM_RETURN_SPEED
+                and (Constants.FREE_AIM_ADS_RETURN_SPEED :: number)
+                or  (Constants.FREE_AIM_CROSSHAIR_RETURN_SPEED :: number)
             aimOffset      = aimOffset:Lerp(Vector2.zero, math.min(1, dt * returnSpeed))
             smoothedOffset = smoothedOffset:Lerp(
                 Vector2.zero,
-                math.min(1, dt * Constants.FREE_AIM_CROSSHAIR_SMOOTH_SPEED)
+                math.min(1, dt * (Constants.FREE_AIM_CROSSHAIR_SMOOTH_SPEED :: number))
             )
+            timeSinceLastInput = 0
             return
         end
 
         local radius = activeRadius()
         local delta  = UserInputService:GetMouseDelta()
 
-        -- Push aim point by scaled mouse delta, then clamp to circular radius.
-        aimOffset = aimOffset + delta * Constants.FREE_AIM_MOUSE_GAIN
-        aimOffset = clampCircle(aimOffset, radius)
+        -- Input deadzone: ignore sub-threshold jitter.
+        if delta.Magnitude >= (Constants.FREE_AIM_CROSSHAIR_INPUT_DEADZONE_PIXELS :: number) then
+            -- ADS uses a near-zero gain so sights feel almost locked.
+            local gain: number = isAiming
+                and (Constants.FREE_AIM_ADS_MOUSE_GAIN :: number)
+                or  (Constants.FREE_AIM_MOUSE_GAIN :: number)
 
-        -- Return toward center when the mouse is still.
-        if delta.Magnitude < 0.5 then
-            local returnSpeed = isAiming
-                and Constants.FREE_AIM_ADS_RETURN_SPEED
-                or  Constants.FREE_AIM_RETURN_SPEED
-            aimOffset = aimOffset:Lerp(Vector2.zero, math.min(1, dt * returnSpeed))
+            -- Max speed clamp: prevent fast flicks from instantly flinging the dot to the edge.
+            local maxTravel = (Constants.FREE_AIM_CROSSHAIR_MAX_SPEED_PIXELS :: number) * dt
+            local contribution = delta * gain
+            if contribution.Magnitude > maxTravel then
+                contribution = contribution * (maxTravel / contribution.Magnitude)
+            end
+
+            aimOffset = aimOffset + contribution
+            aimOffset = clampCircle(aimOffset, radius)
+            timeSinceLastInput = 0
+        else
+            timeSinceLastInput += dt
+        end
+
+        -- Recenter: gently pull offset back to zero after a short idle period.
+        if (Constants.FREE_AIM_RECENTER_ENABLED :: boolean)
+            and timeSinceLastInput >= (Constants.FREE_AIM_RECENTER_DELAY :: number)
+        then
+            aimOffset = aimOffset:Lerp(
+                Vector2.zero,
+                math.min(1, dt * (Constants.FREE_AIM_RECENTER_SPEED :: number))
+            )
         end
 
         -- Smooth the crosshair position; this is what CrosshairUI displays.
         smoothedOffset = smoothedOffset:Lerp(
             aimOffset,
-            math.min(1, dt * Constants.FREE_AIM_CROSSHAIR_SMOOTH_SPEED)
+            math.min(1, dt * (Constants.FREE_AIM_CROSSHAIR_SMOOTH_SPEED :: number))
         )
     end)
     table.insert(_connections, renderConn)
 
     -- Reset all state on character respawn so free aim starts clean.
     local respawnConn = Players.LocalPlayer.CharacterAdded:Connect(function(_: Model)
-        aimOffset      = Vector2.zero
-        smoothedOffset = Vector2.zero
-        weaponEquipped = false
-        isAiming       = false
-        isSprinting    = false
-        isReloading    = false
+        aimOffset          = Vector2.zero
+        smoothedOffset     = Vector2.zero
+        timeSinceLastInput = 0
+        weaponEquipped     = false
+        isAiming           = false
+        isSprinting        = false
+        isReloading        = false
         Logger.debug("[FreeAimController] Offset and state reset on character respawn")
     end)
     table.insert(_connections, respawnConn)
