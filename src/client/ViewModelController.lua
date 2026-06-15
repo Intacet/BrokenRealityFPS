@@ -713,8 +713,9 @@ function ViewModelController:PlayEquipAnimation()
     local capturedWeapon = equippedWeaponName
 
     if weaponEquipTrack then
-        weaponEquipTrack:Play()
-        -- Chain to run or idle when the equip one-shot ends.
+        -- Connect Stopped BEFORE Play() — same reason as reload: if the asset hasn't
+        -- loaded yet (Length == 0), Stopped can fire synchronously on Play(), which
+        -- would skip the callback and leave the weapon stuck at bind pose with no idle.
         -- AnimationTrack:Destroy() disconnects all signals synchronously, so the
         -- Stopped callback will not fire after StopWeaponAnimations() has run.
         weaponEquipTrack.Stopped:Connect(function()
@@ -732,6 +733,7 @@ function ViewModelController:PlayEquipAnimation()
                 self:PlayIdleAnimation()
             end
         end)
+        weaponEquipTrack:Play()
         Logger.debug("[ViewModelController] PlayEquipAnimation: equip track started")
     else
         -- No equip track or zero-length clip — start locomotion or idle directly.
@@ -1967,7 +1969,6 @@ function ViewModelController:PlayReloadAnimation()
         tpIdleTrack:Stop()
     end
     if tpReloadTrack then
-        tpReloadTrack:Play()
         tpReloadTrack.Stopped:Connect(function()
             -- Guard: resume TP idle only if the same weapon is still equipped.
             if equippedWeaponName ~= capturedWeapon then return end
@@ -1975,12 +1976,15 @@ function ViewModelController:PlayReloadAnimation()
                 tpIdleTrack:Play()
             end
         end)
+        tpReloadTrack:Play()
     end
 
-    weaponReloadTrack:Play()
-    -- Resume the correct FP base animation when reload finishes.
-    -- AnimationTrack:Destroy() (called by StopWeaponAnimations / HolsterWeapon) severs this
-    -- connection synchronously before it can fire on a stale weapon.
+    -- Connect Stopped BEFORE Play() so the callback is guaranteed to be registered
+    -- even if the animation has Length == 0 at play time (e.g. asset not yet loaded,
+    -- or invalid ID). If Play is called first and Stopped fires synchronously, the
+    -- callback would never be registered and isReloading would stay true forever.
+    -- AnimationTrack:Destroy() (called by StopWeaponAnimations / HolsterWeapon) severs
+    -- this connection synchronously before it can fire on a stale weapon.
     weaponReloadTrack.Stopped:Connect(function()
         if equippedWeaponName ~= capturedWeapon or self.model == nil then return end
         isReloading = false
@@ -2001,6 +2005,7 @@ function ViewModelController:PlayReloadAnimation()
         Logger.debug("[ViewModelController] PlayReloadAnimation: reload complete, resumed "
             .. vmLocomotionState)
     end)
+    weaponReloadTrack:Play()
     Logger.debug("[ViewModelController] PlayReloadAnimation: reload track started (FP + TP)")
 end
 
