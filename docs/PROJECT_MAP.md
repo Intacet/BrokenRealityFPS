@@ -3,7 +3,7 @@
 ## Known state
 
 - The initial local workspace contained no existing code or Git repository.
-- A local Git repository has now been initialized on main. GitHub remote/push remain pending.
+- Local branch: main. Origin: https://github.com/Intacet/BrokenRealityFPS.git. See GITHUB_MIGRATION.md for preservation of the previous branch/history and the upload record.
 - Verbatim source capture contains 216 scripts. src/ now contains unchanged copies of 32 main scripts; pilot.project.json targets Logger only and default.project.json targets those 32 scripts. Both passed local mapping validation; neither has connected to Studio.
 - Studio place path/ID, script hierarchy, tool versions, and GitHub repository: unknown.
 - Backup received: ../StudioBackups/BrokenReality_preRojo.rbxl (1,379,020 bytes). A separate migration_test copy has an identical SHA-256: 99ae27dd2262a6d5441873d60dfc356081f2521239683e2027ef3dae8023b4c8.

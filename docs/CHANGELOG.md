@@ -32,3 +32,10 @@
 - Installed the official verified Rojo 7.7.0 CLI locally and validated both builds and mappings against the saved place.
 - Downloaded the matching verified Studio plugin; installation remains pending because filesystem write permission was not granted.
 - Added a VS Code task for the pilot. No server started, Studio connection made, or gameplay source edited. GitHub remains pending repository selection.
+
+## 2026-09-07 — existing GitHub repository reconciled
+
+- Connected origin to the owner's Intacet/BrokenRealityFPS repository and inspected its existing branch/history.
+- Confirmed all 32 main scripts match the prior GitHub tip byte-for-byte.
+- Added a shared CLAUDE.md entry point and README to direct future tools to current instructions.
+- Retained the migration tree while joining the older branch history; the original branch is preserved. Main is the new migration branch; the GitHub default branch is unchanged.
