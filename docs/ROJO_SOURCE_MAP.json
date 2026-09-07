@@ -1,0 +1,1134 @@
+[
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "ReplicatedStorage",
+        "name": "ReplicatedStorage",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Modules",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "Ballistics",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ReplicatedStorage/0001_Ballistics.lua",
+    "sourceSha256": "c1fe005a7754c04d765227672c2807cda7a3bd9d2464179adefb4b8c1e340c78",
+    "sourceBytes": 7270,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ReplicatedStorage/Modules/Ballistics.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "ReplicatedStorage",
+        "name": "ReplicatedStorage",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Modules",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "FootstepData",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ReplicatedStorage/0002_FootstepData.lua",
+    "sourceSha256": "a16c675a11532bb7034be9ea5e97f54c283957785aade3c71d02ddf47b3619f2",
+    "sourceBytes": 1073,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ReplicatedStorage/Modules/FootstepData.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "ReplicatedStorage",
+        "name": "ReplicatedStorage",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Modules",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "WeaponFeel",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ReplicatedStorage/0003_WeaponFeel.lua",
+    "sourceSha256": "8ae151a63772e288b112aa9adf10e0bb79c4c5077fdd02b6a24867d97846c042",
+    "sourceBytes": 3196,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ReplicatedStorage/Modules/WeaponFeel.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "ReplicatedStorage",
+        "name": "ReplicatedStorage",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Modules",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "Logger",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ReplicatedStorage/0004_Logger.lua",
+    "sourceSha256": "2e52b1293e0223ff2a4424feb325a1f8b645bcbdc639d91eade02c2e67702a0b",
+    "sourceBytes": 1059,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ReplicatedStorage/Modules/Logger.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "ReplicatedStorage",
+        "name": "ReplicatedStorage",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Modules",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "ZoneData",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ReplicatedStorage/0005_ZoneData.lua",
+    "sourceSha256": "014679feaf4568e0433307d4c7086f76a4edd84bcb2cec3c79e90a3cee301433",
+    "sourceBytes": 678,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ReplicatedStorage/Modules/ZoneData.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "ReplicatedStorage",
+        "name": "ReplicatedStorage",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Modules",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "WeaponData",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ReplicatedStorage/0006_WeaponData.lua",
+    "sourceSha256": "41a42901c843e7bca64773f6e9e492fa87c2d2b95c5c8970d502e5da43038ccd",
+    "sourceBytes": 6214,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ReplicatedStorage/Modules/WeaponData.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "ReplicatedStorage",
+        "name": "ReplicatedStorage",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Modules",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "Types",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ReplicatedStorage/0007_Types.lua",
+    "sourceSha256": "1bc5242ad43de84318279811f4786613b9e0a5c580b0292335ab5e47bbc294cc",
+    "sourceBytes": 2214,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ReplicatedStorage/Modules/Types.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "ReplicatedStorage",
+        "name": "ReplicatedStorage",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Modules",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "Constants",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ReplicatedStorage/0008_Constants.lua",
+    "sourceSha256": "6aa28b8e5f046e03907c8727db582681652165e2bf77d5fa29f12079df13169a",
+    "sourceBytes": 112360,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ReplicatedStorage/Modules/Constants.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "Script",
+    "path": [
+      {
+        "class": "ServerScriptService",
+        "name": "ServerScriptService",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Services",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Script",
+        "name": "MaterialSetup",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "Disabled": "false",
+      "LinkedSource": "",
+      "RunContext": "Enum.RunContext.Legacy"
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ServerScriptService/0009_MaterialSetup.server.lua",
+    "sourceSha256": "b29205d7a4492d07b9a34903b994d8a2f591b05598773e82eaeb31cdbbf7ecb4",
+    "sourceBytes": 1737,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ServerScriptService/Services/MaterialSetup.server.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "Script",
+    "path": [
+      {
+        "class": "ServerScriptService",
+        "name": "ServerScriptService",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Services",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Script",
+        "name": "LightingSetup",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "Disabled": "false",
+      "LinkedSource": "",
+      "RunContext": "Enum.RunContext.Legacy"
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ServerScriptService/0010_LightingSetup.server.lua",
+    "sourceSha256": "85f4d048093e7443e9f98e9d12e0ff599b2c5810beb0cf25f514afcee25a9bda",
+    "sourceBytes": 6845,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ServerScriptService/Services/LightingSetup.server.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "Script",
+    "path": [
+      {
+        "class": "ServerScriptService",
+        "name": "ServerScriptService",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Services",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Script",
+        "name": "WorldWeaponService",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "Disabled": "false",
+      "LinkedSource": "",
+      "RunContext": "Enum.RunContext.Legacy"
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ServerScriptService/0011_WorldWeaponService.server.lua",
+    "sourceSha256": "2f877b8805115ebc37259c9566522ee76183225b88f1e109f3754f52a302c6c3",
+    "sourceBytes": 14578,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ServerScriptService/Services/WorldWeaponService.server.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "ServerScriptService",
+        "name": "ServerScriptService",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Services",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "RagdollService",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ServerScriptService/0012_RagdollService.lua",
+    "sourceSha256": "882d6e3a1231a951d92b076d8452901745f751653aa8b1d44cd14160c6e66024",
+    "sourceBytes": 5867,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ServerScriptService/Services/RagdollService.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "Script",
+    "path": [
+      {
+        "class": "ServerScriptService",
+        "name": "ServerScriptService",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Services",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Script",
+        "name": "ObjectiveService",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "Disabled": "false",
+      "LinkedSource": "",
+      "RunContext": "Enum.RunContext.Legacy"
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ServerScriptService/0013_ObjectiveService.server.lua",
+    "sourceSha256": "b10aceccd4e3ee55997086a25b4ea8dc1434c7c0f15bdaf4b8703590c83d92d6",
+    "sourceBytes": 9215,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ServerScriptService/Services/ObjectiveService.server.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "Script",
+    "path": [
+      {
+        "class": "ServerScriptService",
+        "name": "ServerScriptService",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Services",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Script",
+        "name": "GunService",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "Disabled": "false",
+      "LinkedSource": "",
+      "RunContext": "Enum.RunContext.Legacy"
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ServerScriptService/0014_GunService.server.lua",
+    "sourceSha256": "8f51ef1970c0b5d342c4e711f35785b13e1703d1578051782e64a80e13e4348b",
+    "sourceBytes": 15640,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ServerScriptService/Services/GunService.server.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "ServerScriptService",
+        "name": "ServerScriptService",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Services",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "DamageService",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ServerScriptService/0015_DamageService.lua",
+    "sourceSha256": "a2bbd9e57d7659d9554dd4fdb89ab26ae929f56f9f9a5334ca102c5ac3b19f66",
+    "sourceBytes": 8395,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ServerScriptService/Services/DamageService.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "ServerScriptService",
+        "name": "ServerScriptService",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Services",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "MatchEvents",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ServerScriptService/0016_MatchEvents.lua",
+    "sourceSha256": "5622b415041ed0789a88529d446c0f9d0bf7cb2d6020f751a8292be7ba740a56",
+    "sourceBytes": 3008,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ServerScriptService/Services/MatchEvents.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "Script",
+    "path": [
+      {
+        "class": "ServerScriptService",
+        "name": "ServerScriptService",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Services",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Script",
+        "name": "TeamService",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "Disabled": "false",
+      "LinkedSource": "",
+      "RunContext": "Enum.RunContext.Legacy"
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ServerScriptService/0017_TeamService.server.lua",
+    "sourceSha256": "058b44cba36f2afbc8b3a0e25c904a4f947199f6681b03a2a14bcd6a38dad14d",
+    "sourceBytes": 13577,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ServerScriptService/Services/TeamService.server.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "Script",
+    "path": [
+      {
+        "class": "ServerScriptService",
+        "name": "ServerScriptService",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Services",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Script",
+        "name": "RemoteSetup",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "Disabled": "false",
+      "LinkedSource": "",
+      "RunContext": "Enum.RunContext.Legacy"
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ServerScriptService/0018_RemoteSetup.server.lua",
+    "sourceSha256": "c8fca6863291ddc547750004f48cdd3eb85c545364f14b2d521ce8428ce10fb0",
+    "sourceBytes": 3492,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ServerScriptService/Services/RemoteSetup.server.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "Script",
+    "path": [
+      {
+        "class": "ServerScriptService",
+        "name": "ServerScriptService",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Services",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Script",
+        "name": "MatchService",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "Disabled": "false",
+      "LinkedSource": "",
+      "RunContext": "Enum.RunContext.Legacy"
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/ServerScriptService/0019_MatchService.server.lua",
+    "sourceSha256": "f6b8f602e4b8f7dd0c659952e0d4395cbf4afc0482e0ca616044ee5d25ae33c5",
+    "sourceBytes": 8487,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/ServerScriptService/Services/MatchService.server.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "StarterPlayer",
+        "name": "StarterPlayer",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "StarterPlayerScripts",
+        "name": "StarterPlayerScripts",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Controllers",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "FootstepController",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/StarterPlayer/0020_FootstepController.lua",
+    "sourceSha256": "18e2cf124be91453f6fac477af0eaf152fda4a865a2f2f07eb71da63f753705c",
+    "sourceBytes": 15975,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/StarterPlayer/StarterPlayerScripts/Controllers/FootstepController.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "StarterPlayer",
+        "name": "StarterPlayer",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "StarterPlayerScripts",
+        "name": "StarterPlayerScripts",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Controllers",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "FreeAimController",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/StarterPlayer/0021_FreeAimController.lua",
+    "sourceSha256": "db5e9d3e7668f1ec81a836f4d5836cb1ec79a5249a77c2d54b28f6d8a9a5aa29",
+    "sourceBytes": 11711,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/StarterPlayer/StarterPlayerScripts/Controllers/FreeAimController.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "StarterPlayer",
+        "name": "StarterPlayer",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "StarterPlayerScripts",
+        "name": "StarterPlayerScripts",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Controllers",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "MovementController",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/StarterPlayer/0022_MovementController.lua",
+    "sourceSha256": "fa597b40b224c2663309d3b4ca2eea09db04fb76a69b6cbdc300d617763f2360",
+    "sourceBytes": 343852,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/StarterPlayer/StarterPlayerScripts/Controllers/MovementController.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "StarterPlayer",
+        "name": "StarterPlayer",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "StarterPlayerScripts",
+        "name": "StarterPlayerScripts",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Controllers",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "SoundController",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/StarterPlayer/0023_SoundController.lua",
+    "sourceSha256": "0fb2f8070f0478ffc561b1d3826512c46516419fb1e7e4edee217e7a5b28e0e7",
+    "sourceBytes": 8486,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/StarterPlayer/StarterPlayerScripts/Controllers/SoundController.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "StarterPlayer",
+        "name": "StarterPlayer",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "StarterPlayerScripts",
+        "name": "StarterPlayerScripts",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Controllers",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "ViewModelController",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/StarterPlayer/0024_ViewModelController.lua",
+    "sourceSha256": "fbffef0f8b466f90ba520223bfb74001b76b2b4b1507ed64fa5720762c4fff37",
+    "sourceBytes": 125220,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/StarterPlayer/StarterPlayerScripts/Controllers/ViewModelController.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "LocalScript",
+    "path": [
+      {
+        "class": "StarterPlayer",
+        "name": "StarterPlayer",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "StarterPlayerScripts",
+        "name": "StarterPlayerScripts",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Controllers",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "LocalScript",
+        "name": "ClientInit",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "Disabled": "false",
+      "LinkedSource": "",
+      "RunContext": "Enum.RunContext.Legacy"
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/StarterPlayer/0025_ClientInit.client.lua",
+    "sourceSha256": "52964e27053c564a30c9e23783d471605ad2cfe2e70e66f77e786712a3fca7db",
+    "sourceBytes": 11113,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/StarterPlayer/StarterPlayerScripts/Controllers/ClientInit.client.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "StarterPlayer",
+        "name": "StarterPlayer",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "StarterPlayerScripts",
+        "name": "StarterPlayerScripts",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Controllers",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "MatchController",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/StarterPlayer/0026_MatchController.lua",
+    "sourceSha256": "61f0126e97fd6a5f8ed338871fec9a93dfbe9eb070d5e983eb255703f5604989",
+    "sourceBytes": 5923,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/StarterPlayer/StarterPlayerScripts/Controllers/MatchController.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "StarterPlayer",
+        "name": "StarterPlayer",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "StarterPlayerScripts",
+        "name": "StarterPlayerScripts",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Controllers",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "GunController",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/StarterPlayer/0027_GunController.lua",
+    "sourceSha256": "5ed404854ad1b0b80bf2d02f03f4d63fba1927c4b2c0c7884f74ef4b17793868",
+    "sourceBytes": 33543,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/StarterPlayer/StarterPlayerScripts/Controllers/GunController.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "StarterPlayer",
+        "name": "StarterPlayer",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "StarterPlayerScripts",
+        "name": "StarterPlayerScripts",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Controllers",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "UI",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "KillFeedUI",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/StarterPlayer/0028_KillFeedUI.lua",
+    "sourceSha256": "afe9f09f311c204baf8ba10d71dc00ee6750e42372dd06c2b2bc6793158d4fa9",
+    "sourceBytes": 9227,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/KillFeedUI.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "StarterPlayer",
+        "name": "StarterPlayer",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "StarterPlayerScripts",
+        "name": "StarterPlayerScripts",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Controllers",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "UI",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "DeathScreen",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/StarterPlayer/0029_DeathScreen.lua",
+    "sourceSha256": "069d13795a3a09b584f5982e8996b1571eb0abad33455456d36ef4a4abc5a1d7",
+    "sourceBytes": 9883,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/DeathScreen.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "StarterPlayer",
+        "name": "StarterPlayer",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "StarterPlayerScripts",
+        "name": "StarterPlayerScripts",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Controllers",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "UI",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "CrosshairUI",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/StarterPlayer/0030_CrosshairUI.lua",
+    "sourceSha256": "6e9c0ab8e2f9af4139dbf52ff5388e8cca7f566a624675d19f3c3e78dcf7c8ae",
+    "sourceBytes": 8920,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/CrosshairUI.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "StarterPlayer",
+        "name": "StarterPlayer",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "StarterPlayerScripts",
+        "name": "StarterPlayerScripts",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Controllers",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "UI",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "MatchUI",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/StarterPlayer/0031_MatchUI.lua",
+    "sourceSha256": "452f22ddc3df14742976102053c4fbd5cdc43018776b9fee22fed694d822f59d",
+    "sourceBytes": 10794,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/MatchUI.lua"
+  },
+  {
+    "attributes": {},
+    "children": {},
+    "class": "ModuleScript",
+    "path": [
+      {
+        "class": "StarterPlayer",
+        "name": "StarterPlayer",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "StarterPlayerScripts",
+        "name": "StarterPlayerScripts",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "Controllers",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "Folder",
+        "name": "UI",
+        "sameNameIndex": 1
+      },
+      {
+        "class": "ModuleScript",
+        "name": "HUD",
+        "sameNameIndex": 1
+      }
+    ],
+    "properties": {
+      "LinkedSource": ""
+    },
+    "tags": {},
+    "localFile": "import/studio-snapshot/StarterPlayer/0032_HUD.lua",
+    "sourceSha256": "98655ce9ecdb4b760d0d3edb7d6725be4eaa8b65df76558b9d234c17e41d48bf",
+    "sourceBytes": 12153,
+    "verifiedAgainstSavedSource": true,
+    "syncApproved": false,
+    "sourceFile": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/HUD.lua"
+  }
+]

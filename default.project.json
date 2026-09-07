@@ -1,0 +1,204 @@
+{
+  "name": "Broken Reality \u2014 code only",
+  "serveAddress": "127.0.0.1",
+  "tree": {
+    "$className": "DataModel",
+    "$ignoreUnknownInstances": true,
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "$ignoreUnknownInstances": true,
+      "Modules": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true,
+        "Ballistics": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ReplicatedStorage/Modules/Ballistics.lua"
+        },
+        "FootstepData": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ReplicatedStorage/Modules/FootstepData.lua"
+        },
+        "WeaponFeel": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ReplicatedStorage/Modules/WeaponFeel.lua"
+        },
+        "Logger": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ReplicatedStorage/Modules/Logger.lua"
+        },
+        "ZoneData": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ReplicatedStorage/Modules/ZoneData.lua"
+        },
+        "WeaponData": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ReplicatedStorage/Modules/WeaponData.lua"
+        },
+        "Types": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ReplicatedStorage/Modules/Types.lua"
+        },
+        "Constants": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ReplicatedStorage/Modules/Constants.lua"
+        }
+      }
+    },
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "$ignoreUnknownInstances": true,
+      "Services": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true,
+        "MaterialSetup": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/MaterialSetup.server.lua",
+          "$properties": {
+            "Disabled": false,
+            "RunContext": "Legacy"
+          }
+        },
+        "LightingSetup": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/LightingSetup.server.lua",
+          "$properties": {
+            "Disabled": false,
+            "RunContext": "Legacy"
+          }
+        },
+        "WorldWeaponService": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/WorldWeaponService.server.lua",
+          "$properties": {
+            "Disabled": false,
+            "RunContext": "Legacy"
+          }
+        },
+        "RagdollService": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/RagdollService.lua"
+        },
+        "ObjectiveService": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/ObjectiveService.server.lua",
+          "$properties": {
+            "Disabled": false,
+            "RunContext": "Legacy"
+          }
+        },
+        "GunService": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/GunService.server.lua",
+          "$properties": {
+            "Disabled": false,
+            "RunContext": "Legacy"
+          }
+        },
+        "DamageService": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/DamageService.lua"
+        },
+        "MatchEvents": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/MatchEvents.lua"
+        },
+        "TeamService": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/TeamService.server.lua",
+          "$properties": {
+            "Disabled": false,
+            "RunContext": "Legacy"
+          }
+        },
+        "RemoteSetup": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/RemoteSetup.server.lua",
+          "$properties": {
+            "Disabled": false,
+            "RunContext": "Legacy"
+          }
+        },
+        "MatchService": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/MatchService.server.lua",
+          "$properties": {
+            "Disabled": false,
+            "RunContext": "Legacy"
+          }
+        }
+      }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "$ignoreUnknownInstances": true,
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "$ignoreUnknownInstances": true,
+        "Controllers": {
+          "$className": "Folder",
+          "$ignoreUnknownInstances": true,
+          "FootstepController": {
+            "$ignoreUnknownInstances": true,
+            "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/FootstepController.lua"
+          },
+          "FreeAimController": {
+            "$ignoreUnknownInstances": true,
+            "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/FreeAimController.lua"
+          },
+          "MovementController": {
+            "$ignoreUnknownInstances": true,
+            "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/MovementController.lua"
+          },
+          "SoundController": {
+            "$ignoreUnknownInstances": true,
+            "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/SoundController.lua"
+          },
+          "ViewModelController": {
+            "$ignoreUnknownInstances": true,
+            "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/ViewModelController.lua"
+          },
+          "ClientInit": {
+            "$ignoreUnknownInstances": true,
+            "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/ClientInit.client.lua",
+            "$properties": {
+              "Disabled": false,
+              "RunContext": "Legacy"
+            }
+          },
+          "MatchController": {
+            "$ignoreUnknownInstances": true,
+            "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/MatchController.lua"
+          },
+          "GunController": {
+            "$ignoreUnknownInstances": true,
+            "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/GunController.lua"
+          },
+          "UI": {
+            "$className": "Folder",
+            "$ignoreUnknownInstances": true,
+            "KillFeedUI": {
+              "$ignoreUnknownInstances": true,
+              "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/KillFeedUI.lua"
+            },
+            "DeathScreen": {
+              "$ignoreUnknownInstances": true,
+              "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/DeathScreen.lua"
+            },
+            "CrosshairUI": {
+              "$ignoreUnknownInstances": true,
+              "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/CrosshairUI.lua"
+            },
+            "MatchUI": {
+              "$ignoreUnknownInstances": true,
+              "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/MatchUI.lua"
+            },
+            "HUD": {
+              "$ignoreUnknownInstances": true,
+              "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/HUD.lua"
+            }
+          }
+        }
+      }
+    }
+  }
+}

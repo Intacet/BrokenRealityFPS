@@ -1,0 +1,20 @@
+{
+  "name": "Broken Reality \u2014 Logger pilot",
+  "serveAddress": "127.0.0.1",
+  "tree": {
+    "$className": "DataModel",
+    "$ignoreUnknownInstances": true,
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "$ignoreUnknownInstances": true,
+      "Modules": {
+        "$className": "Folder",
+        "$ignoreUnknownInstances": true,
+        "Logger": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ReplicatedStorage/Modules/Logger.lua"
+        }
+      }
+    }
+  }
+}

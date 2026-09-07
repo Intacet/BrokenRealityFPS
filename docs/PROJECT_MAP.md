@@ -4,10 +4,10 @@
 
 - The initial local workspace contained no existing code or Git repository.
 - A local Git repository has now been initialized on main. GitHub remote/push remain pending.
-- Verbatim source capture now contains 216 scripts from the saved place. No gameplay source was edited and no Rojo configuration exists.
+- Verbatim source capture contains 216 scripts. src/ now contains unchanged copies of 32 main scripts; pilot.project.json targets Logger only and default.project.json targets those 32 scripts. Both passed local mapping validation; neither has connected to Studio.
 - Studio place path/ID, script hierarchy, tool versions, and GitHub repository: unknown.
 - Backup received: ../StudioBackups/BrokenReality_preRojo.rbxl (1,379,020 bytes). A separate migration_test copy has an identical SHA-256: 99ae27dd2262a6d5441873d60dfc356081f2521239683e2027ef3dae8023b4c8.
-- All 216 source files match source decoded from the saved backup. User visual backup verification, off-device backup, mapping approval, and Studio tests remain pending.
+- All 216 source files match source decoded from the saved backup. The owner reported the test copy looks good. Exact test steps, off-device backup, and post-sync Studio checks remain pending.
 - See SCRIPT_INVENTORY.md and SCRIPT_INVENTORY.json for extracted paths, classes, properties, children, attributes, tags, source hashes, and archive filenames.
 - Saved script counts: ReplicatedStorage 8; ServerScriptService 11; StarterPlayer 13; Workspace 184. No saved remote instances were found; runtime setup must be inspected.
 - Existing main folders: ReplicatedStorage/Modules, ServerScriptService/Services, StarterPlayer/StarterPlayerScripts/Controllers. These are candidates for review, not approved mappings.
@@ -44,4 +44,4 @@ Inspect ServerScriptService, ReplicatedStorage, ServerStorage, StarterPlayerScri
 - src/: only reviewed scripts promoted for migration. Final subfolders follow the verified hierarchy; no guessed server/client/shared relocation.
 - docs/: rules, inventory, decisions, and verification records.
 
-No service or folder is approved for Rojo mapping yet. Scripts with children or unusual execution settings require a reviewed representation before migration.
+See ROJO_REVIEW.md for the locally validated individual-script mappings. No live handoff has occurred; all scripts remain Studio-authoritative until trial verification. Scripts with children or unusual execution settings require a reviewed representation before migration.

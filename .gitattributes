@@ -1,2 +1,3 @@
 # Preserve exact saved source bytes in the archival baseline.
 import/studio-snapshot/** -text
+src/** -text

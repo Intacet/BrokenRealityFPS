@@ -23,3 +23,12 @@
 - Captured 216 script sources and verified the output bytes against decoded saved source; added inventory and metadata records.
 - Found 184 Workspace-embedded scripts and 32 scripts in main code locations. Existing Logger and Constants modules are present.
 - No source was edited; no remotes or sync project created. Studio visual/behavior verification and GitHub backup remain pending.
+
+## 2026-09-07 — Rojo configuration prepared
+
+- Recorded the owner's positive test-copy report; no post-sync test is claimed.
+- Copied 32 main scripts unchanged into src/ at their existing hierarchy.
+- Added a Logger-only pilot and an explicit 32-script configuration, with unknown-instance preservation on every affected node.
+- Installed the official verified Rojo 7.7.0 CLI locally and validated both builds and mappings against the saved place.
+- Downloaded the matching verified Studio plugin; installation remains pending because filesystem write permission was not granted.
+- Added a VS Code task for the pilot. No server started, Studio connection made, or gameplay source edited. GitHub remains pending repository selection.

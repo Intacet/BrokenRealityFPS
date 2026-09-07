@@ -14,5 +14,6 @@ dist/
 *.pem
 *.key
 node_modules/
+.tools/
 .DS_Store
 Thumbs.db

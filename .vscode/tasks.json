@@ -1,0 +1,13 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Broken Reality: Start Logger pilot (test copy only)",
+      "type": "process",
+      "command": "${workspaceFolder}/.tools/rojo.exe",
+      "args": ["serve", "pilot.project.json"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    }
+  ]
+}
