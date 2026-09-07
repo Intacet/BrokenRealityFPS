@@ -15,3 +15,11 @@
 - Added .gitignore and empty source-capture and reviewed-source folders.
 - Confirmed Git and VS Code are on the command path; Rojo and gh were not found there.
 - Native Studio UI control is unavailable in this session. Awaiting a user-saved place copy before source inventory or sync configuration.
+
+## 2026-09-07 — saved-place capture
+
+- Received the saved binary place and made a separate test copy; both hashes match.
+- Used official Lune 0.10.5, with its downloaded archive checked against the GitHub release checksum, to read the place without running gameplay or writing the place.
+- Captured 216 script sources and verified the output bytes against decoded saved source; added inventory and metadata records.
+- Found 184 Workspace-embedded scripts and 32 scripts in main code locations. Existing Logger and Constants modules are present.
+- No source was edited; no remotes or sync project created. Studio visual/behavior verification and GitHub backup remain pending.

@@ -12,7 +12,7 @@ Read docs/CURRENT_GAME_DIRECTION.md, docs/PROJECT_RULES.md, and docs/PROJECT_MAP
 - Before any first connection, inventory paths/properties/dependencies, compare copied source, review every mapping, and confirm a verified backup and disposable test copy exist.
 - Use Luau strict mode for new or deliberately edited scripts. Preserve imported source verbatim first; record legacy violations instead of silently fixing them.
 - No print() or warn(); use a Logger module later. No wait() or spawn(); use task.wait() and task.spawn().
-- Gameplay constants belong in Constants.lua. Do not create Constants.lua or Logger until the relevant code stage is requested.
+- Gameplay constants belong in Constants.lua. Existing Constants and Logger modules were found in the saved place under ReplicatedStorage/Modules; review/reuse them, do not create duplicates.
 - Server owns game state. Clients do not decide damage, health, hits, money, inventory, or extraction results.
 - No new remotes without explicit request. Store and clean up RBXScriptConnections.
 - Keep tasks small and staged; do not build multiple systems in one pass. No global formatting unless requested.

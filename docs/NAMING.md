@@ -9,3 +9,4 @@
 - Duplicate names, reserved filenames, or incompatible characters require a documented local-name-to-Studio-path mapping. Do not rename Studio objects to solve these automatically.
 - For future code, use descriptive names; Constants.lua is for gameplay constants and Logger.lua is reserved for the future logging module. Neither is implemented yet.
 - New naming conventions must not trigger a global rename or formatting pass.
+- Actual baseline archive uses service/numbered-name files to avoid duplicate-name collisions and long Windows paths. SCRIPT_INVENTORY.json maps each archive file to exact ancestor names/classes and same-name sibling indices. These archive filenames must not be used directly for Rojo syncing.
