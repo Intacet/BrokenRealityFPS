@@ -1,0 +1,18 @@
+# Studio assets are backed up separately, outside this code repository.
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+backups/
+build/
+dist/
+
+# Credentials and local caches
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+node_modules/
+.DS_Store
+Thumbs.db
