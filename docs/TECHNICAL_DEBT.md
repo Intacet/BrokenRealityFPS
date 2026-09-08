@@ -1453,6 +1453,11 @@ Walk, enterRun, run (new ID), and sprint tracks now also loaded in `_setupWeapon
 - `PlayReloadAnimation()` Stopped callback now resumes via `SetLocomotionState` (locomotion-aware).
 - Fire, reload, ADS, equip animation behavior is unchanged. The 12-item checklist above still applies; the full locomotion checklist is in DEBT-078.
 
+**Updated 2026-09-08 — Stopped:Connect accumulation bug fixed:**
+- `tpReloadTrack.Stopped:Connect` and `weaponReloadTrack.Stopped:Connect` in `PlayReloadAnimation` changed to `:Once`. The `:Connect` form was permanently stacking an additional callback on each call; on reload #2 and later the duplicate callbacks corrupted `vmLocomotionState` and called `SetLocomotionState("")`.
+- Fix is consistent with the ADS tracks which already correctly used `:Once` (lines 2291, 2344).
+- Studio verification that multiple sequential reloads now complete cleanly and resume locomotion correctly is required. See DEBT-082.
+
 ---
 
 ## [DEBT-062] WorldWeaponService world model attachment not verified in Studio — ADDED 2026-05-29
@@ -2214,6 +2219,30 @@ DEBT-066 status (Stable): `isAiming` flag reused by Task D, no duplication.
 - Vertical jump/land inertia separate tuning — currently uses same VERTICAL_Y_STRENGTH as walking; may warrant a separate constant after Studio verification.
 
 **Fix when:** Studio verification passes all 18 checklist items above and sign convention is confirmed. Mark RESOLVED.
+
+---
+
+## [DEBT-082] AKS74 reload animation — Stopped:Connect fix and new animation ID need Studio verification — ADDED 2026-09-08
+
+**Files:** `src/client/ViewModelController.lua`, `src/shared/WeaponData.lua`
+**Severity:** High
+**Studio verification required:** Yes
+
+**Background:** Two bugs were diagnosed in `PlayReloadAnimation` (ViewModelController.lua):
+1. `tpReloadTrack.Stopped:Connect` and `weaponReloadTrack.Stopped:Connect` were stacking permanent callbacks on every call. On reload #2+, the duplicate callbacks both fired on track completion: the first cleared `vmLocomotionState` to `""`, the second then called `SetLocomotionState("")` — an invalid state — breaking post-reload locomotion resume. Fixed to `:Once` (2026-09-08).
+2. The reload animation ID was changed to `rbxassetid://107812216949807` (commit `229bc6e`). If this ID targets a different rig skeleton than the AKS74 viewmodel, `LoadAnimation` succeeds silently but the track produces no visible deformation. Cannot confirm from source alone.
+
+**Studio verification checklist (MCP unavailable at fix time):**
+1. Enter play mode with AKS74 equipped (`Constants.DEFAULT_WEAPON = "AKS74"`, `FORCE_FIRST_PERSON = true`, phase ACTIVE).
+2. Press R → first-person reload animation visibly plays (magazine removed and reseated, or equivalent AKS74 gesture).
+3. Wait for reload to finish → idle or locomotion state resumes correctly (no stuck bind pose, no "Hip" idle interrupted).
+4. Press R a second time immediately after the first reload finishes → reload plays again cleanly.
+5. Press R five times sequentially (waiting for each completion) → each reload plays and resumes idle/locomotion. No progressive state corruption (vmLocomotionState must be non-empty after each completion).
+6. Press R while sprinting → reload plays; sprint/run animation resumes correctly after reload ends.
+7. Press R while in ADS → ADS exits, reload plays, hip idle resumes (not ADS idle).
+8. Check Output → no `[ViewModelController]` errors or unexpected warn() calls during any of the above.
+
+**Resolve when:** All 8 checklist items pass in a live Studio session.
 
 ---
 

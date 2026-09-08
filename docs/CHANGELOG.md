@@ -7,6 +7,16 @@ Under each entry: bullet points for what was added, changed, or removed.
 
 ---
 
+## [2026-09-08 — FIX] — AKS74 reload animation Stopped callback accumulation
+
+- **Bug:** `PlayReloadAnimation` in `ViewModelController.lua` connected `tpReloadTrack.Stopped` and `weaponReloadTrack.Stopped` with `:Connect()` instead of `:Once()`. Because both tracks are persistent objects (loaded once, kept alive until holster/weapon switch), each call to `PlayReloadAnimation` permanently appended an additional Stopped callback. On reload #2 and later, all accumulated callbacks fired on completion: the first would clear `vmLocomotionState` to `""`, then the second would call `SetLocomotionState("")` — an invalid state — corrupting post-reload locomotion resume.
+- **Fix:** Changed both `:Connect(function()...)` calls in `PlayReloadAnimation` to `:Once(function()...)`. Consistent with how the ADS tracks (`weaponAdsInTrack`, `weaponAdsOutTrack`) already used `:Once` in `SetAiming`.
+- **Files changed:** `src/client/ViewModelController.lua` (lines 1972 and 1988).
+- **MCP unavailable — Studio verification was not performed.** See DEBT-082 for the full 8-item verification checklist covering sequential reloads, post-reload locomotion resume, reload-during-ADS, and reload-during-sprint.
+- **Secondary unresolved risk:** `rbxassetid://107812216949807` (updated in commit `229bc6e`) may not be recorded on the AKS74 viewmodel rig skeleton. If it targets a different rig, the track plays with no visible deformation. Requires Studio verification (DEBT-082 checklist item 2).
+
+---
+
 ## [2026-06-13 — FEATURE] — AKS74 viewmodel movement velocity inertia
 
 - **New CFrame layer:** `movementInertiaCF` inserted between `cameraInertiaCF` and `viewRecoilCFrame` in the ViewModelController RenderStepped PivotTo chain. Excluded from `aimAlignedPivot` — ADS alignment is exact and bullet direction is unaffected.

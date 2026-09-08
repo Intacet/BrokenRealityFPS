@@ -1969,7 +1969,7 @@ function ViewModelController:PlayReloadAnimation()
         tpIdleTrack:Stop()
     end
     if tpReloadTrack then
-        tpReloadTrack.Stopped:Connect(function()
+        tpReloadTrack.Stopped:Once(function()
             -- Guard: resume TP idle only if the same weapon is still equipped.
             if equippedWeaponName ~= capturedWeapon then return end
             if tpIdleTrack then
@@ -1985,7 +1985,7 @@ function ViewModelController:PlayReloadAnimation()
     -- callback would never be registered and isReloading would stay true forever.
     -- AnimationTrack:Destroy() (called by StopWeaponAnimations / HolsterWeapon) severs
     -- this connection synchronously before it can fire on a stale weapon.
-    weaponReloadTrack.Stopped:Connect(function()
+    weaponReloadTrack.Stopped:Once(function()
         if equippedWeaponName ~= capturedWeapon or self.model == nil then return end
         isReloading = false
         -- Resume current locomotion state (or legacy run/idle on disabled path).
