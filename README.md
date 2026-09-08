@@ -21,4 +21,4 @@ The older configuration, roadmaps, technical debt, and place snapshots remain av
 
 ## Local tools
 
-The current laptop has verified Rojo 7.7.0 under .tools/rojo.exe; that binary is excluded from Git. A fresh clone needs the matching official CLI installed at that path to use the VS Code pilot task. The Studio plugin and separate place backups are also outside this repository. Git does not replace off-device backups of Studio assets.
+The current laptop has verified Rojo 7.6.1 under .tools/rojo.exe, matching the installed Studio plugin; that binary is excluded from Git. A fresh clone needs the matching official CLI installed at that path to use the VS Code pilot task. The Studio plugin and separate place backups are also outside this repository. Git does not replace off-device backups of Studio assets.

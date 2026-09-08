@@ -39,3 +39,10 @@
 - Confirmed all 32 main scripts match the prior GitHub tip byte-for-byte.
 - Added a shared CLAUDE.md entry point and README to direct future tools to current instructions.
 - Retained the migration tree while joining the older branch history; the original branch is preserved. Main is the new migration branch; the GitHub default branch is unchanged.
+
+## 2026-09-07 — GitHub upload and native Studio access
+
+- Uploaded main successfully using normal Windows Git credentials; preserved the old remote branch.
+- Native Studio control became available. Observed the migration test window and existing Rojo 7.6.1 plugin.
+- Matched the local CLI to official Rojo 7.6.1 and rebuilt both configurations successfully.
+- Saved the test copy and revalidated all mapped scripts against it before attempting the pilot connection.

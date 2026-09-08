@@ -4,9 +4,9 @@
 
 The owner reported that the saved test place looks good after being asked to inspect and test it. This is owner-reported baseline confirmation, not agent-observed verification, and not a post-Rojo test. Exact movement/weapon checks were not individually reported.
 
-Rojo 7.7.0 CLI is installed locally at .tools/rojo.exe (excluded from Git). Its official release archive SHA-256 was verified: 2179c44862a10ecbd725bdfeb4abc64e16dc4aad9b6c8f3e1a7c46a87280b949.
+Studio already has Rojo 7.6.1 installed, verified through its Plugins menu and panel. The local CLI at .tools/rojo.exe now matches 7.6.1 (excluded from Git). Its official release archive SHA-256 was verified: e1c9a78193c609720f3afb38057d3909ed483ecbf5e9e3541313ba0dcbc4f1f8. Both projects also built successfully with 7.6.1.
 
-The official matching plugin is downloaded separately at ../RojoPlugin/Rojo.rbxm, checksum 214e5ad84ccdc88f873e0467b6724e4ea9ada8ea340fcb9d4397cb899a67c83f. Installation was not performed because requested filesystem write access was not granted. No Rojo server is running and no connection has been made.
+An earlier 7.7.0 plugin download remains separately at ../RojoPlugin/Rojo.rbxm; do not install it over the working 7.6.1 setup. No plugin changes were needed. The Logger pilot server has been started; connection and post-sync verification remain pending.
 
 ## Scope
 
