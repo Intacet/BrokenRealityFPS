@@ -32,7 +32,7 @@ These checks establish the intended sync scope, not observed plugin reconciliati
 
 ## Next guided step
 
-1. Install the verified plugin by copying ../RojoPlugin/Rojo.rbxm to the folder opened by Studio's Plugins Folder control. Do not insert this model into Workspace. If a Rojo plugin already exists, report its version first to avoid conflicting installations.
+1. Use the existing observed 7.6.1 Studio plugin with the matching local CLI. Do not install the separately downloaded 7.7.0 plugin over it. Recheck the installed version if Studio has changed.
 2. Reopen Studio if needed and open only BrokenReality_migration_test.rbxl for the trial. Keep play stopped.
 3. In VS Code, run the task named "Broken Reality: Start Logger pilot (test copy only)". This starts the local server; Studio still requires a separate connection.
 4. In Studio's Rojo plugin, connect to localhost:34872. Review any proposed-change display: only the existing ReplicatedStorage/Modules/Logger source may be managed, and it should already match. Cancel for any unexplained deletions, replacements, or duplicates. If no preview is offered, trial only on the disposable copy and inspect immediately afterward.

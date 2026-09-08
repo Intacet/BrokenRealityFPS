@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-08 — shared GPT / Claude laptop setup
+
+- Verified main matches the remote before setup; retained the historical Claude branch.
+- Installed official Codex VS Code extension 26.901.22334 and verified existing Claude Code 2.1.263 in VS Code 1.135.0. Account sign-in and model selection remain user-controlled.
+- Added shared handoff instructions and extension recommendations. Disabled automatic formatting only for this workspace. Opened the existing checkout in VS Code.
+- Retained matching Rojo CLI/plugin 7.6.1; rebuilt the Logger pilot and rechecked the immutable Studio backup hash. No Studio sync, gameplay source change, or publish was performed.
+
 ## 2026-09-08 — isolated Mercer District prototype
 
 - Added a separate city builder, geometry model, test place, and overhead plan: brick homes, corner shops, warehouses, alleys, protected staging cover, and three objective areas.

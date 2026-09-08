@@ -2,6 +2,8 @@
 
 Read docs/CURRENT_GAME_DIRECTION.md, docs/PROJECT_RULES.md, and docs/PROJECT_MAP.md before proposing changes.
 
+When switching between GPT and Claude, also read docs/AI_WORKFLOW.md. Use main for current work; only one assistant edits a shared checkout at a time. Record a handoff before switching tools.
+
 - Broken Reality is currently R6, not R15.
 - SCAR references are outdated unless found in current Studio scripts. The old R15 animation plan is not current.
 - Current focus: custom R6 movement, first-person viewmodels, AKS-74 / AR-style weapons, and PvPvE zone shooter foundations.
