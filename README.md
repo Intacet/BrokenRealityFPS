@@ -5,6 +5,9 @@ R6 Roblox FPS / PvPvE project. Current direction: a large map with a team sent t
 ## Start here
 
 - [AI instructions](AGENTS.md)
+- [Daily GPT / Claude workflow](docs/AI_WORKFLOW.md)
+- [Current AI handoff](docs/AI_HANDOFF.md)
+- [Durable decisions](docs/AI_DECISIONS.md)
 - [Current direction](docs/CURRENT_GAME_DIRECTION.md)
 - [Project map](docs/PROJECT_MAP.md)
 - [Rojo review and next steps](docs/ROJO_REVIEW.md)

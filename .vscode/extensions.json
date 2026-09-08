@@ -1,3 +1,8 @@
 {
-  "recommendations": ["OpenAI.chatgpt", "anthropic.claude-code"]
+  "recommendations": [
+    "OpenAI.chatgpt",
+    "anthropic.claude-code",
+    "evaera.vscode-rojo",
+    "JohnnyMorganz.luau-lsp"
+  ]
 }

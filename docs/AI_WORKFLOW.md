@@ -1,6 +1,6 @@
 # GPT and Claude workflow
 
-Use the existing BrokenReality checkout on branch main. The claude/create-claude-md-AqEm8 branch preserves older history; it is not the current migration branch. Do not clone a second working copy or switch to the older branch to follow an outdated setup message. GitHub's default branch may still display the older branch: select main explicitly.
+Use the existing BrokenReality checkout on branch main. The claude/create-claude-md-AqEm8 branch preserves older history; it is not the current migration branch. Do not clone a second working copy or switch to the older branch to follow an outdated setup message. GitHub's default branch may still display the older branch: select main explicitly. Read `AI_HANDOFF.md` for current state and `AI_DECISIONS.md` for durable owner decisions.
 
 ## Open the project
 
@@ -10,10 +10,10 @@ Use the available model picker to select GPT-6 Astra where your account offers i
 
 ## Work one small task at a time
 
-1. Check Source Control before starting. Keep existing uncommitted work; never reset it to make the status clean.
+1. Run the VS Code task "Broken Reality: Start work safely". It refuses to pull over local changes and updates `main` only by fast-forward.
 2. Give one assistant the editing task. Have it read AGENTS.md, CURRENT_GAME_DIRECTION.md, PROJECT_RULES.md, PROJECT_MAP.md, and this guide.
 3. Stop its editing and review the diff before asking the other assistant to review. The reviewer should report findings without changing files until assigned the next edit.
-4. Record changed files, checks actually performed, remaining issues, and the next small action in the task handoff. Commit a reviewed checkpoint before switching assistants.
+4. Run "Broken Reality: Review work before commit". Record changed files, checks actually performed, remaining issues, and the next small action in `AI_HANDOFF.md`. Add durable owner decisions to `AI_DECISIONS.md`. Commit a reviewed checkpoint before switching assistants.
 5. Push scripts/docs to GitHub. Save and back up Studio assets separately. A Git push does not back up the place files excluded by .gitignore.
 
 Both assistants share files, not automatic conversation memory. A browser chat that only sees the GitHub default branch may give obsolete advice; provide the main branch link and the handoff below.
@@ -32,6 +32,17 @@ Both assistants share files, not automatic conversation memory. A browser chat t
 The CLI is local at .tools/rojo.exe, version 7.6.1, matching the observed Studio plugin. It does not need a global PATH installation. Use the VS Code task "Broken Reality: Start Logger pilot (test copy only)" after reviewing docs/ROJO_REVIEW.md. Starting the server does not authorize connecting an important place.
 
 The first sync is restricted to the existing Logger in a disposable migration copy. Reconcile any newer Studio source first. The full default.project.json manages 32 baseline scripts, not the new city prototype. Do not connect that full configuration to BrokenReality_CityTest.rbxl: it would restore baseline GunService and remove its destruction integration. Never open a code-only Rojo build as the replacement for the working place.
+
+## Daily loop during migration
+
+1. Run "Start work safely" and read `AI_HANDOFF.md`.
+2. Open the correct Studio file and confirm it is a disposable test copy before any pilot connection.
+3. Start only the Logger pilot task when performing the documented migration test. Ordinary docs/repo work does not require Rojo.
+4. Give one assistant one small task. The other assistant may review after editing stops.
+5. Test in Studio and record only the result actually observed or reported by the owner.
+6. Run "Review work before commit", inspect the diff, update handoff/debt/changelog, then commit and push.
+
+After the staged script handoff is complete, this loop can be updated to use the full project. Until then, do not treat "connect Rojo every day" as a safe default.
 
 ## Setup references
 

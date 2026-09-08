@@ -14,6 +14,7 @@
 - Existing Logger and Constants modules are present in ReplicatedStorage/Modules.
 - RemoteSetup source explicitly creates 15 RemoteEvents and one RemoteFunction at runtime; zero saved remote instances does not mean the prototype has no networking.
 - R6 and the direction in CURRENT_GAME_DIRECTION.md are owner-confirmed, not locally inspected.
+- Shared GPT/Claude workflow: `docs/AI_WORKFLOW.md` describes the daily loop, `docs/AI_HANDOFF.md` records current state, and `docs/AI_DECISIONS.md` records durable owner decisions. VS Code tasks guard Git pulls and review diffs; they do not commit, push, connect Rojo, or publish automatically.
 
 ## Isolated city prototype — 2026-09-08
 
