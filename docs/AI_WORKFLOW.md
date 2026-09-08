@@ -1,6 +1,6 @@
 # GPT and Claude workflow
 
-Use the existing BrokenReality checkout on branch main. The claude/create-claude-md-AqEm8 branch preserves older history; it is not the current migration branch. Do not clone a second working copy or switch to the older branch to follow an outdated setup message. GitHub's default branch may still display the older branch: select main explicitly. Read `AI_HANDOFF.md` for current state and `AI_DECISIONS.md` for durable owner decisions.
+Use the existing BrokenReality checkout on branch main. The claude/create-claude-md-AqEm8 branch preserves older history; it is not the current migration branch. Do not clone a second working copy or switch to the older branch to follow an outdated setup message. GitHub now opens `main` by default. Read `AI_HANDOFF.md` for current state and `AI_DECISIONS.md` for durable owner decisions.
 
 ## Open the project
 
@@ -16,7 +16,7 @@ Use the available model picker to select GPT-6 Astra where your account offers i
 4. Run "Broken Reality: Review work before commit". Record changed files, checks actually performed, remaining issues, and the next small action in `AI_HANDOFF.md`. Add durable owner decisions to `AI_DECISIONS.md`. Commit a reviewed checkpoint before switching assistants.
 5. Push scripts/docs to GitHub. Save and back up Studio assets separately. A Git push does not back up the place files excluded by .gitignore.
 
-Both assistants share files, not automatic conversation memory. A browser chat that only sees the GitHub default branch may give obsolete advice; provide the main branch link and the handoff below.
+Both assistants share files, not automatic conversation memory. Provide the repository link and tell each assistant to read the handoff below before editing.
 
 ## Current handoff
 

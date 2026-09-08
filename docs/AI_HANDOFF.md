@@ -4,7 +4,7 @@ Update this file at the end of each completed task so GPT/Codex and Claude start
 
 ## Current state — 2026-09-08
 
-- Work from `main`. The branch `claude/create-claude-md-AqEm8` is preserved history and is not the active migration branch.
+- Work from `main`, which is also the GitHub default branch. The branch `claude/create-claude-md-AqEm8` is preserved history and is not the active migration branch.
 - The working Studio game is R6. Current direction is a gritty FPS / PvPvE zone shooter with custom R6 movement, AKS-74 / AR-style first-person viewmodels, and reality-break containment objectives.
 - SCAR and R15 references are historical unless a current source dependency is found and documented.
 - Studio remains authoritative for maps, models, animations, viewmodels, lighting, spawns, and the current live place. Existing scripts remain Studio-authoritative until each Rojo handoff is verified.

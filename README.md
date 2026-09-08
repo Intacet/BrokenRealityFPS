@@ -20,7 +20,7 @@ The Logger-only pilot is the first Rojo trial. The full configuration must wait 
 
 The earlier work remains on branch `claude/create-claude-md-AqEm8`, last inspected at `04a445df23361187116ab5b0e96686cf2236df4e`. All 32 main scripts matched that commit byte-for-byte when compared with the saved Studio place. This migration changes organization and setup, not gameplay code.
 
-The older configuration, roadmaps, technical debt, and place snapshots remain available in Git history. Their plans need review against the owner's current instructions before reuse. Current code/docs work should use `main`; GitHub's default branch may still point to the older branch until separately changed.
+The older configuration, roadmaps, technical debt, and place snapshots remain available in Git history. Their plans need review against the owner's current instructions before reuse. Current code/docs work and GitHub's default branch use `main`.
 
 ## Local tools
 

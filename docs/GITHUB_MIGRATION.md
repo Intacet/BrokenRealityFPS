@@ -8,7 +8,7 @@
 - The older configuration also described Workspace folders, asset folders, and StarterPlayer properties. The new configuration deliberately manages only individually reviewed code targets and preserves unknown instances at every affected node.
 - The old branch is retained unchanged. Main joins its history using Git's ours merge strategy: the migration tree is retained in full, while the previous history becomes an ancestor. No forced push or remote history replacement is used.
 - Old place files and previous roadmaps remain recoverable in history, but are not added to the active scripts/docs tree. This does not erase historical large files from Git storage.
-- GitHub's default branch has not been changed. Use main for this migration workflow.
+- GitHub's default branch was changed to main on 2026-09-08. The historical Claude branch remains available.
 - HTTPS operations used Git's OpenSSL backend because the Windows Schannel backend failed to initialize credentials. Certificate verification stayed enabled; no global Git settings were changed.
 - Upload succeeded using the owner's normal Windows Git credentials outside the sandbox accounts. Main now exists on GitHub and the local main tracks origin/main. Earlier sandbox credential failures did not indicate a problem with the owner's GitHub account.
 - The OpenSSL backend is configured only for this local repository so VS Code can use it too. Sign in through the normal GitHub flow before publishing main; do not put tokens in project files or chat.
