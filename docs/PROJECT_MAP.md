@@ -3,6 +3,7 @@
 ## Known state
 
 - Reload/equip/ADS animation-recovery patch exception: ViewModelController and Constants in src now intentionally differ from the captured baseline. See RELOAD_DIAGNOSIS.md (including its "Extended scope" section covering the equip and ADS additions). Historical statements below about byte-identical src describe the initial migration capture; import/studio-snapshot remains unchanged. Studio has not received this patch.
+- Wood/door destruction exception: two new files exist under src/ServerScriptService/Services (DestructionService.lua, DestructionRules.lua), and GunService.server.lua + Constants.lua now also intentionally differ from the captured baseline for this reason. See docs/DESTRUCTION_SYSTEM_PLAN.md. Studio has not received this either. No new remote was added — the pre-existing, previously-unused PartDestroyed RemoteEvent (declared in RemoteSetup.server.lua) now has a real producer.
 
 - The initial local workspace contained no existing code or Git repository.
 - Local branch: main. Origin: https://github.com/Intacet/BrokenRealityFPS.git. See GITHUB_MIGRATION.md for preservation of the previous branch/history and the upload record.

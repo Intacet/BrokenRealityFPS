@@ -1693,4 +1693,41 @@ Constants.VIEWMODEL_EQUIP_MAX_DURATION = 10
 Constants.VIEWMODEL_ADS_LOAD_TIMEOUT = 3
 Constants.VIEWMODEL_ADS_MAX_DURATION = 10
 
+-- ============================================================
+-- Destruction — wood/door breakable props (2026-09-08)
+-- Bullet-driven only. No explosive/AoE damage yet — see docs/DESTRUCTION_SYSTEM_PLAN.md.
+-- ============================================================
+
+-- Any Anchored BasePart anywhere in workspace tagged with this attribute (a string key
+-- into Constants.DESTRUCTION_PROFILES) is registered as breakable by DestructionService
+-- at server start. A door is not one part — Studio authors it as several parts (e.g. left
+-- panel / right panel / frame), each independently tagged, so shooting one panel breaks
+-- only that panel (the Rainbow Six Siege behavior the owner asked for). DestructionService
+-- has no special "door" concept; this attribute-per-part model is what gives that behavior.
+Constants.BREAKABLE_PROFILE_ATTRIBUTE = "BR_BreakableProfile"
+Constants.BREAKABLE_HEALTH_ATTRIBUTE  = "BR_Health"
+Constants.BREAKABLE_BROKEN_ATTRIBUTE  = "BR_Broken"
+
+-- Health per breakable profile. Wood = 80 covers doors, crates, fences, planks — any wood
+-- prop — and takes 3 accepted hits from AR15's 28 damage, matching the already-tuned value
+-- from the isolated prototypes/CityDistrict/DestructionService.lua's "Timber" profile.
+Constants.DESTRUCTION_PROFILES = {
+    Wood = { Health = 80 },
+}
+
+Constants.DESTRUCTION_MAX_REGISTERED_PARTS    = 800   -- registration budget; see Logger warnings if exceeded
+Constants.DESTRUCTION_MAX_DAMAGE_PER_HIT      = 100   -- clamps a single hit so a bad WeaponData value can't overflow
+Constants.DESTRUCTION_IMPACT_TOLERANCE        = 1.5   -- studs; slack around a part's bounds for the hit-point check
+Constants.DESTRUCTION_MAX_LIVE_FRAGMENTS      = 64    -- global cosmetic debris cap across all breaks
+Constants.DESTRUCTION_FRAGMENTS_PER_BREAK     = 3
+Constants.DESTRUCTION_FRAGMENT_LIFETIME       = 2.5   -- seconds before cosmetic debris is removed
+Constants.DESTRUCTION_FRAGMENT_SCALE          = 0.22
+Constants.DESTRUCTION_FRAGMENT_MIN_SIZE       = 0.15
+Constants.DESTRUCTION_FRAGMENT_MAX_SIZE       = 2
+Constants.DESTRUCTION_FRAGMENT_SPEED          = 12
+Constants.DESTRUCTION_FRAGMENT_LIFT           = 6
+Constants.DESTRUCTION_FRAGMENT_SPIN           = 4
+Constants.DESTRUCTION_MIN_DIRECTION_MAGNITUDE = 0.001
+Constants.DESTRUCTION_DEBRIS_FOLDER_NAME      = "BR_Debris"
+
 return Constants

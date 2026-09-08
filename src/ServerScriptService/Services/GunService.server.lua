@@ -4,11 +4,13 @@
 --
 -- Validates weapon shots fired by clients.
 -- Clients fire WeaponFired with origin+direction+tick; GunService re-runs the
--- raycast on the server and calls DamageService:Apply() only if the shot is valid.
+-- raycast on the server and calls DamageService:Apply() only if the shot hit a player,
+-- or DestructionService:ApplyHit() if it hit a registered breakable wood prop instead.
 --
 -- What this script does NOT do:
---   - Apply damage or track health   →  DamageService
---   - Handle client input            →  GunController (client)
+--   - Apply player damage or track health        →  DamageService
+--   - Track breakable prop health or debris       →  DestructionService
+--   - Handle client input                         →  GunController (client)
 
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -22,9 +24,10 @@ local Constants  = require(Modules:WaitForChild("Constants"))
 local WeaponData = require(Modules:WaitForChild("WeaponData"))
 local Logger     = require(Modules:WaitForChild("Logger"))
 
--- DamageService and MatchEvents are sibling ModuleScripts in Services.
-local DamageService = require(script.Parent:WaitForChild("DamageService"))
-local MatchEvents   = require(script.Parent:WaitForChild("MatchEvents"))
+-- DamageService, DestructionService, and MatchEvents are sibling ModuleScripts in Services.
+local DamageService      = require(script.Parent:WaitForChild("DamageService"))
+local DestructionService = require(script.Parent:WaitForChild("DestructionService"))
+local MatchEvents        = require(script.Parent:WaitForChild("MatchEvents"))
 
 local Remotes        = ReplicatedStorage:WaitForChild("Remotes")
 local WeaponFired    = Remotes:WaitForChild("WeaponFired")    :: RemoteEvent
@@ -256,6 +259,9 @@ WeaponFired.OnServerEvent:Connect(function(
     -- Confirm the hit part belongs to a player character (not a wall or prop).
     local victim = getPlayerFromPart(result.Instance)
     if not victim or victim == shooter then
+        -- Not a player: try the same already-validated raycast against DestructionService.
+        -- No-ops harmlessly (returns false) for anything that isn't a registered breakable.
+        DestructionService:ApplyHit(result.Instance, weaponDef.damage, result.Position, validDirection)
         return
     end
 

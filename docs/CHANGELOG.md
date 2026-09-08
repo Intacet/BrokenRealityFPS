@@ -1,5 +1,14 @@
 # Changelog
 
+## Wood/door destruction (main game, bullet-driven, no explosives)
+
+- Added `src/ServerScriptService/Services/DestructionService.lua` and `DestructionRules.lua`: server-authoritative, attribute-driven (`BR_BreakableProfile`) wood destruction, ported from the already offline-tested `prototypes/CityDistrict/DestructionService.lua` and retargeted from that isolated test subtree to the whole live main-game `workspace`. One profile, `Wood` (health 80), covers doors, crates, fences, planks — any wood prop.
+- A door authored in Studio as several independently tagged parts (frame/panels/etc.) already breaks piece-by-piece with this — no per-door code exists or is needed, matching the requested Rainbow Six Siege behavior.
+- Wired into `src/ServerScriptService/Services/GunService.server.lua`: any shot that doesn't hit a player is now checked against the registered breakables using the same already-validated server raycast. No new remote — `PartDestroyed` (pre-existing, previously unused) is fired as a break-VFX hook.
+- Explosive/AoE damage is explicitly deferred (owner instruction) — not implemented.
+- Added `scripts/Test-Destruction.luau`, mirroring the prototype's proven `TestDestruction.luau` assertions; not executed in this environment (no local Lune), verified by manual trace only. See `docs/DESTRUCTION_SYSTEM_PLAN.md`.
+- Not installed in Studio, not committed, not Studio-verified.
+
 ## Animation lock recovery (equip / ADS)
 
 - Extended the reload recovery pattern below to `PlayEquipAnimation` and to ADS-in/ADS-out in `SetAiming`: each now has a Heartbeat watchdog (tracked connections, cleared on weapon switch/holster/respawn/ADS interrupt) that force-resumes the correct state if the one-shot animation's `Stopped` signal never arrives, using new `VIEWMODEL_EQUIP_LOAD_TIMEOUT`/`MAX_DURATION` and `VIEWMODEL_ADS_LOAD_TIMEOUT`/`MAX_DURATION` Constants (3s / 10s, matching reload's values).
