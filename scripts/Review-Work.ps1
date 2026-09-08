@@ -3,13 +3,13 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 
 Push-Location $projectRoot
 try {
-    git status --short
+    git -c "safe.directory=$projectRoot" status --short
     if ($LASTEXITCODE -ne 0) {
         throw "Could not read Git status."
     }
 
-    git diff --stat
-    git diff --check
+    git -c "safe.directory=$projectRoot" diff --stat
+    git -c "safe.directory=$projectRoot" diff --check
     if ($LASTEXITCODE -ne 0) {
         throw "The diff contains whitespace errors. Review them before committing."
     }

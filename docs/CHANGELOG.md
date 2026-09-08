@@ -6,6 +6,7 @@
 - Added a tracked VS Code workspace plus safe start and pre-commit review tasks. The start task refuses to pull over uncommitted files and permits only a fast-forward update of `main`.
 - Installed and verified Codex 26.901.22334, Claude Code 2.1.263, Rojo 2.1.2, and Luau LSP 1.69.0 VS Code extensions.
 - Rebuilt both Rojo configurations successfully. No Rojo server was connected to Studio, no gameplay source changed, and no place was published.
+- Scoped Git's safe-directory allowance to each workflow command so the normal Windows account can use this sandbox-created checkout without changing global Git settings.
 
 ## 2026-09-08 — shared GPT / Claude laptop setup
 
