@@ -1,5 +1,18 @@
 # Changelog
 
+## Animation lock recovery (equip / ADS)
+
+- Extended the reload recovery pattern below to `PlayEquipAnimation` and to ADS-in/ADS-out in `SetAiming`: each now has a Heartbeat watchdog (tracked connections, cleared on weapon switch/holster/respawn/ADS interrupt) that force-resumes the correct state if the one-shot animation's `Stopped` signal never arrives, using new `VIEWMODEL_EQUIP_LOAD_TIMEOUT`/`MAX_DURATION` and `VIEWMODEL_ADS_LOAD_TIMEOUT`/`MAX_DURATION` Constants (3s / 10s, matching reload's values).
+- Rationale: a stuck ADS "Entering"/"Exiting" state left `IsAiming()` permanently true, which silently routes every future shot to the ADS fire animation — itself a no-op outside the "Aiming" state — so the gun kept firing server-side with no visible fire animation. A stuck equip state left the weapon frozen at bind pose. See RELOAD_DIAGNOSIS.md "Extended scope" for detail.
+- The equip fix preserves the existing immediate `Play()` call unchanged (success path untouched); it only adds a recovery net. No animation asset IDs were changed.
+- Re-verified (by manual trace, not by running Lune — not installed in this environment) that all 13 existing `scripts/Test-Reload.luau` assertions still hold against the current `PlayReloadAnimation` source; that method was not modified this pass.
+- Not installed in Studio and not Studio-tested. See TECHNICAL_DEBT.md.
+
+## Reload recovery
+
+- Added bounded asset loading and playback recovery to ViewModelController, with timeout tuning in Constants and explicit reload connection cleanup. FP playback is independent of TP playback errors.
+- Added 13 mocked regression assertions and syntax compilation of the two edited runtime files. Visual asset failure cause and Studio verification remain pending; existing asset IDs and original place are unchanged.
+
 ## 2026-09-08 — VS Code sourcemap path
 
 - Pointed Luau LSP at the verified project-local Rojo 7.6.1 executable and selected `default.project.json` for code navigation.

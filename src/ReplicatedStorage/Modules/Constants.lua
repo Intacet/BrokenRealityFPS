@@ -1677,4 +1677,20 @@ Constants.PROJECTILE_DEFAULT_MAX_LIFETIME       = 1.25    -- seconds; hard cap o
 Constants.PROJECTILE_DEFAULT_SIMULATION_STEP    = 0.008333333333333333  -- seconds per sub-step (≈ 120 Hz)
 Constants.PROJECTILE_DEFAULT_MAX_STEP_DISTANCE  = 55      -- studs; max travel per sub-step before forced subdivision
 
+-- Client presentation bounds; these never award ammo or decide server reload results.
+Constants.VIEWMODEL_RELOAD_LOAD_TIMEOUT = 3
+Constants.VIEWMODEL_RELOAD_MAX_DURATION = 10
+
+-- Same recovery bounds for the equip animation: if the asset never loads (LOAD_TIMEOUT)
+-- or a loaded track never reports completion (MAX_DURATION), the weapon still resumes
+-- idle/run instead of freezing at bind pose indefinitely.
+Constants.VIEWMODEL_EQUIP_LOAD_TIMEOUT = 3
+Constants.VIEWMODEL_EQUIP_MAX_DURATION = 10
+
+-- Same recovery bounds for ADS-in/ADS-out: prevents a stuck "Entering"/"Exiting" state
+-- from leaving IsAiming() permanently true, which would otherwise silently swallow every
+-- future shot's fire animation (PlayADSFireAnimation only plays while adsState=="Aiming").
+Constants.VIEWMODEL_ADS_LOAD_TIMEOUT = 3
+Constants.VIEWMODEL_ADS_MAX_DURATION = 10
+
 return Constants

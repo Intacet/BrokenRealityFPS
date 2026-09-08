@@ -235,6 +235,27 @@ local weaponRunTrack:     AnimationTrack? = nil
 -- isReloading: true while reload one-shot is playing; blocks fire and locomotion.
 -- isRunning:   true while locomotion state is "Sprint"; used by sway/inertia weight system.
 local isReloading: boolean = false
+local reloadConnections: { RBXScriptConnection } = {}
+local function clearReloadConnections()
+    for _, connection in reloadConnections do connection:Disconnect() end
+    table.clear(reloadConnections)
+end
+-- equipConnections / adsConnections: same bounded-recovery pattern as reloadConnections.
+-- A one-shot animation (equip, ADS-in, ADS-out) whose asset never loads or whose Stopped
+-- signal never fires would otherwise leave the weapon frozen (bind pose, or stuck ADS
+-- state blocking the fire-animation dispatch in GunController) indefinitely. Each user of
+-- these tables registers a Stopped connection plus a Heartbeat timeout watchdog and clears
+-- both together once the transition resolves, naturally or by recovery.
+local equipConnections: { RBXScriptConnection } = {}
+local function clearEquipConnections()
+    for _, connection in equipConnections do connection:Disconnect() end
+    table.clear(equipConnections)
+end
+local adsConnections: { RBXScriptConnection } = {}
+local function clearAdsConnections()
+    for _, connection in adsConnections do connection:Disconnect() end
+    table.clear(adsConnections)
+end
 local isRunning:   boolean = false
 
 -- Locomotion animation tracks (walk / enterRun / sprint).
@@ -415,6 +436,9 @@ end
 -- Clears all weapon state.  Called by Start() and CharacterAdded.
 -- After init(), self.model is nil (weapon holstered) and no animation tracks are loaded.
 function ViewModelController:init()
+    clearReloadConnections()
+    clearEquipConnections()
+    clearAdsConnections()
     -- Stop and destroy all weapon animation tracks.
     if weaponEquipTrack then
         weaponEquipTrack:Stop()
@@ -550,6 +574,9 @@ end
 -- (reload chain, equip chain) will fire after this returns.
 -- Safe to call when no weapon is equipped (no-op in that case).
 function ViewModelController:StopWeaponAnimations()
+    clearReloadConnections()
+    clearEquipConnections()
+    clearAdsConnections()
     if weaponEquipTrack then
         weaponEquipTrack:Stop()
         weaponEquipTrack:Destroy()
@@ -711,17 +738,27 @@ end
 function ViewModelController:PlayEquipAnimation()
     -- Capture weapon identity so the Stopped callback can guard against stale calls.
     local capturedWeapon = equippedWeaponName
+    local capturedModel  = self.model
+    clearEquipConnections()
 
     if weaponEquipTrack then
-        -- Connect Stopped BEFORE Play() — same reason as reload: if the asset hasn't
-        -- loaded yet (Length == 0), Stopped can fire synchronously on Play(), which
-        -- would skip the callback and leave the weapon stuck at bind pose with no idle.
-        -- AnimationTrack:Destroy() disconnects all signals synchronously, so the
-        -- Stopped callback will not fire after StopWeaponAnimations() has run.
-        weaponEquipTrack.Stopped:Connect(function()
-            -- Guard: only proceed if same weapon is still equipped.
+        local track = weaponEquipTrack
+        local finished = false
+
+        -- Resumes locomotion/idle. Called from the natural Stopped path or, if that
+        -- signal never fires (asset failed to load, or a completion signal is dropped),
+        -- from the Heartbeat recovery watchdog below — mirrors PlayReloadAnimation's
+        -- recovery so the weapon can never freeze at bind pose indefinitely.
+        local function finish(reason: string)
+            if finished then return end
+            finished = true
+            clearEquipConnections()
             if equippedWeaponName ~= capturedWeapon or self.model == nil then return end
-            -- Resume current locomotion state (bypasses guard by clearing cached state).
+            if reason ~= "stopped" then
+                Logger.warn("[ViewModelController] Equip recovered:", reason,
+                    "weapon:", capturedWeapon, "length:", track.Length)
+                pcall(function() track:Stop() end)
+            end
             if Constants.VIEWMODEL_LOCOMOTION_ANIMS_ENABLED :: boolean then
                 local saved = vmLocomotionState
                 vmLocomotionState = ""
@@ -732,8 +769,37 @@ function ViewModelController:PlayEquipAnimation()
             elseif weaponIdleTrack ~= nil then
                 self:PlayIdleAnimation()
             end
-        end)
-        weaponEquipTrack:Play()
+        end
+
+        -- Connect Stopped BEFORE Play() — same reason as reload: if the asset hasn't
+        -- loaded yet (Length == 0), Stopped can fire synchronously on Play(), which
+        -- would skip the callback and leave the weapon stuck at bind pose with no idle.
+        -- AnimationTrack:Destroy() disconnects all signals synchronously, so the
+        -- Stopped callback will not fire after StopWeaponAnimations() has run.
+        table.insert(equipConnections, track.Stopped:Connect(function() finish("stopped") end))
+
+        -- Recovery watchdog: a short window covers an asset that never finishes loading
+        -- (Length stays 0); a longer window covers a loaded asset whose Stopped signal is
+        -- never delivered. Either way the weapon resumes locomotion instead of hanging.
+        local elapsed = 0
+        table.insert(equipConnections, RunService.Heartbeat:Connect(function(dt: number)
+            if self.model ~= capturedModel or equippedWeaponName ~= capturedWeapon then
+                clearEquipConnections()
+                return
+            end
+            elapsed += dt
+            local limit = if track.Length > 0
+                then Constants.VIEWMODEL_EQUIP_MAX_DURATION :: number
+                else Constants.VIEWMODEL_EQUIP_LOAD_TIMEOUT :: number
+            if elapsed >= limit then
+                finish(if track.Length > 0 then "completion signal timed out" else "asset did not load")
+            end
+        end))
+
+        local ok, err = pcall(function() track:Play() end)
+        if not ok then
+            finish("Play failed: " .. tostring(err))
+        end
         Logger.debug("[ViewModelController] PlayEquipAnimation: equip track started")
     else
         -- No equip track or zero-length clip — start locomotion or idle directly.
@@ -1933,9 +1999,69 @@ function ViewModelController:PlayReloadAnimation()
         Logger.debug("[ViewModelController] PlayReloadAnimation: no reload track loaded — skipped")
         return
     end
-    -- Capture weapon identity so the Stopped callback can guard against stale calls.
     local capturedWeapon = equippedWeaponName
+    local capturedModel = self.model
+    local track = weaponReloadTrack
+    clearReloadConnections()
     isReloading = true
+    local finished = false
+    local started = false
+    local elapsed = 0
+    local function finish(reason: string)
+        if finished then return end
+        finished = true
+        clearReloadConnections()
+        if self.model ~= capturedModel or equippedWeaponName ~= capturedWeapon then return end
+        isReloading = false
+        if reason ~= "stopped" then
+            Logger.warn("[ViewModelController] Reload recovered:", reason,
+                "weapon:", capturedWeapon, "length:", track.Length,
+                "animation:", track.Animation and track.Animation.AnimationId)
+            pcall(function() track:Stop() end)
+        end
+        -- TP presentation cannot prevent FP recovery.
+        pcall(function()
+            if tpReloadTrack then tpReloadTrack:Stop() end
+            if tpIdleTrack then tpIdleTrack:Play() end
+        end)
+        if Constants.VIEWMODEL_LOCOMOTION_ANIMS_ENABLED :: boolean then
+            local saved = vmLocomotionState
+            vmLocomotionState = ""
+            vmEnterRunPlaying = false
+            self:SetLocomotionState(saved)
+        else
+            local fade = Constants.VIEWMODEL_RELOAD_RESUME_FADE_TIME :: number
+            if isRunning and weaponRunTrack then self:PlayRunAnimation(fade)
+            else self:PlayIdleAnimation(fade) end
+        end
+    end
+    local function startPlayback()
+        if started or finished then return end
+        started = true
+        elapsed = 0
+        local ok, err = pcall(function() track:Play() end)
+        if not ok then finish("FP Play failed: " .. tostring(err)); return end
+        if finished then return end
+        if tpReloadTrack then
+            local tpOk, tpErr = pcall(function() tpReloadTrack:Play() end)
+            if not tpOk then Logger.warn("[ViewModelController] TP reload failed:", tpErr) end
+        end
+    end
+    -- Register recovery before any animation operation that can fail.
+    table.insert(reloadConnections, track.Stopped:Connect(function() finish("stopped") end))
+    table.insert(reloadConnections, RunService.Heartbeat:Connect(function(dt: number)
+        if self.model ~= capturedModel or equippedWeaponName ~= capturedWeapon then
+            clearReloadConnections()
+            return
+        end
+        elapsed += dt
+        if not started then
+            if track.Length > 0 then startPlayback()
+            elseif elapsed >= Constants.VIEWMODEL_RELOAD_LOAD_TIMEOUT then finish("asset did not load") end
+        elseif elapsed >= Constants.VIEWMODEL_RELOAD_MAX_DURATION then
+            finish("completion signal timed out")
+        end
+    end))
     -- Exit ADS if active (reload takes priority).
     if adsState ~= "Hip" then
         self:StopADSAnimations()
@@ -1968,45 +2094,8 @@ function ViewModelController:PlayReloadAnimation()
     if tpIdleTrack and tpIdleTrack.IsPlaying then
         tpIdleTrack:Stop()
     end
-    if tpReloadTrack then
-        tpReloadTrack.Stopped:Connect(function()
-            -- Guard: resume TP idle only if the same weapon is still equipped.
-            if equippedWeaponName ~= capturedWeapon then return end
-            if tpIdleTrack then
-                tpIdleTrack:Play()
-            end
-        end)
-        tpReloadTrack:Play()
-    end
-
-    -- Connect Stopped BEFORE Play() so the callback is guaranteed to be registered
-    -- even if the animation has Length == 0 at play time (e.g. asset not yet loaded,
-    -- or invalid ID). If Play is called first and Stopped fires synchronously, the
-    -- callback would never be registered and isReloading would stay true forever.
-    -- AnimationTrack:Destroy() (called by StopWeaponAnimations / HolsterWeapon) severs
-    -- this connection synchronously before it can fire on a stale weapon.
-    weaponReloadTrack.Stopped:Connect(function()
-        if equippedWeaponName ~= capturedWeapon or self.model == nil then return end
-        isReloading = false
-        -- Resume current locomotion state (or legacy run/idle on disabled path).
-        if Constants.VIEWMODEL_LOCOMOTION_ANIMS_ENABLED :: boolean then
-            local saved = vmLocomotionState
-            vmLocomotionState = ""
-            vmEnterRunPlaying = false
-            self:SetLocomotionState(saved)
-        else
-            local resumeFade = Constants.VIEWMODEL_RELOAD_RESUME_FADE_TIME :: number
-            if isRunning and weaponRunTrack ~= nil then
-                self:PlayRunAnimation(resumeFade)
-            else
-                self:PlayIdleAnimation(resumeFade)
-            end
-        end
-        Logger.debug("[ViewModelController] PlayReloadAnimation: reload complete, resumed "
-            .. vmLocomotionState)
-    end)
-    weaponReloadTrack:Play()
-    Logger.debug("[ViewModelController] PlayReloadAnimation: reload track started (FP + TP)")
+    -- Length is zero until the asset loads. Heartbeat retries with a bounded wait.
+    if track.Length > 0 then startPlayback() end
 end
 
 -- Called by GunController each RenderStepped with the current sprint flag.
@@ -2232,6 +2321,9 @@ function ViewModelController:SetAiming(entering: boolean)
         return
     end
 
+    -- A fresh ADS action supersedes any in-flight recovery watchdog from the previous one.
+    clearAdsConnections()
+
     if entering then
         -- ADS in: force first-person so the player cannot aim in third-person.
         if Constants.ADS_FORCE_FIRST_PERSON then
@@ -2278,38 +2370,60 @@ function ViewModelController:SetAiming(entering: boolean)
         end
 
         if weaponAdsInTrack then
+            local track = weaponAdsInTrack
+            local capturedWeapon = equippedWeaponName
+            local capturedModel  = self.model
+
+            -- Transition to Aiming and start adsIdle. Called from the natural Stopped
+            -- signal or, if that signal never arrives (asset failed to load, or a
+            -- completion signal is dropped), from the Heartbeat recovery watchdog below.
+            -- Without this recovery, a stuck "Entering" state leaves IsAiming() true
+            -- forever, which routes every future shot to PlayADSFireAnimation() — and
+            -- that no-ops outside "Aiming", so the gun would appear to stop firing.
+            local function finishEntering(reason: string)
+                if equippedWeaponName ~= capturedWeapon or self.model == nil then return end
+                if adsState ~= "Entering" then return end
+                if reason ~= "stopped" then
+                    Logger.warn("[ViewModelController] ADS-in recovered:", reason,
+                        "weapon:", capturedWeapon, "length:", track.Length)
+                    pcall(function() track:Stop() end)
+                end
+                adsState = "Aiming"
+                adsIdleTime = 0
+                Logger.debug("[ViewModelController] adsIn " .. reason .. ": transitioned to Aiming")
+                if weaponAdsIdleTrack then
+                    weaponAdsIdleTrack:Play(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
+                    Logger.debug("[ViewModelController] adsIn " .. reason .. ": adsIdle started")
+                else
+                    Logger.warn("[ViewModelController] adsIn " .. reason .. ": no adsIdle track loaded - ADS pose may not hold")
+                end
+            end
+
             -- Play adsIn from the start with fade.
-            weaponAdsInTrack.TimePosition = 0
-            weaponAdsInTrack:AdjustSpeed(1)
-            weaponAdsInTrack:Play(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
+            track.TimePosition = 0
+            track:AdjustSpeed(1)
+            track:Play(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
             adsState = "Entering"
             adsIdleTime = 0
             Logger.debug("[ViewModelController] SetAiming: adsIn started (state = Entering)")
 
             -- When adsIn finishes, start looping adsIdle.
-            local capturedWeapon = equippedWeaponName
-            weaponAdsInTrack.Stopped:Once(function()
-                -- Only transition if same weapon, still entering, and model exists.
-                if equippedWeaponName ~= capturedWeapon or self.model == nil then
+            table.insert(adsConnections, track.Stopped:Once(function() finishEntering("stopped") end))
+
+            local elapsed = 0
+            table.insert(adsConnections, RunService.Heartbeat:Connect(function(dt: number)
+                if self.model ~= capturedModel or equippedWeaponName ~= capturedWeapon or adsState ~= "Entering" then
+                    clearAdsConnections()
                     return
                 end
-                if adsState ~= "Entering" then
-                    return
+                elapsed += dt
+                local limit = if track.Length > 0
+                    then Constants.VIEWMODEL_ADS_MAX_DURATION :: number
+                    else Constants.VIEWMODEL_ADS_LOAD_TIMEOUT :: number
+                if elapsed >= limit then
+                    finishEntering(if track.Length > 0 then "completion signal timed out" else "asset did not load")
                 end
-
-                -- Transition to Aiming state and start adsIdle loop.
-                adsState = "Aiming"
-                adsIdleTime = 0
-                Logger.debug("[ViewModelController] adsIn Stopped: transitioned to Aiming")
-
-                -- Start adsIdle loop if available.
-                if weaponAdsIdleTrack then
-                    weaponAdsIdleTrack:Play(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
-                    Logger.debug("[ViewModelController] adsIn Stopped: adsIdle started")
-                else
-                    Logger.warn("[ViewModelController] adsIn Stopped: no adsIdle track loaded - ADS pose may not hold")
-                end
-            end)
+            end))
         else
             Logger.warn("[ViewModelController] SetAiming: no adsIn track loaded")
             adsState = "Hip"
@@ -2335,41 +2449,66 @@ function ViewModelController:SetAiming(entering: boolean)
         end
 
         if weaponAdsOutTrack then
-            weaponAdsOutTrack.TimePosition = 0
-            weaponAdsOutTrack:Play(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
+            local track = weaponAdsOutTrack
+            local capturedWeapon = equippedWeaponName
+            local capturedModel  = self.model
+
+            -- Return to Hip and resume idle/run. Called from the natural Stopped signal
+            -- or, if that never arrives, from the Heartbeat recovery watchdog below —
+            -- otherwise a stuck "Exiting" state leaves the weapon frozen on the adsOut
+            -- pose with no looping animation and IsAiming() still true.
+            local function finishExiting(reason: string)
+                if equippedWeaponName ~= capturedWeapon or self.model == nil then return end
+                if adsState ~= "Exiting" then return end
+                if reason ~= "stopped" then
+                    Logger.warn("[ViewModelController] ADS-out recovered:", reason,
+                        "weapon:", capturedWeapon, "length:", track.Length)
+                    pcall(function() track:Stop() end)
+                end
+                adsState = "Hip"
+                -- Resume base-layer hip animation.
+                -- The VIEWMODEL_ADS_DISABLE_* constants suppress idle/run DURING ADS;
+                -- they must not prevent the hip animation from resuming once ADS ends.
+                -- Without unconditional resumption here, the weapon freezes on the final
+                -- adsOut frame with no looping animation (idle-after-ADS bug — DEBT-040).
+                if not isReloading then
+                    if Constants.VIEWMODEL_LOCOMOTION_ANIMS_ENABLED :: boolean then
+                        local saved = vmLocomotionState
+                        vmLocomotionState = ""
+                        vmEnterRunPlaying = false
+                        self:SetLocomotionState(saved)
+                    else
+                        if isRunning and weaponRunTrack ~= nil then
+                            self:PlayRunAnimation()
+                        else
+                            self:PlayIdleAnimation()
+                        end
+                    end
+                end
+                Logger.debug("[ViewModelController] adsOut " .. reason .. ": hip animation resumed")
+            end
+
+            track.TimePosition = 0
+            track:Play(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
             adsState = "Exiting"
 
             -- When adsOut finishes, return to Hip and resume idle/run.
-            local capturedWeapon = equippedWeaponName
-            weaponAdsOutTrack.Stopped:Once(function()
-                -- Only resume if same weapon and still exiting.
-                if equippedWeaponName ~= capturedWeapon or self.model == nil then
+            table.insert(adsConnections, track.Stopped:Once(function() finishExiting("stopped") end))
+
+            local elapsed = 0
+            table.insert(adsConnections, RunService.Heartbeat:Connect(function(dt: number)
+                if self.model ~= capturedModel or equippedWeaponName ~= capturedWeapon or adsState ~= "Exiting" then
+                    clearAdsConnections()
                     return
                 end
-                if adsState == "Exiting" then
-                    adsState = "Hip"
-                    -- Resume base-layer hip animation.
-                    -- The VIEWMODEL_ADS_DISABLE_* constants suppress idle/run DURING ADS;
-                    -- they must not prevent the hip animation from resuming once ADS ends.
-                    -- Without unconditional resumption here, the weapon freezes on the final
-                    -- adsOut frame with no looping animation (idle-after-ADS bug — DEBT-040).
-                    if not isReloading then
-                        if Constants.VIEWMODEL_LOCOMOTION_ANIMS_ENABLED :: boolean then
-                            local saved = vmLocomotionState
-                            vmLocomotionState = ""
-                            vmEnterRunPlaying = false
-                            self:SetLocomotionState(saved)
-                        else
-                            if isRunning and weaponRunTrack ~= nil then
-                                self:PlayRunAnimation()
-                            else
-                                self:PlayIdleAnimation()
-                            end
-                        end
-                    end
-                    Logger.debug("[ViewModelController] adsOut complete: hip animation resumed")
+                elapsed += dt
+                local limit = if track.Length > 0
+                    then Constants.VIEWMODEL_ADS_MAX_DURATION :: number
+                    else Constants.VIEWMODEL_ADS_LOAD_TIMEOUT :: number
+                if elapsed >= limit then
+                    finishExiting(if track.Length > 0 then "completion signal timed out" else "asset did not load")
                 end
-            end)
+            end))
             Logger.debug("[ViewModelController] SetAiming: adsOut started (state = Exiting)")
         else
             -- No adsOut track: immediately return to Hip and resume locomotion.
@@ -2435,6 +2574,9 @@ end
 -- Stops all ADS animations and clears ADS state.
 -- Called internally when holstering, reloading, or resetting.
 function ViewModelController:StopADSAnimations()
+    -- Cancel any in-flight entering/exiting recovery watchdog; this call already forces
+    -- adsState back to "Hip" below, so a stale watchdog must not fire and re-decide it.
+    clearAdsConnections()
     -- adsIn and adsIdle hold the weapon in the ADS pose while active.
     -- Stopping them without a fade snaps the rig to its rest T-pose for one frame,
     -- causing the gun-into-camera glitch when reload or holster interrupts ADS.

@@ -2,6 +2,8 @@
 
 ## Known state
 
+- Reload/equip/ADS animation-recovery patch exception: ViewModelController and Constants in src now intentionally differ from the captured baseline. See RELOAD_DIAGNOSIS.md (including its "Extended scope" section covering the equip and ADS additions). Historical statements below about byte-identical src describe the initial migration capture; import/studio-snapshot remains unchanged. Studio has not received this patch.
+
 - The initial local workspace contained no existing code or Git repository.
 - Local branch: main. Origin: https://github.com/Intacet/BrokenRealityFPS.git. See GITHUB_MIGRATION.md for preservation of the previous branch/history and the upload record.
 - Verbatim source capture contains 216 scripts. src/ now contains unchanged copies of 32 main scripts; pilot.project.json targets Logger only and default.project.json targets those 32 scripts. Both passed local mapping validation; neither has connected to Studio.
