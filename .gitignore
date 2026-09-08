@@ -6,6 +6,7 @@
 backups/
 build/
 dist/
+sourcemap.json
 
 # Credentials and local caches
 .env

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-08 — VS Code sourcemap path
+
+- Pointed Luau LSP at the verified project-local Rojo 7.6.1 executable and selected `default.project.json` for code navigation.
+- Ignored the generated `sourcemap.json`. This changes editor metadata only and does not start a Rojo server or connect Studio.
+
 ## 2026-09-08 — daily GPT / Claude / Rojo workflow
 
 - Added `AI_HANDOFF.md` and `AI_DECISIONS.md` so both assistants share current state and durable owner decisions through Git.
