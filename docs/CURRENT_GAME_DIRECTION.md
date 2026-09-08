@@ -19,3 +19,7 @@ The game takes place on a big map. One team is sent in to control and stabilize 
 The owner reports a working systems prototype in Roblox Studio, originally developed with help from Claude Code, and is moving the workflow from an old desktop to a college laptop with GPT-6 Astra. No prototype behavior has been independently verified here.
 
 Studio remains authoritative for maps/models/animations/viewmodels and other assets. VS Code/Rojo will manage scripts going forward after staged migration. Existing scripts remain Studio-authoritative until each handoff is verified.
+
+## City prototype direction — 2026-09-08
+
+The owner selected brick rowhouses, corner shops, warehouses, and alleys for the first test district and authorized a destruction prototype. Start with ground-level flanks, multiple approaches to reality-break sites, permanent structural cover, and selected breachable pieces. This is a district-scale test of the larger zone-shooter direction, not a commitment to the inherited round rules. Reload animation debugging is deferred.

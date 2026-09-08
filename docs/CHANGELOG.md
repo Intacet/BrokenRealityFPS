@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-08 — isolated Mercer District prototype
+
+- Added a separate city builder, geometry model, test place, and overhead plan: brick homes, corner shops, warehouses, alleys, protected staging cover, and three objective areas.
+- Added server-owned destruction for 132 selected pieces with material health, bounded cosmetic debris, PREP reset, and connection cleanup. Reused the existing validated server shot path and existing match events; no new remotes.
+- Kept migrated src unchanged. Only the generated test copy integrates destruction, changes test lighting, and archives original Workspace objects under ServerStorage.
+- Passed 22 offline checks, syntax compilation, and original Workspace source preservation checks. Assistant observed the separate place enter ACTIVE; user-confirmed Studio destruction/multiplayer verification is pending.
+- Deferred reload animation debugging. No publish or live Rojo handoff performed.
+
 ## 2026-09-07 — documentation baseline
 
 - Inspected the provided local workspace: no existing scripts, Rojo configuration, or Git repository found.

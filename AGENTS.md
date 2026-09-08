@@ -7,7 +7,7 @@ Read docs/CURRENT_GAME_DIRECTION.md, docs/PROJECT_RULES.md, and docs/PROJECT_MAP
 - Current focus: custom R6 movement, first-person viewmodels, AKS-74 / AR-style weapons, and PvPvE zone shooter foundations.
 - Studio remains the source for maps, models, animations, viewmodels, lighting, spawns, and other Studio assets for now.
 - VS Code/Rojo will manage scripts going forward, individually after verified migration. Until then, Studio is authoritative for existing scripts too.
-- Current stage: staged migration setup authorized by the owner. Preserve gameplay source unchanged. Rojo configuration and local validation are allowed; live connection remains pending the reviewed test-copy trial. Do not create remotes or edit gameplay code.
+- Current stage: owner authorized a separate Richmond-inspired city test map and staged destruction prototype. Keep the migrated gameplay baseline unchanged; place new work under prototypes/CityDistrict and integrate only into a separately generated test place. No new remotes. Reload debugging is deferred while this work is active. Live Rojo handoff remains unverified.
 - Never replace the existing place with a code-only Rojo build. Never map entire asset-bearing services or move scripts merely to fit a proposed layout.
 - Before any first connection, inventory paths/properties/dependencies, compare copied source, review every mapping, and confirm a verified backup and disposable test copy exist.
 - Use Luau strict mode for new or deliberately edited scripts. Preserve imported source verbatim first; record legacy violations instead of silently fixing them.

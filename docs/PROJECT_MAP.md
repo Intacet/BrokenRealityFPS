@@ -5,7 +5,7 @@
 - The initial local workspace contained no existing code or Git repository.
 - Local branch: main. Origin: https://github.com/Intacet/BrokenRealityFPS.git. See GITHUB_MIGRATION.md for preservation of the previous branch/history and the upload record.
 - Verbatim source capture contains 216 scripts. src/ now contains unchanged copies of 32 main scripts; pilot.project.json targets Logger only and default.project.json targets those 32 scripts. Both passed local mapping validation; neither has connected to Studio.
-- Studio place path/ID, script hierarchy, tool versions, and GitHub repository: unknown.
+- Saved place and script hierarchy are inventoried below. Rojo CLI/plugin are 7.6.1; Lune is 0.10.5. Published place ID remains unconfirmed.
 - Backup received: ../StudioBackups/BrokenReality_preRojo.rbxl (1,379,020 bytes). A separate migration_test copy has an identical SHA-256: 99ae27dd2262a6d5441873d60dfc356081f2521239683e2027ef3dae8023b4c8.
 - All 216 source files match source decoded from the saved backup. The owner reported the test copy looks good. Exact test steps, off-device backup, and post-sync Studio checks remain pending.
 - See SCRIPT_INVENTORY.md and SCRIPT_INVENTORY.json for extracted paths, classes, properties, children, attributes, tags, source hashes, and archive filenames.
@@ -14,6 +14,14 @@
 - Existing Logger and Constants modules are present in ReplicatedStorage/Modules.
 - RemoteSetup source explicitly creates 15 RemoteEvents and one RemoteFunction at runtime; zero saved remote instances does not mean the prototype has no networking.
 - R6 and the direction in CURRENT_GAME_DIRECTION.md are owner-confirmed, not locally inspected.
+
+## Isolated city prototype — 2026-09-08
+
+New source is under prototypes/CityDistrict; see its README for build and playtest steps. Mercer District is a fictional Richmond-inspired six-block map with 26 buildings, ground-floor routes, three objective areas, 2,494 parts, and 132 breakable windows/barriers/crates. Upper floors remain facade shells.
+
+Generated artifacts are outside the code repo in ../CityDistrict. BrokenReality_CityTest.rbxl archives the original Workspace content inside that test copy only. The immutable preRojo backup and migrated src files remain unchanged. The test copy has its own GunService destruction integration and daylight settings. Neither Rojo configuration maps this feature; do not connect the baseline full project to the city test.
+
+22 offline checks passed with mocked engine events/physics ownership. The assistant observed the test place opening and entering ACTIVE, but user-confirmed destruction, multiplayer, route balance, and performance verification remain pending.
 
 ## Ownership
 
