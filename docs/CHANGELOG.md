@@ -1,5 +1,33 @@
 # Changelog
 
+## Pre-round loadout menu (primary weapon + team pick)
+
+- **New `LoadoutMenu` client UI** (`Controllers/UI/LoadoutMenu.lua`, ClientInit slot 15).
+  A centered deployment panel: a weapon list, a three-way team pick
+  (Auto / Attackers / Defenders), and a Deploy button. Opens/closes on **M**, and
+  auto-opens on entry to LOBBY / RESULTS (PREP is only `PREP_TIME` = 2 s in dev config).
+  Clicking Deploy fires the new `SelectLoadout` remote and closes the panel; selections
+  persist across rounds. Only **AKS-74** is selectable — **AR-15** / **SCAR-H** show as
+  greyed "LOCKED" rows until they have full `WeaponData`.
+- **New `LoadoutService` server script** — the sole writer of two per-player attributes,
+  `BR_LoadoutPrimary` (a `WeaponData` key) and `BR_TeamPref`. Validates every field of a
+  `SelectLoadout` request against `Constants.LOADOUT`; unknown / locked / malformed
+  fields are ignored individually. `LOCK_EDITS_DURING_ACTIVE = false` — a mid-round
+  Deploy is accepted and applies at the next PREP.
+- **`GunService` reads the loadout.** New `resolvePrimary(player)` helper replaces the
+  bare `Constants.DEFAULT_WEAPON` at every stat / ammo / `AmmoChanged` / damage-source
+  site (falls back to `Constants.DEFAULT_WEAPON` when the attribute is missing/invalid).
+- **`TeamService` honours the team pick.** New `resolveTeamAssignment()` places explicit
+  Attackers/Defenders picks first, fills "Auto" players toward an even split, and never
+  leaves a side empty when 2+ players are present. A lone player always gets their pick.
+- **`GunController` equips the chosen weapon** — the equip path resolves
+  `BR_LoadoutPrimary` (fallback `Constants.DEFAULT_VIEWMODEL_WEAPON`) instead of a
+  constant; holster now reports the actually-equipped name to `WorldWeaponService`.
+- New `Constants.LOADOUT` tuning table. New `SelectLoadout` RemoteEvent in
+  `RemoteSetup.server.lua`. Two new mappings in `default.project.json` (**restart
+  `rojo serve`**). `WeaponData.lua` / `WeaponFeel.lua` were **not** touched; `MatchService`
+  is unchanged. Partially closes DEBT-013. Not in-game verified — MCP can't drive input.
+
 ## Tactical sprint balance — short bursts, no juking
 
 - **Burst duration + cooldown.** New `Constants.TACTICAL_SPRINT_MAX_DURATION` (3 s):

@@ -49,6 +49,9 @@ makeEvent("RoundStateChanged")  -- server → all clients | phase, round, timeLe
 -- Teams
 makeEvent("TeamAssigned")       -- server → individual client | your team for this round
 
+-- Loadout menu
+makeEvent("SelectLoadout")      -- client → server | player picks primary weapon + team preference (LoadoutService)
+
 -- Health & combat
 makeEvent("HealthChanged")      -- server → affected client | current health value
 makeEvent("WeaponFired")        -- client → server | request hit validation

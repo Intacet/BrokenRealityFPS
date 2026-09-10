@@ -173,6 +173,14 @@
             "Disabled": false,
             "RunContext": "Legacy"
           }
+        },
+        "LoadoutService": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/LoadoutService.server.lua",
+          "$properties": {
+            "Disabled": false,
+            "RunContext": "Legacy"
+          }
         }
       }
     },
@@ -255,6 +263,10 @@
             "MatchUI": {
               "$ignoreUnknownInstances": true,
               "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/MatchUI.lua"
+            },
+            "LoadoutMenu": {
+              "$ignoreUnknownInstances": true,
+              "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/LoadoutMenu.lua"
             },
             "HUD": {
               "$ignoreUnknownInstances": true,

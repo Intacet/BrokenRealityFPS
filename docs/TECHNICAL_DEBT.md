@@ -1,5 +1,38 @@
 # Technical debt and unresolved migration questions
 
+## Pre-round loadout menu — partial DEBT-013 (Studio verification: YES, required)
+
+`LoadoutMenu` (client UI) + `LoadoutService` (server) + the `SelectLoadout` remote give
+each player server-owned pre-round state in two Player attributes:
+`BR_LoadoutPrimary` (weapon key) and `BR_TeamPref` (`Auto` / `Attackers` / `Defenders`).
+`GunService.resolvePrimary()`, `TeamService.resolveTeamAssignment()` and
+`GunController`'s equip path all read those attributes, falling back to
+`Constants.DEFAULT_WEAPON` / an even split. All tuning is in `Constants.LOADOUT`.
+
+- **Partially closes DEBT-013.** The primary weapon and team are no longer a single
+  shared constant. Still open: secondary/gadget slots, per-weapon reserve/attachment
+  choices, and `WeaponFired`/`ReloadRequest` still trust the attribute rather than
+  carrying a validated weapon id.
+- **Only AKS74 is selectable.** `AR15` / `SCAR` render as greyed "LOCKED" rows and are
+  rejected server-side — they have no complete `WeaponData` block or viewmodel asset,
+  and `WeaponData.lua` / `WeaponFeel.lua` are owned by a parallel work session. Unlock =
+  add the data + a `ReplicatedStorage/ViewModels` asset, then flip `selectable = true`
+  in `Constants.LOADOUT.WEAPONS`. No other code change.
+- **Cursor-hide overlap with `GunController`.** While the menu is open it forces the OS
+  cursor visible + unlocked; on close it re-locks only when
+  `LocalPlayer.CameraMode == LockFirstPerson`. `GunController.applyFirstPersonAim` also
+  drives `MouseIconEnabled` / `MouseBehavior`, so an edge case (holster mid-menu, phase
+  flip on the same frame) can leave the cursor in the wrong state until the next
+  equip/holster. Acceptable for a rough menu; a single cursor-owner arbiter is the fix.
+- **`LOCK_EDITS_DURING_ACTIVE = false`.** A mid-round Deploy is accepted and only takes
+  effect at the next PREP (attributes are read in `assignTeams` / `setupAmmo`), so there
+  is no mid-round advantage. Set the flag true to reject ACTIVE-phase edits outright.
+- **PREP is `PREP_TIME` (2 s) in dev config**, so the menu auto-opens on LOBBY / RESULTS
+  only and is otherwise M-key driven. If PREP is lengthened, add `Constants.Phase.PREP`
+  back to `Constants.LOADOUT.AUTO_OPEN_PHASES`.
+- **Not runtime-verified.** MCP can't drive input or equip a weapon; needs an in-game
+  Play test — menu open/close, team pick moving the spawn, AKS-74 equipping, ammo label.
+
 ## Aiming / free-aim / cursor — Tarkov-style hipfire (Studio verification: YES, required)
 
 Hipfire fires from the camera along the direction the free-aim-rotated gun visually points,

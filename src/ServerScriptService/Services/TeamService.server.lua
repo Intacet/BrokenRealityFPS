@@ -49,6 +49,10 @@ local TEAM_DEFENDERS = "Defenders"
 local ATTACKER_COLOR = BrickColor.new("Bright red")
 local DEFENDER_COLOR = BrickColor.new("Bright blue")
 
+-- Player attribute holding a team preference ("Auto" | "Attackers" | "Defenders"),
+-- written by LoadoutService from the pre-round loadout menu. Read in assignTeams().
+local TEAM_PREF_ATTR = (Constants.LOADOUT :: any).ATTR_TEAM_PREF
+
 -- ============================================================
 -- State
 -- ============================================================
@@ -250,6 +254,60 @@ end
 -- Core logic
 -- ============================================================
 
+-- Maps each player to a team name, honouring the BR_TeamPref attribute that
+-- LoadoutService writes from the pre-round menu. Explicit "Attackers"/"Defenders"
+-- picks are placed first; "Auto"/unset/invalid preferences fill toward an even
+-- split (the caller pre-shuffles `players`, so Auto players split randomly).
+-- With two or more players a side is never left empty — the last player added to
+-- the full side is moved across. A lone player always gets exactly what they asked for.
+local function resolveTeamAssignment(players: { Player }): { [Player]: string }
+    local attackers: { Player } = {}
+    local defenders: { Player } = {}
+    local autoPlayers: { Player } = {}
+
+    for _, player in ipairs(players) do
+        local pref = player:GetAttribute(TEAM_PREF_ATTR)
+        if pref == TEAM_ATTACKERS then
+            table.insert(attackers, player)
+        elseif pref == TEAM_DEFENDERS then
+            table.insert(defenders, player)
+        else
+            table.insert(autoPlayers, player)
+        end
+    end
+
+    for _, player in ipairs(autoPlayers) do
+        if #attackers <= #defenders then
+            table.insert(attackers, player)
+        else
+            table.insert(defenders, player)
+        end
+    end
+
+    if #players > 1 then
+        if #attackers == 0 and #defenders > 1 then
+            local moved = table.remove(defenders)
+            if moved ~= nil then
+                table.insert(attackers, moved)
+            end
+        elseif #defenders == 0 and #attackers > 1 then
+            local moved = table.remove(attackers)
+            if moved ~= nil then
+                table.insert(defenders, moved)
+            end
+        end
+    end
+
+    local assigned: { [Player]: string } = {}
+    for _, player in ipairs(attackers) do
+        assigned[player] = TEAM_ATTACKERS
+    end
+    for _, player in ipairs(defenders) do
+        assigned[player] = TEAM_DEFENDERS
+    end
+    return assigned
+end
+
 -- Splits connected players across both teams, force-spawns each via LoadCharacter(),
 -- teleports to a random spawn, and fires TeamAssigned.
 -- Called when PREP starts.
@@ -261,7 +319,7 @@ local function assignTeams()
     local defenderTeam   = getOrCreateTeam(TEAM_DEFENDERS, DEFENDER_COLOR)
     local attackerSpawns = getSpawnPoints(TEAM_ATTACKERS)
     local defenderSpawns = getSpawnPoints(TEAM_DEFENDERS)
-    local attackerCount  = math.ceil(#players / 2)
+    local assignedTeam   = resolveTeamAssignment(players)
 
     -- Reset alive tables before repopulating for this round.
     table.clear(aliveAttackers)
@@ -273,20 +331,12 @@ local function assignTeams()
         player:LoadCharacter()
     end
 
-    for i, player in ipairs(players) do
-        local teamName: string
-        local team: Team
-        local spawnPoints: { BasePart }
-
-        if i <= attackerCount then
-            teamName    = TEAM_ATTACKERS
-            team        = attackerTeam
-            spawnPoints = attackerSpawns
-        else
-            teamName    = TEAM_DEFENDERS
-            team        = defenderTeam
-            spawnPoints = defenderSpawns
-        end
+    for _, player in ipairs(players) do
+        -- resolveTeamAssignment covers every player; `or TEAM_DEFENDERS` only
+        -- satisfies strict-mode nil-narrowing and is never actually reached.
+        local teamName: string = assignedTeam[player] or TEAM_DEFENDERS
+        local team        = (teamName == TEAM_ATTACKERS) and attackerTeam or defenderTeam
+        local spawnPoints = (teamName == TEAM_ATTACKERS) and attackerSpawns or defenderSpawns
 
         player.Team         = team
         playerTeams[player] = teamName

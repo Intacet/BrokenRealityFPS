@@ -799,11 +799,51 @@ Constants.AMMO_LOW_THRESHOLD = 5  -- magazine count at or below which the number
 -- ============================================================
 Constants.FRIENDLY_FIRE_ENABLED = false  -- set true to allow players to damage teammates
 
--- Single source of truth for the active weapon name used by both GunService
--- (authoritative stat / ammo lookups) and GunController (client-side prediction
--- and cosmetics only). When multiple weapons exist as a player choice, replace
--- this constant with server-owned loadout state sent via a RemoteEvent — DEBT-013.
+-- Fallback weapon name used by GunService (authoritative stat / ammo lookups) and
+-- GunController (client-side prediction and cosmetics only) whenever a player has
+-- no valid loadout selection. Per-player choice now lives in server-owned state —
+-- see Constants.LOADOUT below and LoadoutService (partially resolves DEBT-013).
 Constants.DEFAULT_WEAPON = "AR15"
+
+-- ============================================================
+-- Pre-round loadout menu (LoadoutMenu client UI + LoadoutService)
+--
+-- LoadoutService is the sole writer of two Player attributes, read by
+-- GunService (primary weapon stats/ammo), TeamService (team assignment), and
+-- GunController (which viewmodel to equip):
+--   • ATTR_PRIMARY   — a WeaponData key from an entry with selectable == true
+--   • ATTR_TEAM_PREF — one of TEAM_CHOICES
+-- Attributes replicate to the owning client, so LoadoutMenu re-reads its own
+-- previous selection with no extra remote traffic.
+-- ============================================================
+Constants.LOADOUT = {
+    ENABLED                  = true,
+    TOGGLE_KEY               = Enum.KeyCode.M,   -- opens / closes LoadoutMenu
+    -- Phases in which the menu springs open on its own. PREP is deliberately
+    -- excluded — it is only PREP_TIME seconds long and is the spawn moment.
+    AUTO_OPEN_PHASES         = { [Constants.Phase.LOBBY] = true, [Constants.Phase.RESULTS] = true },
+    -- false: a mid-round SelectLoadout is accepted and queued — GunService and
+    -- TeamService only read the attributes at PREP, so it takes effect next round
+    -- with no mid-round advantage. Set true to reject edits outright during ACTIVE.
+    LOCK_EDITS_DURING_ACTIVE = false,
+
+    ATTR_PRIMARY   = "BR_LoadoutPrimary",
+    ATTR_TEAM_PREF = "BR_TeamPref",
+
+    DEFAULT_PRIMARY   = "AKS74",   -- must be a selectable WEAPONS entry with full WeaponData
+    DEFAULT_TEAM_PREF = "Auto",
+    TEAM_CHOICES      = { "Auto", "Attackers", "Defenders" },
+
+    -- Ordered weapon rows shown in the menu. selectable == false renders a greyed
+    -- "LOCKED" card and is rejected server-side. To unlock a weapon: add its full
+    -- data block in WeaponData (+ WeaponFeel + a ReplicatedStorage/ViewModels asset)
+    -- and flip selectable = true here — no other code change needed.
+    WEAPONS = {
+        { key = "AKS74", label = "AKS-74", blurb = "7.62x39 assault rifle", selectable = true  },
+        { key = "AR15",  label = "AR-15",  blurb = "LOCKED",                selectable = false },
+        { key = "SCAR",  label = "SCAR-H", blurb = "LOCKED",                selectable = false },
+    },
+}
 
 -- Shot validation thresholds (server-side, GunService only)
 Constants.SHOT_ORIGIN_MAX_DISTANCE    = 12    -- max studs between client origin and shooter HumanoidRootPart; farther origins are rejected

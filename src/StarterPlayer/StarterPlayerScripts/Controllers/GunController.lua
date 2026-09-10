@@ -810,12 +810,21 @@ function GunController:Start()
         if gp then return end
         if input.KeyCode ~= Constants.VIEWMODEL_EQUIP_KEY then return end
         if equippedWeaponName == nil then
-            ViewModelController:EquipWeapon(Constants.DEFAULT_VIEWMODEL_WEAPON)
-            equippedWeaponName = Constants.DEFAULT_VIEWMODEL_WEAPON
+            -- Resolve the player's chosen primary from the BR_LoadoutPrimary
+            -- attribute (LoadoutService writes it from the pre-round menu).
+            -- Falls back to the default viewmodel weapon when unset or unknown.
+            local chosen = LocalPlayer:GetAttribute((Constants.LOADOUT :: any).ATTR_PRIMARY)
+            local weaponName: string = Constants.DEFAULT_VIEWMODEL_WEAPON
+            if typeof(chosen) == "string" and WeaponData[chosen] ~= nil then
+                weaponName = chosen
+            end
+
+            ViewModelController:EquipWeapon(weaponName)
+            equippedWeaponName = weaponName
             -- Inform WorldWeaponService so it attaches the gun-only world model
             -- to the character's Right Arm (visible to self in third-person and
             -- to other players regardless of camera mode).
-            WeaponEquipState:FireServer(Constants.DEFAULT_VIEWMODEL_WEAPON, true)
+            WeaponEquipState:FireServer(weaponName, true)
             -- Notify FreeAimController so the free-aim deadzone activates + resolves the
             -- per-weapon feel profile.
             if Constants.FREE_AIM_ENABLED then
@@ -827,8 +836,9 @@ function GunController:Start()
             )
             -- Switch movement animations to the armed set.
             MovementController.SetEquippedWeaponName(Constants.MOVEMENT_ANIMATION_SET_AR15)
-            Logger.debug("[GunController] Equipped: " .. Constants.DEFAULT_VIEWMODEL_WEAPON)
+            Logger.debug("[GunController] Equipped: " .. weaponName)
         else
+            local holsteredName: string = equippedWeaponName
             ViewModelController:HolsterWeapon()
             CameraRecoil.Reset()
             equippedWeaponName = nil
@@ -840,7 +850,7 @@ function GunController:Start()
             -- Restore movement animations to the unarmed set.
             MovementController.SetEquippedWeaponName(nil)
             -- Inform WorldWeaponService to remove the world model.
-            WeaponEquipState:FireServer(Constants.DEFAULT_VIEWMODEL_WEAPON, false)
+            WeaponEquipState:FireServer(holsteredName, false)
             -- Notify FreeAimController and reset the offset on holster.
             if Constants.FREE_AIM_ENABLED then
                 FreeAimController:SetWeapon(nil)

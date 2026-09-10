@@ -233,4 +233,11 @@ loadInitAndStart("DummyDebugUI", function()
     return require(script.Parent:WaitForChild("UI"):WaitForChild("DummyDebugUI"))
 end)
 
+-- 15. LoadoutMenu — pre-round deployment screen (primary weapon + team pick).
+--     Reads only RoundStateChanged and the BR_Loadout* Player attributes; no
+--     dependency on other controllers. Fires SelectLoadout on Deploy.
+loadInitAndStart("LoadoutMenu", function()
+    return require(script.Parent:WaitForChild("UI"):WaitForChild("LoadoutMenu"))
+end)
+
 Logger.debug("[ClientInit] Startup complete")
