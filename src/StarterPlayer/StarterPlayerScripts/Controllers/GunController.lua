@@ -236,20 +236,93 @@ local ImpactFX = {}
 do
     local FX = Constants.BULLET_IMPACT_FX :: any
 
+    type RoleRuntime = {
+        count: number,
+        lifetime: NumberRange,
+        speed: NumberRange,
+        size: NumberSequence,
+        transparency: NumberSequence,
+        color: ColorSequence,
+        spread: Vector2,
+    }
     type Rig = {
         part: BasePart,
         dust: ParticleEmitter,
+        debris: ParticleEmitter,
         spark: ParticleEmitter,
         busy: boolean,
         freeAt: number,
     }
 
-    local rigs: { Rig } = {}            -- fixed pre-built pool (POOL_ENABLED)
+    -- category name → { dust: RoleRuntime, debris: RoleRuntime, spark: RoleRuntime }.
+    -- Built once in ensureInit() from Constants.BULLET_IMPACT_FX.CATEGORIES so PlayImpact
+    -- only assigns pre-made NumberSequence/Range objects (no per-shot allocation).
+    local RESOLVED: { [string]: any } = {}
+    local rigs: { Rig } = {}
     local fxFolder: Folder? = nil
-    local liveCount = 0                 -- rigs currently emitting (bounds full-auto in both modes)
     local warnedPlaceholder = false
-    local warnedCap = false
     local initialized = false
+
+    -- Turn a Constants role sub-table (DUST / DEBRIS / SPARK) into ready-to-assign emitter
+    -- values. A nil table or count <= 0 yields a silent role.
+    local function resolveRole(t: any): RoleRuntime
+        if t == nil or (t.count or 0) <= 0 then
+            return {
+                count = 0,
+                lifetime = NumberRange.new(0.1),
+                speed = NumberRange.new(0),
+                size = NumberSequence.new(0.1),
+                transparency = NumberSequence.new(1),
+                color = ColorSequence.new(Color3.new(1, 1, 1)),
+                spread = Vector2.zero,
+            }
+        end
+        local sizeSeq: NumberSequence
+        if t.sizeStart ~= nil then
+            sizeSeq = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, t.sizeStart),
+                NumberSequenceKeypoint.new(1, t.sizeEnd),
+            })
+        else
+            sizeSeq = NumberSequence.new(t.size)
+        end
+        local baseT: number = t.transparency or 0.2
+        return {
+            count = t.count,
+            lifetime = NumberRange.new(t.lifeMin, t.lifeMax),
+            speed = NumberRange.new(t.speedMin, t.speedMax),
+            size = sizeSeq,
+            transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, baseT),
+                NumberSequenceKeypoint.new(0.75, math.min(1, baseT + 0.3)),
+                NumberSequenceKeypoint.new(1, 1),
+            }),
+            color = ColorSequence.new(t.color or Color3.fromRGB(150, 148, 142)),
+            spread = Vector2.new(t.spread or 30, t.spread or 30),
+        }
+    end
+
+    local function makeEmitter(name: string, texture: string, gravity: number,
+        drag: number, lightEmission: number, tumble: boolean): ParticleEmitter
+        local e = Instance.new("ParticleEmitter")
+        e.Name              = name
+        e.Texture           = texture
+        e.Enabled           = false
+        e.Rate              = 0
+        e.Acceleration      = Vector3.new(0, -gravity, 0)
+        e.Drag              = drag
+        e.LightEmission     = lightEmission
+        e.EmissionDirection = Enum.NormalId.Top -- +Y of the rig == surface normal
+        if tumble then
+            e.Rotation = NumberRange.new(-180, 180)
+            e.RotSpeed = NumberRange.new(-140, 140)
+        end
+        -- Silent placeholders; PlayImpact overwrites the dynamic props per category.
+        e.Lifetime     = NumberRange.new(0.1)
+        e.Size         = NumberSequence.new(0.1)
+        e.Transparency = NumberSequence.new(1)
+        return e
+    end
 
     local function buildRig(): Rig
         local part = Instance.new("Part")
@@ -267,50 +340,12 @@ do
         att.Name   = "FxAttachment"
         att.Parent = part
 
-        local dust = Instance.new("ParticleEmitter")
-        dust.Name          = "Dust"
-        dust.Texture       = FX.IMPACT_TEXTURE
-        dust.Enabled       = false
-        dust.Rate          = 0
-        dust.Lifetime      = NumberRange.new(FX.DUST_LIFETIME_MIN, FX.DUST_LIFETIME_MAX)
-        dust.Speed         = NumberRange.new(FX.DUST_SPEED_MIN, FX.DUST_SPEED_MAX)
-        dust.Rotation      = NumberRange.new(-180, 180)
-        dust.RotSpeed      = NumberRange.new(-120, 120)
-        dust.Size          = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, FX.DUST_SIZE_START),
-            NumberSequenceKeypoint.new(1, FX.DUST_SIZE_END),
-        })
-        dust.Transparency  = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 0.4),
-            NumberSequenceKeypoint.new(1, 1),
-        })
-        dust.Color         = ColorSequence.new(Color3.fromRGB(150, 142, 130))
-        dust.Acceleration  = Vector3.new(0, -6, 0)
-        dust.SpreadAngle   = Vector2.new(38, 38)
-        dust.LightEmission = 0
-        dust.Drag          = 2
-        dust.Parent        = att
+        local dust   = makeEmitter("Dust", FX.DUST_TEXTURE, FX.DUST_GRAVITY, 3.5, 0, true)
+        local debris = makeEmitter("Debris", FX.DEBRIS_TEXTURE, FX.DEBRIS_GRAVITY, 0.6, 0, true)
+        local spark  = makeEmitter("Spark", FX.SPARK_TEXTURE, FX.SPARK_GRAVITY, 1.8, 1, false)
+        dust.Parent, debris.Parent, spark.Parent = att, att, att
 
-        local spark = Instance.new("ParticleEmitter")
-        spark.Name          = "Spark"
-        spark.Texture       = FX.SPARK_TEXTURE
-        spark.Enabled       = false
-        spark.Rate          = 0
-        spark.Lifetime      = NumberRange.new(FX.SPARK_LIFETIME_MIN, FX.SPARK_LIFETIME_MAX)
-        spark.Speed         = NumberRange.new(FX.SPARK_SPEED_MIN, FX.SPARK_SPEED_MAX)
-        spark.Size          = NumberSequence.new(FX.SPARK_SIZE)
-        spark.Transparency  = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 0),
-            NumberSequenceKeypoint.new(1, 0.3),
-        })
-        spark.Color         = ColorSequence.new(Color3.fromRGB(255, 221, 148))
-        spark.Acceleration  = Vector3.new(0, -40, 0)
-        spark.SpreadAngle   = Vector2.new(24, 24)
-        spark.LightEmission = 1
-        spark.Drag          = 4
-        spark.Parent        = att
-
-        return { part = part, dust = dust, spark = spark, busy = false, freeAt = 0 }
+        return { part = part, dust = dust, debris = debris, spark = spark, busy = false, freeAt = 0 }
     end
 
     local function ensureInit()
@@ -319,31 +354,40 @@ do
         end
         initialized = true
 
+        for catName, cat in pairs(FX.CATEGORIES) do
+            RESOLVED[catName] = {
+                dust   = resolveRole(cat.DUST),
+                debris = resolveRole(cat.DEBRIS),
+                spark  = resolveRole(cat.SPARK),
+            }
+        end
+        if RESOLVED.default == nil then
+            RESOLVED.default =
+                { dust = resolveRole(nil), debris = resolveRole(nil), spark = resolveRole(nil) }
+        end
+
         local folder = Instance.new("Folder")
         folder.Name   = "BR_ImpactFx"
         folder.Parent = workspace
         fxFolder = folder
 
-        if FX.POOL_ENABLED == true then
-            for _ = 1, (FX.POOL_SIZE :: number) do
-                local rig = buildRig()
-                rig.part.Parent = folder
-                table.insert(rigs, rig)
-            end
+        for _ = 1, (FX.POOL_SIZE :: number) do
+            local rig = buildRig()
+            rig.part.Parent = folder
+            table.insert(rigs, rig)
         end
 
         if FX.DEBUG == true then
-            Logger.debug(
-                "[GunController] ImpactFX ready — pooled:",
-                FX.POOL_ENABLED == true,
-                "cap:",
-                FX.POOL_SIZE
-            )
+            local cats = 0
+            for _ in pairs(RESOLVED) do
+                cats += 1
+            end
+            Logger.debug("[GunController] ImpactFX ready — pool", FX.POOL_SIZE, "| categories", cats)
         end
     end
 
-    -- POOL_ENABLED: the rig whose burst has finished, else the one finishing soonest.
-    -- Never grows the pool, so full-auto can never add parts.
+    -- The rig whose burst has finished, else the one finishing soonest. Never grows the pool,
+    -- so full-auto can never add parts.
     local function takeRig(): Rig
         local now = os.clock()
         local best: Rig? = nil
@@ -358,9 +402,23 @@ do
         return best :: Rig
     end
 
-    -- position: local predicted hit point. normal: surface normal (optional) — the
-    -- rig's +Y is aligned to it so the puff sprays off the surface.
-    function ImpactFX.PlayImpact(position: Vector3, normal: Vector3?): ()
+    local function configureAndEmit(emitter: ParticleEmitter, role: RoleRuntime)
+        if role.count <= 0 then
+            return
+        end
+        emitter.Lifetime     = role.lifetime
+        emitter.Speed        = role.speed
+        emitter.Size         = role.size
+        emitter.Transparency = role.transparency
+        emitter.Color        = role.color
+        emitter.SpreadAngle  = role.spread
+        emitter:Emit(role.count)
+    end
+
+    -- position: local predicted hit point. normal: surface normal. material: Enum.Material
+    -- of the surface (selects the per-category look; nil / unmapped → "default"). Never
+    -- errors on a missing or unsupported material.
+    function ImpactFX.PlayImpact(position: Vector3, normal: Vector3?, material: Enum.Material?): ()
         assert(typeof(position) == "Vector3", "position must be a Vector3")
         if normal ~= nil then
             assert(typeof(normal) == "Vector3", "normal must be a Vector3")
@@ -370,18 +428,22 @@ do
         end
 
         if not warnedPlaceholder
-            and (FX.IMPACT_TEXTURE == "rbxassetid://0" or FX.SPARK_TEXTURE == "rbxassetid://0")
+            and (FX.DUST_TEXTURE == "rbxassetid://0" or FX.SPARK_TEXTURE == "rbxassetid://0")
         then
             warnedPlaceholder = true
-            Logger.warn(
-                "[GunController] ImpactFX: placeholder textures (rbxassetid://0) — set "
-                    .. "IMPACT_TEXTURE / SPARK_TEXTURE in Constants.BULLET_IMPACT_FX"
-            )
+            Logger.warn("[GunController] ImpactFX: placeholder texture (rbxassetid://0) in Constants.BULLET_IMPACT_FX")
         end
 
         ensureInit()
 
-        -- Surface-aligned CFrame (fallback: unoriented at the point).
+        local catName = (material ~= nil and FX.MATERIAL_CATEGORY[material]) or "default"
+        local rc = RESOLVED[catName] or RESOLVED.default
+        if rc == nil then
+            return
+        end
+
+        -- Surface-aligned CFrame: +Y along the normal so all three emitters fire away from
+        -- the surface. Fallback: unoriented at the point.
         local cf: CFrame
         local n = normal
         if n ~= nil and n.Magnitude > 1e-4 then
@@ -394,35 +456,13 @@ do
             cf = CFrame.new(position)
         end
 
-        if FX.POOL_ENABLED == true then
-            local rig = takeRig()
-            rig.part.CFrame = cf
-            rig.busy   = true
-            rig.freeAt = os.clock() + (FX.IMPACT_PART_LIFETIME :: number)
-            rig.dust:Emit(FX.DUST_EMIT_COUNT :: number)
-            rig.spark:Emit(FX.SPARK_EMIT_COUNT :: number)
-            return
-        end
-
-        -- Pool disabled: bounded create-and-destroy. Still capped at POOL_SIZE
-        -- concurrent so a held trigger cannot grow parts without limit.
-        if liveCount >= (FX.POOL_SIZE :: number) then
-            if FX.DEBUG == true and not warnedCap then
-                warnedCap = true
-                Logger.debug("[GunController] ImpactFX: concurrent cap reached — dropping puffs")
-            end
-            return
-        end
-        local rig = buildRig()
-        rig.part.CFrame  = cf
-        rig.part.Parent  = fxFolder
-        liveCount += 1
-        rig.dust:Emit(FX.DUST_EMIT_COUNT :: number)
-        rig.spark:Emit(FX.SPARK_EMIT_COUNT :: number)
-        task.delay(FX.IMPACT_PART_LIFETIME :: number, function()
-            liveCount = math.max(0, liveCount - 1)
-            rig.part:Destroy()
-        end)
+        local rig = takeRig()
+        rig.part.CFrame = cf
+        rig.busy   = true
+        rig.freeAt = os.clock() + (FX.IMPACT_PART_LIFETIME :: number)
+        configureAndEmit(rig.dust, rc.dust)
+        configureAndEmit(rig.debris, rc.debris)
+        configureAndEmit(rig.spark, rc.spark)
     end
 
     -- Recycle/destroy everything. Not wired yet — GunController has no destroy path
@@ -432,11 +472,11 @@ do
             r.part:Destroy()
         end
         table.clear(rigs)
+        table.clear(RESOLVED)
         if fxFolder ~= nil then
             fxFolder:Destroy()
             fxFolder = nil
         end
-        liveCount = 0
         initialized = false
     end
 end
@@ -630,12 +670,12 @@ function GunController:Start()
         end
 
         -- ── Local bullet impact FX (Stage 1) ─────────────────────────────────
-        -- Dust/smoke puff + tiny sparks at the LOCAL predicted hit point. Visual
-        -- only: not replicated, never consulted for damage / ammo / hit validation.
-        -- Pooled + bounded so full-auto cannot grow parts. ImpactFX.PlayImpact
-        -- self-gates on Constants.BULLET_IMPACT_FX.ENABLED.
+        -- Material-specific dust / chips / sparks at the LOCAL predicted hit point,
+        -- oriented to the surface normal. Visual only: not replicated, never consulted
+        -- for damage / ammo / hit validation. Pooled so full-auto cannot grow parts.
+        -- ImpactFX.PlayImpact self-gates on Constants.BULLET_IMPACT_FX.ENABLED.
         if hitResult ~= nil then
-            ImpactFX.PlayImpact(hitResult.Position, hitResult.Normal)
+            ImpactFX.PlayImpact(hitResult.Position, hitResult.Normal, hitResult.Material)
         end
 
         return true

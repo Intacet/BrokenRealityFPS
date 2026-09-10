@@ -83,40 +83,47 @@ profile, light pulse, no Output errors, graceful fallback). Remaining risks:
 - Adds 5 module-level locals to `ViewModelController.lua`; that file has headroom now, but see
   the MovementController register-limit note below — the same limit applies here.
 
-## Viewmodel / FX — Stage 1 local bullet impact FX (Studio verification: helper logic YES, in-game visuals NO)
+## Viewmodel / FX — Stage 1 local bullet impact FX (Studio verification: helper logic YES, in-game look NO)
 
-`ImpactFX` helper inside `GunController.lua` + `Constants.BULLET_IMPACT_FX`. Dust/smoke
-puff + tiny sparks at the local predicted raycast hit point, pooled and bounded. The
-helper logic was Studio-verified in the Edit datamodel (300 rapid calls, no error, part
-count pinned at `POOL_SIZE`, `assert` guards fire, `Destroy()` cleans up). Open items:
+`ImpactFX` helper inside `GunController.lua` + `Constants.BULLET_IMPACT_FX`. Now
+**material-specific**: `MATERIAL_CATEGORY` maps `Enum.Material` → `concrete` / `metal` /
+`wood` / `dirt` / `default`, and `CATEGORIES` holds a `DUST` / `DEBRIS` / `SPARK` config
+per category. Each pooled rig carries three emitters; `PlayImpact(pos, normal, material)`
+looks up the category and assigns pre-resolved sequences (no per-shot allocation), rig
+`+Y` aligned to the surface normal. Studio-verified (Client datamodel: mapping correct,
+per-category params applied to the right emitters, missing role leaves its emitter
+untouched, 300 rapid calls no error, pool pinned at `POOL_SIZE`, asserts fire, `Destroy`
+cleans up). Open items:
 
-- **Placeholder textures.** `BULLET_IMPACT_FX.IMPACT_TEXTURE` / `SPARK_TEXTURE` are
-  `rbxassetid://0` — Roblox renders a default square particle. Replace with real dust/spark
-  art; the helper `Logger.warn`s once while they are placeholders.
-- **Lives inside `GunController`, not a standalone controller.** This stage was scoped not
-  to touch `default.project.json`, and an unmapped `ImpactFXController.lua` would not sync
-  (WaitForChild hang, like the CameraRecoil incident). Extract to
+- **Textures are engine built-ins, not authored art.** `DUST_TEXTURE` is the built-in
+  smoke sprite; `DEBRIS_TEXTURE` / `SPARK_TEXTURE` are `""` (a plain square). Fine and
+  cheap, but real chip / spark / streak sprites would look better — swap them in
+  `Constants.BULLET_IMPACT_FX` (`rbxassetid://0` still triggers a one-time warn).
+- **In-game look not eyeballed.** MCP can't equip a weapon; the per-category counts /
+  sizes / speeds / colors / gravity are first guesses and need a Studio pass (single
+  shots + sustained full-auto on each material).
+- **Lives inside `GunController`, not a standalone controller.** Extract to
   `src/StarterPlayer/StarterPlayerScripts/Controllers/ImpactFXController.lua` — keep the
   `ImpactFX.PlayImpact` / `ImpactFX.Destroy` shape, add `Start()`, add the Rojo-map entry
-  and a `ClientInit` registration — in a follow-up that is allowed to edit those files.
+  and a `ClientInit` registration. `default.project.json` can be edited now (TestAreaBuilder
+  set the precedent), so this is unblocked — just not done.
 - **`ImpactFX.Destroy()` is never called.** GunController has no destroy path (DEBT-059);
-  the pooled parts + `BR_ImpactFx` folder live for the session. Bounded, so not a leak, but
-  the cleanup hook is dead until the extraction / a GunController teardown exists.
-- **No surface-specific impact types.** One dust+spark look for every material (concrete,
-  metal, wood, flesh, dirt all identical). Needs a material→profile map later; deliberately
-  omitted this stage.
-- **Not replicated.** Only the shooter sees their own impacts; other players' shots produce
-  nothing locally. A replicated path (server tells nearby clients, or clients predict from
-  `WeaponFired` echoes) is deferred.
-- **Server-authoritative reconciliation deferred.** The puff is placed at the *client's*
-  predicted hit point; if the server's authoritative raycast disagrees (lag, movement,
-  anti-cheat rejection) the FX is not corrected or suppressed. Acceptable for a cosmetic,
-  but a future networked version should reconcile.
-- **Pool size / timing (`POOL_SIZE = 20`, `IMPACT_PART_LIFETIME = 1.0`, emit counts,
-  speed/size/lifetime ranges) are first guesses.** Need Studio stress testing at real
-  full-auto RPM across framerates — with `POOL_SIZE` rigs and a 1.0 s hold time, sustained
-  fire above ~20 rounds/sec starts stealing not-yet-finished rigs (visible pop). Tune
-  `POOL_SIZE` up or `IMPACT_PART_LIFETIME` down once the real fire rates are settled.
+  the pooled parts + `BR_ImpactFx` folder live for the session. Bounded, so not a leak.
+- **Glass is not implemented.** No `glass` category / shard burst — deferred until a glass
+  material is actually in use (spec: "do not implement unless glass material support is
+  simple").
+- **Flesh / character hits use `default`.** `BR_DamageDummy` / player hits produce a
+  neutral dust puff, not blood — blood is `BloodController`'s job (separate system, Stage
+  4). No overlap wired.
+- **No decals / scorch marks / bullet holes.** Impacts are particle-only; no persistent
+  surface mark of any kind.
+- **Not replicated.** Only the shooter sees their own impacts. A replicated path (server
+  tells nearby clients, or clients predict from `WeaponFired` echoes) is deferred.
+- **Server-authoritative reconciliation deferred.** The burst is placed at the *client's*
+  predicted hit point; if the server's authoritative raycast disagrees it is not corrected.
+- **Pool size / timing (`POOL_SIZE = 24`, `IMPACT_PART_LIFETIME = 1.0`) are first guesses.**
+  With 24 rigs and a 1.0 s hold, sustained fire above ~24 rounds/sec starts stealing
+  not-yet-finished rigs (visible pop). Tune once real fire rates are settled.
 - **Removed `Constants.BULLET_IMPACT_ENABLED` / `_SIZE` / `_LIFETIME` / `_TRANSPARENCY` /
   `_COLOR`** and their inline single-sphere block in `GunController` — superseded by
   `BULLET_IMPACT_FX`. The separate `DEBUG_BULLET_IMPACT_MARKERS` muzzle-tip marker is

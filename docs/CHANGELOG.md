@@ -1,5 +1,37 @@
 # Changelog
 
+## Bullet impact FX: material-specific, and actually visible (helper logic Studio-verified)
+
+The Stage 1 impact FX was invisible in-game — the emitter textures were `rbxassetid://0`
+and the dust particle was 0.08 studs. Rebuilt around a material config:
+
+- `Constants.BULLET_IMPACT_FX` restructured: top-level pool + textures + per-role gravity,
+  a `MATERIAL_CATEGORY` map (`Enum.Material` → `concrete` / `metal` / `wood` / `dirt` /
+  `default`), and a `CATEGORIES` table with a `DUST` / `DEBRIS` / `SPARK` sub-table per
+  category (a missing sub-table = that emitter is silent for the category). Textures are
+  now engine built-ins: `DUST_TEXTURE` = the built-in smoke sprite, `DEBRIS_TEXTURE` /
+  `SPARK_TEXTURE` = `""` (a small solid square → chip / spark, no asset dependency, no
+  "magic sparkle" look). Old flat `DUST_EMIT_COUNT` / `IMPACT_TEXTURE` / `POOL_ENABLED` /
+  size keys removed.
+- `GunController`'s `ImpactFX` helper reworked: each pooled rig now carries three emitters
+  (dust / debris / spark). `ensureInit()` pre-resolves every category's `NumberRange` /
+  `NumberSequence` / `ColorSequence` once, so `PlayImpact(pos, normal, material)` just
+  looks up the category and assigns cached values before `:Emit()` — no per-shot
+  allocation. Rig `+Y` is aligned to the surface normal so all three emitters fire away
+  from the surface. Still a fixed pool (24), still reused/never grown, still local-only
+  and never consulted for damage/hit validation.
+- `attemptFire()` now passes `hitResult.Material` to `ImpactFX.PlayImpact`.
+- Behaviour: concrete/brick/stone → gray dust puff + chips; metal → tiny bright
+  directional sparks + a wisp of smoke; wood → tan splinter puff + light chips; dirt/
+  grass/sand → subtle low dirt puff + dark specks; unknown → small neutral dust. Short
+  lifetimes (dust ≈ 0.1–0.42 s, debris ≈ 0.15–0.34 s, sparks ≈ 0.04–0.12 s). Glass is
+  **not** implemented (no simple glass material in use yet).
+- Studio-verified (Client datamodel harness): material→category mapping correct for
+  Concrete/Metal/Wood/Grass/Plastic/nil; per-category params are applied to the right
+  emitters on each hit and a missing role leaves its emitter untouched; 300 rapid
+  mixed-material calls raise no error; pool stays pinned at 24; asserts fire; `Destroy`
+  cleans up. The in-game look still needs an eyeball pass.
+
 ## TestAreaBuilder tuning: lift the area into the sky + shrink the labels
 
 - `Constants.DEV_TEST_AREA.ORIGIN` moved from `(0, 0, 0)` to `(0, 300, 0)`. The baseplate

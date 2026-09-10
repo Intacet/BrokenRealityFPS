@@ -1408,40 +1408,115 @@ Constants.DEBUG_BULLET_IMPACT_MARKER_LIFETIME     = 0.08   -- seconds before des
 Constants.DEBUG_BULLET_IMPACT_MARKER_TRANSPARENCY = 0.35
 
 -- ── Local bullet impact FX (Stage 1) ────────────────────────────────────────────────────
--- Small dust/smoke puff + a few tiny sparks at the LOCAL predicted raycast hit point.
--- Client-only, visual-only: not replicated, never consulted for damage / ammo / hit
--- validation, no camera writes. Owned by the ImpactFX helper inside GunController (to be
--- extracted to an ImpactFXController — see TECHNICAL_DEBT). Supersedes the old
--- BULLET_IMPACT_* single-sphere debug marker, which has been removed.
+-- Small, fast, material-specific visual response at the LOCAL predicted raycast hit point,
+-- oriented to the surface normal. Client-only / visual-only: not replicated, never
+-- consulted for damage / ammo / hit validation, no camera writes. Owned by the ImpactFX
+-- helper inside GunController (extraction to an ImpactFXController is filed in
+-- TECHNICAL_DEBT). Gritty-realistic: tiny puffs / chips / sparks, short lifetimes, pooled
+-- so full-auto reuses a fixed set of invisible rigs and never grows part count.
+--
+-- Each impact rig has three ParticleEmitters: DUST (soft smoke puff), DEBRIS (tiny solid
+-- squares → chips / splinters / dirt), SPARK (bright sparkle, metal only). A category
+-- table lists only the emitters it uses; a missing DUST / DEBRIS / SPARK sub-table means
+-- that emitter is silent for the category. Textures are engine built-ins (no upload).
 Constants.BULLET_IMPACT_FX = {
     ENABLED = true,
-    DEBUG = true,
+    DEBUG   = true,
 
-    IMPACT_TEXTURE = "rbxassetid://0",
-    SPARK_TEXTURE = "rbxassetid://0",
+    POOL_SIZE             = 24,     -- fixed pre-built invisible rigs; reused, never grown
+    IMPACT_PART_LIFETIME  = 1.0,    -- seconds a rig stays "busy" before it can be reused
+    IMPACT_SURFACE_OFFSET = 0.03,   -- studs the rig floats off the surface along the normal
 
-    DUST_EMIT_COUNT = 3,
-    SPARK_EMIT_COUNT = 2,
+    -- Particle textures. DUST needs a soft sprite (engine built-in, on every client);
+    -- DEBRIS and SPARK use a blank texture = a small solid square, which reads as a
+    -- chip / fragment / spark and avoids any "magic sparkle" look or asset dependency.
+    DUST_TEXTURE   = "rbxasset://textures/particles/smoke_main.dds",
+    DEBRIS_TEXTURE = "",
+    SPARK_TEXTURE  = "",
 
-    DUST_LIFETIME_MIN = 0.15,
-    DUST_LIFETIME_MAX = 0.35,
-    SPARK_LIFETIME_MIN = 0.04,
-    SPARK_LIFETIME_MAX = 0.08,
+    -- World-space downward pull per role (studs/s²). Chips/sparks fall fast; dust drifts.
+    DUST_GRAVITY   = 4,
+    DEBRIS_GRAVITY = 55,
+    SPARK_GRAVITY  = 40,
 
-    DUST_SPEED_MIN = 0.5,
-    DUST_SPEED_MAX = 2.5,
-    SPARK_SPEED_MIN = 3,
-    SPARK_SPEED_MAX = 7,
+    -- Enum.Material → category. Anything not listed falls back to "default"; a nil / bad
+    -- material also falls back to "default" (never errors).
+    MATERIAL_CATEGORY = {
+        [Enum.Material.Concrete]    = "concrete",
+        [Enum.Material.Brick]       = "concrete",
+        [Enum.Material.Cobblestone] = "concrete",
+        [Enum.Material.Rock]        = "concrete",
+        [Enum.Material.Slate]       = "concrete",
+        [Enum.Material.Asphalt]     = "concrete",
+        [Enum.Material.Pavement]    = "concrete",
+        [Enum.Material.Limestone]   = "concrete",
+        [Enum.Material.Sandstone]   = "concrete",
+        [Enum.Material.Basalt]      = "concrete",
 
-    DUST_SIZE_START = 0.08,
-    DUST_SIZE_END = 0.35,
-    SPARK_SIZE = 0.025,
+        [Enum.Material.Metal]         = "metal",
+        [Enum.Material.CorrodedMetal] = "metal",
+        [Enum.Material.DiamondPlate]  = "metal",
 
-    IMPACT_PART_LIFETIME = 1.0,
-    IMPACT_SURFACE_OFFSET = 0.025,
+        [Enum.Material.Wood]       = "wood",
+        [Enum.Material.WoodPlanks] = "wood",
 
-    POOL_ENABLED = true,
-    POOL_SIZE = 20,
+        [Enum.Material.Ground]     = "dirt",
+        [Enum.Material.Grass]      = "dirt",
+        [Enum.Material.LeafyGrass] = "dirt",
+        [Enum.Material.Mud]        = "dirt",
+        [Enum.Material.Sand]       = "dirt",
+        [Enum.Material.Snow]       = "dirt",
+    },
+
+    -- Per-category emitter params. Sizes/speeds in studs & studs/s. count = 0 or a missing
+    -- sub-table disables that emitter for the category.
+    CATEGORIES = {
+        -- Concrete / brick / stone: gray dust puff + chips out of the surface, brief haze.
+        concrete = {
+            DUST   = { count = 6, lifeMin = 0.18, lifeMax = 0.42, speedMin = 1.5, speedMax = 4.5,
+                       sizeStart = 0.22, sizeEnd = 1.05, transparency = 0.35, spread = 55,
+                       color = Color3.fromRGB(170, 166, 158) },
+            DEBRIS = { count = 7, lifeMin = 0.18, lifeMax = 0.34, speedMin = 6, speedMax = 14,
+                       size = 0.09, transparency = 0.05, spread = 34,
+                       color = Color3.fromRGB(120, 116, 108) },
+        },
+        -- Metal: tiny bright directional sparks + a wisp of gray smoke, almost no chips.
+        metal = {
+            DUST  = { count = 3, lifeMin = 0.1, lifeMax = 0.28, speedMin = 1, speedMax = 3,
+                      sizeStart = 0.12, sizeEnd = 0.5, transparency = 0.5, spread = 38,
+                      color = Color3.fromRGB(138, 138, 143) },
+            SPARK = { count = 10, lifeMin = 0.04, lifeMax = 0.12, speedMin = 16, speedMax = 36,
+                      size = 0.06, transparency = 0, spread = 20,
+                      color = Color3.fromRGB(255, 214, 150) },
+        },
+        -- Wood: tan splinter puff, lots of light chip fragments, little smoke, no sparks.
+        wood = {
+            DUST   = { count = 3, lifeMin = 0.14, lifeMax = 0.34, speedMin = 1, speedMax = 3.5,
+                       sizeStart = 0.16, sizeEnd = 0.6, transparency = 0.45, spread = 42,
+                       color = Color3.fromRGB(150, 120, 82) },
+            DEBRIS = { count = 9, lifeMin = 0.16, lifeMax = 0.32, speedMin = 7, speedMax = 16,
+                       size = 0.1, transparency = 0.05, spread = 28,
+                       color = Color3.fromRGB(122, 90, 54) },
+        },
+        -- Dirt / grass / sand: subtle low dirt puff + a few dark specks, no sparks.
+        dirt = {
+            DUST   = { count = 6, lifeMin = 0.16, lifeMax = 0.4, speedMin = 1, speedMax = 3.5,
+                       sizeStart = 0.2, sizeEnd = 0.95, transparency = 0.4, spread = 36,
+                       color = Color3.fromRGB(104, 86, 62) },
+            DEBRIS = { count = 5, lifeMin = 0.15, lifeMax = 0.3, speedMin = 4, speedMax = 10,
+                       size = 0.08, transparency = 0.05, spread = 30,
+                       color = Color3.fromRGB(74, 58, 40) },
+        },
+        -- Anything else: small neutral dust puff + a couple of neutral specks.
+        default = {
+            DUST   = { count = 5, lifeMin = 0.15, lifeMax = 0.4, speedMin = 1.5, speedMax = 4,
+                       sizeStart = 0.2, sizeEnd = 0.9, transparency = 0.4, spread = 45,
+                       color = Color3.fromRGB(150, 148, 142) },
+            DEBRIS = { count = 4, lifeMin = 0.15, lifeMax = 0.3, speedMin = 5, speedMax = 12,
+                       size = 0.08, transparency = 0.05, spread = 30,
+                       color = Color3.fromRGB(120, 118, 112) },
+        },
+    },
 }
 
 -- ── ViewModelController procedural sway ──────────────────────────────────────────────────
