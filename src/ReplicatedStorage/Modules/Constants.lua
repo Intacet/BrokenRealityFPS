@@ -2144,6 +2144,17 @@ Constants.AI = {
     WEAPON_IDLE_ANIM_FADE     = 0.2,
     WEAPON_EQUIP_ANIM_FADE    = 0.1,
     WEAPON_FIRE_ANIM_FADE     = 0.05,
+
+    -- ── Stage 1D — face target while engaging + take cover between bursts ───
+    -- Grunts turn to look at the player (AutoRotate is off; faceToward drives it)
+    -- and, after each burst, relocate to a raycast-found spot that breaks line of
+    -- sight for COVER_DURATION seconds, then peek out and fire again.
+    FACE_TARGET         = true,
+    FACE_TURN_ALPHA     = 0.4,     -- HumanoidRootPart CFrame:Lerp per think toward the face direction
+    TAKE_COVER          = true,
+    COVER_DURATION      = 3.0,     -- seconds in cover before re-peeking
+    COVER_SEEK_DISTANCE = 16,      -- studs from the grunt to test for a cover spot
+    COVER_SAMPLE_ANGLES = { 0, 40, -40, 75, -75 },  -- degrees off the away-from-target vector to sample
 }
 
 -- ── AI Stage 1B — combat feedback FX for AIService grunts ───────────────────

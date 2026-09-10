@@ -56,9 +56,11 @@ live models. This is **foundation only** — the AI system is NOT complete.
   `CombatEvents.DamageDealt`, so shooting a grunt (or being shot by one) produces a
   blood burst on clients. Not explicitly wired; set `BR_BloodEnabled = false` on an
   NPC model to suppress.
-- **No AI types, factions, cover, suppression, flanking, or squad tactics.** One
-  grunt archetype, one ring formation, leader only used as the patrol-index advancer.
-  Grunts are hostile to every player (no team logic).
+- **No AI types, factions, suppression, flanking, or squad tactics.** One grunt
+  archetype, one ring formation, leader only used as the patrol-index advancer.
+  Grunts are hostile to every player (no team logic). **Basic per-grunt cover**
+  landed in Stage 1D (see that section) — squad-coordinated cover / bounding is
+  still absent.
 - **Server performance at `MAX_ACTIVE_NPCS` (12) is untested.** One `THINK_INTERVAL`
   (0.25 s) loop over all NPCs plus per-NPC LOS raycasts, detached burst tasks, and
   now (Stage 1B) a per-shot `ParticleEmitter:Emit` × 2 + `Sound:Play` + a temporary
@@ -168,6 +170,49 @@ default R6 idle loaded), and the `Motor6D` grip attaches. Open risks:
 - **`buildRig` now always adds an `Animator`.** Harmless for Stage 1A/1B behaviour,
   but every grunt now carries an Animator + up to 4 `AnimationTrack`s; folded into
   the `MAX_ACTIVE_NPCS` performance question above.
+
+## AI Stage 1D — face target + take cover between bursts (Studio verification: REQUIRED, not done)
+
+New `Constants.AI` Stage 1D fields + `AIService` helpers `faceToward` /
+`findCoverPoint`, a `Cover` state, and `Humanoid.AutoRotate = false` in `buildRig`.
+Grunts turn to look at the target while engaging, and after each burst
+`startBurst` arms `record.coverUntil` so `thinkNPC` moves the grunt to a
+raycast-found LOS-breaking spot for `COVER_DURATION` before peeking out to fire
+again. `AIService` + `Constants.AI` only — no new remotes / client / project /
+`GunService` / `DamageService` change. MCP-checked the math + `AutoRotate`.
+Residual risks:
+
+- **Not runtime-verified in Play.** MCP can't drive a player into Attack range or
+  watch the peek/shoot/hide loop. Needs a Studio Play pass — see CHANGELOG /
+  the test steps.
+- **The cover search is dumb.** `findCoverPoint` fires 5 raycasts from the grunt
+  outward along `COVER_SAMPLE_ANGLES` and returns the first spot that a ray to the
+  target finds occluded — it does **not** check that the spot is reachable or that
+  the grunt can path to it. With plain `Humanoid:MoveTo` (no pathfinding) a grunt
+  can walk face-first into the wall it is trying to hide behind. On open ground it
+  just retreats `COVER_SEEK_DISTANCE` studs (partial cover). Real cover needs
+  tagged cover nodes or a navmesh query.
+- **No squad coordination.** Each grunt covers independently on its own burst
+  timer — they do not cover each other, bound, or stagger. A squad all bursts and
+  all ducks at once.
+- **`COVER_DURATION` (3 s) vs `SECONDS_BETWEEN_BURSTS` (1.2 s) is a tuning guess.**
+  Cover time currently dominates, so the grunt hides ~3 s then peeks. Shorten
+  `COVER_DURATION` for more aggressive grunts; it also interacts with
+  `DETECTION_RANGE` / `LOSE_TARGET_RANGE` (a grunt that covers too far loses the
+  target and drops to Chase).
+- **`AutoRotate = false` means `faceToward` is the *only* thing that rotates a
+  grunt.** Every `thinkNPC` branch that should orient the grunt must call it; a
+  new branch that forgets leaves the grunt frozen facing its last direction.
+- **`faceToward` sets `HumanoidRootPart.CFrame` every think (0.25 s), including
+  while walking to cover.** Cheap and it looks intentional (grunt strafes to cover
+  while watching the player), but writing the root CFrame mid-`MoveTo` can stutter
+  the walk and would fight hard against a knockback/ragdoll impulse if one ever
+  lands mid-think (AI ragdoll is not wired, so no conflict today). If it is janky
+  in Play, restrict `faceToward` to the stationary `Attack` state and let a
+  re-enabled `AutoRotate` handle Chase/Cover.
+- **Grunts moon-walk toward cover.** Because facing and move direction are
+  decoupled they back into cover rather than turning and running. Intended, but if
+  it reads badly, face the move goal during `Cover` instead of the target.
 
 ## Pre-round loadout menu — partial DEBT-013 (Studio verification: YES, required)
 

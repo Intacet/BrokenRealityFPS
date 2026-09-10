@@ -1,5 +1,27 @@
 # Changelog
 
+## AI Stage 1D — grunts face the player + take cover between bursts
+
+- **Face the target.** `Humanoid.AutoRotate` is now off on grunts; a new
+  `faceToward` helper lerps the `HumanoidRootPart` to look at the target (or the
+  move goal) every think, so a grunt that walked in sideways turns and points its
+  rifle at the player while firing. `Constants.AI.FACE_TARGET` / `FACE_TURN_ALPHA`.
+- **Take cover after each burst.** New `Cover` state: when a burst finishes,
+  `startBurst` arms `record.coverUntil`; while it's in the future `thinkNPC` moves
+  the grunt to `findCoverPoint` (samples `COVER_SAMPLE_ANGLES` off the
+  away-from-target vector at `COVER_SEEK_DISTANCE`, keeps the first spot a raycast
+  finds LOS-occluded, else a plain retreat) and holds there for `COVER_DURATION`
+  before peeking out and firing again — a per-grunt peek/shoot/hide loop. Breaking
+  LOS or leaving range drops the loop to `Chase`.
+- Per-grunt only — no squad coordination, no tagged cover nodes, no pathfinding
+  (so a grunt can walk into a wall it's trying to hide behind; on open ground it
+  just backs off `COVER_SEEK_DISTANCE` studs). All flag-gated (`TAKE_COVER`).
+- **`AIService` + `Constants.AI` only** — no new remotes, no client files, no
+  `default.project.json` / `GunService` / `DamageService` change. AI detection /
+  chase / attack / damage / death is preserved. MCP-checked the math + APIs; the
+  peek/shoot/hide loop needs a Studio Play test (see docs/TECHNICAL_DEBT.md
+  "AI Stage 1D").
+
 ## AI Stage 1C — grunts get the player's gun + third-person animations
 
 - Each AI grunt now holds the **real AKS-74 world model** — `AIService` clones

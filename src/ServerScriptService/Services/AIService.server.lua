@@ -5,6 +5,7 @@
 -- AI Stage 1A — basic server-owned squad NPC foundation.
 -- AI Stage 1B — combat feedback FX (muzzle flash / smoke / light / tracer / 3D sound).
 -- AI Stage 1C — grunt weapon model + third-person animation (same gun/poses as players).
+-- AI Stage 1D — face the target while engaging + duck into cover between bursts.
 --
 -- Spawns simple R6 rifleman "grunt" squads from Workspace/AISpawns, patrols
 -- Workspace/AIPatrolPoints, detects players by server raycast line-of-sight,
@@ -42,8 +43,17 @@
 -- of this degrades gracefully — a missing model or a failed LoadAnimation just
 -- warns once and the grunt still fires.
 --
--- Deferred (see docs/TECHNICAL_DEBT.md — AI Stage 1A/1B/1C): PathfindingService,
--- ragdoll on AI death, rewards/points/killstreaks, AI types, cover/flanking,
+-- Stage 1D face + cover (Constants.AI Stage 1D fields): AutoRotate is turned off
+-- and faceToward() lerps the HumanoidRootPart to look at the target every think,
+-- so grunts point their rifle at the player while engaging. After each burst
+-- startBurst arms record.coverUntil; while it is in the future thinkNPC runs a
+-- "Cover" branch that moves the grunt to findCoverPoint() (a raycast-sampled spot
+-- that breaks LOS, else a plain retreat) and holds there until it expires, then
+-- re-peeks and fires — a per-grunt peek/shoot/hide loop. No squad coordination,
+-- no tagged cover objects, no pathfinding.
+--
+-- Deferred (see docs/TECHNICAL_DEBT.md — AI Stage 1A..1D): PathfindingService,
+-- ragdoll on AI death, rewards/points/killstreaks, AI types, squad cover/flanking,
 -- jump/climb animation, reload animation, final flash/smoke/sound art, tracer
 -- pooling, extracting the WorldWeaponService attach body into a shared module.
 
@@ -74,7 +84,7 @@ local FX = Constants.AI_COMBAT_FX :: any
 -- Types
 -- ============================================================
 
-type AIState = "Idle" | "Patrol" | "Chase" | "Attack" | "Dead"
+type AIState = "Idle" | "Patrol" | "Chase" | "Attack" | "Cover" | "Dead"
 
 -- Stage 1B combat FX instances, built once per NPC and reused every shot.
 -- All children of `attachment`, so they are destroyed with the NPC model.
@@ -109,6 +119,9 @@ type NPCRecord = {
     target       : Player?,
     lastSeenPos  : Vector3?,
     lastSeenClock: number,
+
+    coverUntil : number,    -- os.clock() deadline; > now → in the Cover branch (0 = not covering)
+    coverPoint : Vector3?,  -- resolved cover destination, cleared on return to Attack
 
     nextThinkClock      : number,
     nextTargetCheckClock: number,
@@ -295,6 +308,9 @@ local function buildRig(worldCFrame: CFrame): (Model, Humanoid, BasePart)
     humanoid.WalkSpeed           = AI.NPC_WALK_SPEED
     humanoid.BreakJointsOnDeath  = false
     humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+    -- Stage 1D: facing is driven manually by faceToward() (toward the target while
+    -- engaging, toward the move goal otherwise), not by the move direction.
+    humanoid.AutoRotate          = false
     humanoid.Parent = model
 
     -- Stage 1C: an Animator is required to LoadAnimation on this rig.
@@ -937,6 +953,11 @@ local function startBurst(record: NPCRecord)
             fireOneShot(record)
             task.wait(AI.SECONDS_BETWEEN_SHOTS)
         end
+        -- Stage 1D: arm the cover window so thinkNPC ducks this grunt away before
+        -- the next burst. The burst loop already bailed on state ~= "Attack".
+        if not record.dead and running and AI.TAKE_COVER == true then
+            record.coverUntil = os.clock() + (AI.COVER_DURATION :: number)
+        end
         if not record.dead and running then
             task.wait(AI.SECONDS_BETWEEN_BURSTS)
         end
@@ -969,6 +990,47 @@ local function patrolDestination(record: NPCRecord): Vector3
         return squad.spawnCFrame.Position + record.slot
     end
     return record.root.Position
+end
+
+-- Stage 1D: lerp the HumanoidRootPart to look at `worldPos` (flattened to the
+-- grunt's own Y so the rig never tilts). No-op if facing is disabled or the point
+-- is basically on top of the grunt. Safe on a server-owned, stationary NPC.
+local function faceToward(record: NPCRecord, worldPos: Vector3)
+    if AI.FACE_TARGET ~= true then
+        return
+    end
+    local root = record.root
+    local flat = Vector3.new(worldPos.X, root.Position.Y, worldPos.Z)
+    if (flat - root.Position).Magnitude < 0.1 then
+        return
+    end
+    root.CFrame = root.CFrame:Lerp(CFrame.lookAt(root.Position, flat), AI.FACE_TURN_ALPHA)
+end
+
+-- Stage 1D: pick a spot roughly COVER_SEEK_DISTANCE studs from the grunt, away
+-- from `targetPos`, that breaks line of sight to the target. Samples a few angles
+-- off the away-from-target vector; returns the first that is occluded, else a
+-- plain retreat point (partial cover). Never returns nil.
+local function findCoverPoint(record: NPCRecord, targetPos: Vector3): Vector3
+    local root = record.root
+    local eye  = Vector3.new(0, AI.LINE_OF_SIGHT_HEIGHT_OFFSET, 0)
+    local flatAway = Vector3.new(root.Position.X - targetPos.X, 0, root.Position.Z - targetPos.Z)
+    if flatAway.Magnitude < 0.1 then
+        flatAway = Vector3.new(0, 0, 1)
+    end
+    local awayDir  = flatAway.Unit
+    local distance = AI.COVER_SEEK_DISTANCE
+
+    local tchar: Model? = if record.target ~= nil then record.target.Character else nil
+    for _, deg in ipairs(AI.COVER_SAMPLE_ANGLES) do
+        local dir = (CFrame.Angles(0, math.rad(deg), 0) * awayDir).Unit
+        local candidate = root.Position + dir * distance
+        local result = workspace:Raycast(candidate + eye, (targetPos + eye) - (candidate + eye), losParams)
+        if result ~= nil and (tchar == nil or not result.Instance:IsDescendantOf(tchar)) then
+            return candidate  -- something sits between this spot and the target
+        end
+    end
+    return root.Position + awayDir * distance
 end
 
 local function thinkNPC(record: NPCRecord, now: number)
@@ -1022,25 +1084,46 @@ local function thinkNPC(record: NPCRecord, now: number)
     if goal ~= nil then
         local dist  = (goal - root.Position).Magnitude
         local inLos = troot ~= nil and tchar ~= nil and canSee(record, tchar, troot)
-        if troot ~= nil and dist <= AI.ATTACK_RANGE and inLos then
+
+        if AI.TAKE_COVER == true and record.coverUntil > now and troot ~= nil then
+            -- Stage 1D: a burst just finished — hold at / move to a cover spot that
+            -- breaks LOS, watching the player, until the cover window expires. Runs
+            -- ahead of the range/LOS check so reaching cover doesn't flip to Chase.
+            setState(record, "Cover")
+            humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
+            if record.coverPoint == nil then
+                record.coverPoint = findCoverPoint(record, goal)
+            end
+            humanoid:MoveTo(record.coverPoint or root.Position)
+            faceToward(record, goal)
+        elseif troot ~= nil and dist <= AI.ATTACK_RANGE and inLos then
             setState(record, "Attack")
+            record.coverPoint = nil
             humanoid.WalkSpeed = AI.ATTACK_MOVE_SPEED
             humanoid:MoveTo(root.Position)  -- hold position
+            faceToward(record, goal)
             if not record.firing then
                 startBurst(record)
             end
         else
             setState(record, "Chase")
+            record.coverUntil = 0
+            record.coverPoint = nil
             humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
             humanoid:MoveTo(goal + record.slot)
+            faceToward(record, goal)
         end
         return
     end
 
     -- No target: patrol between points, or idle near the squad spawn.
+    record.coverUntil = 0
+    record.coverPoint = nil
     setState(record, (#patrolPoints > 0) and "Patrol" or "Idle")
     humanoid.WalkSpeed = AI.NPC_WALK_SPEED
-    humanoid:MoveTo(patrolDestination(record))
+    local patrolGoal = patrolDestination(record)
+    humanoid:MoveTo(patrolGoal)
+    faceToward(record, patrolGoal)
 
     if record.isLeader and #patrolPoints > 0 then
         local squad = squads[record.squadId]
@@ -1069,6 +1152,8 @@ local function disconnectRecord(record: NPCRecord)
     -- connection is in record.conns and is disconnected in the loop below.
     record.fx = nil
     record.anim = nil
+    record.coverUntil = 0
+    record.coverPoint = nil
     for _, conn in ipairs(record.conns) do
         conn:Disconnect()
     end
@@ -1142,6 +1227,9 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
         target       = nil,
         lastSeenPos  = nil,
         lastSeenClock= 0,
+
+        coverUntil = 0,
+        coverPoint = nil,
 
         nextThinkClock       = 0,
         nextTargetCheckClock = 0,
