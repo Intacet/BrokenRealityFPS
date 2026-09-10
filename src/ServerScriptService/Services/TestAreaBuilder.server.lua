@@ -46,11 +46,12 @@ local FOLDER_NAME: string = CFG.FOLDER_NAME
 local ORIGIN: Vector3     = CFG.ORIGIN
 -- Top surface of the baseplate — every ground-level prop sits on this Y.
 local GROUND_TOP: number  = CFG.BASEPLATE_POSITION.Y + CFG.BASEPLATE_SIZE.Y / 2
-local LABEL_LIFT: number  = 3 -- studs a section label floats above its prop
+local LABEL_LIFT: number  = 2 -- studs a section label floats above its prop
 local labelsEnabled: boolean = CFG.DEBUG_LABELS == true
 
--- World position = ORIGIN + local offset. ORIGIN is (0,0,0) today; going through this
--- keeps the whole area relocatable from one constant.
+-- World position = ORIGIN + local offset. ORIGIN lifts the whole area into the sky
+-- (see Constants.DEV_TEST_AREA.ORIGIN); routing every placement through here keeps it
+-- relocatable from that one constant.
 local function place(v: Vector3): Vector3
 	return ORIGIN + v
 end
@@ -123,20 +124,22 @@ local function makeLabel(text: string, worldPos: Vector3, parent: Instance): ()
 
 	local gui = Instance.new("BillboardGui")
 	gui.Name           = "Label"
-	gui.Size           = UDim2.fromOffset(240, 46)
-	gui.AlwaysOnTop    = true
+	gui.Size           = UDim2.fromOffset(96, 22)   -- small tag, ~1/3 the old footprint
+	gui.StudsOffset    = Vector3.new(0, 0.4, 0)
+	gui.AlwaysOnTop    = false                        -- occluded by geometry so only nearby ones show
 	gui.LightInfluence = 0
-	gui.MaxDistance    = 320
+	gui.MaxDistance    = 60                           -- only render when you're in that section
 	gui.Parent         = anchor
 
 	local label = Instance.new("TextLabel")
 	label.Size                   = UDim2.fromScale(1, 1)
 	label.BackgroundColor3       = Color3.fromRGB(0, 0, 0)
-	label.BackgroundTransparency = 0.4
+	label.BackgroundTransparency = 0.55
 	label.BorderSizePixel        = 0
 	label.TextColor3             = Color3.fromRGB(255, 255, 255)
 	label.Font                   = Enum.Font.GothamMedium
 	label.TextScaled             = true
+	label.TextWrapped            = true
 	label.Text                   = text
 	label.Parent                 = gui
 end

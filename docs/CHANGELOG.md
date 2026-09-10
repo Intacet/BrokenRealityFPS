@@ -1,5 +1,16 @@
 # Changelog
 
+## TestAreaBuilder tuning: lift the area into the sky + shrink the labels
+
+- `Constants.DEV_TEST_AREA.ORIGIN` moved from `(0, 0, 0)` to `(0, 300, 0)`. The baseplate
+  top was at Y 0, ~10 studs *below* the map's grass at the origin, so half the props were
+  buried and unusable. It now floats clear in the sky (tallest map part ≈ Y 95); every
+  prop, label and redirected spawn follows `ORIGIN` so nothing else changed.
+- Section labels: `BillboardGui` shrunk from 240×46 → 96×22, `AlwaysOnTop` off (so they're
+  occluded by geometry instead of punching through the whole scene), `MaxDistance`
+  320 → 60 (only the section you're standing in shows), lighter background. `LABEL_LIFT`
+  3 → 2.
+
 ## TestAreaBuilder: optional redirect of all team spawns into the test area (Studio-verified, reversible)
 
 Follow-up so every player spawns in `BrokenReality_TestArea` while testing.

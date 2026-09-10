@@ -1952,7 +1952,10 @@ Constants.DEV_TEST_AREA = {
     ENABLED = true,
     FOLDER_NAME = "BrokenReality_TestArea",
 
-    ORIGIN = Vector3.new(0, 0, 0),
+    -- Lifted well above the map (tallest map part ≈ Y 95; grass at the map origin ≈ Y 10)
+    -- so the whole area floats clear in the sky and nothing is buried in terrain.
+    -- Every prop, label and redirected spawn is placed as ORIGIN + local offset.
+    ORIGIN = Vector3.new(0, 300, 0),
 
     -- Studio only, reversible: move every BasePart under Workspace/Spawns onto this
     -- test area so all players spawn here. TestAreaBuilder stashes each spawn part's
