@@ -1,5 +1,39 @@
 # Changelog
 
+## Hipfire: fire from the camera along the gun's rotation, not the viewmodel muzzle (not Studio-tested)
+
+Measured in a Studio Play session: the previous "fire from the viewmodel `MuzzleAttachment`"
+path was broken end to end.
+
+- The auto-created `MuzzleAttachment` on the AKS-74 `Barrel` had its LookVector along the
+  barrel's local **+X**, which is ~180° from the firing direction (`dot(+X, cameraLook) =
+  -0.998`) — the auto-create picked the right axis, wrong sign.
+- The viewmodel Model's pivot resolves ~330 studs from the player (detached from where its
+  parts render), so the muzzle **origin** failed the server's proximity check — the console
+  showed `[GunService] WeaponFired: origin too far from root` on **every** hipfire shot.
+  Hipfire was doing zero damage.
+
+Fix (owner picked this option): `GunController` now fires hipfire from
+`camera.CFrame.Position` along `(camera.CFrame * CFrame.Angles(pitch, yaw, 0)).LookVector`,
+where `(pitch, yaw)` is the free-aim rotation the viewmodel is actually drawn with, newly
+exposed as `ViewModelController.GetFreeAimAngles()` (0,0 while ADS or holstered). Bullets
+leave in the direction the gun visually points — same intent as before — but with no
+dependency on a cosmetic attachment and with a camera-anchored, server-valid origin. ADS
+and free-aim-off keep the camera-ray-through-reticle path.
+
+- `ViewModelController` publishes `freeAimAimYaw` / `freeAimAimPitch` each frame from the
+  same values that build `freeAimCF` (swing included, roll excluded — roll isn't aim).
+  Reset to 0 on holster / `StopWeaponAnimations` / ADS.
+- `setupMuzzleFx` auto-create sign fixed too: the bore axis is flipped if it points back
+  toward the model centroid, so the **muzzle-flash emitters** face forward. (Firing no
+  longer uses this; authoring a real `MuzzleAttachment` per weapon in Studio is still the
+  right long-term move.)
+- `GetMuzzleWorldCFrame()` kept as a public accessor, now unused by the fire path.
+- No new remotes, no server changes, no ammo/damage/hit-validation change — the server
+  still re-raycasts the client origin+direction. `rojo build` clean.
+- **Needs the in-game check** the previous two entries also need: equip, confirm hipfire
+  now damages and lands where the gun points, and that `origin too far from root` is gone.
+
 ## Free-aim: rotation is now the primary hipfire effect + bounded flick swing (not Studio-tested)
 
 Follow-up to the Tarkov-style hipfire commit. Owner reported the viewmodel would not

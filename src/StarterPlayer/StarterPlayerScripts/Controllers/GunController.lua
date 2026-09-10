@@ -313,23 +313,26 @@ function GunController:Start()
         if not character then return false end
 
         -- ── Spread-perturbed raycast ──────────────────────────────────────────
+        -- Tarkov-style hipfire: the bullet leaves the CAMERA travelling the way the
+        -- free-aim-rotated gun visually points (ViewModelController.GetFreeAimAngles()),
+        -- so rounds go where the muzzle points without depending on a cosmetic muzzle
+        -- attachment or an off-camera origin. ADS and free-aim-off collapse to a camera
+        -- ray through the reticle offset (0 offset = dead centre). The origin stays at
+        -- the camera so the server's origin-vs-root check always passes; the authoritative
+        -- server re-raycast of this origin+direction is unchanged.
         local camera    = workspace.CurrentCamera
-        local origin:  Vector3
+        local origin:  Vector3 = camera.CFrame.Position
         local baseDir: Vector3
-        -- Tarkov-style hipfire: the bullet leaves the viewmodel muzzle, travelling the way
-        -- the free-aim-rotated gun actually points. ADS and "no muzzle" fall back to the
-        -- camera ray through the reticle offset. Server origin/direction validation and the
-        -- authoritative re-raycast are unchanged either way.
-        local muzzleCF: CFrame? = nil
-        if Constants.FREE_AIM_FIRE_FROM_MUZZLE and not ViewModelController:IsAiming() then
-            muzzleCF = ViewModelController.GetMuzzleWorldCFrame()
-        end
-        if muzzleCF ~= nil then
-            origin  = muzzleCF.Position
-            baseDir = muzzleCF.LookVector
+        if Constants.FREE_AIM_ENABLED
+            and Constants.FREE_AIM_FIRE_FROM_MUZZLE
+            and not ViewModelController:IsAiming()
+        then
+            local aimPitch, aimYaw = ViewModelController.GetFreeAimAngles()
+            baseDir = (camera.CFrame * CFrame.Angles(aimPitch, aimYaw, 0)).LookVector
         else
-            origin = camera.CFrame.Position
-            local offset = if Constants.FREE_AIM_ENABLED then FreeAimController:GetSmoothedAimOffset() else Vector2.zero
+            local offset = if Constants.FREE_AIM_ENABLED
+                then FreeAimController:GetSmoothedAimOffset()
+                else Vector2.zero
             local aimPoint = camera.ViewportSize / 2 + offset
             baseDir = camera:ViewportPointToRay(aimPoint.X, aimPoint.Y).Direction
         end

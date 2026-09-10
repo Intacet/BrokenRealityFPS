@@ -2,16 +2,33 @@
 
 ## Aiming / free-aim / cursor — Tarkov-style hipfire (Studio verification: YES, required)
 
-Hipfire now fires from the viewmodel muzzle in the gun's pointing direction, per-weapon
-free-aim feel profiles exist, and the OS cursor is locked/hidden during weapon use. This
-**wires DEBT-063** (previously: "free-aim GetAimRay is a forward-declared API, not wired
-into firing"). Client-only; no server/remote/damage/ammo change. Open risks:
+Hipfire fires from the camera along the direction the free-aim-rotated gun visually points,
+per-weapon free-aim feel profiles exist, and the OS cursor is locked/hidden during weapon
+use. This **wires DEBT-063** (previously: "free-aim GetAimRay is a forward-declared API, not
+wired into firing"). Client-only; no server/remote/damage/ammo change. Open risks:
 
-- **Not runtime-verified.** MCP `require()` gets a separate module context, so the muzzle
-  direction, cursor lock, and per-gun feel could not be exercised. Needs an in-game test.
+- **Not runtime-verified.** MCP `require()` gets a separate module context and a weapon
+  can't be equipped from MCP, so the aim direction, cursor lock, and per-gun feel could not
+  be exercised. Needs an in-game test.
+- **Firing model changed 2026-09-09 (v2), not Studio-tested.** The first version fired from
+  `ViewModelController.GetMuzzleWorldCFrame()` (the viewmodel `MuzzleAttachment`
+  WorldCFrame). Studio measurement showed that attachment (auto-created on the AKS-74
+  `Barrel`) pointed ~180° backwards **and** the Model pivot was ~330 studs from the player,
+  so the server rejected every hipfire shot (`WeaponFired: origin too far from root`) —
+  hipfire did no damage. Now: origin = `camera.CFrame.Position`, direction =
+  `(camera.CFrame * CFrame.Angles(ViewModelController.GetFreeAimAngles())).LookVector`.
+  `GetFreeAimAngles()` returns the same pitch/yaw that build `freeAimCF` (swing included).
+  Still needs an in-game check that hipfire now damages and lands where the gun points.
+- **`GetFreeAimAngles()` ≈ but ≠ the viewmodel's true world rotation.** Recoil CFs
+  (`viewRecoilCFrame`, `vmRecoilCF`) and the camera/movement inertia CFs sit between
+  `cam.CFrame` and `freeAimCF` in the pivot chain, so the fired direction omits the visual
+  recoil kick (intended — camera recoil + spread own that) and a sub-degree of inertia lag.
+- **`GetMuzzleWorldCFrame()` is now unused by the fire path** — kept as a public accessor
+  (future tracer/bore-FX origin). Remove if nothing adopts it.
 - **Yaw sign is a guess.** `ViewModelController` rotates the viewmodel with
-  `freeAimYaw = -vmFreeAimBlended.X * angle`. If the gun points *away* from the reticle in
-  Studio, flip to `+vmFreeAimBlended.X`.
+  `freeAimYaw = -vmFreeAimBlended.X * angle`, and firing now inherits that exact sign. If
+  the gun points *away* from the reticle in Studio, flip to `+vmFreeAimBlended.X` (this also
+  flips the fired direction, since they share the value).
 - **Rotation-vs-slide fix (2026-09-09), not Studio-tested.** Owner reported the gun would
   not visibly rotate right — it slid left and recentred. Cause: raw `vmMouseInertia`
   (clamp ≈26–30) was summed into the roll/translation terms next to `vmFreeAimBlended`
@@ -24,12 +41,16 @@ into firing"). Client-only; no server/remote/damage/ammo change. Open risks:
   fixed cant that doesn't change when the camera turns is the AKS-74 viewmodel idle/hold
   animation or the rig's FakeCamera → `BASE_OFFSET` alignment, and must be corrected on the
   rig in Studio — no code knob covers it.
-- **Fire origin is the FP viewmodel muzzle**, a cosmetic rig ~2-3 studs from the camera and
-  scaled/offset for screen framing — so close-range shots have slight parallax vs. a
-  camera-centre ray (intended Tarkov behaviour, but tune `MuzzleAttachment` placement per
-  weapon; the AKS-74 attachment is still auto-created along the barrel's longest axis).
-- **`FREE_AIM_FIRE_FROM_MUZZLE` requires a resolvable `MuzzleAttachment`.** With no muzzle,
-  firing silently falls back to the old camera+reticle ray.
+- **Fire origin is the camera**, not the bore — no muzzle parallax at all now (a fixed-bore
+  Tarkov feel would need the origin moved back to a real per-weapon `MuzzleAttachment` plus
+  an origin-vs-root guard so a bad rig can't get shots server-rejected).
+- **`FREE_AIM_FIRE_FROM_MUZZLE = false`** now just means "fire the camera ray through the
+  reticle offset" (the pre-Tarkov behaviour); it no longer depends on any attachment.
+- **Muzzle-flash emitters still hang off the auto-created `MuzzleAttachment`.** The
+  auto-create sign heuristic was fixed (axis flipped if it points back at the model
+  centroid), but a hand-authored `MuzzleAttachment` at the bore tip per weapon is still the
+  right fix — if the AKS-74 rig template already contains a backwards one, delete it so the
+  heuristic runs.
 - **Cursor lock coexistence with `MovementController`.** `GunController` restores the
   pre-lock `MouseBehavior`, so if MovementController's LeftControl lock was on it stays
   LockCenter; if it was off, a 1-frame flicker to Default is possible when unequipping in a

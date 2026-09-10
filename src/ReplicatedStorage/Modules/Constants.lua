@@ -1160,10 +1160,12 @@ Constants.FREE_AIM_ENABLED                        = true
 -- Debug: Logger.debug on weight changes and large-delta resets.
 Constants.FREE_AIM_DEBUG                          = false
 
--- Tarkov-style firing: when true and hip-firing with a resolvable muzzle, GunController
--- fires from the viewmodel's MuzzleAttachment along the direction the (free-aim-rotated)
--- gun is actually pointing, instead of a camera ray through the reticle pixel offset.
--- Falls back to the camera path when there is no muzzle. ADS always fires dead-centre.
+-- Tarkov-style firing: when true and hip-firing, GunController fires from the CAMERA
+-- position along the direction the free-aim-rotated gun visually points
+-- (camera.CFrame * CFrame.Angles(ViewModelController.GetFreeAimAngles())), instead of a
+-- camera ray through the reticle pixel offset. Bullets leave where the gun points without
+-- depending on a cosmetic muzzle attachment, and the origin stays camera-anchored so the
+-- server's origin-vs-root check passes. ADS and free-aim-off fire dead-centre.
 -- Server origin/direction validation + re-raycast are unchanged; no remote/ammo/damage change.
 Constants.FREE_AIM_FIRE_FROM_MUZZLE               = true
 

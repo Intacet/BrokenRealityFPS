@@ -136,6 +136,14 @@ local viewRecoilCFrame: CFrame = CFrame.new()
 local vmFreeAimNormalized: Vector2 = Vector2.zero
 local vmFreeAimBlended:    Vector2 = Vector2.zero
 
+-- Final free-aim rotation the viewmodel is drawn with this frame, relative to the camera
+-- (radians). Mirrors the pitch / yaw inside freeAimCF (swing included); both 0 while ADS
+-- or holstered. GunController reads these via GetFreeAimAngles() and fires the hipfire ray
+-- from the camera along camera.CFrame * CFrame.Angles(pitch, yaw, 0), so bullets leave in
+-- the direction the gun visually points without depending on a cosmetic muzzle attachment.
+local freeAimAimYaw:   number = 0
+local freeAimAimPitch: number = 0
+
 -- Per-weapon free-aim feel (blend speed, track factor, mouse-inertia gain/max), resolved
 -- on equip from Constants.FREE_AIM_PROFILES. DEFAULT until a weapon is equipped.
 local vmFreeAimProfile: { [string]: any } = (Constants.FREE_AIM_PROFILES :: any).DEFAULT
@@ -650,6 +658,16 @@ local function setupMuzzleFx(weaponName: string?): boolean
             elseif sz.Y >= sz.X and sz.Y >= sz.Z then
                 axis, halfLen = Vector3.yAxis, sz.Y * 0.5
             end
+            -- The longest-axis guess above only picks the LINE of the bore; on many rigs
+            -- its +sign points back at the shooter. Flip it so it points away from the gun
+            -- body: the barrel tip sits on the far side of the model centroid from the
+            -- stock, so the firing direction is the sign that leads outward toward the
+            -- barrel part. (Only affects the muzzle-flash emitters now — firing uses the
+            -- free-aim gun rotation, not this attachment.)
+            local centre = model:GetBoundingBox().Position
+            if barrel.CFrame:VectorToWorldSpace(axis):Dot(barrel.Position - centre) < 0 then
+                axis = -axis
+            end
             local pos = axis * (halfLen + (cfg.AUTO_ATTACHMENT_FORWARD_OFFSET :: number))
             local att = Instance.new("Attachment")
             att.Name   = "MuzzleAttachment"
@@ -775,6 +793,15 @@ function ViewModelController.GetMuzzleWorldCFrame(): CFrame?
     return att.WorldCFrame
 end
 
+-- Current free-aim rotation of the viewmodel relative to the camera, in radians,
+-- as (pitch, yaw). Both 0 while ADS or holstered. GunController fires the hipfire ray
+-- from the camera along camera.CFrame * CFrame.Angles(pitch, yaw, 0) so rounds leave in
+-- the direction the gun visually points (Tarkov free-aim) without relying on a cosmetic
+-- muzzle attachment or an off-camera origin.
+function ViewModelController.GetFreeAimAngles(): (number, number)
+    return freeAimAimPitch, freeAimAimYaw
+end
+
 -- ============================================================
 -- Public methods — weapon lifecycle
 -- ============================================================
@@ -865,6 +892,8 @@ function ViewModelController:init()
     vmMouseInertiaDelta  = Vector2.zero
     vmMouseInertia       = Vector2.zero
     vmInertiaCurrent     = 1
+    freeAimAimYaw        = 0
+    freeAimAimPitch      = 0
     vmRecoilTarget        = CFrame.new()
     vmRecoilCurrent       = CFrame.new()
     vmRecoilBuildup       = 0
@@ -1007,6 +1036,8 @@ function ViewModelController:StopWeaponAnimations()
     vmMouseInertiaDelta    = Vector2.zero
     vmMouseInertia         = Vector2.zero
     vmInertiaCurrent       = 1
+    freeAimAimYaw          = 0
+    freeAimAimPitch        = 0
     vmRecoilTarget        = CFrame.new()
     vmRecoilCurrent       = CFrame.new()
     vmRecoilBuildup       = 0
@@ -1766,6 +1797,8 @@ function ViewModelController:Start()
                 math.min(1, dt * (vmFreeAimProfile.VIEWMODEL_BLEND_SPEED :: number))
             )
             freeAimCF = CFrame.new()
+            -- No free-aim rotation while ADS: bullets follow the camera centre.
+            freeAimAimYaw, freeAimAimPitch = 0, 0
         else
             vmFreeAimBlended = vmFreeAimBlended:Lerp(
                 vmFreeAimNormalized,
@@ -1840,6 +1873,10 @@ function ViewModelController:Start()
 
             freeAimCF = CFrame.new(translateX, translateY, translateZ)
                 * CFrame.Angles(freeAimPitch, freeAimYaw, freeAimRoll)
+
+            -- Publish the rotation the gun is drawn with so GunController can fire the
+            -- hipfire ray the same way (roll is cosmetic, not part of the aim).
+            freeAimAimYaw, freeAimAimPitch = freeAimYaw, freeAimPitch
         end
 
         -- ── Procedural sway (mouse lag, movement bob, strafe roll) ───────────
