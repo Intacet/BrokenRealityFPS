@@ -1,5 +1,36 @@
 # Changelog
 
+## Ragdoll actually knocks the body over now (per-weapon knockback)
+
+The death ragdoll "folded up while standing" instead of falling. Three fixes in
+`RagdollService:Apply`, none of which change how a ragdoll is *entered*:
+
+1. **The impulse was being swallowed.** `ApplyImpulse` on the fresh corpse did nothing
+   until network ownership resolved a few frames later. `Apply` now `SetNetworkOwner(nil)`s
+   every unanchored body part before the shove (server owns a dead body anyway). Studio
+   physics probe: with this, the impulse lands the same frame; without it, not at all.
+2. **Every joint had one 45° limit.** Now per-joint via `Constants.RAGDOLL_JOINT_ANGLES`
+   (hips/shoulders 115°, root 100°, neck 45°) so the rig can collapse and roll instead of
+   holding a rigid shape.
+3. **The collidable legs propped it up.** Arms + legs go `CanCollide = false` while
+   ragdolled (restored from a stashed `BR_RagdollWasCollide` attribute in `Restore`), so
+   the collidable Torso slumps to the ground.
+
+- Knockback is now **per-weapon**: `DummyService` looks up `Constants.RAGDOLL_WEAPON_IMPULSE`
+  by `DamageInfo.sourceName`, falling back to `RAGDOLL_IMPULSE_DEFAULT`. Magnitude =
+  `min(finalAmount * SCALE, MAX)`; applied with `ApplyImpulseAtPosition`
+  `RAGDOLL_IMPULSE_HEIGHT_OFFSET` (1.2) studs above the Torso for topple torque, tilted
+  down by `RAGDOLL_IMPULSE_DOWN_BIAS` (0.1). **AKS-74 = `{ SCALE = 4.5, MAX = 320 }`** —
+  a firm topple, no launch. Add a `FUTURE_SHOTGUN = { SCALE = 12, MAX = 1100 }`-style
+  entry later for weapons that should send bodies flying.
+- Also disables the Humanoid `GettingUp` state during ragdoll (re-enabled on `Restore`).
+- Removed `RAGDOLL_IMPULSE_SCALE` / `RAGDOLL_BALLSOCKET_UPPER_ANGLE`; all new
+  `Constants.RAGDOLL_*` consumers have `or`-fallbacks for a partial Constants sync.
+- **Not watched in a real death yet** — Edit mode doesn't step physics. Tuned from Studio
+  probes (≈40 studs/s topples an R6 rig; 16 doesn't). If it still won't fall or flies too
+  far, the knobs are `RAGDOLL_WEAPON_IMPULSE.AKS74.SCALE`, `RAGDOLL_JOINT_ANGLES`,
+  `RAGDOLL_IMPULSE_HEIGHT_OFFSET`.
+
 ## Blood marks: small welded body splatter + carved wound + bigger ground pool
 
 Owner feedback — the old marks plastered big flat red squares over the torso. Reworked

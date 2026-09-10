@@ -45,6 +45,11 @@ local ATT0_PREFIX = "RagdollAtt0_"
 local ATT1_PREFIX = "RagdollAtt1_"
 local BSC_PREFIX  = "RagdollBSC_"
 
+-- Limbs whose CanCollide we drop while ragdolled (so the Torso slumps rather than the rig
+-- balancing on stiff legs). Original value is stashed on this attribute for Restore().
+local LIMB_NAMES = { "Left Arm", "Right Arm", "Left Leg", "Right Leg" }
+local WAS_COLLIDE_ATTR = "BR_RagdollWasCollide"
+
 export type RagdollOptions = {
     player     : Player?,   -- set for player deaths; drives the death screen + kill signals
     attacker   : Player?,   -- responsible player, or nil for environment kills
@@ -77,12 +82,18 @@ local function convertJoint(motor: Motor6D)
     att1.CFrame = motor.C1
     att1.Parent = part1
 
+    -- `or` fallbacks tolerate a Constants module that has not synced the new keys yet.
+    local jointAngles = (Constants.RAGDOLL_JOINT_ANGLES :: any) or {}
+    local upperAngle  = jointAngles[motor.Name]
+        or (Constants.RAGDOLL_BALLSOCKET_DEFAULT_ANGLE :: any)
+        or 90
+
     local bsc         = Instance.new("BallSocketConstraint")
     bsc.Name          = BSC_PREFIX .. motor.Name
     bsc.Attachment0   = att0
     bsc.Attachment1   = att1
     bsc.LimitsEnabled = true   -- prevent full 360° spin; keeps the ragdoll visually plausible
-    bsc.UpperAngle    = Constants.RAGDOLL_BALLSOCKET_UPPER_ANGLE :: number
+    bsc.UpperAngle    = upperAngle
     bsc.Parent        = part0
 
     motor.Enabled = false
@@ -152,18 +163,56 @@ function RagdollService:Apply(character: Model, opts: RagdollOptions?)
 
     -- ── Stop the Humanoid fighting the joints ───────────────────────────────────
     humanoid.PlatformStand = true
+    -- GettingUp would repeatedly try to stand the rig back up mid-ragdoll.
+    humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+    pcall(function()
+        humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+    end)
     character:SetAttribute(RAGDOLLED_ATTRIBUTE, true)
+
+    -- ── Force server physics ownership so the death impulse lands this frame ─────
+    -- Without this the parts may still be owned by a client (or unassigned), and the
+    -- ApplyImpulse below is silently deferred/absorbed — the "folds up while standing"
+    -- symptom. A dead body is server-authoritative anyway.
+    for _, descendant in ipairs(character:GetDescendants()) do
+        if descendant:IsA("BasePart") and not descendant.Anchored then
+            pcall(function()
+                descendant:SetNetworkOwner(nil)
+            end)
+        end
+    end
+
+    -- ── Let the body actually fall: drop CanCollide on the limbs ────────────────
+    if (Constants.RAGDOLL_LIMB_NONCOLLIDE :: any) ~= false then
+        for _, limbName in ipairs(LIMB_NAMES) do
+            local limb = character:FindFirstChild(limbName)
+            if limb ~= nil and limb:IsA("BasePart") then
+                limb:SetAttribute(WAS_COLLIDE_ATTR, limb.CanCollide)
+                limb.CanCollide = false
+            end
+        end
+    end
 
     -- ── Preserve some of the incoming shot force ────────────────────────────────
     -- Applied after PlatformStand so the Humanoid does not immediately damp it out.
     if options.impulse ~= nil then
         local raw = options.impulse
-        if raw.Magnitude > (Constants.RAGDOLL_MAX_IMPULSE :: number) then
-            raw = raw.Unit * (Constants.RAGDOLL_MAX_IMPULSE :: number)
+        -- Tilt the shove toward the ground so the body falls rather than sailing back.
+        local downBias = (Constants.RAGDOLL_IMPULSE_DOWN_BIAS :: any) or 0
+        if raw.Magnitude > 0 and downBias > 0 then
+            raw = (raw.Unit + Vector3.new(0, -downBias, 0)).Unit * raw.Magnitude
+        end
+        -- Hard safety ceiling (per-weapon MAX is applied by the caller).
+        local ceiling = (Constants.RAGDOLL_MAX_IMPULSE :: any) or 1200
+        if raw.Magnitude > ceiling then
+            raw = raw.Unit * ceiling
         end
         local target = impulseTarget(character, options.hitPart)
         if target ~= nil and raw.Magnitude > 0 then
-            target:ApplyImpulse(raw)
+            -- Apply ABOVE the centre of mass so the shove tips the body over rather than
+            -- just sliding it (a lever arm from the feet).
+            local hOffset = (Constants.RAGDOLL_IMPULSE_HEIGHT_OFFSET :: any) or 1.6
+            target:ApplyImpulseAtPosition(raw, target.Position + Vector3.new(0, hOffset, 0))
         end
     end
 
@@ -215,9 +264,22 @@ function RagdollService:Restore(character: Model)
         end
     end
 
+    -- Restore limb collision from the stashed value.
+    for _, limbName in ipairs(LIMB_NAMES) do
+        local limb = character:FindFirstChild(limbName)
+        if limb ~= nil and limb:IsA("BasePart") then
+            local was = limb:GetAttribute(WAS_COLLIDE_ATTR)
+            if typeof(was) == "boolean" then
+                limb.CanCollide = was
+            end
+            limb:SetAttribute(WAS_COLLIDE_ATTR, nil)
+        end
+    end
+
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if humanoid then
         humanoid.PlatformStand = false
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
     end
 
     character:SetAttribute(RAGDOLLED_ATTRIBUTE, false)

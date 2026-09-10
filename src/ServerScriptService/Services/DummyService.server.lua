@@ -174,9 +174,16 @@ local function onDummyDied(model: Instance?, info: Types.DamageInfo?)
         return  -- EntityKilled and Humanoid.Died can both land; ragdoll once
     end
 
+    -- Per-weapon knockback: look the profile up by the damage source name, else DEFAULT.
+    -- `or` fallbacks tolerate a Constants module that has not synced the new keys yet.
     local impulse: Vector3? = nil
     if info ~= nil and info.hitDirection ~= nil and info.finalAmount > 0 then
-        impulse = info.hitDirection * info.finalAmount * (Constants.RAGDOLL_IMPULSE_SCALE :: number)
+        local byWeapon = (Constants.RAGDOLL_WEAPON_IMPULSE :: any) or {}
+        local prof = (info.sourceName ~= nil and byWeapon[info.sourceName])
+            or (Constants.RAGDOLL_IMPULSE_DEFAULT :: any)
+            or { SCALE = 2.6, MAX = 240 }
+        local mag = math.min(info.finalAmount * prof.SCALE, prof.MAX)
+        impulse = info.hitDirection.Unit * mag
     end
 
     RagdollService:Apply(record.model, {

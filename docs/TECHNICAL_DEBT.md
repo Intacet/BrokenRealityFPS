@@ -230,8 +230,26 @@ table and the Stages 4–6 debt list. Highlights:
     client-predicted (no server reconciliation).
   - All numbers are first-eyeball guesses — needs a Studio pass shooting a dummy.
 - Dev tooling trusts `RunService:IsStudio()`; `Constants.DEV_USER_IDS` is empty until filled.
-- Ragdoll impulse was retuned down after the owner's first test (was flinging the rig);
-  the retune has not been re-tested.
+- **Ragdoll rework (2026-09-10) — needs an in-Play eyeball.** The "folds up while standing"
+  symptom had three causes, all now addressed in `RagdollService:Apply`: (1) the death
+  `ApplyImpulse` was silently absorbed until network ownership resolved — `Apply` now
+  `SetNetworkOwner(nil)`s every unanchored body part first (Studio-verified: impulse lands
+  the same frame vs not at all); (2) every `BallSocketConstraint` used one 45° limit —
+  now per-joint via `Constants.RAGDOLL_JOINT_ANGLES` (hips/shoulders 115°, root 100°,
+  neck 45°) so the rig can actually fall over; (3) the collidable legs held it upright —
+  arms + legs go `CanCollide = false` while ragdolled (restored from a stashed attribute).
+  The shove is now per-weapon (`Constants.RAGDOLL_WEAPON_IMPULSE` keyed by
+  `DamageInfo.sourceName`, `DEFAULT` fallback), applied with `ApplyImpulseAtPosition`
+  `RAGDOLL_IMPULSE_HEIGHT_OFFSET` studs above the Torso for topple torque, tilted down by
+  `RAGDOLL_IMPULSE_DOWN_BIAS`. AKS-74 = `{ SCALE = 4.5, MAX = 320 }` — tuned from Studio
+  physics probes (velocity ~40 studs/s topples an R6 rig, 16 does not) but **not** watched
+  in a real death yet; if it still doesn't fall / flies too far, tune
+  `RAGDOLL_WEAPON_IMPULSE.AKS74.SCALE`, `RAGDOLL_JOINT_ANGLES`, `RAGDOLL_IMPULSE_HEIGHT_OFFSET`.
+  Removed `RAGDOLL_IMPULSE_SCALE` / `RAGDOLL_BALLSOCKET_UPPER_ANGLE`.
+- **`SetNetworkOwner(nil)` on player deaths** hands corpse physics to the server — correct
+  for authority, but if a future revive/get-up returns control to the player it must
+  `SetNetworkOwnershipAuto()` in `Restore` (not done — dummies never revive, they respawn a
+  clone).
 
 Open items (Stages 1–3):
 

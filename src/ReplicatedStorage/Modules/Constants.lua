@@ -2189,13 +2189,40 @@ Constants.REACTION_REGION_JOINTS = {
 -- ── Developer dummy control (Stage 6) ───────────────────────────────────────
 Constants.DUMMY_DEV_STATE_INTERVAL = 0.2    -- seconds between DummyDevState snapshots to subscribed dev clients
 
--- Ragdoll (Stage 3). Preserved incoming shot force so deaths do not collapse identically.
--- Impulse = hitDirection * finalAmount * SCALE, clamped to MAX_IMPULSE, applied to the
--- Torso. Tuned down from the first pass (45 / 4000) which flung the rig across the room —
--- an AKS body shot is now ~30 * 1.5 = 45 impulse on a ~3-mass torso ≈ a firm stagger.
-Constants.RAGDOLL_IMPULSE_SCALE          = 1.5    -- raise for a harder knockback, lower for a limp drop
-Constants.RAGDOLL_MAX_IMPULSE            = 200    -- clamp on the applied impulse magnitude
-Constants.RAGDOLL_BALLSOCKET_UPPER_ANGLE = 45     -- BallSocketConstraint.UpperAngle for converted joints (was hardcoded in RagdollService)
+-- Ragdoll (Stage 3). On the killing shot the body is converted to a physics rig and
+-- shoved so deaths do not collapse identically.
+--
+-- Knockback is per-weapon: DummyService looks up RAGDOLL_WEAPON_IMPULSE by
+-- DamageInfo.sourceName, falling back to RAGDOLL_IMPULSE_DEFAULT. impulse magnitude =
+-- min(finalAmount * SCALE, MAX); direction = hitDirection tilted toward -Y by
+-- RAGDOLL_IMPULSE_DOWN_BIAS; applied to the Torso via ApplyImpulseAtPosition at
+-- RAGDOLL_IMPULSE_HEIGHT_OFFSET studs ABOVE it, so the off-centre shove tips the body
+-- over instead of sliding it. AKS-74 is tuned to knock the body over without launching
+-- it; give a future shotgun/launcher a big SCALE + MAX for flight.
+Constants.RAGDOLL_IMPULSE_DEFAULT   = { SCALE = 4.5, MAX = 320 }
+Constants.RAGDOLL_WEAPON_IMPULSE = {
+    AKS74  = { SCALE = 4.5, MAX = 320 },  -- firm topple, no flight
+    -- AR15 = { SCALE = 4.2, MAX = 300 },
+    -- FUTURE_SHOTGUN = { SCALE = 12, MAX = 1100 },  -- sends the body flying
+}
+Constants.RAGDOLL_IMPULSE_DOWN_BIAS      = 0.1    -- tilt toward -Y so the body commits to falling
+Constants.RAGDOLL_IMPULSE_HEIGHT_OFFSET  = 1.2    -- studs above the Torso the shove is applied (topple lever arm)
+Constants.RAGDOLL_MAX_IMPULSE            = 1200   -- RagdollService hard safety ceiling (per-weapon MAX is the real limit)
+
+-- BallSocketConstraint.UpperAngle per converted joint (degrees). A joint not listed
+-- (RootJoint) uses RAGDOLL_BALLSOCKET_DEFAULT_ANGLE. Loose hips/shoulders + a loose
+-- torso↔root link let the rig actually fall over instead of folding while upright.
+Constants.RAGDOLL_BALLSOCKET_DEFAULT_ANGLE = 100
+Constants.RAGDOLL_JOINT_ANGLES = {
+    Neck               = 45,
+    ["Left Shoulder"]  = 115,
+    ["Right Shoulder"] = 115,
+    ["Left Hip"]       = 115,
+    ["Right Hip"]      = 115,
+}
+-- While ragdolled, drop CanCollide on the arms + legs so the collidable Torso slumps to
+-- the ground instead of the rig balancing on rigid legs. Restored on Restore().
+Constants.RAGDOLL_LIMB_NONCOLLIDE = true
 
 -- Reference gunplay tuning, 2026-09-09. Angles in degrees; rates per second.
 Constants.CAMERA_RECOIL_SPRING = 18
