@@ -136,6 +136,22 @@ local viewRecoilCFrame: CFrame = CFrame.new()
 local vmFreeAimNormalized: Vector2 = Vector2.zero
 local vmFreeAimBlended:    Vector2 = Vector2.zero
 
+-- Per-weapon free-aim feel (blend speed, track factor, mouse-inertia gain/max), resolved
+-- on equip from Constants.FREE_AIM_PROFILES. DEFAULT until a weapon is equipped.
+local vmFreeAimProfile: { [string]: any } = (Constants.FREE_AIM_PROFILES :: any).DEFAULT
+local function resolveFreeAimProfile(weaponName: string?)
+    local profiles = Constants.FREE_AIM_PROFILES :: any
+    local override = (weaponName ~= nil) and profiles[weaponName] or nil
+    if override == nil then
+        vmFreeAimProfile = profiles.DEFAULT
+        return
+    end
+    local merged: { [string]: any } = {}
+    for k, v in profiles.DEFAULT do merged[k] = v end
+    for k, v in override do merged[k] = v end
+    vmFreeAimProfile = merged
+end
+
 -- Mouse inertia state: velocity accumulated from raw mouse delta each frame, then damped.
 -- vmMouseInertiaDelta: latest delta pushed by GunController via SetMouseInertia().
 -- vmMouseInertia:      running velocity (integrated + clamped + damped each RenderStepped).
@@ -738,6 +754,27 @@ function ViewModelController.PlayMuzzleFlash(): ()
     end
 end
 
+-- Returns the world CFrame of the resolved MuzzleAttachment, or nil if there is no
+-- current viewmodel / muzzle. GunController uses this for Tarkov-style firing: the
+-- attachment sits on the viewmodel, which is rotated toward the free-aim reticle, so its
+-- LookVector is "where the gun is actually pointing". Lazily runs muzzle setup once.
+function ViewModelController.GetMuzzleWorldCFrame(): CFrame?
+    if ViewModelController.model == nil then
+        return nil
+    end
+    local att = muzzleFx.attachment
+    if att == nil or att.Parent == nil or muzzleFx.weaponName ~= equippedWeaponName then
+        if not setupMuzzleFx(equippedWeaponName) then
+            return nil
+        end
+        att = muzzleFx.attachment
+    end
+    if att == nil or att.Parent == nil then
+        return nil
+    end
+    return att.WorldCFrame
+end
+
 -- ============================================================
 -- Public methods — weapon lifecycle
 -- ============================================================
@@ -749,6 +786,7 @@ function ViewModelController:init()
     clearEquipConnections()
     clearAdsConnections()
     clearMuzzleFx()  -- drop muzzle FX refs; instances die with the model destroyed below
+    resolveFreeAimProfile(nil)  -- back to the DEFAULT free-aim feel while holstered
     -- Stop and destroy all weapon animation tracks.
     if weaponEquipTrack then
         weaponEquipTrack:Stop()
@@ -1263,6 +1301,9 @@ function ViewModelController:EquipWeapon(weaponName: string)
     -- only; failure is non-fatal and warns once. PlayMuzzleFlash() also re-runs this lazily.
     setupMuzzleFx(weaponName)
 
+    -- Resolve the per-weapon free-aim feel profile for the RenderStepped lean/inertia.
+    resolveFreeAimProfile(weaponName)
+
     -- Load third-person animation tracks on the character's Humanoid.Animator.
     -- These overlay movement animations on the character body (visible in third-person
     -- and by other players).  Runs regardless of current camera perspective.
@@ -1694,20 +1735,21 @@ function ViewModelController:Start()
             targetWeight = Constants.FREE_AIM_HIP_WEIGHT
         end
         vmInertiaCurrent = vmInertiaCurrent
-            + (targetWeight - vmInertiaCurrent) * math.min(1, dt * Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED)
+            + (targetWeight - vmInertiaCurrent) * math.min(1, dt * (vmFreeAimProfile.VIEWMODEL_BLEND_SPEED :: number))
 
         -- Mouse inertia: integrate delta, clamp magnitude, then damp.
         if Constants.FREE_AIM_MOUSE_INERTIA_ENABLED then
             if not inADS then
-                vmMouseInertia = vmMouseInertia
-                    + vmMouseInertiaDelta * Constants.FREE_AIM_MOUSE_INERTIA_GAIN
+                local inertiaGain = vmFreeAimProfile.MOUSE_INERTIA_GAIN :: number
+                local inertiaMax  = vmFreeAimProfile.MOUSE_INERTIA_MAX :: number
+                vmMouseInertia = vmMouseInertia + vmMouseInertiaDelta * inertiaGain
                 local inertMag = vmMouseInertia.Magnitude
-                if inertMag > Constants.FREE_AIM_MOUSE_INERTIA_MAX then
-                    vmMouseInertia = vmMouseInertia * (Constants.FREE_AIM_MOUSE_INERTIA_MAX / inertMag)
+                if inertMag > inertiaMax then
+                    vmMouseInertia = vmMouseInertia * (inertiaMax / inertMag)
                 end
                 vmMouseInertia = vmMouseInertia:Lerp(
                     Vector2.zero,
-                    math.min(1, dt * Constants.FREE_AIM_MOUSE_INERTIA_DAMPING)
+                    math.min(1, dt * (vmFreeAimProfile.MOUSE_INERTIA_DAMPING :: number))
                 )
             else
                 vmMouseInertia = vmMouseInertia:Lerp(
@@ -1721,13 +1763,13 @@ function ViewModelController:Start()
         if inADS then
             vmFreeAimBlended = vmFreeAimBlended:Lerp(
                 Vector2.zero,
-                math.min(1, dt * Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED)
+                math.min(1, dt * (vmFreeAimProfile.VIEWMODEL_BLEND_SPEED :: number))
             )
             freeAimCF = CFrame.new()
         else
             vmFreeAimBlended = vmFreeAimBlended:Lerp(
                 vmFreeAimNormalized,
-                math.min(1, dt * Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED)
+                math.min(1, dt * (vmFreeAimProfile.VIEWMODEL_BLEND_SPEED :: number))
             )
             local w = vmInertiaCurrent
 
@@ -1744,7 +1786,7 @@ function ViewModelController:Start()
             -- offset ([-1,1] at the deadzone edge) into the real angle that edge subtends at
             -- the current FOV/viewport, scaled by FREE_AIM_VIEWMODEL_TRACK_FACTOR.
             -- TRACK_FACTOR == 0 restores the old fixed-degree behaviour.
-            local track = Constants.FREE_AIM_VIEWMODEL_TRACK_FACTOR :: number
+            local track = vmFreeAimProfile.VIEWMODEL_TRACK_FACTOR :: number
             local freeAimYaw:   number
             local freeAimPitch: number
             if track > 0 then
@@ -1753,8 +1795,10 @@ function ViewModelController:Start()
                 local maxAimAngle: number
                 if cam and pxHalfH > 0 then
                     local halfFov = math.rad(cam.FieldOfView) * 0.5
+                    -- Use the per-weapon deadzone radius so the muzzle angle matches the
+                    -- radius FreeAimController normalises the offset against.
                     maxAimAngle = math.atan(
-                        (Constants.FREE_AIM_RADIUS_PIXELS :: number) / pxHalfH * math.tan(halfFov)
+                        (vmFreeAimProfile.RADIUS_PIXELS :: number) / pxHalfH * math.tan(halfFov)
                     )
                 else
                     maxAimAngle = math.rad(Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES)

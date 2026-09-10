@@ -1,5 +1,32 @@
 # Technical debt and unresolved migration questions
 
+## Aiming / free-aim / cursor — Tarkov-style hipfire (Studio verification: YES, required)
+
+Hipfire now fires from the viewmodel muzzle in the gun's pointing direction, per-weapon
+free-aim feel profiles exist, and the OS cursor is locked/hidden during weapon use. This
+**wires DEBT-063** (previously: "free-aim GetAimRay is a forward-declared API, not wired
+into firing"). Client-only; no server/remote/damage/ammo change. Open risks:
+
+- **Not runtime-verified.** MCP `require()` gets a separate module context, so the muzzle
+  direction, cursor lock, and per-gun feel could not be exercised. Needs an in-game test.
+- **Yaw sign is a guess.** `ViewModelController` rotates the viewmodel with
+  `freeAimYaw = -vmFreeAimBlended.X * angle`. If the gun points *away* from the reticle in
+  Studio, flip to `+vmFreeAimBlended.X`.
+- **Fire origin is the FP viewmodel muzzle**, a cosmetic rig ~2-3 studs from the camera and
+  scaled/offset for screen framing — so close-range shots have slight parallax vs. a
+  camera-centre ray (intended Tarkov behaviour, but tune `MuzzleAttachment` placement per
+  weapon; the AKS-74 attachment is still auto-created along the barrel's longest axis).
+- **`FREE_AIM_FIRE_FROM_MUZZLE` requires a resolvable `MuzzleAttachment`.** With no muzzle,
+  firing silently falls back to the old camera+reticle ray.
+- **Cursor lock coexistence with `MovementController`.** `GunController` restores the
+  pre-lock `MouseBehavior`, so if MovementController's LeftControl lock was on it stays
+  LockCenter; if it was off, a 1-frame flicker to Default is possible when unequipping in a
+  menu. Not observed, not fixed.
+- Per-gun `FREE_AIM_PROFILES` values (AKS74/AR15) are first-guess stubs.
+- Recoil/spread/camera-kick: `CameraRecoil.lua` (parallel change) now exists; its
+  `camera.CFrame` writes are separate from this work.
+- No dynamic crosshair / spread UI.
+
 ## Viewmodel / FX — Stage 1 muzzle flash (Studio verification: Yes, still required for visuals/tuning)
 
 Local first-person muzzle FX (`ViewModelController` + `Constants.MUZZLE_FX`). Runtime behaviour

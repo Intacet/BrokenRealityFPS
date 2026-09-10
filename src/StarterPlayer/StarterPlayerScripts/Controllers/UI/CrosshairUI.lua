@@ -60,9 +60,27 @@ local hitmarkerBars : { Frame } = {}
 
 local freeAimEnabled: boolean = false
 
+-- Visibility inputs: the round phase allows the reticle, and whether we are currently
+-- hip-firing (in which case the fixed centre crosshair is hidden per Constants).
+local phaseShowsReticle: boolean = false
+local hipfireActive:     boolean = false
+
 -- ============================================================
 -- Private helpers
 -- ============================================================
+
+-- Applies the current visibility state. barrelDot (the floating gun-direction reticle)
+-- shows whenever the phase allows it. crosshairImg (fixed centre) additionally hides
+-- while hip-firing when FREE_AIM_HIDE_CENTER_CROSSHAIR_HIPFIRE is set.
+local function updateVisibility()
+    if not crosshairImg or not barrelDot then
+        return
+    end
+    barrelDot.Visible = phaseShowsReticle
+    local hideCenter = hipfireActive
+        and (Constants.FREE_AIM_HIDE_CENTER_CROSSHAIR_HIPFIRE :: boolean)
+    crosshairImg.Visible = phaseShowsReticle and not hideCenter
+end
 
 local function makeBar(
     parent   : Instance,
@@ -156,10 +174,9 @@ end
 function CrosshairUI:Start()
     RoundStateChanged.OnClientEvent:Connect(function(raw: any)
         local payload = raw :: { phase: string }
-        local show    = (payload.phase == Constants.Phase.PREP
-                      or payload.phase == Constants.Phase.ACTIVE)
-        crosshairImg.Visible = show
-        barrelDot.Visible    = show
+        phaseShowsReticle = (payload.phase == Constants.Phase.PREP
+                          or payload.phase == Constants.Phase.ACTIVE)
+        updateVisibility()
     end)
 
     Logger.debug("[CrosshairUI] Started")
@@ -192,6 +209,17 @@ function CrosshairUI:SetFreeAimEnabled(enabled: boolean): ()
             dot.Position = UDim2.new(0.5, 0, 0.5, 0)
         end
     end
+end
+
+-- Called each frame by GunController: true while hip-firing (armed, not ADS). Hides the
+-- fixed centre crosshair so only the floating gun-direction reticle shows during hipfire.
+function CrosshairUI:SetHipfireActive(active: boolean): ()
+    assert(typeof(active) == "boolean", "[CrosshairUI] SetHipfireActive: expected boolean")
+    if active == hipfireActive then
+        return
+    end
+    hipfireActive = active
+    updateVisibility()
 end
 
 -- ============================================================

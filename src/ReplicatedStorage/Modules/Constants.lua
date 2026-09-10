@@ -1160,6 +1160,71 @@ Constants.FREE_AIM_ENABLED                        = true
 -- Debug: Logger.debug on weight changes and large-delta resets.
 Constants.FREE_AIM_DEBUG                          = false
 
+-- Tarkov-style firing: when true and hip-firing with a resolvable muzzle, GunController
+-- fires from the viewmodel's MuzzleAttachment along the direction the (free-aim-rotated)
+-- gun is actually pointing, instead of a camera ray through the reticle pixel offset.
+-- Falls back to the camera path when there is no muzzle. ADS always fires dead-centre.
+-- Server origin/direction validation + re-raycast are unchanged; no remote/ammo/damage change.
+Constants.FREE_AIM_FIRE_FROM_MUZZLE               = true
+
+-- Hide the fixed centre crosshair while hip-firing (only the floating gun-direction reticle
+-- shows). The centre crosshair returns for ADS. See CrosshairUI:SetHipfireActive.
+Constants.FREE_AIM_HIDE_CENTER_CROSSHAIR_HIPFIRE  = true
+
+-- First-person aim/cursor lock. GunController pins + hides the OS pointer during active
+-- first-person weapon use so the white cursor is no longer an apparent aim point, and
+-- restores it outside gameplay. MouseBehavior LockCenter also feeds mouse delta to the
+-- camera + FreeAimController exactly as before. Coexists with MovementController's own
+-- LeftControl mouse-lock (both want LockCenter).
+Constants.FIRST_PERSON_AIM = {
+    ENABLED                   = true,
+    LOCK_MOUSE_TO_CENTER      = true,
+    HIDE_DEFAULT_CURSOR       = true,
+    SHOW_CUSTOM_CROSSHAIR     = true,
+    RESTORE_MOUSE_ON_INACTIVE = true,
+    DEBUG                     = true,
+}
+
+-- Per-weapon free-aim "weight / inertia" feel. DEFAULT holds every override-able knob;
+-- FREE_AIM_PROFILES[<weaponName>] overrides only the keys it lists (rest fall back to
+-- DEFAULT). weaponName matches ViewModelController:EquipWeapon / Constants.DEFAULT_VIEWMODEL_WEAPON.
+-- The non-listed FREE_AIM_* constants below stay global (ADS behaviour, input deadzone, etc.).
+Constants.FREE_AIM_PROFILES = {
+    DEFAULT = {
+        RADIUS_PIXELS          = 55,     -- how far the reticle / gun can drift from centre
+        MOUSE_GAIN             = 0.26,   -- reticle responsiveness to raw mouse delta (hip)
+        CROSSHAIR_MAX_SPEED_PIXELS = 420,
+        CROSSHAIR_SMOOTH_SPEED = 9,      -- reticle position lag (lower = more trailing)
+        RECENTER_SPEED         = 7,      -- pull back to centre when idle
+        RECENTER_DELAY         = 0.08,
+        VIEWMODEL_BLEND_SPEED  = 13,     -- gun rotation lag toward the reticle
+        VIEWMODEL_TRACK_FACTOR = 0.92,   -- how fully the muzzle lands on the reticle (0..1)
+        MOUSE_INERTIA_GAIN     = 0.10,   -- swing/weight from fast mouse motion
+        MOUSE_INERTIA_MAX      = 26,
+        MOUSE_INERTIA_DAMPING  = 12,
+    },
+    -- AKS-74 (5.45 rifle): medium weight, a touch more drift + swing.
+    AKS74 = {
+        RADIUS_PIXELS          = 60,
+        MOUSE_GAIN             = 0.26,
+        CROSSHAIR_SMOOTH_SPEED = 8.5,
+        VIEWMODEL_BLEND_SPEED  = 12,
+        VIEWMODEL_TRACK_FACTOR = 0.92,
+        MOUSE_INERTIA_GAIN     = 0.12,
+        MOUSE_INERTIA_MAX      = 30,
+    },
+    -- AR-15 (5.56 carbine): lighter, snappier, less drift.
+    AR15 = {
+        RADIUS_PIXELS          = 50,
+        MOUSE_GAIN             = 0.28,
+        CROSSHAIR_SMOOTH_SPEED = 10,
+        VIEWMODEL_BLEND_SPEED  = 15,
+        VIEWMODEL_TRACK_FACTOR = 0.9,
+        MOUSE_INERTIA_GAIN     = 0.09,
+        MOUSE_INERTIA_MAX      = 22,
+    },
+}
+
 -- Hipfire deadzone radius in pixels (how far the crosshair can drift from center).
 Constants.FREE_AIM_RADIUS_PIXELS                  = 55
 

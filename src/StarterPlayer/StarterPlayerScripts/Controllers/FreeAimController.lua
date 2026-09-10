@@ -48,6 +48,10 @@ local isAiming:       boolean = false
 local isSprinting:    boolean = false
 local isReloading:    boolean = false
 
+-- Per-weapon feel profile (weight / inertia knobs), resolved on weapon change from
+-- Constants.FREE_AIM_PROFILES. DEFAULT until a weapon is equipped.
+local profile: { [string]: any } = (Constants.FREE_AIM_PROFILES :: any).DEFAULT
+
 -- Cleanup table for RBXScriptConnections created in Init().
 local _connections: { RBXScriptConnection } = {}
 
@@ -66,11 +70,12 @@ local function isSuppressed(): boolean
 end
 
 -- Returns the active deadzone radius in pixels based on ADS state.
+-- Hipfire radius is per-weapon (profile.RADIUS_PIXELS); ADS stays global.
 local function activeRadius(): number
     if isAiming then
         return Constants.FREE_AIM_ADS_RADIUS_PIXELS
     end
-    return Constants.FREE_AIM_RADIUS_PIXELS
+    return profile.RADIUS_PIXELS :: number
 end
 
 -- Clamps vector v to a circle of radius r.  Returns v unchanged if within radius.
@@ -121,13 +126,13 @@ function FreeAimController:Init(): ()
 
         -- Input deadzone: ignore sub-threshold jitter.
         if delta.Magnitude >= (Constants.FREE_AIM_CROSSHAIR_INPUT_DEADZONE_PIXELS :: number) then
-            -- ADS uses a near-zero gain so sights feel almost locked.
+            -- ADS uses a near-zero global gain; hipfire gain is per-weapon.
             local gain: number = isAiming
                 and (Constants.FREE_AIM_ADS_MOUSE_GAIN :: number)
-                or  (Constants.FREE_AIM_MOUSE_GAIN :: number)
+                or  (profile.MOUSE_GAIN :: number)
 
             -- Max speed clamp: prevent fast flicks from instantly flinging the dot to the edge.
-            local maxTravel = (Constants.FREE_AIM_CROSSHAIR_MAX_SPEED_PIXELS :: number) * dt
+            local maxTravel = (profile.CROSSHAIR_MAX_SPEED_PIXELS :: number) * dt
             local contribution = delta * gain
             if contribution.Magnitude > maxTravel then
                 contribution = contribution * (maxTravel / contribution.Magnitude)
@@ -140,20 +145,20 @@ function FreeAimController:Init(): ()
             timeSinceLastInput += dt
         end
 
-        -- Recenter: gently pull offset back to zero after a short idle period.
+        -- Recenter: gently pull offset back to zero after a short idle period (per-weapon).
         if (Constants.FREE_AIM_RECENTER_ENABLED :: boolean)
-            and timeSinceLastInput >= (Constants.FREE_AIM_RECENTER_DELAY :: number)
+            and timeSinceLastInput >= (profile.RECENTER_DELAY :: number)
         then
             aimOffset = aimOffset:Lerp(
                 Vector2.zero,
-                math.min(1, dt * (Constants.FREE_AIM_RECENTER_SPEED :: number))
+                math.min(1, dt * (profile.RECENTER_SPEED :: number))
             )
         end
 
-        -- Smooth the crosshair position; this is what CrosshairUI displays.
+        -- Smooth the crosshair position; this is what CrosshairUI displays (per-weapon lag).
         smoothedOffset = smoothedOffset:Lerp(
             aimOffset,
-            math.min(1, dt * (Constants.FREE_AIM_CROSSHAIR_SMOOTH_SPEED :: number))
+            math.min(1, dt * (profile.CROSSHAIR_SMOOTH_SPEED :: number))
         )
     end)
     table.insert(_connections, renderConn)
@@ -167,6 +172,7 @@ function FreeAimController:Init(): ()
         isAiming           = false
         isSprinting        = false
         isReloading        = false
+        profile            = (Constants.FREE_AIM_PROFILES :: any).DEFAULT
         Logger.debug("[FreeAimController] Offset and state reset on character respawn")
     end)
     table.insert(_connections, respawnConn)
@@ -188,12 +194,32 @@ function FreeAimController:IsEnabled(): boolean
     return enabled
 end
 
--- Notifies whether a weapon is currently equipped in the player's hands.
--- Free aim is suppressed (offsets lerp to zero) when no weapon is equipped.
+-- Sets the currently equipped weapon by name (nil = holstered). Resolves the per-weapon
+-- feel profile (Constants.FREE_AIM_PROFILES[name] merged over DEFAULT) and toggles the
+-- equipped flag. Free aim is suppressed (offsets lerp to zero) when name is nil.
+function FreeAimController:SetWeapon(name: string?): ()
+    assert(name == nil or typeof(name) == "string",
+        "[FreeAimController] SetWeapon: expected string or nil")
+    weaponEquipped = name ~= nil
+
+    local profiles = Constants.FREE_AIM_PROFILES :: any
+    local override = (name ~= nil) and profiles[name] or nil
+    if override == nil then
+        profile = profiles.DEFAULT
+    else
+        local merged: { [string]: any } = {}
+        for k, v in profiles.DEFAULT do merged[k] = v end
+        for k, v in override do merged[k] = v end
+        profile = merged
+    end
+    Logger.debug("[FreeAimController] Weapon: " .. tostring(name))
+end
+
+-- Back-compat shim for callers that only know equipped-or-not. Uses the default viewmodel
+-- weapon name when equipped.
 function FreeAimController:SetWeaponEquipped(isEquipped: boolean): ()
     assert(typeof(isEquipped) == "boolean", "[FreeAimController] SetWeaponEquipped: expected boolean")
-    weaponEquipped = isEquipped
-    Logger.debug("[FreeAimController] Weapon equipped: " .. tostring(isEquipped))
+    self:SetWeapon(isEquipped and (Constants.DEFAULT_VIEWMODEL_WEAPON :: string) or nil)
 end
 
 -- Notifies whether the player is currently aiming down sights (ADS).

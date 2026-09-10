@@ -70,6 +70,38 @@ out of scope by design. See `docs/DAMAGE_TEST_DUMMY_PLAN.md`.
 - Not installed in Studio, not committed, not Studio-verified. Intentional live change:
   PvP headshots now do ×2 (`Constants.DAMAGE_REGION_MULTIPLIERS`).
 
+## Tarkov-style hipfire: bullets from the muzzle + cursor lock (not in-game verified)
+
+Client-only, no server / remote / ammo / damage / hit-validation change.
+
+- **Bullets leave the muzzle, along where the gun points.** `GunController`'s hipfire
+  raycast now originates at the viewmodel `MuzzleAttachment` and travels its LookVector
+  (`ViewModelController.GetMuzzleWorldCFrame()`), instead of a camera ray through the
+  reticle pixel offset. Because the viewmodel is already rotated toward the free-aim
+  reticle (`FREE_AIM_VIEWMODEL_TRACK_FACTOR`), that direction *is* "where the gun points".
+  ADS and "no muzzle" fall back to the camera path. Gated by
+  `Constants.FREE_AIM_FIRE_FROM_MUZZLE`. Server origin/direction validation + re-raycast
+  unchanged (muzzle origin is ~2-3 studs from camera, well inside `SHOT_ORIGIN_MAX_DISTANCE`).
+  This wires the long-standing `DEBT-063` (free-aim → firing) — see TECHNICAL_DEBT.
+- **Per-weapon free-aim feel.** New `Constants.FREE_AIM_PROFILES` (`DEFAULT` + `AKS74` +
+  `AR15`) overriding the weight/inertia knobs (deadzone radius, mouse gain, reticle lag,
+  viewmodel blend speed, track factor, mouse-inertia gain/max) per gun. `FreeAimController`
+  gained `SetWeapon(name)` (`SetWeaponEquipped` kept as a shim); `ViewModelController`
+  resolves its own profile on equip. Non-listed `FREE_AIM_*` constants stay global.
+- **White cursor gone during weapon use.** New `Constants.FIRST_PERSON_AIM` table.
+  `GunController` sets `MouseBehavior = LockCenter` + `MouseIconEnabled = false` while armed
+  in the ACTIVE phase (edge-triggered), and restores on holster / respawn / phase change —
+  restoring the pre-lock `MouseBehavior` so `MovementController`'s own LeftControl mouse-lock
+  is preserved, not clobbered.
+- **Centre crosshair hidden in hipfire.** `CrosshairUI:SetHipfireActive` — only the floating
+  gun-direction reticle (`barrelDot`) shows while hip-firing; the fixed centre crosshair
+  returns for ADS. Gated by `Constants.FREE_AIM_HIDE_CENTER_CROSSHAIR_HIPFIRE`.
+- Compiles, all client controllers load clean, `rojo build` passes. **Runtime not
+  MCP-verifiable** (module require-context split): the yaw sign of the muzzle rotation, the
+  in-game feel, and the cursor lock need an in-game test — press 1, hip-fire while moving
+  the mouse, confirm bullets land where the gun points and the OS pointer is gone. If the
+  gun points *away* from the reticle, flip the `freeAimYaw` sign in ViewModelController.
+
 ## Stage 1 first-person muzzle FX (MCP-verified in a Studio Play session)
 
 - New local, visual-only first-person muzzle flash for the viewmodel weapon:

@@ -130,9 +130,57 @@ local wasReloading: boolean = false
 -- Compared each RenderStepped to detect changes; SetLocomotionState is called only on edge.
 local lastLocomotionState: string = "Idle"
 
+-- First-person aim cursor lock (Constants.FIRST_PERSON_AIM). Active while a weapon is
+-- equipped in the ACTIVE phase; pins + hides the OS pointer so the white cursor is no
+-- longer an apparent aim point.  Edge-triggered from the RenderStepped loop and forced
+-- off on holster / respawn.
+local firstPersonAimActive: boolean = false
+local savedMouseBehavior: Enum.MouseBehavior? = nil
+
 -- ============================================================
 -- Private helpers
 -- ============================================================
+
+-- Enables/disables the first-person aim cursor lock. Idempotent; only touches
+-- MouseBehavior/MouseIconEnabled on a real state change. On release it restores the
+-- MouseBehavior that was in effect when it locked, so MovementController's own
+-- LeftControl mouse-lock (LockCenter) is preserved rather than clobbered to Default.
+local function applyFirstPersonAim(active: boolean)
+    local cfg = Constants.FIRST_PERSON_AIM :: any
+    if cfg.ENABLED ~= true then
+        return
+    end
+    if active == firstPersonAimActive then
+        return
+    end
+    firstPersonAimActive = active
+
+    if active then
+        if cfg.HIDE_DEFAULT_CURSOR == true then
+            UserInputService.MouseIconEnabled = false
+        end
+        if cfg.LOCK_MOUSE_TO_CENTER == true then
+            savedMouseBehavior = UserInputService.MouseBehavior
+            UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+        end
+        if cfg.DEBUG == true then
+            Logger.debug("[GunController] first-person aim lock ON")
+        end
+    else
+        if cfg.RESTORE_MOUSE_ON_INACTIVE == true then
+            UserInputService.MouseIconEnabled = true
+            if savedMouseBehavior ~= nil then
+                UserInputService.MouseBehavior = savedMouseBehavior
+                savedMouseBehavior = nil
+            else
+                UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+            end
+        end
+        if cfg.DEBUG == true then
+            Logger.debug("[GunController] first-person aim lock OFF")
+        end
+    end
+end
 
 -- Applies a spread cone perturbation to a unit direction vector.
 -- spreadDeg is the half-cone angle in degrees.
@@ -266,11 +314,25 @@ function GunController:Start()
 
         -- ── Spread-perturbed raycast ──────────────────────────────────────────
         local camera    = workspace.CurrentCamera
-        local origin    = camera.CFrame.Position
-        -- Use the same screen-space point as the visible free-aim reticle.
-        local offset = if Constants.FREE_AIM_ENABLED then FreeAimController:GetSmoothedAimOffset() else Vector2.zero
-        local aimPoint = camera.ViewportSize / 2 + offset
-        local baseDir = camera:ViewportPointToRay(aimPoint.X, aimPoint.Y).Direction
+        local origin:  Vector3
+        local baseDir: Vector3
+        -- Tarkov-style hipfire: the bullet leaves the viewmodel muzzle, travelling the way
+        -- the free-aim-rotated gun actually points. ADS and "no muzzle" fall back to the
+        -- camera ray through the reticle offset. Server origin/direction validation and the
+        -- authoritative re-raycast are unchanged either way.
+        local muzzleCF: CFrame? = nil
+        if Constants.FREE_AIM_FIRE_FROM_MUZZLE and not ViewModelController:IsAiming() then
+            muzzleCF = ViewModelController.GetMuzzleWorldCFrame()
+        end
+        if muzzleCF ~= nil then
+            origin  = muzzleCF.Position
+            baseDir = muzzleCF.LookVector
+        else
+            origin = camera.CFrame.Position
+            local offset = if Constants.FREE_AIM_ENABLED then FreeAimController:GetSmoothedAimOffset() else Vector2.zero
+            local aimPoint = camera.ViewportSize / 2 + offset
+            baseDir = camera:ViewportPointToRay(aimPoint.X, aimPoint.Y).Direction
+        end
         local spread    = computeSpread(feel)
         local direction = applySpread(baseDir, spread)
 
@@ -427,7 +489,18 @@ function GunController:Start()
             CrosshairUI:SetFreeAimEnabled(
                 FreeAimController:IsEnabled() and equippedWeaponName ~= nil
             )
+            -- Hide the fixed centre crosshair while hip-firing (only the floating gun-
+            -- direction reticle shows); it returns for ADS.
+            CrosshairUI:SetHipfireActive(
+                equippedWeaponName ~= nil and not ViewModelController:IsAiming()
+            )
         end
+
+        -- First-person aim cursor lock: active while armed in the ACTIVE phase.
+        applyFirstPersonAim(
+            equippedWeaponName ~= nil
+            and MatchController:GetPhase() == Constants.Phase.ACTIVE
+        )
         -- Task A/B: sync reload state to MovementController each frame so the stance POV
         -- reload multiplier stays accurate without creating a VMC→MC dependency.
         local nowReloading = ViewModelController:GetIsReloading()
@@ -462,10 +535,12 @@ function GunController:Start()
             -- to the character's Right Arm (visible to self in third-person and
             -- to other players regardless of camera mode).
             WeaponEquipState:FireServer(Constants.DEFAULT_VIEWMODEL_WEAPON, true)
-            -- Notify FreeAimController so the free-aim deadzone activates.
+            -- Notify FreeAimController so the free-aim deadzone activates + resolves the
+            -- per-weapon feel profile.
             if Constants.FREE_AIM_ENABLED then
-                FreeAimController:SetWeaponEquipped(true)
+                FreeAimController:SetWeapon(equippedWeaponName)
             end
+            applyFirstPersonAim(MatchController:GetPhase() == Constants.Phase.ACTIVE)
             -- Switch movement animations to the armed set.
             MovementController.SetEquippedWeaponName(Constants.MOVEMENT_ANIMATION_SET_AR15)
             Logger.debug("[GunController] Equipped: " .. Constants.DEFAULT_VIEWMODEL_WEAPON)
@@ -484,11 +559,12 @@ function GunController:Start()
             WeaponEquipState:FireServer(Constants.DEFAULT_VIEWMODEL_WEAPON, false)
             -- Notify FreeAimController and reset the offset on holster.
             if Constants.FREE_AIM_ENABLED then
-                FreeAimController:SetWeaponEquipped(false)
+                FreeAimController:SetWeapon(nil)
                 if Constants.FREE_AIM_RESET_ON_HOLSTER then
                     FreeAimController:ResetOffset()
                 end
             end
+            applyFirstPersonAim(false)
             Logger.debug("[GunController] Holstered weapon")
         end
     end)
@@ -509,9 +585,10 @@ function GunController:Start()
         MovementController.SetEquippedWeaponName(nil)
         -- Reset free-aim state on respawn: weapon is holstered, offset is cleared.
         if Constants.FREE_AIM_ENABLED then
-            FreeAimController:SetWeaponEquipped(false)
+            FreeAimController:SetWeapon(nil)
             FreeAimController:ResetOffset()
         end
+        applyFirstPersonAim(false)
         Logger.debug("[GunController] equippedWeaponName cleared on respawn (weapon holstered)")
     end)
     table.insert(_connections, respawnConn)
