@@ -1,5 +1,35 @@
 # Changelog
 
+## Test-area damage dummies + a blood realism pass
+
+- **Dummies in the test area.** `Constants.DEV_TEST_AREA.SPAWN_DUMMIES` (default true) —
+  `TestAreaBuilder` builds `DUMMY_COUNT` (3) standard R6 rigs downrange of the firing line,
+  facing it, tagged `Constants.TAG_DAMAGE_DUMMY` + a `BR_TestAreaDummy` attribute so
+  `DummyService` picks them up (damage / blood / hit reactions / ragdoll / respawn) and the
+  builder can sweep its own rigs — and `DummyService` respawn clones, which inherit the
+  attribute — on every rebuild. Rig geometry mirrors `scripts/Build-TestDummy.luau`. No
+  new gameplay code; `DummyService` is untouched. `CollectionService` added to
+  `TestAreaBuilder`'s requires. Studio-verified: the rig builds as a valid tagged R6
+  Humanoid model (7 parts, 6 Motor6Ds, HP 100, PrimaryPart set).
+- **Blood realism pass** (`BloodController` + `Constants.BLOOD_*`, rewritten):
+  - Burst is now **two emitters** per pooled rig: a fine **MIST** (built-in soft smoke
+    sprite, tinted, sprays back toward the shooter and tilts up) + heavier **DROPLETS**
+    (blank-square flecks, narrower cone, ~5× the mist gravity so they arc and fall). Both
+    fade base→dark over each particle's life.
+  - Darker two-tone palette: `BLOOD_COLOR` `(112,6,6)` → `(104,12,12)`, new
+    `BLOOD_COLOR_DARK` `(56,8,8)`.
+  - **Surface marks** are now irregular (random footprint aspect, random rotation about
+    the surface normal, per-mark colour lerp toward the dark tone, randomised opacity),
+    smaller (≤ ~1.9 studs vs the old 4.0), each hit also drops a few tiny **satellite
+    spatter spots**, and marks **fade in** on birth and **fade out** over the last 5 s
+    instead of popping. Ray directions are biased toward the exit direction + downward
+    (floor pooling) rather than fully random.
+  - Server contract unchanged (`BloodEffect` still sends only position/dir/intensity/type;
+    zero server instances). Hard caps kept: 12 pooled bursts, 56-mark ring buffer, global
+    `BR_BloodGlobalEnabled` kill switch. Old flat `BLOOD_PARTICLES_*` keys removed.
+  - Studio-verified: 2 emitters per rig, 40 rapid bursts + ~800 mark adds with no error,
+    ring buffer holds at the cap, fade pass runs.
+
 ## Impact FX visibility bump + cursor hidden whenever armed
 
 - **Impact FX chips/sparks were too small to see.** Bumped `Constants.BULLET_IMPACT_FX`

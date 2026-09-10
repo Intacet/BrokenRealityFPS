@@ -165,9 +165,16 @@ Open items / deferred:
   one grid, not separated — fine for solo movement/weapon testing, not for team-flow tests.
 - **Material-specific impact logic is NOT implemented.** The `MaterialTest` samples are
   visual surfaces only — no per-material impact FX / sound / decal behaviour exists yet.
-- **Moving targets are deferred.** All targets are static anchored parts.
-- **AI / animated target dummies are deferred.** The existing `BR_DamageDummy` /
-  `DummyService` rig is not spawned here; this area has no live-reacting targets.
+- **Moving targets are deferred.** The static neon targets never move.
+- **Damage test dummies are now spawned** (2026-09-10): `DEV_TEST_AREA.SPAWN_DUMMIES`
+  builds `DUMMY_COUNT` tagged R6 rigs downrange (rig geometry mirrors
+  `scripts/Build-TestDummy.luau`); `DummyService` registers them for damage / blood / hit
+  reactions / ragdoll / respawn. They carry `BR_TestAreaDummy` so a rebuild sweeps its own
+  rigs and any `DummyService` respawn clone. Caveats: parented straight to `workspace`
+  (not the test-area folder or a sub-folder), so between a rebuild and the sweep there is a
+  brief window where an old and a new set could co-exist; the rig has no clothing / R15 /
+  animation and no `HumanoidDescription`; DummyService's own service connections are never
+  disconnected (pre-existing). Still **no AI** — the dummies just stand and take hits.
 - **Extraction / loot-loop test area is deferred.** No objective, stash, exfil, or
   inventory props — out of scope for this task.
 - **No global lighting/atmosphere test.** `LightingTest` is self-contained props only;
@@ -204,8 +211,16 @@ table and the Stages 4–6 debt list. Highlights:
 - Hit reactions only render on rigs with no Animator writing `Transform` (the dummy). On
   players the flinch is silently overwritten — the seam for an animation provider is the
   single `applyReaction` function; no provider registry (YAGNI).
-- Blood marks are texture-free flat parts (no splatter texture asset was available);
-  `BloodEffect` is `FireAllClients` with no distance culling.
+- **Blood realism pass (2026-09-10).** `BloodController` now does a two-emitter burst
+  (soft-sprite MIST that sprays back toward the shooter + tilts up, blank-square DROPLETS
+  that arc and fall on stronger gravity) and irregular surface marks (random footprint /
+  rotation / dark-red colour lerp / opacity, a few tiny satellite spatter spots per hit,
+  fade-in then fade-out). New `Constants.BLOOD_*` block (mist/droplet params, satellites,
+  `BLOOD_COLOR_DARK`). Still: marks are texture-free flat parts (no splatter decal asset),
+  no pooling of *marks* (only bursts are pooled — marks are a capped ring buffer of fresh
+  `Part`s), `BloodEffect` is `FireAllClients` with no distance culling, and the whole thing
+  is client-predicted (no server reconciliation). All numbers are first-eyeball guesses —
+  needs a Studio pass shooting a dummy.
 - Dev tooling trusts `RunService:IsStudio()`; `Constants.DEV_USER_IDS` is empty until filled.
 - Ragdoll impulse was retuned down after the owner's first test (was flinging the rig);
   the retune has not been re-tested.

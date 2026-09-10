@@ -2074,6 +2074,15 @@ Constants.DEV_TEST_AREA = {
 
     MATERIAL_TEST_POSITION = Vector3.new(55, 1, 35),
 
+    -- Developer damage-test dummies. TestAreaBuilder builds N tagged R6 rigs
+    -- (Constants.TAG_DAMAGE_DUMMY) so DummyService picks them up — shoot them to test
+    -- damage, blood, hit reactions and ragdoll. They carry a BR_TestAreaDummy attribute
+    -- so a rebuild (and DummyService's respawn clones) can be swept clean.
+    SPAWN_DUMMIES = true,
+    DUMMY_COUNT = 3,
+    DUMMY_SPACING = 8,          -- studs between dummies along the firing line
+    DUMMY_DOWNRANGE = 16,       -- studs in front of SHOOTING_RANGE_START
+
     DEBUG_LABELS = true,
 }
 
@@ -2093,20 +2102,51 @@ Constants.BLOOD_GLOBAL_ATTRIBUTE   = "BR_BloodGlobalEnabled"  -- runtime kill sw
 Constants.BLOOD_REFERENCE_DAMAGE   = 40     -- finalAmount that maps to intensity 1.0
 Constants.BLOOD_MIN_INTENSITY      = 0.25   -- a hit always produces at least this much
 Constants.BLOOD_EFFECT_RATE_LIMIT  = 0.045  -- min seconds between BloodEffect sends per target model
--- Client burst
-Constants.BLOOD_POOL_SIZE            = 12    -- reused Attachment+ParticleEmitter pairs
-Constants.BLOOD_BURST_LIFETIME      = 1.4    -- seconds a pooled burst emitter stays parented before returning to the pool
-Constants.BLOOD_PARTICLES_BASE      = 4      -- emitted particles at intensity 0
-Constants.BLOOD_PARTICLES_PER_INTENSITY = 20 -- extra emitted particles at intensity 1
-Constants.BLOOD_COLOR               = Color3.fromRGB(112, 6, 6)
--- Client surface marks (texture-free: small flat parts flush to the surface)
-Constants.BLOOD_SPLATTER_RAYS       = 5      -- rays cast around the hit point looking for nearby surfaces
-Constants.BLOOD_SPLATTER_RANGE      = 9      -- studs
-Constants.BLOOD_MAX_MARKS           = 40     -- ring buffer; oldest mark is destroyed when full
-Constants.BLOOD_MARK_LIFETIME       = 14     -- seconds before a mark fades and is destroyed
-Constants.BLOOD_MARK_SIZE_MIN       = 1.2    -- studs
-Constants.BLOOD_MARK_SIZE_MAX       = 4.0
-Constants.BLOOD_MARK_THICKNESS      = 0.05
+Constants.BLOOD_COLOR               = Color3.fromRGB(104, 12, 12)  -- fresh
+Constants.BLOOD_COLOR_DARK          = Color3.fromRGB(56, 8, 8)     -- settled / venous — marks & particle tails lerp toward this
+
+-- Client burst: a fine retrograde MIST (soft sprite) + heavier DROPLETS (square) that
+-- arc and fall. Both spray back along -hitDirection, nudged upward.
+Constants.BLOOD_POOL_SIZE            = 12    -- reused burst rigs (2 emitters each)
+Constants.BLOOD_BURST_LIFETIME      = 1.1    -- seconds a rig stays busy before it can be reused
+Constants.BLOOD_MIST_TEXTURE        = "rbxasset://textures/particles/smoke_main.dds"
+Constants.BLOOD_MIST_BASE           = 7      -- mist particles at intensity 0
+Constants.BLOOD_MIST_PER_INTENSITY  = 24     -- extra mist particles at intensity 1
+Constants.BLOOD_MIST_SIZE_START     = 0.05
+Constants.BLOOD_MIST_SIZE_END       = 0.34
+Constants.BLOOD_MIST_LIFETIME_MIN   = 0.16
+Constants.BLOOD_MIST_LIFETIME_MAX   = 0.42
+Constants.BLOOD_MIST_SPEED_MIN      = 12
+Constants.BLOOD_MIST_SPEED_MAX      = 30
+Constants.BLOOD_MIST_SPREAD         = 34     -- half-cone degrees
+Constants.BLOOD_MIST_GRAVITY        = 26
+Constants.BLOOD_DROPLET_BASE           = 3
+Constants.BLOOD_DROPLET_PER_INTENSITY  = 11
+Constants.BLOOD_DROPLET_SIZE_START     = 0.13
+Constants.BLOOD_DROPLET_SIZE_END       = 0.05
+Constants.BLOOD_DROPLET_LIFETIME_MIN   = 0.35
+Constants.BLOOD_DROPLET_LIFETIME_MAX   = 0.85
+Constants.BLOOD_DROPLET_SPEED_MIN      = 7
+Constants.BLOOD_DROPLET_SPEED_MAX      = 22
+Constants.BLOOD_DROPLET_SPREAD         = 22
+Constants.BLOOD_DROPLET_GRAVITY        = 130
+Constants.BLOOD_SPRAY_UP_BIAS          = 0.35 -- how much the spray axis tilts toward world up
+
+-- Client surface marks (texture-free: small flat parts flush to the surface).
+Constants.BLOOD_SPLATTER_RAYS       = 5      -- rays cast around the hit looking for nearby surfaces
+Constants.BLOOD_SPLATTER_RANGE      = 11     -- studs
+Constants.BLOOD_MAX_MARKS           = 56     -- ring buffer (main marks + satellites); oldest destroyed when full
+Constants.BLOOD_MARK_LIFETIME       = 18     -- seconds before a mark is destroyed
+Constants.BLOOD_MARK_FADE_IN        = 0.1    -- seconds to fade a fresh mark in
+Constants.BLOOD_MARK_FADE_OUT       = 5      -- seconds of fade-out at the end of life
+Constants.BLOOD_MARK_SIZE_MIN       = 0.4    -- studs (main mark)
+Constants.BLOOD_MARK_SIZE_MAX       = 1.9
+Constants.BLOOD_MARK_THICKNESS      = 0.04
+Constants.BLOOD_MARK_TRANSPARENCY_MIN = 0.08 -- base opacity range (randomised per mark)
+Constants.BLOOD_MARK_TRANSPARENCY_MAX = 0.32
+Constants.BLOOD_MARK_SATELLITES     = 3      -- tiny spatter spots dropped around each main mark
+Constants.BLOOD_MARK_SATELLITE_RANGE = 1.7   -- studs the satellites scatter across the surface
+Constants.BLOOD_MARK_SATELLITE_SIZE = 0.28   -- max satellite size
 
 -- ── Hit reactions (Stage 5) ─────────────────────────────────────────────────
 -- Procedural flinch written to Motor6D.Transform, decayed to identity. Never touches

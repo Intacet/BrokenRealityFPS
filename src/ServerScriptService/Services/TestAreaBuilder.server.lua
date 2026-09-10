@@ -9,7 +9,8 @@
 --
 -- This is NOT a gameplay system:
 --   * No RemoteEvents / RemoteFunctions.
---   * No combat / damage / ammo / movement / camera / viewmodel logic.
+--   * No combat / damage / ammo / movement / camera / viewmodel logic — the test
+--     dummies are plain tagged R6 rigs; DummyService owns all their behaviour.
 --   * No per-frame loops, no RBXScriptConnections.
 --   * game.Lighting is never touched — the lighting section is self-contained props
 --     (Part + PointLight/SpotLight) that vanish with the folder.
@@ -18,13 +19,17 @@
 -- Constants.DEV_TEST_AREA.ENABLED == true.
 --
 -- Safe to re-run (stop/start Play Solo): it destroys ONLY the one folder it owns and
--- rebuilds it. The single exception to "never touch other Workspace content" is the
--- opt-in Constants.DEV_TEST_AREA.REDIRECT_TEAM_SPAWNS: when true it moves the CFrames
--- of the BaseParts under Workspace/Spawns onto this test area (stashing each original
--- in a backup attribute and restoring it on the next run) so every player spawns here.
+-- rebuilds it. Two opt-in exceptions touch Workspace content it does not own, both
+-- swept/restored on every run:
+--   * DEV_TEST_AREA.REDIRECT_TEAM_SPAWNS — moves the CFrames of Workspace/Spawns
+--     BaseParts onto this area (originals stashed in a backup attribute).
+--   * DEV_TEST_AREA.SPAWN_DUMMIES — spawns N R6 rigs tagged Constants.TAG_DAMAGE_DUMMY
+--     with a BR_TestAreaDummy attribute, and destroys any it (or DummyService) left
+--     behind before respawning them.
 
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
 
 local Modules   = ReplicatedStorage:WaitForChild("Modules")
 local Constants = require(Modules:WaitForChild("Constants"))
@@ -569,6 +574,140 @@ local function redirectTeamSpawns(): ()
 		:format(#parts, FOLDER_NAME, attr))
 end
 
+-- ── Developer damage-test dummies (Studio only) ────────────────────────────
+-- Standard R6 rigs tagged Constants.TAG_DAMAGE_DUMMY so DummyService owns them
+-- (damage / blood / hit reactions / ragdoll / respawn). Rig geometry mirrors
+-- scripts/Build-TestDummy.luau. Each rig carries a BR_TestAreaDummy attribute so this
+-- builder can sweep its own dummies — and DummyService's respawn clones, which inherit
+-- the attribute — on every rebuild.
+local DUMMY_ATTR = "BR_TestAreaDummy"
+
+local function buildDummyRig(worldCFrame: CFrame): Model
+	assert(typeof(worldCFrame) == "CFrame", "buildDummyRig: worldCFrame must be a CFrame")
+	local BODY = Color3.fromRGB(180, 180, 185)
+	local LIMB = Color3.fromRGB(150, 150, 155)
+
+	local function p(name: string, size: Vector3, color: Color3): BasePart
+		local part = Instance.new("Part")
+		part.Name          = name
+		part.Size          = size
+		part.Color         = color
+		part.Material      = Enum.Material.SmoothPlastic
+		part.TopSurface    = Enum.SurfaceType.Smooth
+		part.BottomSurface = Enum.SurfaceType.Smooth
+		return part
+	end
+	local function motor(name: string, a: BasePart, b: BasePart, c0: CFrame, c1: CFrame)
+		local m = Instance.new("Motor6D")
+		m.Name   = name
+		m.Part0  = a
+		m.Part1  = b
+		m.C0     = c0
+		m.C1     = c1
+		m.Parent = a
+	end
+
+	local model = Instance.new("Model")
+	model.Name = "TestAreaDummy"
+
+	local root = p("HumanoidRootPart", Vector3.new(2, 2, 1), BODY)
+	root.Transparency = 1
+	root.CanCollide   = false
+	local torso = p("Torso", Vector3.new(2, 2, 1), BODY)
+	local head  = p("Head", Vector3.new(2, 1, 1), BODY)
+	local lArm  = p("Left Arm", Vector3.new(1, 2, 1), LIMB)
+	local rArm  = p("Right Arm", Vector3.new(1, 2, 1), LIMB)
+	local lLeg  = p("Left Leg", Vector3.new(1, 2, 1), LIMB)
+	local rLeg  = p("Right Leg", Vector3.new(1, 2, 1), LIMB)
+
+	local headMesh = Instance.new("SpecialMesh")
+	headMesh.MeshType = Enum.MeshType.Head
+	headMesh.Scale    = Vector3.new(1.25, 1.25, 1.25)
+	headMesh.Parent   = head
+	local face = Instance.new("Decal")
+	face.Name    = "face"
+	face.Texture = "rbxasset://textures/face.png"
+	face.Face    = Enum.NormalId.Front
+	face.Parent  = head
+
+	local base = CFrame.new(0, 3, 0)
+	torso.CFrame = base
+	root.CFrame  = base
+	head.CFrame  = base * CFrame.new(0, 1.5, 0)
+	lArm.CFrame  = base * CFrame.new(-1.5, 0, 0)
+	rArm.CFrame  = base * CFrame.new(1.5, 0, 0)
+	lLeg.CFrame  = base * CFrame.new(-0.5, -2, 0)
+	rLeg.CFrame  = base * CFrame.new(0.5, -2, 0)
+	for _, part in ipairs({ root, torso, head, lArm, rArm, lLeg, rLeg }) do
+		part.Parent = model
+	end
+
+	motor("RootJoint", root, torso,
+		CFrame.new(0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 1, 0),
+		CFrame.new(0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 1, 0))
+	motor("Neck", torso, head,
+		CFrame.new(0, 1, 0, -1, 0, 0, 0, 0, 1, 0, 1, 0),
+		CFrame.new(0, -0.5, 0, -1, 0, 0, 0, 0, 1, 0, 1, 0))
+	motor("Left Shoulder", torso, lArm,
+		CFrame.new(-1, 0.5, 0, 0, 0, -1, 0, 1, 0, 1, 0, 0),
+		CFrame.new(0.5, 0.5, 0, 0, 0, -1, 0, 1, 0, 1, 0, 0))
+	motor("Right Shoulder", torso, rArm,
+		CFrame.new(1, 0.5, 0, 0, 0, 1, 0, 1, 0, -1, 0, 0),
+		CFrame.new(-0.5, 0.5, 0, 0, 0, 1, 0, 1, 0, -1, 0, 0))
+	motor("Left Hip", torso, lLeg,
+		CFrame.new(-1, -1, 0, 0, 0, -1, 0, 1, 0, 1, 0, 0),
+		CFrame.new(-0.5, 1, 0, 0, 0, -1, 0, 1, 0, 1, 0, 0))
+	motor("Right Hip", torso, rLeg,
+		CFrame.new(1, -1, 0, 0, 0, 1, 0, 1, 0, -1, 0, 0),
+		CFrame.new(0.5, 1, 0, 0, 0, 1, 0, 1, 0, -1, 0, 0))
+
+	local humanoid = Instance.new("Humanoid")
+	humanoid.RigType             = Enum.HumanoidRigType.R6
+	humanoid.MaxHealth           = Constants.DUMMY_DEFAULT_MAX_HEALTH :: number
+	humanoid.Health              = Constants.DUMMY_DEFAULT_MAX_HEALTH :: number
+	humanoid.BreakJointsOnDeath  = false
+	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	humanoid.Parent = model
+
+	model.PrimaryPart = root
+	model:PivotTo(worldCFrame)
+	model:SetAttribute(DUMMY_ATTR, true)
+	CollectionService:AddTag(model, Constants.TAG_DAMAGE_DUMMY :: string)
+	return model
+end
+
+-- Sweeps this builder's previous dummies (and DummyService respawn clones, which keep the
+-- attribute), then spawns DUMMY_COUNT fresh rigs downrange of the firing line, facing it.
+local function spawnTestDummies(): ()
+	local swept = 0
+	for _, m in ipairs(CollectionService:GetTagged(Constants.TAG_DAMAGE_DUMMY :: string)) do
+		if m:GetAttribute(DUMMY_ATTR) == true then
+			m:Destroy()
+			swept += 1
+		end
+	end
+
+	if CFG.SPAWN_DUMMIES ~= true then
+		if swept > 0 then
+			Logger.debug(("[TestAreaBuilder] removed %d prior test dummy/dummies"):format(swept))
+		end
+		return
+	end
+
+	local count: number     = CFG.DUMMY_COUNT
+	local spacing: number    = CFG.DUMMY_SPACING
+	local downrange: number  = CFG.DUMMY_DOWNRANGE
+	local start: Vector3     = CFG.SHOOTING_RANGE_START
+	local faceTarget = place(Vector3.new(start.X, GROUND_TOP + 3, start.Z))
+	for i = 1, count do
+		local x = start.X + (i - (count + 1) / 2) * spacing
+		local pivotPos = place(Vector3.new(x, GROUND_TOP + 3, start.Z + downrange))
+		buildDummyRig(CFrame.lookAt(pivotPos, faceTarget)).Parent = workspace
+	end
+	Logger.debug(("[TestAreaBuilder] spawned %d damage test dummy/dummies (swept %d)")
+		:format(count, swept))
+end
+
 -- ── Build ───────────────────────────────────────────────────────────────────
 local existing = workspace:FindFirstChild(FOLDER_NAME)
 if existing ~= nil then
@@ -592,6 +731,7 @@ buildLightingTest(root)
 root.Parent = workspace
 
 redirectTeamSpawns()
+spawnTestDummies()
 
 Logger.debug(("[TestAreaBuilder] built Workspace.%s — %d instances (labels %s)")
 	:format(FOLDER_NAME, #root:GetDescendants(), if labelsEnabled then "on" else "off"))

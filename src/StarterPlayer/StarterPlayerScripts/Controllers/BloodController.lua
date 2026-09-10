@@ -7,6 +7,12 @@
 -- damageType }. The server never creates an instance — every particle and mark lives and
 -- dies here, under hard caps.
 --
+-- Look (gritty, not arcade): a fine retrograde MIST (soft sprite, sprays back toward the
+-- shooter, nudged up) plus heavier DROPLETS (small squares) that arc and fall. Surface
+-- marks are small irregular flat parts in a dark-red palette, scattered with a few tiny
+-- satellite spots, that fade in fast and fade out at end of life. All texture-free except
+-- the built-in smoke sprite for the mist.
+--
 -- Reusable character system: it is driven purely by the BloodEffect remote and is not
 -- aware of the test dummy, players, or NPCs. Disable everything at once by setting the
 -- ReplicatedStorage attribute named by Constants.BLOOD_GLOBAL_ATTRIBUTE to false (the
@@ -30,6 +36,10 @@ local BloodEffect = Remotes:WaitForChild("BloodEffect") :: RemoteEvent
 
 local GLOBAL_ATTR = Constants.BLOOD_GLOBAL_ATTRIBUTE :: string
 local BLOOD_COLOR = Constants.BLOOD_COLOR :: Color3
+local BLOOD_DARK  = Constants.BLOOD_COLOR_DARK :: Color3
+
+-- Untyped view of Constants so the many BLOOD_* tuning numbers read without a cast each.
+local C = Constants :: any
 
 local BloodController = {}
 
@@ -39,11 +49,11 @@ local BloodController = {}
 
 local fxFolder: Folder
 
-type Burst = { part: BasePart, emitter: ParticleEmitter, freeAt: number, busy: boolean }
+type Burst = { part: BasePart, mist: ParticleEmitter, droplet: ParticleEmitter, freeAt: number, busy: boolean }
 local bursts: { Burst } = {}
 
-type Mark = { part: BasePart, expireAt: number }
-local marks: { Mark } = {}          -- ring buffer, oldest first
+type Mark = { part: BasePart, bornAt: number, expireAt: number, baseT: number }
+local marks: { Mark } = {}          -- ring buffer, oldest first (all share one lifetime)
 
 local started = false
 
@@ -53,6 +63,49 @@ local started = false
 
 local function bloodOn(): boolean
     return ReplicatedStorage:GetAttribute(GLOBAL_ATTR) ~= false
+end
+
+local function makeEmitter(
+    texture: string,
+    sizeStart: number,
+    sizeEnd: number,
+    lifeMin: number,
+    lifeMax: number,
+    speedMin: number,
+    speedMax: number,
+    spread: number,
+    gravity: number,
+    drag: number,
+    fadeStart: number
+): ParticleEmitter
+    local e = Instance.new("ParticleEmitter")
+    e.Texture       = texture
+    e.Enabled       = false
+    e.Rate          = 0
+    e.Lifetime      = NumberRange.new(lifeMin, lifeMax)
+    e.Speed         = NumberRange.new(speedMin, speedMax)
+    e.SpreadAngle   = Vector2.new(spread, spread)
+    e.Acceleration  = Vector3.new(0, -gravity, 0)
+    e.Drag          = drag
+    e.LightEmission  = 0
+    e.Rotation      = NumberRange.new(-180, 180)
+    e.RotSpeed      = NumberRange.new(-160, 160)
+    e.EmissionDirection = Enum.NormalId.Top   -- +Y of the host part == spray axis
+    e.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, sizeStart),
+        NumberSequenceKeypoint.new(1, sizeEnd),
+    })
+    e.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, fadeStart),
+        NumberSequenceKeypoint.new(0.7, math.min(1, fadeStart + 0.35)),
+        NumberSequenceKeypoint.new(1, 1),
+    })
+    -- Fresh at the spray tip, settling toward the dark tone as each particle ages.
+    e.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, BLOOD_COLOR),
+        ColorSequenceKeypoint.new(1, BLOOD_DARK),
+    })
+    return e
 end
 
 local function buildPool()
@@ -70,29 +123,30 @@ local function buildPool()
         part.CanQuery     = false
         part.CanTouch     = false
         part.CastShadow   = false
+        part.Locked       = true
         part.Parent       = fxFolder
 
-        local emitter = Instance.new("ParticleEmitter")
-        emitter.Enabled      = false
-        emitter.Rate         = 0
-        emitter.Color        = ColorSequence.new(BLOOD_COLOR)
-        emitter.Size         = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 0.35),
-            NumberSequenceKeypoint.new(1, 0.05),
-        })
-        emitter.Transparency = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 0.1),
-            NumberSequenceKeypoint.new(1, 1),
-        })
-        emitter.Lifetime     = NumberRange.new(0.25, 0.55)
-        emitter.Speed        = NumberRange.new(9, 20)
-        emitter.SpreadAngle  = Vector2.new(28, 28)
-        emitter.Acceleration = Vector3.new(0, -90, 0)
-        emitter.Drag         = 3
-        emitter.LightEmission = 0
-        emitter.Parent       = part
+        local mist = makeEmitter(
+            C.BLOOD_MIST_TEXTURE,
+            C.BLOOD_MIST_SIZE_START, C.BLOOD_MIST_SIZE_END,
+            C.BLOOD_MIST_LIFETIME_MIN, C.BLOOD_MIST_LIFETIME_MAX,
+            C.BLOOD_MIST_SPEED_MIN, C.BLOOD_MIST_SPEED_MAX,
+            C.BLOOD_MIST_SPREAD, C.BLOOD_MIST_GRAVITY, 4, 0.12
+        )
+        mist.Name   = "Mist"
+        mist.Parent = part
 
-        table.insert(bursts, { part = part, emitter = emitter, freeAt = 0, busy = false })
+        local droplet = makeEmitter(
+            "",  -- blank = small solid square, reads as a droplet/fleck
+            C.BLOOD_DROPLET_SIZE_START, C.BLOOD_DROPLET_SIZE_END,
+            C.BLOOD_DROPLET_LIFETIME_MIN, C.BLOOD_DROPLET_LIFETIME_MAX,
+            C.BLOOD_DROPLET_SPEED_MIN, C.BLOOD_DROPLET_SPEED_MAX,
+            C.BLOOD_DROPLET_SPREAD, C.BLOOD_DROPLET_GRAVITY, 1.5, 0.0
+        )
+        droplet.Name   = "Droplet"
+        droplet.Parent = part
+
+        table.insert(bursts, { part = part, mist = mist, droplet = droplet, freeAt = 0, busy = false })
     end
 end
 
@@ -112,18 +166,33 @@ end
 
 local function playBurst(position: Vector3, travelDir: Vector3, intensity: number)
     local b = takeBurst()
-    -- Spray back toward where the shot came from, plus the emitter's own spread.
-    local sprayDir = (-travelDir)
-    if sprayDir.Magnitude < 1e-3 then
-        sprayDir = Vector3.yAxis
+
+    -- Spray axis: back toward the shooter (retrograde spatter), tilted up so the mist
+    -- rises and the droplets arc over before gravity takes them.
+    local axis = -travelDir
+    if axis.Magnitude < 1e-3 then
+        axis = Vector3.yAxis
     end
-    b.part.CFrame = CFrame.lookAt(position, position + sprayDir.Unit)
-    local count = (Constants.BLOOD_PARTICLES_BASE :: number)
-        + math.round(intensity * (Constants.BLOOD_PARTICLES_PER_INTENSITY :: number))
-    b.emitter:Emit(count)
+    axis = (axis.Unit + Vector3.yAxis * (Constants.BLOOD_SPRAY_UP_BIAS :: number))
+    axis = axis.Magnitude > 1e-4 and axis.Unit or Vector3.yAxis
+
+    local ref = if math.abs(axis.Y) > 0.99 then Vector3.xAxis else Vector3.yAxis
+    local right = ref:Cross(axis)
+    right = right.Magnitude > 1e-4 and right.Unit or Vector3.xAxis
+    b.part.CFrame = CFrame.fromMatrix(position, right, axis)
+
+    local mistCount = math.round(C.BLOOD_MIST_BASE + intensity * C.BLOOD_MIST_PER_INTENSITY)
+    local dropCount = math.round(C.BLOOD_DROPLET_BASE + intensity * C.BLOOD_DROPLET_PER_INTENSITY)
+    b.mist:Emit(mistCount)
+    b.droplet:Emit(dropCount)
+
     b.busy   = true
     b.freeAt = os.clock() + (Constants.BLOOD_BURST_LIFETIME :: number)
 end
+
+-- ============================================================
+-- Surface marks
+-- ============================================================
 
 local function retireOldestMark()
     local m = table.remove(marks, 1)
@@ -132,27 +201,45 @@ local function retireOldestMark()
     end
 end
 
+-- cf: surface-flat CFrame (Y = surface normal). size: nominal footprint (studs).
 local function addMark(cf: CFrame, size: number)
     if #marks >= (Constants.BLOOD_MAX_MARKS :: number) then
         retireOldestMark()
     end
-    local part = Instance.new("Part")
-    part.Name         = "BloodMark"
-    part.Size         = Vector3.new(size, Constants.BLOOD_MARK_THICKNESS :: number, size)
-    part.CFrame       = cf
-    part.Anchored     = true
-    part.CanCollide   = false
-    part.CanQuery     = false
-    part.CanTouch     = false
-    part.CastShadow   = false
-    part.Material     = Enum.Material.SmoothPlastic
-    part.Color        = BLOOD_COLOR
-    part.Transparency = 0.15
-    part.TopSurface   = Enum.SurfaceType.Smooth
-    part.BottomSurface = Enum.SurfaceType.Smooth
-    part.Parent       = fxFolder
 
-    table.insert(marks, { part = part, expireAt = os.clock() + (Constants.BLOOD_MARK_LIFETIME :: number) })
+    local now  = os.clock()
+    local tMin: number = C.BLOOD_MARK_TRANSPARENCY_MIN
+    local tMax: number = C.BLOOD_MARK_TRANSPARENCY_MAX
+    local baseT = tMin + math.random() * (tMax - tMin)
+
+    local part = Instance.new("Part")
+    part.Name          = "BloodMark"
+    -- Irregular footprint so it does not read as a red tile.
+    part.Size          = Vector3.new(
+        size * (0.72 + math.random() * 0.56),
+        Constants.BLOOD_MARK_THICKNESS :: number,
+        size * (0.72 + math.random() * 0.56)
+    )
+    part.CFrame        = cf
+    part.Anchored      = true
+    part.CanCollide    = false
+    part.CanQuery      = false
+    part.CanTouch      = false
+    part.CastShadow    = false
+    part.Locked        = true
+    part.Material      = Enum.Material.SmoothPlastic
+    part.Color         = BLOOD_COLOR:Lerp(BLOOD_DARK, math.random() * 0.65)
+    part.Transparency  = 1    -- fades in via onHeartbeat
+    part.TopSurface    = Enum.SurfaceType.Smooth
+    part.BottomSurface = Enum.SurfaceType.Smooth
+    part.Parent        = fxFolder
+
+    table.insert(marks, {
+        part = part,
+        bornAt = now,
+        expireAt = now + (Constants.BLOOD_MARK_LIFETIME :: number),
+        baseT = baseT,
+    })
 end
 
 local function spawnMarks(position: Vector3, travelDir: Vector3, intensity: number)
@@ -160,6 +247,10 @@ local function spawnMarks(position: Vector3, travelDir: Vector3, intensity: numb
     local range = Constants.BLOOD_SPLATTER_RANGE :: number
     local sMin  = Constants.BLOOD_MARK_SIZE_MIN :: number
     local sMax  = Constants.BLOOD_MARK_SIZE_MAX :: number
+    local thick = Constants.BLOOD_MARK_THICKNESS :: number
+    local sats  = Constants.BLOOD_MARK_SATELLITES :: number
+    local satRange = Constants.BLOOD_MARK_SATELLITE_RANGE :: number
+    local satSize  = Constants.BLOOD_MARK_SATELLITE_SIZE :: number
 
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
@@ -167,34 +258,50 @@ local function spawnMarks(position: Vector3, travelDir: Vector3, intensity: numb
     params.IgnoreWater = true
     params.RespectCanCollide = true
 
+    local fwd = travelDir.Magnitude > 1e-3 and travelDir.Unit or Vector3.new(0, -1, 0)
+
     for i = 1, rays do
         local dir: Vector3
-        if i == 1 and travelDir.Magnitude > 1e-3 then
-            dir = travelDir.Unit                          -- the wall directly behind the hit
+        if i == 1 then
+            dir = fwd                                   -- the surface directly behind the hit
+        elseif i == 2 then
+            dir = Vector3.new(0, -1, 0)                 -- the floor below (pooling)
         else
-            dir = Vector3.new(
+            -- Biased toward the exit direction and downward, not fully random.
+            local jitter = Vector3.new(
                 (math.random() - 0.5) * 2,
-                (math.random() - 0.5) * 2,
+                -math.random(),
                 (math.random() - 0.5) * 2
             )
-            if dir.Magnitude < 1e-3 then dir = Vector3.yAxis end
-            dir = dir.Unit
+            dir = (fwd * 0.55 + jitter * 0.45)
+            dir = dir.Magnitude > 1e-3 and dir.Unit or Vector3.new(0, -1, 0)
         end
 
         local result = workspace:Raycast(position, dir * range, params)
         if result ~= nil then
-            local size = math.clamp(sMin + math.random() * (sMax - sMin), sMin, sMax)
-                * (0.5 + 0.5 * intensity)
             local up = result.Normal
-            local right = up:Cross(Vector3.xAxis)
-            if right.Magnitude < 1e-3 then right = up:Cross(Vector3.zAxis) end
-            right = right.Unit
+            local baseRight = up:Cross(Vector3.xAxis)
+            if baseRight.Magnitude < 1e-3 then
+                baseRight = up:Cross(Vector3.zAxis)
+            end
+            baseRight = baseRight.Unit
+            local ang = math.random() * math.pi * 2
+            local right = (baseRight * math.cos(ang) + up:Cross(baseRight) * math.sin(ang)).Unit
             local look = right:Cross(up).Unit
-            local cf = CFrame.fromMatrix(
-                result.Position + up * (Constants.BLOOD_MARK_THICKNESS :: number),
-                right, up, look
-            )
-            addMark(cf, size)
+
+            local size = math.clamp(sMin + math.random() * (sMax - sMin), sMin, sMax)
+                * (0.55 + 0.55 * intensity)
+            addMark(CFrame.fromMatrix(result.Position + up * thick, right, up, look), size)
+
+            -- A few tiny satellite spots scattered across the same surface plane.
+            for _ = 1, sats do
+                local off = right * ((math.random() - 0.5) * 2 * satRange)
+                    + look * ((math.random() - 0.5) * 2 * satRange)
+                addMark(
+                    CFrame.fromMatrix(result.Position + off + up * thick, right, up, look),
+                    satSize * (0.35 + math.random() * 0.65)
+                )
+            end
         end
     end
 end
@@ -205,7 +312,8 @@ local function clearAll()
     end
     table.clear(marks)
     for _, b in ipairs(bursts) do
-        b.emitter:Clear()
+        b.mist:Clear()
+        b.droplet:Clear()
         b.busy = false
     end
 end
@@ -226,6 +334,21 @@ local function onHeartbeat()
     -- marks is oldest-first; expired ones are always at the front.
     while #marks > 0 and now >= marks[1].expireAt do
         retireOldestMark()
+    end
+
+    -- Fade marks in on birth and out at end of life; hold flat opacity in between.
+    local fadeIn  = Constants.BLOOD_MARK_FADE_IN :: number
+    local fadeOut = Constants.BLOOD_MARK_FADE_OUT :: number
+    for _, m in ipairs(marks) do
+        local age  = now - m.bornAt
+        local left = m.expireAt - now
+        if age < fadeIn then
+            m.part.Transparency = m.baseT + (1 - m.baseT) * (1 - age / fadeIn)
+        elseif left < fadeOut then
+            m.part.Transparency = m.baseT + (1 - m.baseT) * (1 - left / fadeOut)
+        elseif m.part.Transparency ~= m.baseT then
+            m.part.Transparency = m.baseT
+        end
     end
 end
 
