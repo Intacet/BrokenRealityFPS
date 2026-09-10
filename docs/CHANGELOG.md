@@ -1,5 +1,21 @@
 # Changelog
 
+## Tactical sprint balance — short bursts, no juking
+
+- **Burst duration + cooldown.** New `Constants.TACTICAL_SPRINT_MAX_DURATION` (3 s):
+  `MovementController`'s Heartbeat force-stops tactical sprint once a burst hits that
+  length. New `TACTICAL_SPRINT_COOLDOWN` (4 s): a double-tap can't restart it until that
+  long after the previous burst ended (tracked in `movementState.lastTacticalSprintEndTime`,
+  set from `stopTacticalSprint()` and the Shift-release path; respawn does not impose it).
+- **Commit to forward.** `TACTICAL_SPRINT_MIN_FORWARD_DOT` 0.35 → **0.6**. The existing
+  per-frame sustain check now ends the burst if the move input drifts more than ~53° off
+  camera-forward — a diagonal veer (W+D) still holds, a hard sideways strafe cancels it.
+- `TACTICAL_SPRINT_STOP_MIN_DURATION` 5 → **1.5** so a full 3 s burst can still trigger
+  the stop-animation + momentum carry on release (it was previously unreachable).
+- No new module-level locals in `MovementController` (register-limit safe) — one
+  `movementState` field + closure-scoped locals only. Not in-game tested (Edit mode has
+  no input); tune `TACTICAL_SPRINT_MAX_DURATION` / `_COOLDOWN` / `_MIN_FORWARD_DOT`.
+
 ## Fix jumping / vaulting over walls that should be too tall
 
 - **Jump height.** Nothing was setting it, so characters used the R6 default

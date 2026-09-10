@@ -494,9 +494,16 @@ Constants.TACTICAL_SPRINT_SPEED = 30
 Constants.TACTICAL_SPRINT_ACCELERATION_TIME = 1.0
 
 -- Minimum dot product of Humanoid.MoveDirection against the camera flat-forward vector
--- required to sustain tactical sprint each Heartbeat. Falls below this → tactical sprint ends.
--- 0.35 ≈ 70° off-forward; values above this require the player to face roughly forward.
-Constants.TACTICAL_SPRINT_MIN_FORWARD_DOT = 0.35
+-- required to sustain tactical sprint each Heartbeat. Falls below this → tactical sprint
+-- ends. 0.6 ≈ 53° off-forward: a diagonal (W+D ≈ 0.71) still sustains as a veer, but a
+-- hard sideways strafe (dot ≈ 0) cancels the burst — no juking while committed forward.
+Constants.TACTICAL_SPRINT_MIN_FORWARD_DOT = 0.6
+
+-- ── Balance: tactical sprint is a short committed burst, not a permanent gait ──
+-- Force-stops after this many seconds of continuous tactical sprint.
+Constants.TACTICAL_SPRINT_MAX_DURATION = 3.0
+-- Seconds after tactical sprint ends before a double-tap can start it again.
+Constants.TACTICAL_SPRINT_COOLDOWN = 4.0
 
 -- When true, GunController blocks firing and reloading while tactical sprint is active.
 -- The client does not send WeaponFired or ReloadRequest during tactical sprint.
@@ -511,7 +518,8 @@ Constants.TACTICAL_SPRINT_STOP_ANIMATION_ENABLED = true
 -- (TacticalSprintStop animation + movement lock + momentum carry) plays on Shift release.
 -- Below this threshold, Shift release ends tactical sprint instantly with no animation or lock.
 -- Only applies to the Shift-release path; direction-change stops (Heartbeat) are unaffected.
-Constants.TACTICAL_SPRINT_STOP_MIN_DURATION = 5.0
+-- Kept below TACTICAL_SPRINT_MAX_DURATION so a full burst can still trigger the stop clip.
+Constants.TACTICAL_SPRINT_STOP_MIN_DURATION = 1.5
 
 -- ── Stage 3K: Tactical sprint mouse sensitivity override ──────────────────────
 -- When true, MovementController reduces UserInputService.MouseDeltaSensitivity by

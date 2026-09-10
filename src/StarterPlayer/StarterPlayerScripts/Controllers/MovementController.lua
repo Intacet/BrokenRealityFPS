@@ -278,6 +278,7 @@ local movementState = {
     moveVector          = Vector3.zero,   -- raw Humanoid.MoveDirection each Heartbeat
     isTacticalSprinting = false,          -- true while tactical sprint is active (Stage 2P)
     isSliding           = false,          -- true while a slide is in progress (Stage 3O)
+    lastTacticalSprintEndTime = 0,        -- os.clock() of the last tac-sprint end; gates TACTICAL_SPRINT_COOLDOWN
 }
 
 -- ============================================================
@@ -2469,6 +2470,7 @@ local function stopTacticalSprint()
     isTacticalSprinting               = false
     movementState.isTacticalSprinting = false
     tacticalSprintStartTime           = 0
+    movementState.lastTacticalSprintEndTime = os.clock()  -- start the re-use cooldown
     -- Stage 3K: restore sensitivity immediately on tactical sprint end.
     applyTacticalSprintSensitivity(false)
 
@@ -5828,6 +5830,8 @@ function MovementController:Start()
                 and not isTacticalSprinting
                 and movementState.isMoving
                 and (now - lastShiftPressTime) <= Constants.TACTICAL_SPRINT_DOUBLE_TAP_WINDOW
+                and (now - (movementState.lastTacticalSprintEndTime or 0))
+                    >= (Constants.TACTICAL_SPRINT_COOLDOWN :: number)
             then
                 -- Forward dot check: MoveDirection must point sufficiently toward camera forward.
                 local hum2 = humanoid
@@ -5897,6 +5901,7 @@ function MovementController:Start()
                 isTacticalSprinting               = false
                 movementState.isTacticalSprinting = false
                 tacticalSprintStartTime           = 0
+                movementState.lastTacticalSprintEndTime = os.clock()  -- start the re-use cooldown
                 clearTacticalSprintStopConnection()
 
                 if tacticalDuration >= Constants.TACTICAL_SPRINT_STOP_MIN_DURATION then
@@ -6599,12 +6604,18 @@ function MovementController:Start()
             end
         end
 
-        -- Stage 2P: sustain or end tactical sprint based on movement direction each frame.
-        -- If the player stops moving or drifts off-forward, tactical sprint ends automatically.
-        -- applySpeed() is called again after the state change so WalkSpeed reflects the
-        -- new non-tactical-sprint mode immediately (no one-frame speed overshoot).
+        -- Stage 2P: sustain or end tactical sprint based on duration and movement direction.
+        -- Ends automatically on: max burst duration reached, the player stopping, or drifting
+        -- off-forward. applySpeed() is called again after so WalkSpeed reflects the new mode.
         if isTacticalSprinting then
-            if not movementState.isMoving then
+            local tsElapsed = tacticalSprintStartTime > 0
+                and (os.clock() - tacticalSprintStartTime)
+                or 0
+            if tsElapsed >= (Constants.TACTICAL_SPRINT_MAX_DURATION :: number) then
+                -- Balance: tactical sprint is a short burst — force it to end.
+                stopTacticalSprint()
+                applySpeed()
+            elseif not movementState.isMoving then
                 stopTacticalSprint()
                 applySpeed()
             else
