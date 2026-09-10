@@ -144,6 +144,13 @@ function RagdollService:Apply(character: Model, opts: RagdollOptions?)
     -- destroys the Motor6Ds we are about to disable and Restore() can never rebuild them.
     humanoid.BreakJointsOnDeath = false
 
+    -- RequiresNeck must be off BEFORE the Neck Motor6D is disabled below. With it on
+    -- (the default), the engine notices the missing neck and, after a ~0.5 s grace
+    -- period, forcibly finalises the death — the rig stays upright and rigid for that
+    -- half second, then flops. Turning it off lets the constraints take over on the
+    -- same frame, so the ragdoll (and the death impulse) land immediately.
+    humanoid.RequiresNeck = false
+
     -- ── Convert all Motor6Ds to physics joints ──────────────────────────────────
     local motorCount = 0
     for _, descendant in ipairs(character:GetDescendants()) do
@@ -280,6 +287,7 @@ function RagdollService:Restore(character: Model)
     if humanoid then
         humanoid.PlatformStand = false
         humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+        humanoid.RequiresNeck = true
     end
 
     character:SetAttribute(RAGDOLLED_ATTRIBUTE, false)

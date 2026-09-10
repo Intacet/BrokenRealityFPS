@@ -1,5 +1,13 @@
 # Changelog
 
+## Ragdoll fires instantly (no ~0.5 s stall)
+
+- `RagdollService:Apply` now sets `Humanoid.RequiresNeck = false` before it disables the
+  Neck Motor6D. With `RequiresNeck` on (the default), the engine saw the missing neck and
+  waited a ~0.5 s grace period before finalising the death — the rig stood upright and
+  rigid for that half second, then flopped, and the death impulse was damped during the
+  freeze. `Restore()` sets it back to `true`. No tuning change.
+
 ## Pre-round loadout menu (primary weapon + team pick)
 
 - **New `LoadoutMenu` client UI** (`Controllers/UI/LoadoutMenu.lua`, ClientInit slot 15).
