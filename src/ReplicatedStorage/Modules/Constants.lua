@@ -2074,14 +2074,22 @@ Constants.DEV_USER_IDS = {
 }
 
 -- ── Developer test area (TestAreaBuilder.server) ────────────────────────────
--- Layout knobs for the generated Studio-only sandbox under
--- Workspace/<FOLDER_NAME>. All positions are world-space offsets from ORIGIN.
--- TestAreaBuilder no-ops entirely unless RunService:IsStudio() and ENABLED == true.
--- It destroys/rebuilds only the one folder it owns; the sole exception is the
--- opt-in REDIRECT_TEAM_SPAWNS below, which relocates Workspace/Spawns points
--- (reversibly). Not a gameplay system.
+-- Layout knobs for the generated developer sandbox under Workspace/<FOLDER_NAME>.
+-- All positions are world-space offsets from ORIGIN.
+-- TestAreaBuilder no-ops entirely unless ENABLED == true AND it is allowed to run
+-- in the current context: always in Studio, and in a published server only when
+-- RUN_IN_PUBLISHED == true. It destroys/rebuilds only the one folder it owns; the
+-- sole exception is the opt-in REDIRECT_TEAM_SPAWNS below, which relocates
+-- Workspace/Spawns points (reversibly). Not a gameplay system.
+--
+-- ⚠ With RUN_IN_PUBLISHED = true the sandbox — and, if REDIRECT_TEAM_SPAWNS is on,
+-- every real match spawn moved into it — ships to all players in the live game.
+-- Set RUN_IN_PUBLISHED = false (or ENABLED = false) before any real release.
 Constants.DEV_TEST_AREA = {
     ENABLED = true,
+    -- false = Studio only (the safe default for a shipping build). true = also build
+    -- it on a published server so `Play` / a published test place spawns you here too.
+    RUN_IN_PUBLISHED = true,
     FOLDER_NAME = "BrokenReality_TestArea",
 
     -- Lifted well above the map (tallest map part ≈ Y 95; grass at the map origin ≈ Y 10)
@@ -2089,11 +2097,12 @@ Constants.DEV_TEST_AREA = {
     -- Every prop, label and redirected spawn is placed as ORIGIN + local offset.
     ORIGIN = Vector3.new(0, 300, 0),
 
-    -- Studio only, reversible: move every BasePart under Workspace/Spawns onto this
-    -- test area so all players spawn here. TestAreaBuilder stashes each spawn part's
-    -- original CFrame in SPAWN_BACKUP_ATTRIBUTE before moving it, and restores every
-    -- stashed spawn on each run first — so setting this false (keep ENABLED true) and
-    -- pressing Play once puts all spawns back exactly where they were.
+    -- Reversible: move every BasePart under Workspace/Spawns onto this test area so
+    -- all players spawn here (runs wherever TestAreaBuilder runs — see RUN_IN_PUBLISHED).
+    -- TestAreaBuilder stashes each spawn part's original CFrame in
+    -- SPAWN_BACKUP_ATTRIBUTE before moving it, and restores every stashed spawn on
+    -- each run first — so setting this false (keep ENABLED true) and starting one more
+    -- server / Play puts all spawns back exactly where they were.
     REDIRECT_TEAM_SPAWNS = true,
     TEAM_SPAWN_GRID_SPACING = 4,
     SPAWN_BACKUP_ATTRIBUTE = "BR_TestAreaOriginalCFrame",

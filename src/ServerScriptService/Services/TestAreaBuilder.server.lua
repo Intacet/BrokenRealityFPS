@@ -2,7 +2,8 @@
 -- Script
 -- Location in Studio: ServerScriptService > Services > TestAreaBuilder
 --
--- DEVELOPER-ONLY test-map tooling. On server start, in Studio only, (re)builds
+-- DEVELOPER-ONLY test-map tooling. On server start (in Studio always; in a
+-- published server only when DEV_TEST_AREA.RUN_IN_PUBLISHED is true) it (re)builds
 -- Workspace/<Constants.DEV_TEST_AREA.FOLDER_NAME> — a self-contained sandbox for
 -- quickly testing movement, weapon feel, first-person viewmodels, muzzle flash /
 -- smoke, bullet impacts, reload timing, vaulting, crouch, sprint and landing drops.
@@ -15,8 +16,9 @@
 --   * game.Lighting is never touched — the lighting section is self-contained props
 --     (Part + PointLight/SpotLight) that vanish with the folder.
 --
--- Guards: does nothing unless RunService:IsStudio() AND
--- Constants.DEV_TEST_AREA.ENABLED == true.
+-- Guards: does nothing unless Constants.DEV_TEST_AREA.ENABLED == true AND it is
+-- allowed to run here — always in Studio, and in a published server only when
+-- Constants.DEV_TEST_AREA.RUN_IN_PUBLISHED == true.
 --
 -- Safe to re-run (stop/start Play Solo): it destroys ONLY the one folder it owns and
 -- rebuilds it. Two opt-in exceptions touch Workspace content it does not own, both
@@ -38,11 +40,12 @@ local Logger    = require(Modules:WaitForChild("Logger"))
 local CFG = Constants.DEV_TEST_AREA :: any
 
 -- ── Guards ───────────────────────────────────────────────────────────────────
-if not RunService:IsStudio() then
-	return
-end
 if CFG == nil or CFG.ENABLED ~= true then
 	Logger.debug("[TestAreaBuilder] skipped — Constants.DEV_TEST_AREA.ENABLED is not true")
+	return
+end
+if not RunService:IsStudio() and CFG.RUN_IN_PUBLISHED ~= true then
+	Logger.debug("[TestAreaBuilder] skipped — not in Studio and DEV_TEST_AREA.RUN_IN_PUBLISHED is not true")
 	return
 end
 
@@ -508,7 +511,7 @@ local function buildLightingTest(root: Folder): ()
 	makeLabel("Lighting Test", place(Vector3.new(-14, GROUND_TOP + 12, -49)), f)
 end
 
--- ── Team-spawn redirect (Studio only, reversible) ───────────────────────────
+-- ── Team-spawn redirect (reversible) ───────────────────────────────────────
 -- The one place this script touches Workspace content it does not own. It only
 -- writes BasePart.CFrame and a single backup attribute — never reparents,
 -- resizes, restyles, or destroys a spawn point. Each run first restores every
@@ -574,7 +577,7 @@ local function redirectTeamSpawns(): ()
 		:format(#parts, FOLDER_NAME, attr))
 end
 
--- ── Developer damage-test dummies (Studio only) ────────────────────────────
+-- ── Developer damage-test dummies ─────────────────────────────────────────
 -- Standard R6 rigs tagged Constants.TAG_DAMAGE_DUMMY so DummyService owns them
 -- (damage / blood / hit reactions / ragdoll / respawn). Rig geometry mirrors
 -- scripts/Build-TestDummy.luau. Each rig carries a BR_TestAreaDummy attribute so this

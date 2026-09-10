@@ -1,5 +1,15 @@
 # Changelog
 
+## Test area can run in a published build
+
+- `TestAreaBuilder` was hard-gated to `RunService:IsStudio()`, so a published place
+  never built the sandbox and never redirected spawns — you'd spawn in the real map.
+  New `Constants.DEV_TEST_AREA.RUN_IN_PUBLISHED` (default **true** for now): the guard
+  is now `ENABLED and (IsStudio() or RUN_IN_PUBLISHED)`. Nothing else changed — same
+  folder-scoped rebuild, same reversible `REDIRECT_TEAM_SPAWNS` (restores originals
+  first on every run). ⚠ Set `RUN_IN_PUBLISHED = false` (or `ENABLED = false`) before a
+  real release or the sandbox and the relocated match spawns ship to live players.
+
 ## Ragdoll fires instantly (no ~0.5 s stall)
 
 - `RagdollService:Apply` now sets `Humanoid.RequiresNeck = false` before it disables the
