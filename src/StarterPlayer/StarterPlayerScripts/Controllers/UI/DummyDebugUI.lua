@@ -29,6 +29,10 @@ local Remotes         = ReplicatedStorage:WaitForChild("Remotes")
 local DummyDevCommand = Remotes:WaitForChild("DummyDevCommand") :: RemoteEvent
 local DummyDevState   = Remotes:WaitForChild("DummyDevState")   :: RemoteEvent
 
+-- Sibling controller — CrosshairUI is initialised earlier by ClientInit (step 6),
+-- DummyDebugUI is step 14, so it is always ready by the time this requires it.
+local CrosshairUI = require(script.Parent:WaitForChild("CrosshairUI"))
+
 local LocalPlayer = Players.LocalPlayer
 
 local DummyDebugUI = {}
@@ -40,13 +44,24 @@ local DummyDebugUI = {}
 local enabled       = false
 local infiniteOn    = false
 local hitboxOn      = false
+local collapsed     = false
+local crosshairOn   = true
+
+local PANEL_W          = 320
+local PANEL_H_EXPANDED = 320
+local PANEL_H_COLLAPSED = 22
 
 local screen: ScreenGui
+local panel: Frame
+local titleBtn: TextButton
+local btnRow: Frame
 local listFrame: Frame
 local bloodBtn: TextButton
 local infBtn: TextButton
 local hitboxBtn: TextButton
+local crosshairBtn: TextButton
 
+local lastState: { [string]: any }? = nil
 local hitboxAdorns: { SelectionBox } = {}
 
 local REGION_COLORS: { [string]: Color3 } = {
@@ -206,8 +221,29 @@ local function addDummyRow(data: { [string]: any }, order: number)
     limbs.Parent = row
 end
 
-local function render(state: { [string]: any })
+-- Forward declaration so setCollapsed() can re-run render() when the panel re-opens.
+local render: (state: { [string]: any }) -> ()
+
+-- Collapse the panel to just its title bar, or restore it. The title bar stays clickable
+-- in both states so it works as an open/close toggle.
+local function setCollapsed(c: boolean)
+    collapsed = c
+    panel.Size        = UDim2.new(0, PANEL_W, 0, c and PANEL_H_COLLAPSED or PANEL_H_EXPANDED)
+    btnRow.Visible    = not c
+    listFrame.Visible = not c
+    titleBtn.Text     = c and "DUMMY DEBUG   [+]" or "DUMMY DEBUG   [-]"
+    if not c and lastState ~= nil then
+        render(lastState)  -- refresh rows that were skipped while collapsed
+    end
+end
+
+function render(state: { [string]: any })
     if not enabled then
+        return
+    end
+    lastState = state
+    crosshairBtn.Text = "Crosshair: " .. (crosshairOn and "ON" or "OFF")
+    if collapsed then
         return
     end
     bloodBtn.Text = state.bloodEnabled and "Blood: ON" or "Blood: OFF"
@@ -254,28 +290,31 @@ function DummyDebugUI:init(playerGui: PlayerGui)
     screen.DisplayOrder    = 50
     screen.Parent          = playerGui
 
-    local panel = Instance.new("Frame")
+    panel = Instance.new("Frame")
     panel.Name              = "Panel"
     panel.AnchorPoint       = Vector2.new(1, 0)
     panel.Position          = UDim2.new(1, -12, 0, 12)
-    panel.Size              = UDim2.new(0, 320, 0, 320)
+    panel.Size              = UDim2.new(0, PANEL_W, 0, PANEL_H_EXPANDED)
     panel.BackgroundColor3  = Color3.fromRGB(8, 8, 8)
     panel.BackgroundTransparency = 0.35
     panel.BorderSizePixel   = 0
     panel.Parent            = screen
 
-    local title = Instance.new("TextLabel")
-    title.Size                   = UDim2.new(1, 0, 0, 22)
-    title.BackgroundColor3       = Color3.fromRGB(20, 20, 20)
-    title.BackgroundTransparency = 0.2
-    title.BorderSizePixel        = 0
-    title.Font                   = Enum.Font.Code
-    title.TextSize               = 13
-    title.TextColor3             = Color3.fromRGB(240, 200, 90)
-    title.Text                   = "DUMMY DEBUG"
-    title.Parent                 = panel
+    -- Title doubles as the open/close toggle.
+    titleBtn = Instance.new("TextButton")
+    titleBtn.Name                   = "Title"
+    titleBtn.Size                   = UDim2.new(1, 0, 0, 22)
+    titleBtn.BackgroundColor3       = Color3.fromRGB(20, 20, 20)
+    titleBtn.BackgroundTransparency = 0.2
+    titleBtn.BorderSizePixel        = 0
+    titleBtn.Font                   = Enum.Font.Code
+    titleBtn.TextSize               = 13
+    titleBtn.TextColor3             = Color3.fromRGB(240, 200, 90)
+    titleBtn.AutoButtonColor       = true
+    titleBtn.Text                   = "DUMMY DEBUG   [-]"
+    titleBtn.Parent                 = panel
 
-    local btnRow = Instance.new("Frame")
+    btnRow = Instance.new("Frame")
     btnRow.Position               = UDim2.new(0, 6, 0, 26)
     btnRow.Size                   = UDim2.new(1, -12, 0, 54)
     btnRow.BackgroundTransparency = 1
@@ -295,6 +334,8 @@ function DummyDebugUI:init(playerGui: PlayerGui)
     bloodBtn.Parent = btnRow
     hitboxBtn = makeButton("Hitboxes: OFF", 5)
     hitboxBtn.Parent = btnRow
+    crosshairBtn = makeButton("Crosshair: ON", 6)
+    crosshairBtn.Parent = btnRow
 
     listFrame = Instance.new("Frame")
     listFrame.Name                 = "List"
@@ -325,6 +366,14 @@ function DummyDebugUI:init(playerGui: PlayerGui)
         hitboxOn = not hitboxOn
         hitboxBtn.Text = "Hitboxes: " .. (hitboxOn and "ON" or "OFF")
         refreshHitboxes()
+    end)
+    crosshairBtn.Activated:Connect(function()
+        crosshairOn = not crosshairOn
+        crosshairBtn.Text = "Crosshair: " .. (crosshairOn and "ON" or "OFF")
+        CrosshairUI:SetUserEnabled(crosshairOn)
+    end)
+    titleBtn.Activated:Connect(function()
+        setCollapsed(not collapsed)
     end)
 end
 

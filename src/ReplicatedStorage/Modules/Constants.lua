@@ -1122,8 +1122,11 @@ Constants.WORLD_AKS74_GRIP_C1 = CFrame.new()
 -- sequence. With it false (current default) ADS is just the FOV zoom + the pivot glide.
 -- ============================================================
 
--- Input type for ADS toggle (right mouse button).
+-- Input for ADS (right mouse button).
 Constants.ADS_INPUT_USER_INPUT_TYPE = Enum.UserInputType.MouseButton2
+-- true  = hold the button to aim, release to lower (default).
+-- false = press to toggle aim on/off.
+Constants.ADS_HOLD_TO_AIM = true
 
 -- Fade time for ADS animation blend/transitions (in seconds).
 Constants.VIEWMODEL_ADS_TRACK_FADE_TIME = 0.03

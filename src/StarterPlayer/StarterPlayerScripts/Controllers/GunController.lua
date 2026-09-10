@@ -924,35 +924,52 @@ function GunController:Start()
         Logger.debug("[GunController] Reload requested", currentMag <= 0 and "(empty)" or "(tactical)")
     end)
 
-    -- ── Input: ADS (aim down sights) — MB2 toggle ─────────────────────────────
-    -- Toggles first-person ADS animation on/off.
-    -- Only affects viewmodel animation; no server state, no recoil/spread changes.
-    -- MB2 press toggles isAiming state; GunController uses ViewModelController:IsAiming()
-    -- to decide which fire animation to play (normal fire vs ADS fire).
-    local adsConn = UserInputService.InputBegan:Connect(function(input: InputObject, gp: boolean)
+    -- ── Input: ADS (aim down sights) — MB2 ────────────────────────────────────
+    -- Constants.ADS_HOLD_TO_AIM: true = hold MB2 to aim / release to lower; false = press
+    -- to toggle. Only drives viewmodel animation + ADS FOV/move-speed via SetAiming — no
+    -- server state, no recoil/spread changes.
+    local function requestAiming(active: boolean)
+        if equippedWeaponName == nil then
+            active = false  -- never leave the flag stuck on with no weapon
+        end
+        if active then
+            if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
+            if Constants.TACTICAL_SPRINT_BLOCKS_GUN_USE
+                and MovementController.IsTacticalSprinting()
+            then
+                return
+            end
+            -- No ADS entry from third-person: scroll into first-person first.
+            if LocalPlayer.CameraMode ~= Enum.CameraMode.LockFirstPerson then
+                return
+            end
+        end
+        if ViewModelController:IsAiming() == active then return end
+        ViewModelController:SetAiming(active)
+        MovementController.SetAiming(active)
+        Logger.debug("[GunController] ADS " .. (active and "engaged" or "released"))
+    end
+
+    local adsBeganConn = UserInputService.InputBegan:Connect(function(input: InputObject, gp: boolean)
         if gp then return end
         if input.UserInputType ~= Constants.ADS_INPUT_USER_INPUT_TYPE then return end
-        -- Block ADS while holstered (no weapon in hand).
-        if equippedWeaponName == nil then return end
-        if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
-        -- Stage 2P: block ADS while tactical sprint is active.
-        if Constants.TACTICAL_SPRINT_BLOCKS_GUN_USE
-            and MovementController.IsTacticalSprinting()
-        then
-            return
+        if Constants.ADS_HOLD_TO_AIM then
+            requestAiming(true)
+        else
+            requestAiming(not ViewModelController:IsAiming())
         end
-        -- Block ADS entry from third-person: player must scroll into first-person first.
-        local currentlyAiming = ViewModelController:IsAiming()
-        local newAiming = not currentlyAiming
-        if newAiming and LocalPlayer.CameraMode ~= Enum.CameraMode.LockFirstPerson then
-            return
-        end
-        ViewModelController:SetAiming(newAiming)
-        -- Task A: notify MovementController so it can cancel sprint and manage ADS FOV.
-        MovementController.SetAiming(newAiming)
-        Logger.debug("[GunController] ADS toggled: " .. tostring(newAiming))
     end)
-    table.insert(_connections, adsConn)
+    table.insert(_connections, adsBeganConn)
+
+    -- Release always lowers the sights in hold mode (no gameProcessed check — a stuck
+    -- "aiming" flag would be worse than a spurious release).
+    local adsEndedConn = UserInputService.InputEnded:Connect(function(input: InputObject)
+        if input.UserInputType ~= Constants.ADS_INPUT_USER_INPUT_TYPE then return end
+        if Constants.ADS_HOLD_TO_AIM then
+            requestAiming(false)
+        end
+    end)
+    table.insert(_connections, adsEndedConn)
 
     -- ── Server event listeners ────────────────────────────────────────────────
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## Hold-to-ADS + collapsible dummy overlay + a crosshair toggle
+
+- **Hold to aim.** `Constants.ADS_HOLD_TO_AIM` (default true): MB2 InputBegan engages ADS,
+  InputEnded lowers it. `GunController`'s ADS handler is refactored around one
+  `requestAiming(active)` helper (the weapon / phase / tac-sprint / first-person guards
+  only gate *entering*; release always lowers). Set the constant false for the old
+  press-to-toggle behaviour. No server / recoil / spread change — still just drives
+  `ViewModelController:SetAiming` + `MovementController.SetAiming`.
+- **Dummy debug overlay opens/closes.** The `DUMMY DEBUG` title bar is now a button;
+  clicking it collapses the panel to just that bar (`[-]` / `[+]`) and restores it. The
+  row list is skipped while collapsed and re-rendered from the last cached state on
+  re-open.
+- **Crosshair toggle.** New `Crosshair: ON/OFF` button in the dummy overlay calls
+  `CrosshairUI:SetUserEnabled(bool)` — a new developer override that hides both the fixed
+  centre crosshair image and the floating gun-direction dot regardless of phase / hipfire
+  state (hitmarker still flashes on hits). Client-only; `DummyDebugUI` requires
+  `CrosshairUI` directly (sibling controller, initialised earlier by `ClientInit`).
+
 ## Ragdoll actually knocks the body over now (per-weapon knockback)
 
 The death ragdoll "folded up while standing" instead of falling. Three fixes in

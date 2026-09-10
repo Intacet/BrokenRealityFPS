@@ -64,6 +64,9 @@ local freeAimEnabled: boolean = false
 -- hip-firing (in which case the fixed centre crosshair is hidden per Constants).
 local phaseShowsReticle: boolean = false
 local hipfireActive:     boolean = false
+-- Developer override (DummyDebugUI "Crosshair" button). When false the crosshair image
+-- AND the floating gun-direction dot are hidden regardless of phase / hipfire state.
+local userCrosshairEnabled: boolean = true
 
 -- ============================================================
 -- Private helpers
@@ -76,10 +79,10 @@ local function updateVisibility()
     if not crosshairImg or not barrelDot then
         return
     end
-    barrelDot.Visible = phaseShowsReticle
+    barrelDot.Visible = phaseShowsReticle and userCrosshairEnabled
     local hideCenter = hipfireActive
         and (Constants.FREE_AIM_HIDE_CENTER_CROSSHAIR_HIPFIRE :: boolean)
-    crosshairImg.Visible = phaseShowsReticle and not hideCenter
+    crosshairImg.Visible = phaseShowsReticle and userCrosshairEnabled and not hideCenter
 end
 
 local function makeBar(
@@ -220,6 +223,22 @@ function CrosshairUI:SetHipfireActive(active: boolean): ()
     end
     hipfireActive = active
     updateVisibility()
+end
+
+-- Developer toggle (DummyDebugUI). false hides the crosshair image + the floating dot
+-- entirely; true restores normal phase/hipfire-driven visibility.
+function CrosshairUI:SetUserEnabled(enabled: boolean): ()
+    assert(typeof(enabled) == "boolean", "[CrosshairUI] SetUserEnabled: expected boolean")
+    if enabled == userCrosshairEnabled then
+        return
+    end
+    userCrosshairEnabled = enabled
+    updateVisibility()
+end
+
+-- Current state of the developer toggle above.
+function CrosshairUI:IsUserEnabled(): boolean
+    return userCrosshairEnabled
 end
 
 -- ============================================================
