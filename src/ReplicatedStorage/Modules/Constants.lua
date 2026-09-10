@@ -2127,6 +2127,23 @@ Constants.AI = {
     PATROL_ARRIVE_DISTANCE  = 8,   -- leader within this of a patrol point → advance the squad index
     LAST_SEEN_CHASE_SECONDS = 3,   -- keep chasing a lost target's last position this long
     ATTACK_MOVE_SPEED       = 6,   -- WalkSpeed while in Attack (slow, not a hard stop)
+
+    -- ── Stage 1C — grunt weapon model + third-person animation ─────────────
+    -- AIService clones ReplicatedStorage/WorldModels/<worldModelName> onto the
+    -- grunt's Right Arm exactly like WorldWeaponService does for players, and
+    -- loads the same WeaponData thirdPerson equip/idle/fire clips + default R6
+    -- idle/walk onto the grunt's Humanoid.Animator. The gun only sits right while
+    -- the thirdPerson `idle` pose is playing (WORLD_AKS74_GRIP_C0/C1 are identity).
+    WEAPON_NAME               = Constants.DEFAULT_VIEWMODEL_WEAPON,  -- WeaponData key: world model + thirdPerson anims
+    USE_WORLD_WEAPON          = true,   -- weld WorldModels/<worldModelName> to the Right Arm
+    USE_THIRD_PERSON_ANIMS    = true,   -- load thirdPerson equip/idle/fire on the grunt Animator
+    USE_LOCOMOTION_ANIMS      = true,   -- default R6 idle/walk driven off Humanoid speed
+    LOCOMOTION_IDLE_ANIM_ID   = "rbxassetid://180435571",  -- Roblox default R6 idle
+    LOCOMOTION_WALK_ANIM_ID   = "rbxassetid://180426354",  -- Roblox default R6 walk
+    LOCOMOTION_WALK_SPEED_MIN = 0.5,   -- Humanoid speed at/above this → walk clip, else idle
+    WEAPON_IDLE_ANIM_FADE     = 0.2,
+    WEAPON_EQUIP_ANIM_FADE    = 0.1,
+    WEAPON_FIRE_ANIM_FADE     = 0.05,
 }
 
 -- ── AI Stage 1B — combat feedback FX for AIService grunts ───────────────────

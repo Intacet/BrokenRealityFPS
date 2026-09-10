@@ -4,6 +4,7 @@
 --
 -- AI Stage 1A — basic server-owned squad NPC foundation.
 -- AI Stage 1B — combat feedback FX (muzzle flash / smoke / light / tracer / 3D sound).
+-- AI Stage 1C — grunt weapon model + third-person animation (same gun/poses as players).
 --
 -- Spawns simple R6 rifleman "grunt" squads from Workspace/AISpawns, patrols
 -- Workspace/AIPatrolPoints, detects players by server raycast line-of-sight,
@@ -25,16 +26,26 @@
 --
 -- Stage 1B combat FX (Constants.AI_COMBAT_FX): server-created, world-replicated
 -- placeholder visuals — a muzzle flash + smoke puff + light pulse on an
--- auto-created "AIMuzzleAttachment" (on the grunt's Right Arm, or HumanoidRootPart
--- if absent — placeholder until AI weapon models exist), an optional short tracer
--- Beam parented under Workspace/AI, and a 3D gunshot Sound. Emitters / light /
--- sound are built ONCE per NPC in setupAICombatFx and reused; only the tracer
--- creates a temporary part per shot (Debris-cleaned; AI fire rate is capped).
--- Placeholder asset IDs (rbxassetid://0) warn once and do not crash.
+-- auto-created "AIMuzzleAttachment" (on the welded gun's Barrel, else the Right
+-- Arm), an optional short tracer Beam parented under Workspace/AI, and a 3D
+-- gunshot Sound. Emitters / light / sound are built ONCE per NPC in
+-- setupAICombatFx and reused; only the tracer creates a temporary part per shot
+-- (Debris-cleaned; AI fire rate is capped). Placeholder asset IDs (rbxassetid://0)
+-- warn once and do not crash.
 --
--- Deferred (see docs/TECHNICAL_DEBT.md — AI Stage 1A/1B): PathfindingService,
+-- Stage 1C weapon + animation (Constants.AI Stage 1C fields): each grunt gets the
+-- real AKS-74 world model (ReplicatedStorage/WorldModels/<worldModelName>) welded
+-- Handle -> Right Arm via a Motor6D, exactly like WorldWeaponService does for
+-- players, plus the WeaponData thirdPerson equip/idle/fire clips and the default
+-- R6 idle/walk clips loaded on the grunt's Humanoid.Animator. The gun only sits
+-- correctly while the thirdPerson `idle` pose plays (grip C0/C1 are identity). All
+-- of this degrades gracefully — a missing model or a failed LoadAnimation just
+-- warns once and the grunt still fires.
+--
+-- Deferred (see docs/TECHNICAL_DEBT.md — AI Stage 1A/1B/1C): PathfindingService,
 -- ragdoll on AI death, rewards/points/killstreaks, AI types, cover/flanking,
--- AI firing animations, final flash/smoke/sound art, tracer pooling.
+-- jump/climb animation, reload animation, final flash/smoke/sound art, tracer
+-- pooling, extracting the WorldWeaponService attach body into a shared module.
 
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -46,9 +57,10 @@ local Debris            = game:GetService("Debris")
 -- Dependencies
 -- ============================================================
 
-local Modules   = ReplicatedStorage:WaitForChild("Modules")
-local Constants = require(Modules:WaitForChild("Constants"))
-local Logger    = require(Modules:WaitForChild("Logger"))
+local Modules    = ReplicatedStorage:WaitForChild("Modules")
+local Constants  = require(Modules:WaitForChild("Constants"))
+local Logger     = require(Modules:WaitForChild("Logger"))
+local WeaponData = require(Modules:WaitForChild("WeaponData"))
 
 -- DamageService is a sibling ModuleScript; the only in-tree caller besides GunService.
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
@@ -75,6 +87,16 @@ type AICombatFx = {
     lightToken: number,          -- guards the light-off task.delay against rapid re-fire
 }
 
+-- Stage 1C animation tracks, loaded once per NPC on the Humanoid.Animator.
+-- Tracks + Animator are children of the NPC model and die with it.
+type AIAnim = {
+    weaponIdle    : AnimationTrack?,  -- thirdPerson idle — positions the welded gun
+    locomotionIdle: AnimationTrack?,
+    locomotionWalk: AnimationTrack?,
+    fire          : AnimationTrack?,  -- thirdPerson fire — played per shot
+    movingWalk    : boolean,          -- current locomotion state (walk vs idle)
+}
+
 type NPCRecord = {
     model    : Model,
     humanoid : Humanoid,
@@ -95,6 +117,7 @@ type NPCRecord = {
     fireThread: thread?,
     conns     : { RBXScriptConnection },
     fx        : AICombatFx?,
+    anim      : AIAnim?,
     dead      : boolean,
 }
 
@@ -135,6 +158,8 @@ local warnedNoSpawns = false
 local warnedNoPatrol = false
 local warnedPlaceholderFx  = false  -- one-time: AI_COMBAT_FX still on rbxassetid://0
 local warnedNoMuzzleParent = false  -- one-time: an NPC rig had no Right Arm / HRP
+local warnedNoWorldModel    = false  -- one-time: WorldModels/<weapon> asset missing (Stage 1C)
+local warnedAnimLoadFailed  = false  -- one-time: LoadAnimation threw for an AI anim (Stage 1C)
 
 -- ============================================================
 -- Workspace folder discovery
@@ -272,6 +297,10 @@ local function buildRig(worldCFrame: CFrame): (Model, Humanoid, BasePart)
     humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
     humanoid.Parent = model
 
+    -- Stage 1C: an Animator is required to LoadAnimation on this rig.
+    local animator = Instance.new("Animator")
+    animator.Parent = humanoid
+
     model.PrimaryPart = root
     model:PivotTo(worldCFrame)
 
@@ -387,9 +416,16 @@ local function warnPlaceholderFxOnce()
     end
 end
 
--- The rig part the muzzle FX hang off. Placeholder ordering: Right Arm, then
--- HumanoidRootPart. A real AI weapon model would supply its own muzzle part.
+-- The rig part the muzzle FX hang off. Prefers the welded gun's Barrel (Stage 1C),
+-- then the Right Arm, then HumanoidRootPart.
 local function muzzleParentFor(record: NPCRecord): BasePart?
+    local gun = record.model:FindFirstChild(Constants.WORLD_WEAPON_CHARACTER_MODEL_NAME)
+    if gun ~= nil then
+        local barrel = gun:FindFirstChild("Barrel")
+        if barrel ~= nil and barrel:IsA("BasePart") and barrel.Parent ~= nil then
+            return barrel
+        end
+    end
     local arm = record.model:FindFirstChild("Right Arm")
     if arm ~= nil and arm:IsA("BasePart") and arm.Parent ~= nil then
         return arm
@@ -619,6 +655,207 @@ local function playAIShotFx(npcRecord: NPCRecord, muzzleWorldPosition: Vector3, 
     end
 end
 
+-- ============================================================
+-- Stage 1C — grunt weapon model + third-person animation
+-- Clones ReplicatedStorage/WorldModels/<worldModelName> onto the Right Arm exactly
+-- like WorldWeaponService, and loads the WeaponData thirdPerson equip/idle/fire +
+-- default R6 idle/walk on the Humanoid.Animator. Everything degrades gracefully.
+-- ============================================================
+
+-- Loads one Animation asset into a track on `animator`. Returns nil (and warns
+-- once) if LoadAnimation throws — e.g. the asset is not readable by this place.
+local function loadTrack(
+    animator: Animator,
+    animId: string,
+    looped: boolean,
+    priority: Enum.AnimationPriority
+): AnimationTrack?
+    local anim = Instance.new("Animation")
+    anim.AnimationId = animId
+    local ok, result = pcall(function()
+        return animator:LoadAnimation(anim)
+    end)
+    anim:Destroy()
+    if not ok then
+        if not warnedAnimLoadFailed then
+            warnedAnimLoadFailed = true
+            Logger.warn("[AIService] LoadAnimation failed for an AI clip (" .. animId
+                .. ") — grunts fall back to the raw pose:", tostring(result))
+        end
+        return nil
+    end
+    local track = result :: AnimationTrack
+    track.Looped = looped
+    track.Priority = priority
+    return track
+end
+
+-- Clones the AKS-74 world model onto the grunt's Right Arm. Mirrors
+-- WorldWeaponService.EquipWeapon's attach body (that service takes a Player and is
+-- a Script, so it can't be reused) using the same Constants.WORLD_WEAPON_* values.
+local function attachAIWorldWeapon(record: NPCRecord): ()
+    assert(record ~= nil, "record is required")
+    if AI.USE_WORLD_WEAPON ~= true then
+        return
+    end
+
+    local rawData = WeaponData[AI.WEAPON_NAME]
+    if rawData == nil then
+        return
+    end
+    local wmName = (rawData :: any).worldModelName
+    if typeof(wmName) ~= "string" or wmName == "" then
+        return
+    end
+
+    local folder = ReplicatedStorage:FindFirstChild(Constants.WORLD_WEAPON_FOLDER_NAME)
+    local asset = if folder ~= nil then folder:FindFirstChild(wmName) else nil
+    if asset == nil or not asset:IsA("Model") then
+        if not warnedNoWorldModel then
+            warnedNoWorldModel = true
+            Logger.warn("[AIService] ReplicatedStorage." .. Constants.WORLD_WEAPON_FOLDER_NAME
+                .. "." .. wmName .. " not found — grunts fire without a visible gun")
+        end
+        return
+    end
+
+    local rightArmInst = record.model:FindFirstChild(Constants.WORLD_WEAPON_R6_RIGHT_ARM_NAME)
+    if rightArmInst == nil or not rightArmInst:IsA("BasePart") then
+        return
+    end
+
+    -- Defensive: drop any earlier clone (setup runs once per NPC).
+    local prior = record.model:FindFirstChild(Constants.WORLD_WEAPON_CHARACTER_MODEL_NAME)
+    if prior ~= nil then
+        prior:Destroy()
+    end
+
+    local clone = (asset :: Model):Clone()
+    clone.Name = Constants.WORLD_WEAPON_CHARACTER_MODEL_NAME
+    for _, desc in ipairs(clone:GetDescendants()) do
+        if desc:IsA("BasePart") then
+            desc.CanCollide = false
+            desc.CanQuery   = false
+            desc.CanTouch   = false
+            desc.Massless    = true
+            desc.Anchored    = false
+        end
+    end
+
+    local handleInst = clone:FindFirstChild(Constants.WORLD_WEAPON_HANDLE_PART_NAME)
+    if handleInst == nil or not handleInst:IsA("BasePart") then
+        clone:Destroy()
+        Logger.warn("[AIService] WorldModels." .. wmName .. " has no '"
+            .. Constants.WORLD_WEAPON_HANDLE_PART_NAME .. "' BasePart — AI gun not attached")
+        return
+    end
+
+    clone.Parent = record.model
+
+    local motor  = Instance.new("Motor6D")
+    motor.Name   = Constants.WORLD_WEAPON_GRIP_MOTOR_NAME
+    motor.Part0  = rightArmInst
+    motor.Part1  = handleInst
+    motor.C0     = Constants.WORLD_AKS74_GRIP_C0
+    motor.C1     = Constants.WORLD_AKS74_GRIP_C1
+    motor.Parent = rightArmInst
+end
+
+-- Loads idle/walk (default R6) + thirdPerson idle/fire/equip on the grunt's
+-- Animator and starts the hold pose. Connects Humanoid.Running to swap idle<->walk.
+local function setupAIAnimation(record: NPCRecord): ()
+    assert(record ~= nil, "record is required")
+    if record.anim ~= nil then
+        return
+    end
+    if AI.USE_THIRD_PERSON_ANIMS ~= true and AI.USE_LOCOMOTION_ANIMS ~= true then
+        return
+    end
+
+    local animator = record.humanoid:FindFirstChildOfClass("Animator")
+    if animator == nil then
+        return
+    end
+
+    local anim: AIAnim = {
+        weaponIdle     = nil,
+        locomotionIdle = nil,
+        locomotionWalk = nil,
+        fire           = nil,
+        movingWalk     = false,
+    }
+
+    if AI.USE_LOCOMOTION_ANIMS == true then
+        anim.locomotionIdle = loadTrack(animator, AI.LOCOMOTION_IDLE_ANIM_ID, true, Enum.AnimationPriority.Idle)
+        anim.locomotionWalk = loadTrack(animator, AI.LOCOMOTION_WALK_ANIM_ID, true, Enum.AnimationPriority.Movement)
+        local li = anim.locomotionIdle
+        if li ~= nil then
+            li:Play()
+        end
+    end
+
+    if AI.USE_THIRD_PERSON_ANIMS == true then
+        local data = WeaponData[AI.WEAPON_NAME] :: any
+        local tp = if data ~= nil and data.animations ~= nil then data.animations.thirdPerson else nil
+        if tp ~= nil then
+            if typeof(tp.idle) == "string" then
+                anim.weaponIdle = loadTrack(animator, tp.idle, true, Enum.AnimationPriority.Action)
+                local wi = anim.weaponIdle
+                if wi ~= nil then
+                    wi:Play(AI.WEAPON_IDLE_ANIM_FADE)
+                end
+            end
+            if typeof(tp.fire) == "string" then
+                anim.fire = loadTrack(animator, tp.fire, false, Enum.AnimationPriority.Action2)
+            end
+            if typeof(tp.equip) == "string" then
+                local equipTrack = loadTrack(animator, tp.equip, false, Enum.AnimationPriority.Action2)
+                if equipTrack ~= nil then
+                    equipTrack:Play(AI.WEAPON_EQUIP_ANIM_FADE)
+                end
+            end
+        end
+    end
+
+    record.anim = anim
+
+    -- Swap idle <-> walk on the Humanoid's own speed signal (only when it flips).
+    local runConn = record.humanoid.Running:Connect(function(speed: number)
+        local a = record.anim
+        if a == nil or record.dead then
+            return
+        end
+        local shouldWalk = speed >= (AI.LOCOMOTION_WALK_SPEED_MIN :: number)
+        if shouldWalk == a.movingWalk then
+            return
+        end
+        a.movingWalk = shouldWalk
+        local li, lw = a.locomotionIdle, a.locomotionWalk
+        if shouldWalk then
+            if li ~= nil then li:Stop() end
+            if lw ~= nil then lw:Play() end
+        else
+            if lw ~= nil then lw:Stop() end
+            if li ~= nil then li:Play() end
+        end
+    end)
+    table.insert(record.conns, runConn)
+end
+
+-- Plays the thirdPerson fire kick once, restarting it if already playing (fine at
+-- the capped AI fire rate — same reasoning as the shared Stage 1B gunshot Sound).
+local function playAIFireAnim(record: NPCRecord): ()
+    local a = record.anim
+    if a == nil then
+        return
+    end
+    local fire = a.fire
+    if fire ~= nil then
+        fire:Play(AI.WEAPON_FIRE_ANIM_FADE)
+        fire.TimePosition = 0
+    end
+end
+
 local function fireOneShot(record: NPCRecord)
     local target = record.target
     local troot  = targetRootOf(target)
@@ -638,8 +875,8 @@ local function fireOneShot(record: NPCRecord)
     local rayVec = dir * AI.SHOT_RANGE
     local result = workspace:Raycast(origin, rayVec, losParams)
 
-    -- Stage 1B: play the visible + audible shot FX for every shot, hit or miss.
-    -- Reads only the muzzle / end position — the hit calculation is unchanged.
+    -- Stage 1B/1C: play the visible + audible shot FX and the fire kick for every
+    -- shot, hit or miss. Reads only the muzzle / end position — hit calc unchanged.
     local muzzlePos: Vector3 = origin
     local fx = record.fx
     if fx ~= nil and fx.attachment.Parent ~= nil then
@@ -647,6 +884,7 @@ local function fireOneShot(record: NPCRecord)
     end
     local endPos: Vector3 = if result ~= nil then result.Position else origin + rayVec
     playAIShotFx(record, muzzlePos, endPos)
+    playAIFireAnim(record)
 
     if result == nil then
         return
@@ -825,9 +1063,12 @@ local function disconnectRecord(record: NPCRecord)
         record.fireThread = nil
     end
     record.firing = false
-    -- Stage 1B: drop FX references. The emitters / light / sound are children of
-    -- the NPC model and die with it; the token-guarded light task.delay no-ops.
+    -- Stage 1B/1C: drop FX + animation references. Emitters / light / sound /
+    -- AnimationTracks / Animator / gun model are all children of the NPC model and
+    -- die with it; the token-guarded light task.delay no-ops. The Humanoid.Running
+    -- connection is in record.conns and is disconnected in the loop below.
     record.fx = nil
+    record.anim = nil
     for _, conn in ipairs(record.conns) do
         conn:Disconnect()
     end
@@ -909,6 +1150,7 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
         fireThread= nil,
         conns     = {},
         fx        = nil,
+        anim      = nil,
         dead      = false,
     }
 
@@ -921,11 +1163,24 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
 
     npcs[model] = record
 
-    -- Stage 1B: build the per-NPC muzzle FX once. pcall so a Studio FX quirk
-    -- (missing asset, odd rig) can never block a grunt from spawning.
+    -- Presentation setup, each pcall'd so a Studio asset quirk can never block a
+    -- grunt from spawning. Order matters:
+    --   1C weapon first  — so setupAICombatFx's attachment can land on the Barrel
+    --   1B muzzle FX
+    --   1C animation last — plays the idle pose on a rig that already has the gun
+    local okWeapon, weaponErr = pcall(attachAIWorldWeapon, record)
+    if not okWeapon then
+        Logger.warn("[AIService] attachAIWorldWeapon failed for", model.Name, "-", tostring(weaponErr))
+    end
+
     local okFx, fxErr = pcall(setupAICombatFx, record)
     if not okFx then
         Logger.warn("[AIService] setupAICombatFx failed for", model.Name, "-", tostring(fxErr))
+    end
+
+    local okAnim, animErr = pcall(setupAIAnimation, record)
+    if not okAnim then
+        Logger.warn("[AIService] setupAIAnimation failed for", model.Name, "-", tostring(animErr))
     end
 
     return model

@@ -88,12 +88,11 @@ miss) — the hit / damage calculation is unchanged. No remotes, no client code,
   edits (no `default.project.json` change), so a `rojo serve` restart is not needed,
   but MCP can't drive a player into a grunt's Attack state or watch the FX. Needs a
   Studio Play pass — see the test steps below.
-- **AI muzzle position is a placeholder.** The `AIMuzzleAttachment` is auto-created
-  on the grunt's **Right Arm** (or **HumanoidRootPart** if absent) at the
-  `MUZZLE_*_OFFSET` (all 0 by default). There is no AI weapon model, so the flash
-  comes from roughly the right-hand area, not a barrel tip, and "forward" is the
-  limb's local −Z which only loosely matches aim. Real AI weapon/world models later
-  should supply their own muzzle part and this heuristic can be dropped.
+- **AI muzzle position** — since Stage 1C `muzzleParentFor` puts `AIMuzzleAttachment`
+  on the welded gun's **`Barrel`** part (falling back to Right Arm / HumanoidRootPart
+  if the world model is missing). The `MUZZLE_*_OFFSET` (all 0) and "forward = local
+  −Z of the Barrel" are still first guesses; a hand-authored `MuzzleAttachment` on
+  the world model's Barrel would be the clean fix.
 - **Placeholder asset IDs.** `FLASH_TEXTURE` / `SMOKE_TEXTURE` / `GUNSHOT_SOUND_ID`
   are `rbxassetid://0` — the flash/smoke render as the default particle square and
   the sound does not play (guarded so it never emits a "failed to load" warning).
@@ -109,8 +108,8 @@ miss) — the hit / damage calculation is unchanged. No remotes, no client code,
   `TRACER_LIFETIME` (≈55 ms), and `Destroy()` sweeps any `BR_AITracer` strays +
   destroys `Workspace/AI`. If NPC count or fire rate rises, pool the holder + Beam
   (one reusable rig per shooter, or a small shared ring).
-- **AI shots still have no firing animation.** The arm does not move / recoil; the
-  flash just appears. An `Animator` + a simple fire clip is a later stage.
+- **AI firing animation + weapon model landed in Stage 1C** (see the section below) —
+  grunts now hold the real AKS-74 and play the third-person fire kick per shot.
 - **AI gunshot audio needs final sound design + distance tuning.**
   `GUNSHOT_VOLUME` (0.45), `GUNSHOT_ROLLOFF_MIN/MAX_DISTANCE` (12 / 180) and
   `RollOffMode.InverseTapered` are guesses; a real gunshot asset will change the
@@ -124,6 +123,51 @@ miss) — the hit / damage calculation is unchanged. No remotes, no client code,
   sound are attachment-parented so they ignore it.
 - Still **no rewards / points / killstreaks**, **no AI types / advanced tactics**,
   **no AI ragdoll integration** — all unchanged from Stage 1A.
+
+## AI Stage 1C — grunt weapon model + third-person animation (Studio verification: REQUIRED, not done)
+
+New `Constants.AI` Stage 1C fields + `AIService` helpers `attachAIWorldWeapon` /
+`setupAIAnimation` / `playAIFireAnim`, plus an `Animator` in `buildRig`. Each grunt
+clones `ReplicatedStorage/WorldModels/AKS-74` and welds `Handle` → `Right Arm` via a
+`Motor6D`, then loads the `WeaponData` `thirdPerson` equip/idle/fire clips + default
+R6 idle/walk on the `Animator`, plays the weapon idle pose, and swaps idle↔walk on
+`Humanoid.Running`. `fireOneShot` plays the fire clip per shot. **No new remotes, no
+client files, no `default.project.json` / `GunService` / `DamageService` /
+`WorldWeaponService` change.** MCP-verified: the world model exists with `Handle` +
+`Barrel` BaseParts, `Animator:LoadAnimation` works server-side (even the Roblox
+default R6 idle loaded), and the `Motor6D` grip attaches. Open risks:
+
+- **Not runtime-verified in Play.** MCP can't drive a player into a grunt's Attack
+  state or watch the pose blend. Needs a Studio Play pass — see the test steps.
+- **`WorldWeaponService`'s attach body is now duplicated in `AIService`** (~30
+  lines). `WorldWeaponService:EquipWeapon` takes a `Player` and lives in a
+  `.server.lua` Script, so it can't be `require`d. Extract a shared
+  `WorldWeapon` ModuleScript (`attach(character, weaponName)`) and have both call
+  it — the grip CFrames / part names / physics-prop loop must stay in lockstep.
+- **Server-side `LoadAnimation` on the game's own `thirdPerson` IDs is unverified**
+  in a real session. The Roblox default R6 idle loaded fine via MCP, so game-owned
+  clips should too, but each load is `pcall`'d — a failure leaves that track nil,
+  `Logger.warn`s once, and the grunt holds the gun in the **raw identity pose**
+  (gun through the wrist — ugly but functional). If it looks wrong in Play, that
+  is the cause.
+- **Animation priorities / fades / walk-speed threshold are first guesses.**
+  Weapon idle at `Action`, fire/equip at `Action2`, locomotion at `Idle`/`Movement`,
+  `LOCOMOTION_WALK_SPEED_MIN = 0.5`, fades 0.05–0.2 s. If the arms slide off the
+  gun while walking, bump the weapon-idle priority; if legs jitter at the
+  idle/walk boundary, widen the threshold or add hysteresis.
+- **Only one archetype / weapon.** `Constants.AI.WEAPON_NAME` (= the player's
+  default viewmodel weapon) drives both the world model and the anims for every
+  grunt. Per-squad or per-type weapons need a real loadout concept.
+- **Grunts still don't jump or climb** — no anim loaded for it (they never do
+  either in Stage 1A). **No reload animation** — deliberate; grunts have infinite
+  ammo and never reload.
+- **The gun is server-owned and Motor6D-driven.** It replicates and animates
+  correctly, but it is not network-owned by anyone (grunts are server-simulated).
+  If a future "pick up a dropped AI gun" feature is added, ownership handoff is
+  unhandled.
+- **`buildRig` now always adds an `Animator`.** Harmless for Stage 1A/1B behaviour,
+  but every grunt now carries an Animator + up to 4 `AnimationTrack`s; folded into
+  the `MAX_ACTIVE_NPCS` performance question above.
 
 ## Pre-round loadout menu — partial DEBT-013 (Studio verification: YES, required)
 

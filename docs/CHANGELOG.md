@@ -1,5 +1,28 @@
 # Changelog
 
+## AI Stage 1C — grunts get the player's gun + third-person animations
+
+- Each AI grunt now holds the **real AKS-74 world model** — `AIService` clones
+  `ReplicatedStorage/WorldModels/AKS-74` and welds `Handle` → `Right Arm` with a
+  `Motor6D`, the exact attach body `WorldWeaponService` uses for players (same
+  `Constants.WORLD_WEAPON_*` / grip CFrames; the ~30 lines are duplicated because
+  that service takes a `Player` and can't be `require`d).
+- Grunts gained an `Animator` and load the player's **third-person weapon poses**
+  (`WeaponData` `thirdPerson` equip / idle / fire — reload skipped, infinite ammo)
+  plus **default R6 idle / walk** clips. The weapon idle pose is what positions the
+  gun in-hand (grip C0/C1 are identity); `Humanoid.Running` swaps idle↔walk by
+  speed so grunts walk instead of sliding; `fireOneShot` plays the fire kick per
+  shot. Muzzle FX now originate at the gun's **`Barrel`**.
+- Every step is `pcall`'d and warns once on failure — a missing world model or a
+  failed `LoadAnimation` just means the grunt fires without the gun / in the raw
+  pose. New `Constants.AI` Stage 1C fields (`WEAPON_NAME`, `USE_*` flags,
+  `LOCOMOTION_*_ANIM_ID`, fades).
+- **No new remotes, no client files, no `default.project.json` change**;
+  `WorldWeaponService` / `WeaponData` / `GunService` / `DamageService` unchanged.
+  AI detection / chase / attack / damage / death is preserved. MCP-verified the
+  engine APIs + asset; full behaviour needs a Studio Play test (see
+  docs/TECHNICAL_DEBT.md "AI Stage 1C").
+
 ## AI Stage 1B — combat feedback FX for grunts
 
 - New `Constants.AI_COMBAT_FX` + `AIService` helpers `setupAICombatFx` /
