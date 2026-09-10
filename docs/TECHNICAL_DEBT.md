@@ -8,14 +8,22 @@ by server raycast LOS, chase, and burst-fire server raycasts. `Workspace/AI` hol
 live models. This is **foundation only** — the AI system is NOT complete.
 
 - **Not runtime-verified.** `default.project.json` gained the `AIService` mapping
-  (structural — `rojo serve` restarted), but MCP can't create `Workspace/AISpawns`
-  parts, drive a player near a grunt, or watch chase/attack/death. Needs an
-  in-Studio Play pass: connect Rojo, add 1–2 anchored parts under
-  `Workspace/AISpawns` (optionally 2–4 under `Workspace/AIPatrolPoints`), Play Solo,
-  confirm `Workspace/AI` appears with squads, walk into `DETECTION_RANGE`, confirm
-  detect → chase → attack, kill a grunt (or set `Humanoid.Health = 0`), confirm
-  Dead state + model cleanup after `DEATH_CLEANUP_DELAY`, let it run several minutes
-  for Output spam / runaway count / server hitching, then Stop with no errors.
+  (structural — `rojo serve` restarted), but MCP can't drive a player near a grunt
+  or watch chase/attack/death. `TestAreaBuilder` now builds the input folders
+  automatically (`DEV_TEST_AREA.SPAWN_AI_ZONE` → `Workspace/AISpawns` +
+  `Workspace/AIPatrolPoints` with anchored marker parts, plus an "AI Patrol Zone"
+  pad in the test area), so a Studio Play pass just needs: connect Rojo, Play Solo,
+  confirm `Workspace/AI` appears with squads walking the patrol loop in the AI Zone
+  corner of the test area, walk into `DETECTION_RANGE`, confirm detect → chase →
+  attack, kill a grunt (or set `Humanoid.Health = 0`), confirm Dead + model cleanup
+  after `DEATH_CLEANUP_DELAY`, run several minutes for Output spam / runaway count /
+  server hitching, then Stop with no errors.
+- **Server-script order is handled, not assumed.** `AIService` connects
+  `workspace.ChildAdded` (stored in `serviceConns`, disconnected in `Destroy()`) and
+  re-scans if a `Workspace/AISpawns` / `AIPatrolPoints` folder appears after it
+  started — so it does not matter whether `AIService` or `TestAreaBuilder` runs
+  first. This also picks up folders/parts added by hand mid-session. This is the
+  service's one persistent connection.
 - **Pathfinding is `Humanoid:MoveTo` only.** No `PathfindingService`. Grunts walk
   straight at the goal and will get stuck on walls, corners, and gaps.
   `PATH_RECALCULATE_INTERVAL` exists in `Constants.AI` but is currently unused
@@ -268,6 +276,16 @@ Open items / deferred:
   disconnected (pre-existing). The **test dummies** still just stand and take hits — moving
   AI now lives in the separate `AIService` (see "AI Stage 1A" above); its grunt NPCs are a
   different tag (`BR_DamageEntity` only, not `BR_DamageDummy`) so DummyService ignores them.
+- **AI patrol zone is now built** (2026-09-10): `DEV_TEST_AREA.SPAWN_AI_ZONE` (default
+  true) → a marked "AI Patrol Zone" pad inside the test-area folder, plus the top-level
+  `Workspace/AISpawns` (2 anchored parts) and `Workspace/AIPatrolPoints` (4 anchored parts
+  in a loop) that `AIService` reads, so grunt squads spawn and patrol on Play with no
+  manual setup. The two folders carry `BR_TestAreaOwned`; each run destroys only folders
+  with that attribute, so a **hand-authored** `AISpawns` / `AIPatrolPoints` is detected and
+  left completely alone (the builder then skips its own). Caveats: the folder-name match is
+  by string only (`Constants.AI.SPAWN_FOLDER_NAME` / `PATROL_FOLDER_NAME`); the marker part
+  positions and the 4-point loop shape are eyeball guesses; `SPAWN_AI_ZONE = false` + one
+  more run removes the owned folders (like the other opt-in sub-flags).
 - **Extraction / loot-loop test area is deferred.** No objective, stash, exfil, or
   inventory props — out of scope for this task.
 - **No global lighting/atmosphere test.** `LightingTest` is self-contained props only;

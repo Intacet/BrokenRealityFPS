@@ -2134,9 +2134,12 @@ Constants.AI = {
 -- All positions are world-space offsets from ORIGIN.
 -- TestAreaBuilder no-ops entirely unless ENABLED == true AND it is allowed to run
 -- in the current context: always in Studio, and in a published server only when
--- RUN_IN_PUBLISHED == true. It destroys/rebuilds only the one folder it owns; the
--- sole exception is the opt-in REDIRECT_TEAM_SPAWNS below, which relocates
--- Workspace/Spawns points (reversibly). Not a gameplay system.
+-- RUN_IN_PUBLISHED == true. It destroys/rebuilds only the one folder it owns;
+-- the opt-in exceptions that touch Workspace content outside that folder are all
+-- reversible: REDIRECT_TEAM_SPAWNS (relocates Workspace/Spawns points),
+-- SPAWN_DUMMIES (parents tagged R6 rigs to Workspace), and SPAWN_AI_ZONE (creates
+-- the top-level Workspace/AISpawns + Workspace/AIPatrolPoints folders it owns).
+-- Not a gameplay system.
 --
 -- ⚠ With RUN_IN_PUBLISHED = true the sandbox — and, if REDIRECT_TEAM_SPAWNS is on,
 -- every real match spawn moved into it — ships to all players in the live game.
@@ -2189,6 +2192,21 @@ Constants.DEV_TEST_AREA = {
     DROP_TEST_HEIGHTS = { 4, 8, 14 },
 
     MATERIAL_TEST_POSITION = Vector3.new(55, 1, 35),
+
+    -- AI patrol zone. Reversible, opt-in: TestAreaBuilder builds a small marked pad
+    -- (a child of its own folder) AND, outside that folder, the top-level
+    -- Workspace/AISpawns + Workspace/AIPatrolPoints folders (name-matched to
+    -- Constants.AI.SPAWN_FOLDER_NAME / PATROL_FOLDER_NAME) that AIService reads.
+    -- Those two folders carry AI_ZONE_OWNED_ATTRIBUTE so a rebuild only ever
+    -- destroys folders it made itself — a hand-authored AISpawns/AIPatrolPoints is
+    -- left untouched. Set SPAWN_AI_ZONE = false + start one more server to remove them.
+    SPAWN_AI_ZONE          = true,
+    AI_ZONE_POSITION       = Vector3.new(70, 0, 70),   -- local; a clear corner of the baseplate
+    AI_ZONE_SIZE           = Vector3.new(48, 1, 48),   -- marked pad footprint
+    AI_ZONE_SPAWN_COUNT    = 2,                        -- anchored squad-spawn parts
+    AI_ZONE_PATROL_COUNT   = 4,                        -- anchored patrol-point parts (walked as a loop)
+    AI_ZONE_MARKER_SIZE    = Vector3.new(3, 1, 3),     -- size of each spawn / patrol part
+    AI_ZONE_OWNED_ATTRIBUTE = "BR_TestAreaOwned",      -- marks the folders TestAreaBuilder created
 
     -- Developer damage-test dummies. TestAreaBuilder builds N tagged R6 rigs
     -- (Constants.TAG_DAMAGE_DUMMY) so DummyService picks them up — shoot them to test

@@ -87,6 +87,8 @@ type SquadRecord = {
 local started   = false
 local running   = false
 local mainThread: thread? = nil
+local serviceConns: { RBXScriptConnection } = {}
+local didStudioAutoSpawn = false
 
 local aiFolder : Folder? = nil
 local losParams: RaycastParams = RaycastParams.new()
@@ -702,6 +704,31 @@ local function mainLoop()
     end
 end
 
+-- Runs the one-time Studio opening spawn (idempotent via didStudioAutoSpawn). Safe
+-- to call again once spawn parts appear — e.g. TestAreaBuilder creating
+-- Workspace/AISpawns after this service already started (script order is not fixed).
+local function studioAutoSpawn()
+    if didStudioAutoSpawn or not running then
+        return
+    end
+    if not (RunService:IsStudio() and AI.SPAWN_ON_SERVER_START_IN_STUDIO == true) then
+        return
+    end
+    if #spawnParts == 0 then
+        return
+    end
+    didStudioAutoSpawn = true
+    task.spawn(function()
+        for i = 1, AI.MAX_SQUADS do
+            if not running or activeCount() >= AI.MAX_ACTIVE_NPCS then
+                break
+            end
+            local part = spawnParts[((i - 1) % #spawnParts) + 1]
+            spawnSquad(part.CFrame, AI.DEFAULT_SQUAD_SIZE)
+        end
+    end)
+end
+
 -- ============================================================
 -- Public API
 -- ============================================================
@@ -734,21 +761,25 @@ function AIService.Start(): ()
 
     mainThread = task.spawn(mainLoop)
 
-    if RunService:IsStudio() and AI.SPAWN_ON_SERVER_START_IN_STUDIO == true then
-        if #spawnParts == 0 then
-            Logger.warn("[AIService] SPAWN_ON_SERVER_START_IN_STUDIO is on but Workspace." .. AI.SPAWN_FOLDER_NAME .. " has no spawn parts — no squads spawned")
-        else
-            task.spawn(function()
-                for i = 1, AI.MAX_SQUADS do
-                    if not running or activeCount() >= AI.MAX_ACTIVE_NPCS then
-                        break
-                    end
-                    local part = spawnParts[((i - 1) % #spawnParts) + 1]
-                    spawnSquad(part.CFrame, AI.DEFAULT_SQUAD_SIZE)
-                end
-            end)
+    -- Re-scan when an AISpawns / AIPatrolPoints folder appears after we started
+    -- (server script order is not guaranteed; TestAreaBuilder may build them later).
+    local addedConn = workspace.ChildAdded:Connect(function(child: Instance)
+        if not child:IsA("Folder") then
+            return
         end
+        if child.Name == AI.SPAWN_FOLDER_NAME then
+            spawnParts, warnedNoSpawns = collectParts(AI.SPAWN_FOLDER_NAME, warnedNoSpawns)
+            studioAutoSpawn()
+        elseif child.Name == AI.PATROL_FOLDER_NAME then
+            patrolPoints, warnedNoPatrol = collectParts(AI.PATROL_FOLDER_NAME, warnedNoPatrol)
+        end
+    end)
+    table.insert(serviceConns, addedConn)
+
+    if RunService:IsStudio() and AI.SPAWN_ON_SERVER_START_IN_STUDIO == true and #spawnParts == 0 then
+        Logger.warn("[AIService] SPAWN_ON_SERVER_START_IN_STUDIO is on but Workspace." .. AI.SPAWN_FOLDER_NAME .. " has no spawn parts yet — will spawn if one appears")
     end
+    studioAutoSpawn()
 
     Logger.debug("[AIService] started — spawns:", #spawnParts, "patrol points:", #patrolPoints)
 end
@@ -768,6 +799,12 @@ end
 function AIService.Destroy(): ()
     running = false
     started = false
+    didStudioAutoSpawn = false
+
+    for _, conn in ipairs(serviceConns) do
+        conn:Disconnect()
+    end
+    table.clear(serviceConns)
 
     if mainThread ~= nil then
         pcall(task.cancel, mainThread)

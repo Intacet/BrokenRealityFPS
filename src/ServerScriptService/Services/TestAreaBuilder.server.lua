@@ -21,13 +21,16 @@
 -- Constants.DEV_TEST_AREA.RUN_IN_PUBLISHED == true.
 --
 -- Safe to re-run (stop/start Play Solo): it destroys ONLY the one folder it owns and
--- rebuilds it. Two opt-in exceptions touch Workspace content it does not own, both
+-- rebuilds it. Three opt-in exceptions touch Workspace content it does not own, all
 -- swept/restored on every run:
 --   * DEV_TEST_AREA.REDIRECT_TEAM_SPAWNS — moves the CFrames of Workspace/Spawns
 --     BaseParts onto this area (originals stashed in a backup attribute).
 --   * DEV_TEST_AREA.SPAWN_DUMMIES — spawns N R6 rigs tagged Constants.TAG_DAMAGE_DUMMY
 --     with a BR_TestAreaDummy attribute, and destroys any it (or DummyService) left
 --     behind before respawning them.
+--   * DEV_TEST_AREA.SPAWN_AI_ZONE — creates top-level Workspace/AISpawns +
+--     Workspace/AIPatrolPoints folders (marked BR_TestAreaOwned) for AIService to
+--     read; destroys only the folders it made, never a hand-authored one.
 
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -441,6 +444,44 @@ local function buildMaterialTest(root: Folder): ()
 	makeLabel("Material Test", place(Vector3.new(pos.X, GROUND_TOP + 12, pos.Z)), f)
 end
 
+-- Visual-only markers for the AI patrol zone, inside the test-area folder (swept
+-- on every rebuild). The functional Workspace/AISpawns + Workspace/AIPatrolPoints
+-- folders that AIService reads are made separately by setupAIZoneFolders().
+local function buildAIZoneMarkers(root: Folder): ()
+	local f = makeFolder("AIZone", root)
+	local pos: Vector3 = CFG.AI_ZONE_POSITION
+	local size: Vector3 = CFG.AI_ZONE_SIZE
+
+	-- Flat translucent pad — the baseplate is the real floor; this only marks the area.
+	makeBlock({
+		name = "ZonePad",
+		size = Vector3.new(size.X, 0.2, size.Z),
+		cframe = CFrame.new(place(Vector3.new(pos.X, GROUND_TOP + 0.1, pos.Z))),
+		color = Color3.fromRGB(48, 60, 70),
+		material = Enum.Material.SmoothPlastic,
+		transparency = 0.35,
+		canCollide = false,
+		parent = f,
+	})
+
+	local hx, hz = size.X / 2, size.Z / 2
+	for _, corner in ipairs({
+		Vector3.new(-hx, 0, -hz), Vector3.new(hx, 0, -hz),
+		Vector3.new(hx, 0, hz), Vector3.new(-hx, 0, hz),
+	}) do
+		makeBlock({
+			name = "ZonePost",
+			size = Vector3.new(0.6, 5, 0.6),
+			cframe = CFrame.new(place(Vector3.new(pos.X + corner.X, GROUND_TOP + 2.5, pos.Z + corner.Z))),
+			color = Color3.fromRGB(60, 90, 110),
+			material = Enum.Material.Metal,
+			parent = f,
+		})
+	end
+
+	makeLabel("AI Patrol Zone", place(Vector3.new(pos.X, GROUND_TOP + 8, pos.Z)), f)
+end
+
 local function buildLightingTest(root: Folder): ()
 	-- Self-contained props only. game.Lighting is NOT modified anywhere in this script.
 	local f = makeFolder("LightingTest", root)
@@ -711,6 +752,101 @@ local function spawnTestDummies(): ()
 		:format(count, swept))
 end
 
+-- ── AI patrol zone (Workspace/AISpawns + Workspace/AIPatrolPoints) ──────────
+-- Creates the two top-level folders AIService reads (names come from Constants.AI).
+-- Every run first destroys any same-named folder that carries AI_ZONE_OWNED_ATTRIBUTE
+-- (i.e. one THIS builder made) — a hand-authored folder is left completely alone.
+-- SPAWN_AI_ZONE = false + one more run removes the owned folders and stops.
+local function setupAIZoneFolders(): ()
+	local aiCfg = Constants.AI :: any
+	local ownedAttr: string = CFG.AI_ZONE_OWNED_ATTRIBUTE
+	local spawnName: string  = aiCfg.SPAWN_FOLDER_NAME
+	local patrolName: string = aiCfg.PATROL_FOLDER_NAME
+
+	-- Returns any existing same-named folder that is NOT ours (must be left alone),
+	-- after destroying ours if present.
+	local function clearOwned(name: string): Instance?
+		local existing = workspace:FindFirstChild(name)
+		if existing == nil then
+			return nil
+		end
+		if existing:GetAttribute(ownedAttr) == true then
+			existing:Destroy()
+			return nil
+		end
+		return existing
+	end
+
+	local foreignSpawn  = clearOwned(spawnName)
+	local foreignPatrol = clearOwned(patrolName)
+
+	if CFG.SPAWN_AI_ZONE ~= true then
+		Logger.debug("[TestAreaBuilder] SPAWN_AI_ZONE off — removed any AI zone folders this builder owned")
+		return
+	end
+	if foreignSpawn ~= nil or foreignPatrol ~= nil then
+		Logger.debug("[TestAreaBuilder] Workspace." .. spawnName .. " / " .. patrolName
+			.. " is hand-authored — leaving the AI zone folders alone")
+		return
+	end
+
+	local pos: Vector3      = CFG.AI_ZONE_POSITION
+	local size: Vector3     = CFG.AI_ZONE_SIZE
+	local markSize: Vector3 = CFG.AI_ZONE_MARKER_SIZE
+	local markY: number     = GROUND_TOP + markSize.Y / 2
+	local hx, hz            = size.X / 2, size.Z / 2
+
+	local function markerPart(name: string, worldPos: Vector3, color: Color3): BasePart
+		local part = Instance.new("Part")
+		part.Name       = name
+		part.Size       = markSize
+		part.Anchored   = true
+		part.CanCollide = false
+		part.CanQuery   = false
+		part.CastShadow = false
+		part.Color      = color
+		part.Material   = Enum.Material.Neon
+		part.CFrame     = CFrame.new(worldPos)
+		return part
+	end
+
+	-- Spawn parts: a short row along the -Z edge of the pad.
+	local spawnFolder = Instance.new("Folder")
+	spawnFolder.Name = spawnName
+	spawnFolder:SetAttribute(ownedAttr, true)
+	local spawnCount: number = CFG.AI_ZONE_SPAWN_COUNT
+	for i = 1, spawnCount do
+		local t = if spawnCount > 1 then (i - 1) / (spawnCount - 1) else 0.5
+		local lx = pos.X - hx * 0.55 + (hx * 1.1) * t
+		markerPart("AISpawn_" .. tostring(i),
+			place(Vector3.new(lx, markY, pos.Z - hz * 0.6)),
+			Color3.fromRGB(210, 70, 70)).Parent = spawnFolder
+	end
+	spawnFolder.Parent = workspace
+
+	-- Patrol parts: a rectangle loop just inside the pad corners.
+	local ring = {
+		Vector3.new(-hx * 0.7, 0, hz * 0.7),
+		Vector3.new(hx * 0.7, 0, hz * 0.7),
+		Vector3.new(hx * 0.7, 0, -hz * 0.7),
+		Vector3.new(-hx * 0.7, 0, -hz * 0.7),
+	}
+	local patrolFolder = Instance.new("Folder")
+	patrolFolder.Name = patrolName
+	patrolFolder:SetAttribute(ownedAttr, true)
+	local patrolCount: number = CFG.AI_ZONE_PATROL_COUNT
+	for i = 1, patrolCount do
+		local corner = ring[((i - 1) % #ring) + 1]
+		markerPart("AIPatrol_" .. tostring(i),
+			place(Vector3.new(pos.X + corner.X, markY, pos.Z + corner.Z)),
+			Color3.fromRGB(240, 210, 60)).Parent = patrolFolder
+	end
+	patrolFolder.Parent = workspace
+
+	Logger.debug(("[TestAreaBuilder] AI zone: Workspace.%s (%d spawn) + Workspace.%s (%d patrol)")
+		:format(spawnName, spawnCount, patrolName, patrolCount))
+end
+
 -- ── Build ───────────────────────────────────────────────────────────────────
 local existing = workspace:FindFirstChild(FOLDER_NAME)
 if existing ~= nil then
@@ -729,12 +865,14 @@ buildShootingRange(root)
 buildImpactWall(root)
 buildMovementCourse(root)
 buildMaterialTest(root)
+buildAIZoneMarkers(root)
 buildLightingTest(root)
 
 root.Parent = workspace
 
 redirectTeamSpawns()
 spawnTestDummies()
+setupAIZoneFolders()
 
 Logger.debug(("[TestAreaBuilder] built Workspace.%s — %d instances (labels %s)")
 	:format(FOLDER_NAME, #root:GetDescendants(), if labelsEnabled then "on" else "off"))

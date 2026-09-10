@@ -1,5 +1,20 @@
 # Changelog
 
+## AI patrol zone in the test area
+
+- `TestAreaBuilder` now builds an "AI Patrol Zone" — a marked pad in a clear corner of
+  the test area (`Constants.DEV_TEST_AREA.AI_ZONE_*`) plus the top-level
+  `Workspace/AISpawns` (2 anchored parts) and `Workspace/AIPatrolPoints` (4 anchored
+  parts in a loop) that `AIService` reads. So on Play you now see grunt squads spawn and
+  walk the patrol loop with zero manual setup. New `DEV_TEST_AREA.SPAWN_AI_ZONE` flag
+  (default true); the two folders carry `BR_TestAreaOwned` so a rebuild only ever
+  destroys folders it made — a hand-authored `AISpawns`/`AIPatrolPoints` is detected and
+  left untouched. `SPAWN_AI_ZONE = false` + one more run removes the owned folders.
+- `AIService` now connects `workspace.ChildAdded` (its one persistent connection,
+  disconnected in `Destroy()`) and re-scans if `AISpawns`/`AIPatrolPoints` appear after
+  it started — so it no longer matters whether `AIService` or `TestAreaBuilder` runs
+  first, and folders/parts added by hand mid-session are picked up.
+
 ## AI Stage 1A — basic server-owned squad NPC foundation
 
 - New `src/ServerScriptService/Services/AIService.server.lua` (self-running Script,
