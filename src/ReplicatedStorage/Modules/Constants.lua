@@ -1115,8 +1115,11 @@ Constants.WORLD_AKS74_GRIP_C0 = CFrame.new()
 Constants.WORLD_AKS74_GRIP_C1 = CFrame.new()
 
 -- ============================================================
--- First-person viewmodel ADS (aim down sights) — animation only
--- No FOV zoom, no camera changes — ADS is driven purely by animation playback.
+-- First-person viewmodel ADS (aim down sights)
+-- Camera FOV zoom is owned by MovementController (updateSprintFov "Task A", keyed off
+-- isAiming). ViewModelController owns the pivot glide to screen centre (adsAimAlpha) and,
+-- when VIEWMODEL_ADS_ANIMATION_ENABLED is true, the adsIn/adsIdle/adsOut/adsFire pose
+-- sequence. With it false (current default) ADS is just the FOV zoom + the pivot glide.
 -- ============================================================
 
 -- Input type for ADS toggle (right mouse button).
@@ -1128,6 +1131,13 @@ Constants.VIEWMODEL_ADS_TRACK_FADE_TIME = 0.03
 -- Playback-speed multiplier for the adsIn / adsOut transition clips (AnimationTrack:AdjustSpeed).
 -- > 1 makes raising/lowering the sights snappier without touching the animation assets.
 Constants.VIEWMODEL_ADS_TRANSITION_SPEED_MULTIPLIER = 1.35
+
+-- When false, ADS plays NO viewmodel pose animation. Entering ADS goes straight to the
+-- held "Aiming" state, the gun glides to a camera-centred position via VIEWMODEL_ADS_AIM_
+-- BLEND_SPEED (adsAimAlpha), the FOV zoom is handled by MovementController as today, and
+-- shots while aimed use the normal hipfire animation. Set true to restore the authored
+-- adsIn / adsIdle / adsOut / adsFire animation sequence and its bounded-recovery watchdogs.
+Constants.VIEWMODEL_ADS_ANIMATION_ENABLED = false
 
 -- Crossfade duration for idle ↔ run and post-reload resume transitions.
 -- Longer than ADS (which needs to feel snappy) but short enough to feel responsive.

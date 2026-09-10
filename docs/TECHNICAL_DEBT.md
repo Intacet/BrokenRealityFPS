@@ -182,9 +182,37 @@ Open items (Stages 1–3):
 
 Local code addresses an indefinite client reload lock and TP playback preventing FP playback. Visual asset load/permissions and joint compatibility remain unconfirmed in Studio. See RELOAD_DIAGNOSIS.md; no animation asset ID was changed. User testing and source reconciliation before installation are pending.
 
+## ADS zoom-only mode (2026-09-09, not Studio-tested)
+
+`Constants.VIEWMODEL_ADS_ANIMATION_ENABLED = false` (new default) makes `SetAiming` skip
+the `adsIn`/`adsIdle`/`adsOut` pose clips: Hip→Aiming and Aiming→Hip are set directly,
+the `adsAimAlpha` pivot blend glides the gun to centre, and the FOV zoom
+(`MovementController.updateSprintFov` Task A) is the "zoom in". `PlayADSFireAnimation`
+delegates to `PlayFireAnimation`. Open items:
+
+- **Not Studio-tested.** A weapon can't be equipped from MCP. Needs an in-game check: ADS
+  toggle glide framing, FOV in/out, fire while aimed, and reload/holster while aimed
+  (all route through `StopADSAnimations` / the reload `adsState ~= "Hip"` exit, which are
+  harmless no-ops on the never-played ADS tracks — verify visually anyway).
+- **Centred pose is the idle pose, not a sighted pose.** With no `adsIn` clip, `aimAlignedPivot`
+  puts the rig's FakeCamera at the camera in whatever pose idle/locomotion holds — "roughly
+  centred", iron sights not truly aligned. If the framing looks off, add a small static
+  `CFrame` offset to `aimAlignedPivot` in the zoom-only branch (no constant exists for this
+  yet) or re-enable the animation.
+- **Procedural sway/bob still fades out during zoom** (`inADS` path, scaled by `1 - adsAimAlpha`)
+  and free-aim is zeroed — intended for a steadier zoom, but if the gun should keep bobbing
+  while zoomed that suppression needs a carve-out.
+- **The four ADS tracks are still loaded** by `_setupWeaponAnimations` even though unused —
+  deliberate, so flipping the constant back to `true` restores full behaviour with no other
+  change. Minor wasted `LoadAnimation` per equip.
+- **Two FOV writers are now one path but two owners in principle.** MovementController owns
+  `camera.FieldOfView` (sprint + ADS Task A). ViewModelController's zoom-only ADS relies on
+  that; it does not write FOV itself. If ViewModelController ever needs its own zoom curve,
+  reconcile ownership rather than adding a second writer.
+
 ## Animation lock recovery — equip / ADS (new, not yet Studio-tested)
 
-Same bounded-recovery pattern as the reload patch, applied to `PlayEquipAnimation` and to ADS-in/ADS-out in `SetAiming`. See RELOAD_DIAGNOSIS.md "Extended scope". Not installed in Studio; visual asset load/permissions remain unconfirmed there, same as the reload patch.
+Same bounded-recovery pattern as the reload patch, applied to `PlayEquipAnimation` and to ADS-in/ADS-out in `SetAiming`. See RELOAD_DIAGNOSIS.md "Extended scope". Not installed in Studio; visual asset load/permissions remain unconfirmed there, same as the reload patch. **Note (2026-09-09):** with `VIEWMODEL_ADS_ANIMATION_ENABLED = false` the ADS-in/ADS-out watchdogs and the Entering/Exiting states are not used at all — the recovery patch only matters if the animation is re-enabled.
 
 Two related gaps were found but intentionally left unpatched this pass (lower impact, no permanent lock):
 - Third-person equip (`startThirdPersonEquipSequence`) skips the TP equip clip whenever it isn't already loaded at the moment `EquipWeapon` calls it (near-always, since asset loading is asynchronous) and falls straight to TP idle — a missed cosmetic beat, not a freeze.

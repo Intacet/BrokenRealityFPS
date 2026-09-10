@@ -2798,6 +2798,17 @@ function ViewModelController:SetAiming(entering: boolean)
             setFirstPerson(true)
         end
 
+        -- Zoom-only ADS (no pose animation): jump straight to the held "Aiming" state.
+        -- adsAimAlpha then glides the pivot to the camera-centred position and
+        -- MovementController zooms the FOV; idle/locomotion keep running underneath.
+        -- Shots route through PlayADSFireAnimation() → PlayFireAnimation() (normal kick).
+        if not (Constants.VIEWMODEL_ADS_ANIMATION_ENABLED :: boolean) then
+            adsState = "Aiming"
+            adsIdleTime = 0
+            Logger.debug("[ViewModelController] SetAiming: zoom-only ADS (state = Aiming)")
+            return
+        end
+
         -- ADS in: stop idle/run, play adsIn, set state to Entering.
         -- RenderStepped will monitor TimePosition and freeze at final frame.
 
@@ -2900,6 +2911,15 @@ function ViewModelController:SetAiming(entering: boolean)
         -- ADS out: restore the perspective mode that was active before ADS entered.
         if Constants.ADS_FORCE_FIRST_PERSON then
             setFirstPerson(preAdsFirstPerson)
+        end
+
+        -- Zoom-only ADS: no adsOut animation. Drop straight to Hip; adsAimAlpha glides
+        -- the pivot back to the hip chain and MovementController restores the FOV.
+        if not (Constants.VIEWMODEL_ADS_ANIMATION_ENABLED :: boolean) then
+            adsState = "Hip"
+            adsIdleTime = 0
+            Logger.debug("[ViewModelController] SetAiming: zoom-only ADS exit (state = Hip)")
+            return
         end
 
         -- ADS out: stop adsIn/adsIdle, play adsOut, set state to Exiting.
@@ -3027,6 +3047,12 @@ end
 -- Only plays if adsState == "Aiming" (held ADS pose).
 -- Restartable: each shot re-plays from the start.
 function ViewModelController:PlayADSFireAnimation()
+    -- Zoom-only ADS has no dedicated ADS fire clip — use the normal hipfire animation
+    -- (it fires the muzzle flash and drives the viewmodel recoil path itself).
+    if not (Constants.VIEWMODEL_ADS_ANIMATION_ENABLED :: boolean) then
+        self:PlayFireAnimation()
+        return
+    end
     -- Muzzle FX is independent of the ADS fire clip — a round left the barrel, so flash it
     -- even mid-transition (the adsFire animation itself still only plays in the Aiming pose).
     ViewModelController.PlayMuzzleFlash()

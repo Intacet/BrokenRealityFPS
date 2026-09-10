@@ -1,5 +1,31 @@
 # Changelog
 
+## ADS is now zoom-only — viewmodel pose animation replaced by an FOV zoom + pivot glide (not Studio-tested)
+
+Per owner request: "replace the ADS animation with just a zoom in."
+
+- New `Constants.VIEWMODEL_ADS_ANIMATION_ENABLED` (default **false**). When false,
+  `ViewModelController:SetAiming(true)` skips the `adsIn` pose clip and the
+  Entering→Aiming watchdog machinery and drops straight to the held `Aiming` state;
+  `SetAiming(false)` drops straight to `Hip`. The existing `adsAimAlpha` blend
+  (`VIEWMODEL_ADS_AIM_BLEND_SPEED = 18/s`) still glides the viewmodel pivot to the
+  camera-centred position and back, so the gun eases toward centre — just with no
+  animated arm pose. Idle/locomotion animations keep running underneath (they are no
+  longer stopped on ADS-in, so nothing needs resuming on ADS-out).
+- The **FOV zoom already existed** and is unchanged: `MovementController.updateSprintFov`
+  ("Task A") tweens `camera.FieldOfView` to `Constants.CAMERA_ADS_FOV` (70→56, or →52
+  with the focus key) whenever `isAiming`. MovementController remains the sole FOV writer.
+- `PlayADSFireAnimation()` now delegates to `PlayFireAnimation()` in zoom-only mode, so
+  shots while aimed use the normal hipfire animation + recoil (owner's choice). The
+  `adsFire` clip is only used when `VIEWMODEL_ADS_ANIMATION_ENABLED = true`.
+- Fully reversible: set `VIEWMODEL_ADS_ANIMATION_ENABLED = true` to restore the authored
+  `adsIn`/`adsIdle`/`adsOut`/`adsFire` sequence and its bounded-recovery watchdogs. The
+  four ADS tracks are still loaded by `_setupWeaponAnimations` either way.
+- Client/viewmodel only: no new remotes, no server/damage/ammo/fire-rate change, no new
+  camera writer. `rojo build` clean. Not Studio-tested — a weapon can't be equipped from
+  MCP; needs an in-game ADS toggle check (glide framing, FOV in/out, fire while aimed,
+  reload/holster while aimed).
+
 ## Stage 1 local bullet impact FX (helper logic Studio-verified; in-game visuals not tested)
 
 When the local player fires and the client raycast hits a surface, a small dust/smoke
