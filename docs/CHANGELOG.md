@@ -1,5 +1,27 @@
 # Changelog
 
+## TestAreaBuilder: optional redirect of all team spawns into the test area (Studio-verified, reversible)
+
+Follow-up so every player spawns in `BrokenReality_TestArea` while testing.
+
+- New `Constants.DEV_TEST_AREA.REDIRECT_TEAM_SPAWNS` (default **true**), plus
+  `TEAM_SPAWN_GRID_SPACING` and `SPAWN_BACKUP_ATTRIBUTE`.
+- `TestAreaBuilder` now, after building its folder (Studio only), calls
+  `redirectTeamSpawns()`: for every `BasePart` under `Workspace/Spawns` it (1) restores
+  any part it moved on a previous run from the `BR_TestAreaOriginalCFrame` attribute,
+  then (2) if the flag is on, stashes each part's current `CFrame` in that attribute and
+  lays the parts out in a grid around `SPAWN_POSITION` on the baseplate. `TeamService`
+  reads those parts' CFrames unchanged, so all round spawns land in the test area.
+- **Reversible:** set `REDIRECT_TEAM_SPAWNS = false` (keep `ENABLED = true`) and press
+  Play once — step (1) restores every spawn to its exact original CFrame and clears the
+  attributes. It only ever writes `BasePart.CFrame` + that one attribute; never reparents,
+  resizes, restyles, or destroys a spawn point.
+- Still no new remotes, no `TeamService`/`MatchService` change, no gameplay logic change.
+- Studio-verified against the live `Workspace/Spawns` (Attackers ×3 + Defenders ×3):
+  redirect moves all 6 and tags them; a second run is position-stable (deterministic
+  grid, no drift); toggling the flag off restores all 6 to their original CFrames with
+  zero leftover attributes. Left fully restored after the check.
+
 ## Generated developer test area — `TestAreaBuilder` (build logic Studio-verified; in-game run not tested)
 
 New Studio-only sandbox for iterating on movement, weapon feel, viewmodels, muzzle FX,

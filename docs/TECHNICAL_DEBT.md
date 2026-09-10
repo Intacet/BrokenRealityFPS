@@ -144,6 +144,18 @@ Open items / deferred:
   (`Players.CharacterAutoLoads = false` + `TeamService` teleports), but in a plain Studio
   playtest it becomes a real spawn. If that ever conflicts, set `Enabled = false` and make
   it a plain marker.
+- **`REDIRECT_TEAM_SPAWNS` mutates `Workspace/Spawns` (Studio only, reversible).** This is
+  the one place the builder writes Workspace content it does not own. It only sets
+  `BasePart.CFrame` + the `BR_TestAreaOriginalCFrame` attribute, restores from that
+  attribute at the top of every run, and never reparents/resizes/destroys — but the revert
+  path depends on those attributes surviving. If a spawn part is deleted/recreated in
+  Studio while redirected, its original position is lost (re-place it by hand). To restore:
+  `REDIRECT_TEAM_SPAWNS = false` (keep `ENABLED = true`) + Play once. A fully disabled
+  builder (`ENABLED = false`) will NOT auto-restore — it returns before reaching the spawn
+  code — so toggle the sub-flag, not the master flag, to revert.
+- **Grid layout of the redirected spawns is arbitrary** (6 per row, `TEAM_SPAWN_GRID_SPACING`
+  studs, offset +8/+row from `SPAWN_POSITION`). Attackers and Defenders are interleaved in
+  one grid, not separated — fine for solo movement/weapon testing, not for team-flow tests.
 - **Material-specific impact logic is NOT implemented.** The `MaterialTest` samples are
   visual surfaces only — no per-material impact FX / sound / decal behaviour exists yet.
 - **Moving targets are deferred.** All targets are static anchored parts.

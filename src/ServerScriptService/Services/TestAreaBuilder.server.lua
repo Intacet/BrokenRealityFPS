@@ -18,7 +18,10 @@
 -- Constants.DEV_TEST_AREA.ENABLED == true.
 --
 -- Safe to re-run (stop/start Play Solo): it destroys ONLY the one folder it owns and
--- rebuilds it. Unrelated Workspace content is never read or modified.
+-- rebuilds it. The single exception to "never touch other Workspace content" is the
+-- opt-in Constants.DEV_TEST_AREA.REDIRECT_TEAM_SPAWNS: when true it moves the CFrames
+-- of the BaseParts under Workspace/Spawns onto this test area (stashing each original
+-- in a backup attribute and restoring it on the next run) so every player spawns here.
 
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -497,6 +500,72 @@ local function buildLightingTest(root: Folder): ()
 	makeLabel("Lighting Test", place(Vector3.new(-14, GROUND_TOP + 12, -49)), f)
 end
 
+-- ── Team-spawn redirect (Studio only, reversible) ───────────────────────────
+-- The one place this script touches Workspace content it does not own. It only
+-- writes BasePart.CFrame and a single backup attribute — never reparents,
+-- resizes, restyles, or destroys a spawn point. Each run first restores every
+-- previously-moved spawn from its backup attribute, so flipping
+-- REDIRECT_TEAM_SPAWNS to false and pressing Play once fully reverts.
+local function redirectTeamSpawns(): ()
+	local spawnsRoot = workspace:FindFirstChild("Spawns")
+	if spawnsRoot == nil then
+		Logger.debug("[TestAreaBuilder] no Workspace.Spawns — team-spawn redirect skipped")
+		return
+	end
+	local attr: string = CFG.SPAWN_BACKUP_ATTRIBUTE
+
+	-- 1. Restore anything we moved on a previous run (self-healing / clean toggle-off).
+	local restored = 0
+	for _, d in ipairs(spawnsRoot:GetDescendants()) do
+		if d:IsA("BasePart") then
+			local saved = d:GetAttribute(attr)
+			if typeof(saved) == "CFrame" then
+				d.CFrame = saved :: CFrame
+				d:SetAttribute(attr, nil)
+				restored += 1
+			end
+		end
+	end
+
+	if CFG.REDIRECT_TEAM_SPAWNS ~= true then
+		if restored > 0 then
+			Logger.debug(("[TestAreaBuilder] restored %d team spawn point(s) to their original CFrames"):format(restored))
+		end
+		return
+	end
+
+	-- 2. Stash each spawn part's current CFrame, then lay them out in a grid on the
+	--    baseplate around SPAWN_POSITION so every player spawns in the test area.
+	local parts: { BasePart } = {}
+	for _, d in ipairs(spawnsRoot:GetDescendants()) do
+		if d:IsA("BasePart") then
+			table.insert(parts, d)
+		end
+	end
+	if #parts == 0 then
+		Logger.warn("[TestAreaBuilder] Workspace.Spawns has no BasePart children — nothing to redirect")
+		return
+	end
+
+	local spacing: number = CFG.TEAM_SPAWN_GRID_SPACING
+	local perRow = 6
+	local base = CFG.SPAWN_POSITION
+	for i, part in ipairs(parts) do
+		part:SetAttribute(attr, part.CFrame)
+		local idx = i - 1
+		local col = idx % perRow
+		local rowN = math.floor(idx / perRow)
+		local gridOffset = Vector3.new(
+			(col - (perRow - 1) / 2) * spacing,
+			0,
+			8 + rowN * spacing
+		)
+		part.CFrame = CFrame.new(place(Vector3.new(base.X, GROUND_TOP + 3, base.Z)) + gridOffset)
+	end
+	Logger.debug(("[TestAreaBuilder] redirected %d team spawn point(s) into %s (originals stashed on '%s')")
+		:format(#parts, FOLDER_NAME, attr))
+end
+
 -- ── Build ───────────────────────────────────────────────────────────────────
 local existing = workspace:FindFirstChild(FOLDER_NAME)
 if existing ~= nil then
@@ -518,6 +587,8 @@ buildMaterialTest(root)
 buildLightingTest(root)
 
 root.Parent = workspace
+
+redirectTeamSpawns()
 
 Logger.debug(("[TestAreaBuilder] built Workspace.%s — %d instances (labels %s)")
 	:format(FOLDER_NAME, #root:GetDescendants(), if labelsEnabled then "on" else "off"))

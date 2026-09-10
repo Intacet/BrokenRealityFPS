@@ -1944,13 +1944,24 @@ Constants.DEV_USER_IDS = {
 -- ── Developer test area (TestAreaBuilder.server) ────────────────────────────
 -- Layout knobs for the generated Studio-only sandbox under
 -- Workspace/<FOLDER_NAME>. All positions are world-space offsets from ORIGIN.
--- TestAreaBuilder no-ops entirely unless RunService:IsStudio() and ENABLED == true,
--- and only ever destroys/rebuilds the one folder it owns. Not a gameplay system.
+-- TestAreaBuilder no-ops entirely unless RunService:IsStudio() and ENABLED == true.
+-- It destroys/rebuilds only the one folder it owns; the sole exception is the
+-- opt-in REDIRECT_TEAM_SPAWNS below, which relocates Workspace/Spawns points
+-- (reversibly). Not a gameplay system.
 Constants.DEV_TEST_AREA = {
     ENABLED = true,
     FOLDER_NAME = "BrokenReality_TestArea",
 
     ORIGIN = Vector3.new(0, 0, 0),
+
+    -- Studio only, reversible: move every BasePart under Workspace/Spawns onto this
+    -- test area so all players spawn here. TestAreaBuilder stashes each spawn part's
+    -- original CFrame in SPAWN_BACKUP_ATTRIBUTE before moving it, and restores every
+    -- stashed spawn on each run first — so setting this false (keep ENABLED true) and
+    -- pressing Play once puts all spawns back exactly where they were.
+    REDIRECT_TEAM_SPAWNS = true,
+    TEAM_SPAWN_GRID_SPACING = 4,
+    SPAWN_BACKUP_ATTRIBUTE = "BR_TestAreaOriginalCFrame",
 
     BASEPLATE_SIZE = Vector3.new(220, 1, 220),
     BASEPLATE_POSITION = Vector3.new(0, -0.5, 0),
