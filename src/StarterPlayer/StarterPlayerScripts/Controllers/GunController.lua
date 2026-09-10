@@ -236,6 +236,18 @@ local ImpactFX = {}
 do
     local FX = Constants.BULLET_IMPACT_FX :: any
 
+    -- Tolerate a partially-synced Constants (old flat shape) — fall back to sane values
+    -- and a plain neutral dust puff rather than erroring on nil fields.
+    local DUST_TEXTURE: string   = FX.DUST_TEXTURE or "rbxasset://textures/particles/smoke_main.dds"
+    local DEBRIS_TEXTURE: string = FX.DEBRIS_TEXTURE or ""
+    local SPARK_TEXTURE: string  = FX.SPARK_TEXTURE or ""
+    local DUST_GRAVITY: number   = FX.DUST_GRAVITY or 4
+    local DEBRIS_GRAVITY: number = FX.DEBRIS_GRAVITY or 55
+    local SPARK_GRAVITY: number  = FX.SPARK_GRAVITY or 40
+    local POOL_SIZE: number      = FX.POOL_SIZE or 24
+    local PART_LIFETIME: number  = FX.IMPACT_PART_LIFETIME or 1.0
+    local SURFACE_OFFSET: number = FX.IMPACT_SURFACE_OFFSET or 0.03
+
     type RoleRuntime = {
         count: number,
         lifetime: NumberRange,
@@ -340,9 +352,9 @@ do
         att.Name   = "FxAttachment"
         att.Parent = part
 
-        local dust   = makeEmitter("Dust", FX.DUST_TEXTURE, FX.DUST_GRAVITY, 3.5, 0, true)
-        local debris = makeEmitter("Debris", FX.DEBRIS_TEXTURE, FX.DEBRIS_GRAVITY, 0.6, 0, true)
-        local spark  = makeEmitter("Spark", FX.SPARK_TEXTURE, FX.SPARK_GRAVITY, 1.8, 1, false)
+        local dust   = makeEmitter("Dust", DUST_TEXTURE, DUST_GRAVITY, 3.5, 0, true)
+        local debris = makeEmitter("Debris", DEBRIS_TEXTURE, DEBRIS_GRAVITY, 0.6, 0, true)
+        local spark  = makeEmitter("Spark", SPARK_TEXTURE, SPARK_GRAVITY, 1.8, 1, false)
         dust.Parent, debris.Parent, spark.Parent = att, att, att
 
         return { part = part, dust = dust, debris = debris, spark = spark, busy = false, freeAt = 0 }
@@ -354,7 +366,7 @@ do
         end
         initialized = true
 
-        for catName, cat in pairs(FX.CATEGORIES) do
+        for catName, cat in pairs(FX.CATEGORIES or {}) do
             RESOLVED[catName] = {
                 dust   = resolveRole(cat.DUST),
                 debris = resolveRole(cat.DEBRIS),
@@ -362,8 +374,19 @@ do
             }
         end
         if RESOLVED.default == nil then
-            RESOLVED.default =
-                { dust = resolveRole(nil), debris = resolveRole(nil), spark = resolveRole(nil) }
+            -- No CATEGORIES synced (old Constants) — still give a usable neutral impact.
+            RESOLVED.default = {
+                dust = resolveRole({
+                    count = 6, lifeMin = 0.15, lifeMax = 0.42, speedMin = 1.5, speedMax = 4.5,
+                    sizeStart = 0.24, sizeEnd = 1.05, transparency = 0.34, spread = 45,
+                    color = Color3.fromRGB(154, 152, 146),
+                }),
+                debris = resolveRole({
+                    count = 6, lifeMin = 0.15, lifeMax = 0.34, speedMin = 6, speedMax = 16,
+                    size = 0.15, transparency = 0.0, spread = 30, color = Color3.fromRGB(150, 148, 142),
+                }),
+                spark = resolveRole(nil),
+            }
         end
 
         local folder = Instance.new("Folder")
@@ -371,7 +394,7 @@ do
         folder.Parent = workspace
         fxFolder = folder
 
-        for _ = 1, (FX.POOL_SIZE :: number) do
+        for _ = 1, POOL_SIZE do
             local rig = buildRig()
             rig.part.Parent = folder
             table.insert(rigs, rig)
@@ -382,7 +405,7 @@ do
             for _ in pairs(RESOLVED) do
                 cats += 1
             end
-            Logger.debug("[GunController] ImpactFX ready — pool", FX.POOL_SIZE, "| categories", cats)
+            Logger.debug("[GunController] ImpactFX ready — pool", POOL_SIZE, "| categories", cats)
         end
     end
 
@@ -428,7 +451,7 @@ do
         end
 
         if not warnedPlaceholder
-            and (FX.DUST_TEXTURE == "rbxassetid://0" or FX.SPARK_TEXTURE == "rbxassetid://0")
+            and (DUST_TEXTURE == "rbxassetid://0" or SPARK_TEXTURE == "rbxassetid://0")
         then
             warnedPlaceholder = true
             Logger.warn("[GunController] ImpactFX: placeholder texture (rbxassetid://0) in Constants.BULLET_IMPACT_FX")
@@ -436,7 +459,8 @@ do
 
         ensureInit()
 
-        local catName = (material ~= nil and FX.MATERIAL_CATEGORY[material]) or "default"
+        local matMap = FX.MATERIAL_CATEGORY or {}
+        local catName = (material ~= nil and matMap[material]) or "default"
         local rc = RESOLVED[catName] or RESOLVED.default
         if rc == nil then
             return
@@ -451,7 +475,7 @@ do
             local ref = if math.abs(n.Y) > 0.99 then Vector3.xAxis else Vector3.yAxis
             local right = ref:Cross(n)
             right = if right.Magnitude > 1e-4 then right.Unit else Vector3.xAxis
-            cf = CFrame.fromMatrix(position + n * (FX.IMPACT_SURFACE_OFFSET :: number), right, n)
+            cf = CFrame.fromMatrix(position + n * SURFACE_OFFSET, right, n)
         else
             cf = CFrame.new(position)
         end
@@ -459,7 +483,7 @@ do
         local rig = takeRig()
         rig.part.CFrame = cf
         rig.busy   = true
-        rig.freeAt = os.clock() + (FX.IMPACT_PART_LIFETIME :: number)
+        rig.freeAt = os.clock() + PART_LIFETIME
         configureAndEmit(rig.dust, rc.dust)
         configureAndEmit(rig.debris, rc.debris)
         configureAndEmit(rig.spark, rc.spark)
@@ -749,10 +773,14 @@ function GunController:Start()
             )
         end
 
-        -- First-person aim cursor lock: active while armed in the ACTIVE phase.
+        -- First-person aim cursor lock: active while a weapon is equipped. Only additionally
+        -- requires the ACTIVE round phase when FIRST_PERSON_AIM.REQUIRE_ACTIVE_PHASE is true.
         applyFirstPersonAim(
             equippedWeaponName ~= nil
-            and MatchController:GetPhase() == Constants.Phase.ACTIVE
+            and (
+                (Constants.FIRST_PERSON_AIM :: any).REQUIRE_ACTIVE_PHASE ~= true
+                or MatchController:GetPhase() == Constants.Phase.ACTIVE
+            )
         )
         -- Task A/B: sync reload state to MovementController each frame so the stance POV
         -- reload multiplier stays accurate without creating a VMC→MC dependency.
@@ -793,7 +821,10 @@ function GunController:Start()
             if Constants.FREE_AIM_ENABLED then
                 FreeAimController:SetWeapon(equippedWeaponName)
             end
-            applyFirstPersonAim(MatchController:GetPhase() == Constants.Phase.ACTIVE)
+            applyFirstPersonAim(
+                (Constants.FIRST_PERSON_AIM :: any).REQUIRE_ACTIVE_PHASE ~= true
+                or MatchController:GetPhase() == Constants.Phase.ACTIVE
+            )
             -- Switch movement animations to the armed set.
             MovementController.SetEquippedWeaponName(Constants.MOVEMENT_ANIMATION_SET_AR15)
             Logger.debug("[GunController] Equipped: " .. Constants.DEFAULT_VIEWMODEL_WEAPON)

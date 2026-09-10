@@ -1,5 +1,22 @@
 # Changelog
 
+## Impact FX visibility bump + cursor hidden whenever armed
+
+- **Impact FX chips/sparks were too small to see.** Bumped `Constants.BULLET_IMPACT_FX`
+  per-category sizes/counts: metal SPARK 0.06→0.17 studs, count 10→16, life to 0.17 s;
+  DEBRIS across all categories 0.08–0.10 → 0.14–0.18 studs, higher counts, and chip
+  colours lightened so they contrast with the surface. Dust puffs slightly larger. All
+  still short-lived and pooled at 24.
+- **`ImpactFX` helper is now defensive.** If a partial Rojo sync leaves the old flat
+  `Constants.BULLET_IMPACT_FX` in place, it falls back to built-in textures + a synthesised
+  neutral dust/chip default instead of erroring on `pairs(nil)` — so a stale Constants
+  degrades gracefully rather than killing all impact FX. Studio-verified both paths (old
+  shape: no crash, neutral default; new shape: per-category params applied, pool 24).
+- **Cursor:** `Constants.FIRST_PERSON_AIM.REQUIRE_ACTIVE_PHASE` (new, default `false`) —
+  `GunController` now hides the OS cursor + locks it to centre whenever a weapon is
+  equipped, in any match phase (so you're cursor-free just running around the test area).
+  Set it `true` to restore the previous "only during the ACTIVE round" behaviour.
+
 ## Bullet impact FX: material-specific, and actually visible (helper logic Studio-verified)
 
 The Stage 1 impact FX was invisible in-game — the emitter textures were `rbxassetid://0`

@@ -1194,6 +1194,10 @@ Constants.FIRST_PERSON_AIM = {
     HIDE_DEFAULT_CURSOR       = true,
     SHOW_CUSTOM_CROSSHAIR     = true,
     RESTORE_MOUSE_ON_INACTIVE = true,
+    -- false: hide the OS cursor + lock to centre whenever a weapon is equipped, in any
+    -- match phase (so you are cursor-free while just running around the test area).
+    -- true: only do it during the ACTIVE round phase (leaves the cursor for lobby menus).
+    REQUIRE_ACTIVE_PHASE      = false,
     DEBUG                     = true,
 }
 
@@ -1469,52 +1473,54 @@ Constants.BULLET_IMPACT_FX = {
     },
 
     -- Per-category emitter params. Sizes/speeds in studs & studs/s. count = 0 or a missing
-    -- sub-table disables that emitter for the category.
+    -- sub-table disables that emitter for the category. Kept small and short — but big
+    -- enough to actually read at a few studs (DEBRIS/SPARK squares under ~0.12 studs are
+    -- invisible in practice).
     CATEGORIES = {
-        -- Concrete / brick / stone: gray dust puff + chips out of the surface, brief haze.
+        -- Concrete / brick / stone: gray dust puff + pale chips out of the surface.
         concrete = {
-            DUST   = { count = 6, lifeMin = 0.18, lifeMax = 0.42, speedMin = 1.5, speedMax = 4.5,
-                       sizeStart = 0.22, sizeEnd = 1.05, transparency = 0.35, spread = 55,
-                       color = Color3.fromRGB(170, 166, 158) },
-            DEBRIS = { count = 7, lifeMin = 0.18, lifeMax = 0.34, speedMin = 6, speedMax = 14,
-                       size = 0.09, transparency = 0.05, spread = 34,
-                       color = Color3.fromRGB(120, 116, 108) },
+            DUST   = { count = 7, lifeMin = 0.18, lifeMax = 0.44, speedMin = 1.5, speedMax = 5,
+                       sizeStart = 0.3, sizeEnd = 1.3, transparency = 0.3, spread = 55,
+                       color = Color3.fromRGB(176, 172, 163) },
+            DEBRIS = { count = 10, lifeMin = 0.18, lifeMax = 0.4, speedMin = 7, speedMax = 19,
+                       size = 0.17, transparency = 0.0, spread = 34,
+                       color = Color3.fromRGB(188, 183, 172) },
         },
-        -- Metal: tiny bright directional sparks + a wisp of gray smoke, almost no chips.
+        -- Metal: bright directional sparks + a thin wisp of gray smoke, almost no chips.
         metal = {
-            DUST  = { count = 3, lifeMin = 0.1, lifeMax = 0.28, speedMin = 1, speedMax = 3,
-                      sizeStart = 0.12, sizeEnd = 0.5, transparency = 0.5, spread = 38,
-                      color = Color3.fromRGB(138, 138, 143) },
-            SPARK = { count = 10, lifeMin = 0.04, lifeMax = 0.12, speedMin = 16, speedMax = 36,
-                      size = 0.06, transparency = 0, spread = 20,
-                      color = Color3.fromRGB(255, 214, 150) },
+            DUST  = { count = 3, lifeMin = 0.1, lifeMax = 0.3, speedMin = 1, speedMax = 3,
+                      sizeStart = 0.14, sizeEnd = 0.6, transparency = 0.45, spread = 38,
+                      color = Color3.fromRGB(140, 140, 145) },
+            SPARK = { count = 16, lifeMin = 0.05, lifeMax = 0.17, speedMin = 18, speedMax = 44,
+                      size = 0.17, transparency = 0, spread = 24,
+                      color = Color3.fromRGB(255, 238, 200) },
         },
-        -- Wood: tan splinter puff, lots of light chip fragments, little smoke, no sparks.
+        -- Wood: tan splinter puff + lots of light splinter fragments, little smoke, no sparks.
         wood = {
-            DUST   = { count = 3, lifeMin = 0.14, lifeMax = 0.34, speedMin = 1, speedMax = 3.5,
-                       sizeStart = 0.16, sizeEnd = 0.6, transparency = 0.45, spread = 42,
-                       color = Color3.fromRGB(150, 120, 82) },
-            DEBRIS = { count = 9, lifeMin = 0.16, lifeMax = 0.32, speedMin = 7, speedMax = 16,
-                       size = 0.1, transparency = 0.05, spread = 28,
-                       color = Color3.fromRGB(122, 90, 54) },
+            DUST   = { count = 3, lifeMin = 0.14, lifeMax = 0.36, speedMin = 1, speedMax = 3.5,
+                       sizeStart = 0.18, sizeEnd = 0.7, transparency = 0.4, spread = 42,
+                       color = Color3.fromRGB(156, 124, 84) },
+            DEBRIS = { count = 12, lifeMin = 0.16, lifeMax = 0.38, speedMin = 8, speedMax = 22,
+                       size = 0.18, transparency = 0.0, spread = 26,
+                       color = Color3.fromRGB(160, 122, 76) },
         },
-        -- Dirt / grass / sand: subtle low dirt puff + a few dark specks, no sparks.
+        -- Dirt / grass / sand: low dirt puff + a few dark clumps, no sparks.
         dirt = {
-            DUST   = { count = 6, lifeMin = 0.16, lifeMax = 0.4, speedMin = 1, speedMax = 3.5,
-                       sizeStart = 0.2, sizeEnd = 0.95, transparency = 0.4, spread = 36,
-                       color = Color3.fromRGB(104, 86, 62) },
-            DEBRIS = { count = 5, lifeMin = 0.15, lifeMax = 0.3, speedMin = 4, speedMax = 10,
-                       size = 0.08, transparency = 0.05, spread = 30,
-                       color = Color3.fromRGB(74, 58, 40) },
+            DUST   = { count = 7, lifeMin = 0.16, lifeMax = 0.42, speedMin = 1, speedMax = 4,
+                       sizeStart = 0.26, sizeEnd = 1.15, transparency = 0.32, spread = 34,
+                       color = Color3.fromRGB(110, 90, 64) },
+            DEBRIS = { count = 8, lifeMin = 0.15, lifeMax = 0.34, speedMin = 5, speedMax = 15,
+                       size = 0.15, transparency = 0.0, spread = 30,
+                       color = Color3.fromRGB(92, 72, 50) },
         },
-        -- Anything else: small neutral dust puff + a couple of neutral specks.
+        -- Anything else: small neutral dust puff + a few neutral specks.
         default = {
-            DUST   = { count = 5, lifeMin = 0.15, lifeMax = 0.4, speedMin = 1.5, speedMax = 4,
-                       sizeStart = 0.2, sizeEnd = 0.9, transparency = 0.4, spread = 45,
+            DUST   = { count = 6, lifeMin = 0.15, lifeMax = 0.42, speedMin = 1.5, speedMax = 4.5,
+                       sizeStart = 0.24, sizeEnd = 1.05, transparency = 0.34, spread = 45,
+                       color = Color3.fromRGB(154, 152, 146) },
+            DEBRIS = { count = 7, lifeMin = 0.15, lifeMax = 0.34, speedMin = 6, speedMax = 16,
+                       size = 0.15, transparency = 0.0, spread = 30,
                        color = Color3.fromRGB(150, 148, 142) },
-            DEBRIS = { count = 4, lifeMin = 0.15, lifeMax = 0.3, speedMin = 5, speedMax = 12,
-                       size = 0.08, transparency = 0.05, spread = 30,
-                       color = Color3.fromRGB(120, 118, 112) },
         },
     },
 }
