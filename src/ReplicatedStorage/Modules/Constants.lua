@@ -1941,6 +1941,47 @@ Constants.DEV_USER_IDS = {
     -- [175217234] = true,  -- fill in live-place developer UserIds; Studio is always allowed
 }
 
+-- ── Developer test area (TestAreaBuilder.server) ────────────────────────────
+-- Layout knobs for the generated Studio-only sandbox under
+-- Workspace/<FOLDER_NAME>. All positions are world-space offsets from ORIGIN.
+-- TestAreaBuilder no-ops entirely unless RunService:IsStudio() and ENABLED == true,
+-- and only ever destroys/rebuilds the one folder it owns. Not a gameplay system.
+Constants.DEV_TEST_AREA = {
+    ENABLED = true,
+    FOLDER_NAME = "BrokenReality_TestArea",
+
+    ORIGIN = Vector3.new(0, 0, 0),
+
+    BASEPLATE_SIZE = Vector3.new(220, 1, 220),
+    BASEPLATE_POSITION = Vector3.new(0, -0.5, 0),
+
+    SPAWN_POSITION = Vector3.new(0, 2, -80),
+
+    SHOOTING_RANGE_START = Vector3.new(0, 1, -50),
+    TARGET_DISTANCES = { 25, 50, 100, 150 },
+    TARGET_SIZE = Vector3.new(5, 7, 1),
+
+    IMPACT_WALL_POSITION = Vector3.new(35, 6, -35),
+    IMPACT_WALL_SIZE = Vector3.new(1, 12, 35),
+
+    SPRINT_LANE_POSITION = Vector3.new(-45, 0.05, -15),
+    SPRINT_LANE_SIZE = Vector3.new(12, 0.2, 70),
+
+    CROUCH_TUNNEL_POSITION = Vector3.new(-25, 2.5, 35),
+    CROUCH_TUNNEL_SIZE = Vector3.new(18, 5, 20),
+    CROUCH_TUNNEL_OPENING_HEIGHT = 3.5,
+
+    LOW_VAULT_HEIGHT = 2.5,
+    MEDIUM_VAULT_HEIGHT = 4.25,
+    TOO_TALL_VAULT_HEIGHT = 6.0,
+
+    DROP_TEST_HEIGHTS = { 4, 8, 14 },
+
+    MATERIAL_TEST_POSITION = Vector3.new(55, 1, 35),
+
+    DEBUG_LABELS = true,
+}
+
 -- Test dummy
 Constants.DUMMY_DEFAULT_MAX_HEALTH  = 100
 Constants.DUMMY_LIMB_MAX_HEALTH     = 100    -- per-limb pool; tracked from DamageDealt, does NOT gate death yet

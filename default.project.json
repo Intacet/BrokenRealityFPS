@@ -165,6 +165,14 @@
             "Disabled": false,
             "RunContext": "Legacy"
           }
+        },
+        "TestAreaBuilder": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/TestAreaBuilder.server.lua",
+          "$properties": {
+            "Disabled": false,
+            "RunContext": "Legacy"
+          }
         }
       }
     },

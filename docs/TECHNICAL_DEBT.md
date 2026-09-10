@@ -122,6 +122,40 @@ count pinned at `POOL_SIZE`, `assert` guards fire, `Destroy()` cleans up). Open 
   `BULLET_IMPACT_FX`. The separate `DEBUG_BULLET_IMPACT_MARKERS` muzzle-tip marker is
   untouched.
 
+## Dev tooling — generated test area `TestAreaBuilder` (Studio verification: build logic YES, in-game run required)
+
+`src/ServerScriptService/Services/TestAreaBuilder.server.lua` + `Constants.DEV_TEST_AREA`
+build `Workspace/BrokenReality_TestArea` on server start, Studio-only. The construction
+logic was verified in the Edit datamodel (builds clean, rerun reproduces an identical
+tree, exactly one folder, `workspace` gains one child, all sections present, self-cleaned).
+Open items / deferred:
+
+- **Developer-only by design.** Guarded by `RunService:IsStudio()` **and**
+  `DEV_TEST_AREA.ENABLED`. It must never build in a live server — if a live build is ever
+  wanted, add an explicit separate flag rather than loosening the `IsStudio()` gate.
+- **Auto-run on server start not MCP-tested.** A weapon/character can't be driven from MCP;
+  the `Play`-time behaviour (script runs, folder appears, no Output errors, stop/restart
+  rebuilds safely) needs an in-Studio pass with Rojo connected.
+- **Visual layout is first-pass and will need tuning.** Section spacing, ramp angles, the
+  crouch-tunnel clearance vs. the real R6 crouch height, vault-bar reachability, and label
+  placement are eyeball guesses in `Constants.DEV_TEST_AREA`. Ramps use a flat run = 3×rise
+  and may not meet the platform edge perfectly.
+- **`TestSpawn` is an enabled neutral `SpawnLocation`.** Harmless with the live flow
+  (`Players.CharacterAutoLoads = false` + `TeamService` teleports), but in a plain Studio
+  playtest it becomes a real spawn. If that ever conflicts, set `Enabled = false` and make
+  it a plain marker.
+- **Material-specific impact logic is NOT implemented.** The `MaterialTest` samples are
+  visual surfaces only — no per-material impact FX / sound / decal behaviour exists yet.
+- **Moving targets are deferred.** All targets are static anchored parts.
+- **AI / animated target dummies are deferred.** The existing `BR_DamageDummy` /
+  `DummyService` rig is not spawned here; this area has no live-reacting targets.
+- **Extraction / loot-loop test area is deferred.** No objective, stash, exfil, or
+  inventory props — out of scope for this task.
+- **No global lighting/atmosphere test.** `LightingTest` is self-contained props only;
+  `game.Lighting` is deliberately untouched (that stays owned by `LightingSetup.server`).
+- **`default.project.json` gained one entry** (`TestAreaBuilder`) — required because the
+  `Services` folder maps scripts explicitly, not as a directory.
+
 ## MovementController.lua is at Luau's 200-local-register limit (main chunk)
 
 `MovementController.lua` (~6500 lines) has so many module-level `local` declarations that its

@@ -1,5 +1,38 @@
 # Changelog
 
+## Generated developer test area — `TestAreaBuilder` (build logic Studio-verified; in-game run not tested)
+
+New Studio-only sandbox for iterating on movement, weapon feel, viewmodels, muzzle FX,
+bullet impacts, reload timing, vaulting, crouch, sprint, and landing drops.
+
+- New `Constants.DEV_TEST_AREA` table — every position / size / height / distance the
+  builder uses, so the layout is tunable without touching code and the whole area is
+  relocatable from `ORIGIN`.
+- New server script `src/ServerScriptService/Services/TestAreaBuilder.server.lua`
+  (mapped in `default.project.json`). On server start it **no-ops unless
+  `RunService:IsStudio()` and `Constants.DEV_TEST_AREA.ENABLED == true`**. When it runs
+  it destroys and rebuilds **only** `Workspace.BrokenReality_TestArea` — it never reads
+  or modifies any other Workspace content, and never touches `game.Lighting`.
+- Contents: baseplate; `TestSpawn` (enabled neutral `SpawnLocation` on a dais);
+  **ShootingRange** (firing line, static targets at 25/50/100/150 studs with distance
+  labels + neon bullseyes, backstop wall); **ImpactWall** (side wall for impact FX /
+  spread); **MovementCourse** (sprint lane with 10-stud markers, crouch tunnel with 3.5
+  stud clearance, Low/Medium/Too-Tall vault bars at the configured heights, three drop
+  platforms at 4/8/14 studs with walk-up ramps, a 6-step stair run);
+  **MaterialTest** (Concrete/Metal/Wood/Grass wall + floor samples — visual only);
+  **LightingTest** (self-contained point light, spot light, and a shade overhang — no
+  global lighting change). `BillboardGui` section labels when
+  `DEV_TEST_AREA.DEBUG_LABELS == true`.
+- Helpers only (`makeBlock` / `makeFolder` / `makeLabel` / `buildVaultBar` /
+  `buildDropPlatform`), `assert`-validated params, `--!strict`. No RemoteEvents, no
+  per-frame loops, no `RBXScriptConnection`s. No combat / damage / ammo / movement /
+  camera / viewmodel / animation-ID changes.
+- Studio-verified (Edit datamodel harness, self-cleaning): builds without error, a
+  second build reproduces an identical 159-instance tree (safe rerun), exactly one
+  `BrokenReality_TestArea` folder results, `workspace` gains exactly one child, all eight
+  sections + `TestSpawn` + the four targets are present. The script auto-running on
+  **server start** (Rojo sync + Play) is not MCP-testable — needs an in-Studio check.
+
 ## ADS is now zoom-only — viewmodel pose animation replaced by an FOV zoom + pivot glide (not Studio-tested)
 
 Per owner request: "replace the ADS animation with just a zoom in."
