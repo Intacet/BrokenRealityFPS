@@ -1,5 +1,14 @@
 # Changelog
 
+## Crosshair toggle for every player
+
+- The crosshair on/off control was only in `DummyDebugUI`, which builds for developers
+  only (`RunService:IsStudio()` / `Constants.DEV_USER_IDS`). Added a **CROSSHAIR: ON/OFF**
+  button to `LoadoutMenu` (which everyone gets, opened with M), wired to the same
+  `CrosshairUI:SetUserEnabled` / `:IsUserEnabled`. The menu re-reads the current state
+  each time it opens so the two buttons never disagree. Session-local (not persisted).
+  The dev `DummyDebugUI` button is unchanged.
+
 ## Test area can run in a published build
 
 - `TestAreaBuilder` was hard-gated to `RunService:IsStudio()`, so a published place

@@ -34,6 +34,10 @@ local Logger    = require(Modules:WaitForChild("Logger"))
 -- phase so a mid-match joiner does not briefly see the menu before RoundStateChanged.
 local MatchController = require(script.Parent.Parent:WaitForChild("MatchController"))
 
+-- CrosshairUI (ClientInit slot 6) owns SetUserEnabled/IsUserEnabled — the loadout
+-- menu exposes that toggle to every player (the DummyDebugUI button is dev-only).
+local CrosshairUI = require(script.Parent:WaitForChild("CrosshairUI"))
+
 local Remotes           = ReplicatedStorage:WaitForChild("Remotes")
 local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEvent
 local SelectLoadout     = Remotes:WaitForChild("SelectLoadout")     :: RemoteEvent
@@ -65,9 +69,11 @@ local ROW_H     = 40
 -- GUI references (set in init())
 -- ============================================================
 
-local screenGui  : ScreenGui
-local panel      : Frame
-local deployBtn  : TextButton
+local screenGui    : ScreenGui
+local panel        : Frame
+local deployBtn    : TextButton
+local crosshairBtn : TextButton
+local crosshairLbl : TextLabel
 
 -- weapon key → { button: TextButton, stroke: UIStroke, selectable: boolean }
 local weaponRows : { [string]: { button: TextButton, stroke: UIStroke, selectable: boolean } } = {}
@@ -78,10 +84,12 @@ local teamRows   : { [string]: { button: TextButton, stroke: UIStroke } } = {}
 -- State
 -- ============================================================
 
-local isOpen         = false
-local selectedWeapon : string = LOADOUT.DEFAULT_PRIMARY
-local selectedTeam   : string = LOADOUT.DEFAULT_TEAM_PREF
-local lastPhase      : string = Constants.Phase.LOBBY
+local isOpen          = false
+local selectedWeapon  : string = LOADOUT.DEFAULT_PRIMARY
+local selectedTeam    : string = LOADOUT.DEFAULT_TEAM_PREF
+local lastPhase       : string = Constants.Phase.LOBBY
+-- Mirror of CrosshairUI:IsUserEnabled(); the button label follows it.
+local crosshairEnabled = true
 
 -- ============================================================
 -- Build helpers
@@ -141,6 +149,20 @@ local function refreshSelectionHighlight()
     end
 end
 
+-- Syncs the crosshair toggle label from CrosshairUI's current user setting.
+local function refreshCrosshairButton()
+    local ok, enabled = pcall(function()
+        return CrosshairUI:IsUserEnabled()
+    end)
+    if ok and type(enabled) == "boolean" then
+        crosshairEnabled = enabled
+    end
+    if crosshairLbl ~= nil then
+        crosshairLbl.Text = "CROSSHAIR: " .. (crosshairEnabled and "ON" or "OFF")
+        crosshairLbl.TextColor3 = crosshairEnabled and WHITE or DIM_GREY
+    end
+end
+
 -- ============================================================
 -- Open / close
 -- ============================================================
@@ -171,6 +193,7 @@ local function setOpen(open: boolean)
     if open then
         seedFromAttributes()
         refreshSelectionHighlight()
+        refreshCrosshairButton()
         UserInputService.MouseIconEnabled = true
         UserInputService.MouseBehavior    = Enum.MouseBehavior.Default
     else
@@ -243,8 +266,9 @@ function LoadoutMenu:init(playerGui: PlayerGui)
     backdrop.Parent              = screenGui
 
     -- Panel
+    local TOGGLE_H = 30  -- crosshair toggle button
     local weaponBlockH = #LOADOUT.WEAPONS * CARD_H + (#LOADOUT.WEAPONS - 1) * CARD_GAP
-    local panelH = PAD + 28 + 22 + weaponBlockH + 24 + 20 + ROW_H + 20 + ROW_H + 8 + 16 + PAD
+    local panelH = PAD + 28 + 22 + weaponBlockH + 24 + 20 + ROW_H + 20 + ROW_H + 8 + TOGGLE_H + 8 + 16 + PAD
 
     panel                    = Instance.new("Frame")
     panel.Name               = "Panel"
@@ -332,6 +356,18 @@ function LoadoutMenu:init(playerGui: PlayerGui)
         16, true, WHITE, Enum.TextXAlignment.Center)
     y += ROW_H + 8
 
+    -- Crosshair toggle — available to every player (the DummyDebugUI copy is dev-only).
+    local xhairButton = makeButton(panel,
+        UDim2.fromOffset(innerW, TOGGLE_H),
+        UDim2.fromOffset(PAD, y),
+        CARD_COLOR)
+    crosshairBtn = xhairButton
+    crosshairBtn.Name = "CrosshairToggle"
+    crosshairLbl = makeLabel(crosshairBtn, "CROSSHAIR: ON",
+        UDim2.fromScale(1, 1), UDim2.fromScale(0, 0),
+        12, true, WHITE, Enum.TextXAlignment.Center)
+    y += TOGGLE_H + 8
+
     makeLabel(panel,
         string.format("[%s] close", LOADOUT.TOGGLE_KEY.Name),
         UDim2.fromOffset(innerW, 16), UDim2.fromOffset(PAD, y),
@@ -364,6 +400,16 @@ function LoadoutMenu:Start()
 
     deployBtn.Activated:Connect(deploy)
 
+    -- Crosshair on/off — routes to CrosshairUI:SetUserEnabled, which hides both the
+    -- fixed centre reticle and the floating hipfire reticle. Session-local.
+    crosshairBtn.Activated:Connect(function()
+        crosshairEnabled = not crosshairEnabled
+        pcall(function()
+            CrosshairUI:SetUserEnabled(crosshairEnabled)
+        end)
+        refreshCrosshairButton()
+    end)
+
     -- Toggle key.
     UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
         if gameProcessed then
@@ -384,6 +430,7 @@ function LoadoutMenu:Start()
     -- Seed the initial selection and phase, then open if we're already in a menu phase.
     seedFromAttributes()
     refreshSelectionHighlight()
+    refreshCrosshairButton()
     local ok, phase = pcall(function()
         return MatchController:GetPhase()
     end)
