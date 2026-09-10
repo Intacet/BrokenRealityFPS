@@ -6,6 +6,8 @@
 -- AI Stage 1B — combat feedback FX (muzzle flash / smoke / light / tracer / 3D sound).
 -- AI Stage 1C — grunt weapon model + third-person animation (same gun/poses as players).
 -- AI Stage 1D — face the target while engaging + duck into cover between bursts.
+-- AI Stage 1E — fight from cover, break to cover the instant you're hit, and
+--               flank a stale last-known position instead of giving up.
 --
 -- Spawns simple R6 rifleman "grunt" squads from Workspace/AISpawns, patrols
 -- Workspace/AIPatrolPoints, detects players by server raycast line-of-sight,
@@ -55,10 +57,22 @@
 -- — a per-grunt peek/shoot/hide loop. No squad coordination, no tagged cover
 -- objects, no pathfinding.
 --
--- Deferred (see docs/TECHNICAL_DEBT.md — AI Stage 1A..1D): PathfindingService,
--- ragdoll on AI death, rewards/points/killstreaks, AI types, squad cover/flanking,
--- jump/climb animation, reload animation, final flash/smoke/sound art, tracer
--- pooling, extracting the WorldWeaponService attach body into a shared module.
+-- Stage 1E fight-from-cover / react / flank (Constants.AI Stage 1E fields): the
+-- Attack branch first walks to findFightingPosition() (a spot within
+-- FIGHT_SEEK_DISTANCE that keeps LOS to the target AND has an obstacle within
+-- COVER_ADJACENT_RADIUS) before planting — nil result → hold in place as before.
+-- A service-level CombatEvents.DamageDealt listener arms record.coverUntil the
+-- moment a grunt is hit and, if a player did it, makes that player the target.
+-- When a target has been unseen longer than LAST_SEEN_CHASE_SECONDS (up to
+-- SEARCH_DURATION) the grunt enters a "Search" state and approaches lastSeenPos on
+-- an arc via flankPointFor() (per-grunt flankSide alternates), converging on the
+-- spot; after SEARCH_DURATION with no sighting it drops back to patrol.
+--
+-- Deferred (see docs/TECHNICAL_DEBT.md — AI Stage 1A..1E): PathfindingService,
+-- ragdoll on AI death, rewards/points/killstreaks, AI types, real squad
+-- cover/flanking coordination, suppression, jump/climb animation, reload
+-- animation, final flash/smoke/sound art, tracer pooling, extracting the
+-- WorldWeaponService attach body into a shared module.
 
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -74,9 +88,14 @@ local Modules    = ReplicatedStorage:WaitForChild("Modules")
 local Constants  = require(Modules:WaitForChild("Constants"))
 local Logger     = require(Modules:WaitForChild("Logger"))
 local WeaponData = require(Modules:WaitForChild("WeaponData"))
+local Types      = require(Modules:WaitForChild("Types"))
 
 -- DamageService is a sibling ModuleScript; the only in-tree caller besides GunService.
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
+-- CombatEvents is a sibling ModuleScript holding server-to-server BindableEvents
+-- (DamageService is the sole producer). Stage 1E listens to DamageDealt so a grunt
+-- reacts the instant it is shot.
+local CombatEvents = require(script.Parent:WaitForChild("CombatEvents"))
 
 -- Untyped views of the tuning tables (heterogeneous fields; matches the pattern
 -- used by TestAreaBuilder's `local CFG = Constants.DEV_TEST_AREA :: any`).
@@ -87,7 +106,7 @@ local FX = Constants.AI_COMBAT_FX :: any
 -- Types
 -- ============================================================
 
-type AIState = "Idle" | "Patrol" | "Chase" | "Attack" | "Cover" | "Dead"
+type AIState = "Idle" | "Patrol" | "Chase" | "Attack" | "Cover" | "Search" | "Dead"
 
 -- Stage 1B combat FX instances, built once per NPC and reused every shot.
 -- All children of `attachment`, so they are destroyed with the NPC model.
@@ -124,7 +143,9 @@ type NPCRecord = {
     lastSeenClock: number,
 
     coverUntil : number,    -- os.clock() deadline; > now → in the Cover branch (0 = not covering)
-    coverPoint : Vector3?,  -- resolved cover destination, cleared on return to Attack
+    coverPoint : Vector3?,  -- LOS-broken hide spot for Cover, cleared on return to Attack
+    fightPoint : Vector3?,  -- Stage 1E: cover-adjacent spot that keeps LOS, for Attack
+    flankSide  : number,    -- Stage 1E: -1 / +1, which way this grunt arcs into a stale last-known pos
 
     nextThinkClock      : number,
     nextTargetCheckClock: number,
@@ -1037,6 +1058,70 @@ local function findCoverPoint(record: NPCRecord, targetPos: Vector3): Vector3
     return root.Position + awayDir * distance
 end
 
+-- Stage 1E: true if there is something to hug within COVER_ADJACENT_RADIUS of
+-- `fromPos` on the side facing away from the target (or either flank of it).
+local function hasNearbyCover(fromPos: Vector3, targetPos: Vector3): boolean
+    local eye = Vector3.new(0, AI.LINE_OF_SIGHT_HEIGHT_OFFSET * 0.5, 0)
+    local flatAway = Vector3.new(fromPos.X - targetPos.X, 0, fromPos.Z - targetPos.Z)
+    if flatAway.Magnitude < 0.1 then
+        return false
+    end
+    local away  = flatAway.Unit
+    local reach = AI.COVER_ADJACENT_RADIUS
+    for _, deg in ipairs({ 0, 60, -60, 120, -120 }) do
+        local dir = (CFrame.Angles(0, math.rad(deg), 0) * away).Unit
+        if workspace:Raycast(fromPos + eye, dir * reach, losParams) ~= nil then
+            return true
+        end
+    end
+    return false
+end
+
+-- Stage 1E: a spot within FIGHT_SEEK_DISTANCE that keeps line of sight to the
+-- target AND sits beside cover. Returns nil when none qualifies (caller then just
+-- holds where it is — the pre-1E behaviour). Samples FIGHT_SAMPLE_ANGLES off the
+-- away-from-target vector at two radii, near first.
+local function findFightingPosition(record: NPCRecord, targetPos: Vector3): Vector3?
+    local root = record.root
+    local eye  = Vector3.new(0, AI.LINE_OF_SIGHT_HEIGHT_OFFSET, 0)
+    local flatAway = Vector3.new(root.Position.X - targetPos.X, 0, root.Position.Z - targetPos.Z)
+    if flatAway.Magnitude < 0.1 then
+        return nil
+    end
+    local awayDir = flatAway.Unit
+    local tchar: Model? = if record.target ~= nil then record.target.Character else nil
+
+    for _, radius in ipairs({ AI.FIGHT_SEEK_DISTANCE * 0.5, AI.FIGHT_SEEK_DISTANCE }) do
+        for _, deg in ipairs(AI.FIGHT_SAMPLE_ANGLES) do
+            local dir = (CFrame.Angles(0, math.rad(deg), 0) * awayDir).Unit
+            local c = root.Position + dir * radius
+            -- (a) still sees the target: ray reaches the target character, or hits nothing
+            local losHit = workspace:Raycast(c + eye, (targetPos + eye) - (c + eye), losParams)
+            local seesTarget = losHit == nil or (tchar ~= nil and losHit.Instance:IsDescendantOf(tchar))
+            if seesTarget and hasNearbyCover(c, targetPos) then
+                return c
+            end
+        end
+    end
+    return nil
+end
+
+-- Stage 1E: an arc approach to `lastSeenPos` — wide lateral offset when far,
+-- converging on the spot as the grunt closes. flankSide picks left / right so
+-- squad members come in from opposite sides.
+local function flankPointFor(record: NPCRecord, lastSeenPos: Vector3): Vector3
+    local root = record.root
+    local flat = Vector3.new(lastSeenPos.X - root.Position.X, 0, lastSeenPos.Z - root.Position.Z)
+    if flat.Magnitude < 0.1 then
+        return lastSeenPos
+    end
+    local dir  = flat.Unit
+    local perp = Vector3.new(-dir.Z, 0, dir.X) * record.flankSide
+    local lateral = (AI.FLANK_OFFSET_DISTANCE :: number)
+        * math.clamp(flat.Magnitude / (AI.FLANK_CURVE_DISTANCE :: number), 0, 1)
+    return lastSeenPos + perp * lateral
+end
+
 local function thinkNPC(record: NPCRecord, now: number)
     if record.dead then
         return
@@ -1058,16 +1143,22 @@ local function thinkNPC(record: NPCRecord, now: number)
             end
             record.lastSeenClock = now
         elseif record.target ~= nil then
-            local troot = targetRootOf(record.target)
-            local lost  = troot == nil
-            if troot ~= nil and (troot.Position - root.Position).Magnitude > AI.LOSE_TARGET_RANGE then
+            local tr   = targetRootOf(record.target)
+            local lost = tr == nil
+            if tr ~= nil and (tr.Position - root.Position).Magnitude > AI.LOSE_TARGET_RANGE then
                 lost = true
             end
+            -- Drop the live target ref once LOS has been gone past the direct-chase
+            -- window, but KEEP lastSeenPos so the Search / flank phase can use it.
             if lost or (now - record.lastSeenClock) > AI.LAST_SEEN_CHASE_SECONDS then
                 record.target = nil
-                record.lastSeenPos = nil
             end
         end
+    end
+    -- Stage 1E: forget the last-known position entirely after SEARCH_DURATION with
+    -- no fresh sighting.
+    if record.lastSeenPos ~= nil and (now - record.lastSeenClock) > AI.SEARCH_DURATION then
+        record.lastSeenPos = nil
     end
 
     -- ── Decide + act ────────────────────────────────────────────────────────
@@ -1078,48 +1169,75 @@ local function thinkNPC(record: NPCRecord, now: number)
         record.lastSeenClock = now
     end
 
-    local goal: Vector3? = nil
+    -- ── Live target: cover / fight-from-cover / chase ──────────────────────
     if troot ~= nil then
-        goal = troot.Position
-    elseif record.lastSeenPos ~= nil and (now - record.lastSeenClock) <= AI.LAST_SEEN_CHASE_SECONDS then
-        goal = record.lastSeenPos
-    end
+        local dist  = (troot.Position - root.Position).Magnitude
+        local inLos = tchar ~= nil and canSee(record, tchar, troot)
 
-    if goal ~= nil then
-        local dist  = (goal - root.Position).Magnitude
-        local inLos = troot ~= nil and tchar ~= nil and canSee(record, tchar, troot)
-
-        if AI.TAKE_COVER == true and record.coverUntil > now and troot ~= nil then
-            -- Stage 1D: a burst just finished — move to a cover spot that breaks
-            -- LOS until the cover window expires. Runs ahead of the range/LOS check
-            -- so reaching cover doesn't flip to Chase. AutoRotate faces the way it
-            -- walks (no CFrame write here — that would stomp the walk).
+        if AI.TAKE_COVER == true and record.coverUntil > now then
+            -- Burst just finished OR just got shot — hold at / move to a spot that
+            -- breaks LOS until the window expires. Ahead of the range/LOS check so
+            -- reaching cover doesn't flip to Chase.
             setState(record, "Cover")
+            record.fightPoint = nil
             humanoid.AutoRotate = true
             humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
             if record.coverPoint == nil then
-                record.coverPoint = findCoverPoint(record, goal)
+                record.coverPoint = findCoverPoint(record, troot.Position)
             end
             humanoid:MoveTo(record.coverPoint or root.Position)
-        elseif troot ~= nil and dist <= AI.ATTACK_RANGE and inLos then
-            -- Stationary + shooting: hand facing to faceToward() so the rifle
-            -- points at the player.
+        elseif dist <= AI.ATTACK_RANGE and inLos then
             setState(record, "Attack")
             record.coverPoint = nil
-            humanoid.AutoRotate = false
-            humanoid.WalkSpeed = AI.ATTACK_MOVE_SPEED
-            humanoid:MoveTo(root.Position)  -- hold position
-            faceToward(record, goal)
-            if not record.firing then
-                startBurst(record)
+            local spot = record.fightPoint
+            if spot == nil and AI.FIGHT_FROM_COVER == true then
+                spot = findFightingPosition(record, troot.Position)
+                record.fightPoint = spot
+            end
+            if spot ~= nil and (root.Position - spot).Magnitude > AI.FIGHT_ARRIVE_DIST then
+                -- Still moving into a cover-adjacent firing spot.
+                humanoid.AutoRotate = true
+                humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
+                humanoid:MoveTo(spot)
+            else
+                -- Planted (at cover, or no cover found) — face the player and fire.
+                humanoid.AutoRotate = false
+                humanoid.WalkSpeed = AI.ATTACK_MOVE_SPEED
+                humanoid:MoveTo(root.Position)
+                faceToward(record, troot.Position)
+                if not record.firing then
+                    startBurst(record)
+                end
             end
         else
             setState(record, "Chase")
             record.coverUntil = 0
             record.coverPoint = nil
+            record.fightPoint = nil
             humanoid.AutoRotate = true
             humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
-            humanoid:MoveTo(goal + record.slot)
+            humanoid:MoveTo(troot.Position + record.slot)
+        end
+        return
+    end
+
+    -- ── No live target, but a last-known position to work ──────────────────
+    local lastSeen = record.lastSeenPos
+    if lastSeen ~= nil then
+        record.coverUntil = 0
+        record.coverPoint = nil
+        record.fightPoint = nil
+        humanoid.AutoRotate = true
+        if (now - record.lastSeenClock) <= AI.LAST_SEEN_CHASE_SECONDS then
+            -- Fresh: run straight at where they were last seen.
+            setState(record, "Chase")
+            humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
+            humanoid:MoveTo(lastSeen + record.slot)
+        else
+            -- Stale: move in and flank the last-known position on an arc.
+            setState(record, "Search")
+            humanoid.WalkSpeed = AI.NPC_WALK_SPEED
+            humanoid:MoveTo(flankPointFor(record, lastSeen))
         end
         return
     end
@@ -1127,6 +1245,7 @@ local function thinkNPC(record: NPCRecord, now: number)
     -- No target: patrol between points, or idle near the squad spawn.
     record.coverUntil = 0
     record.coverPoint = nil
+    record.fightPoint = nil
     setState(record, (#patrolPoints > 0) and "Patrol" or "Idle")
     humanoid.AutoRotate = true
     humanoid.WalkSpeed = AI.NPC_WALK_SPEED
@@ -1161,6 +1280,7 @@ local function disconnectRecord(record: NPCRecord)
     record.anim = nil
     record.coverUntil = 0
     record.coverPoint = nil
+    record.fightPoint = nil
     for _, conn in ipairs(record.conns) do
         conn:Disconnect()
     end
@@ -1237,6 +1357,8 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
 
         coverUntil = 0,
         coverPoint = nil,
+        fightPoint = nil,
+        flankSide  = (index % 2 == 0) and 1 or -1,
 
         nextThinkClock       = 0,
         nextTargetCheckClock = 0,
@@ -1415,6 +1537,34 @@ function AIService.Start(): ()
     patrolPoints, warnedNoPatrol = collectParts(AI.PATROL_FOLDER_NAME, warnedNoPatrol)
 
     mainThread = task.spawn(mainLoop)
+
+    -- Stage 1E: react the instant a grunt is shot. DamageService fires DamageDealt
+    -- for every accepted hit; targetModel is the grunt's Model, info.attacker is
+    -- the player who shot it (nil for AI-inflicted or environment damage). Non-grunt
+    -- events find no npcs[targetModel] and no-op.
+    local dmgConn = CombatEvents.DamageDealt.Event:Connect(function(targetModel: Model?, info: Types.DamageInfo)
+        if targetModel == nil then
+            return
+        end
+        local record = npcs[targetModel]
+        if record == nil or record.dead then
+            return
+        end
+        if AI.HURT_COVER == true then
+            record.coverUntil = os.clock() + (AI.COVER_DURATION :: number)
+            record.coverPoint = nil  -- force a fresh hide spot away from the new threat
+        end
+        local attacker = info.attacker
+        if attacker ~= nil then
+            record.target = attacker
+            local aroot = targetRootOf(attacker)
+            if aroot ~= nil then
+                record.lastSeenPos = aroot.Position
+                record.lastSeenClock = os.clock()
+            end
+        end
+    end)
+    table.insert(serviceConns, dmgConn)
 
     -- Re-scan when an AISpawns / AIPatrolPoints folder appears after we started
     -- (server script order is not guaranteed; TestAreaBuilder may build them later).

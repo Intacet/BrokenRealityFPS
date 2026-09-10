@@ -2155,6 +2155,17 @@ Constants.AI = {
     COVER_DURATION      = 3.0,     -- seconds in cover before re-peeking
     COVER_SEEK_DISTANCE = 16,      -- studs from the grunt to test for a cover spot
     COVER_SAMPLE_ANGLES = { 0, 40, -40, 75, -75 },  -- degrees off the away-from-target vector to sample
+
+    -- ── Stage 1E — fight from cover, react to fire, flank a stale target ───
+    HURT_COVER            = true,  -- taking any hit arms the cover window immediately
+    FIGHT_FROM_COVER      = true,  -- Attack walks to a cover-adjacent spot that still has LOS before planting
+    FIGHT_SEEK_DISTANCE   = 10,    -- studs: radius searched for a fighting position
+    FIGHT_ARRIVE_DIST     = 3,     -- within this of the fighting position → plant + fire
+    COVER_ADJACENT_RADIUS = 6,     -- an obstacle within this of a spot = "beside cover"
+    FIGHT_SAMPLE_ANGLES   = { 0, 35, -35, 70, -70, 110, -110, 145, -145, 180 },
+    SEARCH_DURATION       = 12,    -- total seconds to hunt a lost target before returning to patrol
+    FLANK_OFFSET_DISTANCE = 14,    -- max lateral offset when approaching a stale last-known position
+    FLANK_CURVE_DISTANCE  = 30,    -- beyond this range the full offset applies; nearer → converge on the spot
 }
 
 -- ── AI Stage 1B — combat feedback FX for AIService grunts ───────────────────

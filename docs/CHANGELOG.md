@@ -1,5 +1,30 @@
 # Changelog
 
+## AI Stage 1E — grunts fight from cover, react to fire, flank a lost target
+
+- **Don't stand in the open.** The `Attack` state now walks to `findFightingPosition`
+  first — a spot within `FIGHT_SEEK_DISTANCE` that still has line of sight to the
+  target *and* has an obstacle within `COVER_ADJACENT_RADIUS` — then plants there
+  to fire. No cover nearby → holds where it stopped (pre-1E behaviour).
+- **React to being shot.** A service-level `CombatEvents.DamageDealt` listener (a
+  `require`d BindableEvent — no new remote) arms the cover window the instant a
+  grunt takes any hit, and if a player did it, makes that player the target and
+  updates the last-seen position. A grunt shot in the back while patrolling now
+  turns, ducks to cover, and engages the shooter.
+- **Flank a stale last-known position.** `lastSeenPos` is kept after the live
+  target reference is dropped. Once it's older than `LAST_SEEN_CHASE_SECONDS`
+  (up to `SEARCH_DURATION`), the grunt enters a new `Search` state and moves in
+  via `flankPointFor` — an arc that's wide when far from the spot and converges on
+  it, with squad members alternating `flankSide` for a rough pincer — instead of
+  immediately giving up and patrolling.
+- Per-grunt heuristics only: no squad coordination, no tagged cover nodes, no
+  pathfinding (a grunt can get stuck against a wall it's trying to fight from /
+  reach). All flag-gated (`FIGHT_FROM_COVER`, `HURT_COVER`).
+- **`AIService` + `Constants.AI` only** — no new remotes, no client files, no
+  `default.project.json` / `GunService` / `DamageService` / `CombatEvents` change.
+  AI detection / damage / death is preserved. MCP-checked the math + APIs; the
+  behaviour needs a Studio Play test (see docs/TECHNICAL_DEBT.md "AI Stage 1E").
+
 ## AI Stage 1D — grunts face the player + take cover between bursts
 
 - **Face the target while shooting.** In the stationary `Attack` state

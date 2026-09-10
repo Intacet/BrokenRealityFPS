@@ -215,6 +215,44 @@ Residual risks:
   knockback / ragdoll impulse landing mid-think — AI ragdoll is not wired, so no
   conflict today.
 
+## AI Stage 1E — fight from cover / react to fire / flank (Studio verification: REQUIRED, not done)
+
+New `Constants.AI` Stage 1E fields + `AIService` helpers `hasNearbyCover` /
+`findFightingPosition` / `flankPointFor`, a `Search` state, `fightPoint` /
+`flankSide` on the record, and a service-level `CombatEvents.DamageDealt` listener
+(a `require`d BindableEvent — **no new remote**). `AIService` + `Constants.AI`
+only; `GunService` / `DamageService` / `CombatEvents` / `WorldWeaponService`
+unchanged. MCP-checked the math + that `CombatEvents.DamageDealt` is a
+BindableEvent. Residual risks:
+
+- **Not runtime-verified in Play.** MCP can't drive a player into range or watch
+  the fight-from-cover / flank behaviour — needs a Studio Play pass.
+- **`findFightingPosition` is a 20-raycast local sample** (10 angles × 2 radii)
+  and returns `nil` on open ground — the grunt then plants where it stopped
+  exactly like pre-1E. "Don't stand in the open" is best-effort and entirely
+  bounded by nearby geometry. With no pathfinding it can also pick a spot on the
+  far side of a wall it can't walk around and get stuck against it.
+- **`hasNearbyCover` only proves *something* is within `COVER_ADJACENT_RADIUS`** —
+  not that it's tall enough to actually block a shot, nor which side of the grunt
+  it's on. A knee-high crate or a thin pole counts.
+- **The flank is `flankSide` alternation, not real squad coordination.** Two grunts
+  arc from opposite sides by luck of spawn index; 3+ grunts don't fan out, and
+  nobody covers anybody. `SEARCH_DURATION` (12 s), `FLANK_OFFSET_DISTANCE` (14),
+  `FLANK_CURVE_DISTANCE` (30) are guesses.
+- **`DamageDealt` fires once per accepted hit**, so a sustained stream re-arms
+  `coverUntil` every shot — a pinned grunt keeps trying to reach a *fresh* hide
+  spot (`coverPoint` is nil'd each hit) and barely peeks while under fire.
+  Intended as "suppressed", but if it reads as frozen, only nil `coverPoint` when
+  the grunt isn't already in `Cover`.
+- **A grunt shot from a direction it cannot path to** (through a wall, from above)
+  sets that shooter as its target and will walk straight at the obstacle. No LOS
+  or reachability check on the attacker before adopting them.
+- **`lastSeenPos` now survives the live-target drop.** A grunt that saw you once
+  will hunt/flank your last spot for a full `SEARCH_DURATION` even if you're long
+  gone — more persistent than before; lower `SEARCH_DURATION` to dial it back.
+- Still **no suppression fire, no squad tactics, no AI ragdoll, no rewards** —
+  unchanged from earlier stages.
+
 ## Pre-round loadout menu — partial DEBT-013 (Studio verification: YES, required)
 
 `LoadoutMenu` (client UI) + `LoadoutService` (server) + the `SelectLoadout` remote give
