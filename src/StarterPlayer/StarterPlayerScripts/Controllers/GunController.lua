@@ -111,14 +111,11 @@ local currentMag:     number = 0
 local currentReserve: number = 0
 
 -- ADS state. Visual transition is deferred (DEBT-040).
-local isADS: boolean = false
 
 -- Recoil CFrame accumulator. Applied to ViewModelController each frame.
 -- Snapped outward on each shot, lerped back to identity by RenderStepped.
-local recoilCFrame:    CFrame  = CFrame.new()
 local recoilBuildup:   number  = 0   -- accumulated multiplier from sustained fire
 local recoilResetTimer:number  = 0   -- counts down from feel.recoilResetTime after last shot
-local recoilAltRight:  boolean = true -- alternates sign of lateral kick each shot
 
 -- Full-auto flag. Set true by InputBegan MB1; cleared by InputEnded MB1, dry-fire, or holster.
 -- RenderStepped calls attemptFire() each frame while this is true; the internal cooldown check
@@ -157,6 +154,7 @@ end
 
 -- Computes the total spread half-cone angle in degrees from WeaponFeel + movement state.
 local function computeSpread(feel: { [string]: any }): number
+    local isADS = ViewModelController:IsAiming()
     local moveState = MovementController:GetMoveState()
     local spread    = (isADS and (feel.baseSpread :: number) or
                       (feel.baseSpread :: number) + (feel.hipfireSpread :: number))
@@ -176,9 +174,11 @@ end
 -- Controller
 -- ============================================================
 
+local CameraRecoil = require(script.Parent:WaitForChild("CameraRecoil"))
 local GunController = {}
 
 function GunController:Start()
+    CameraRecoil.Start()
 
     -- ── attemptFire: internal helper — fire one shot if all guards pass ────────
     -- Defined before RenderStepped and InputBegan so both closures can reference it.
@@ -194,7 +194,7 @@ function GunController:Start()
         if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return false end
 
         -- Guard: WeaponFeel data must exist (uses DEFAULT_WEAPON for all cosmetics).
-        local feel = WeaponFeel[Constants.DEFAULT_WEAPON]
+        local feel = WeaponFeel[equippedWeaponName or Constants.DEFAULT_WEAPON] or WeaponFeel[Constants.DEFAULT_WEAPON]
         if not feel then
             Logger.warn("[GunController] No WeaponFeel entry for:", Constants.DEFAULT_WEAPON)
             return false
@@ -243,13 +243,19 @@ function GunController:Start()
         if now - lastShotTime < interval then return false end
 
         -- Guard: ADS may be blocked by movement.
-        if isADS and MovementController:IsADSBlocked() then
-            isADS = false
-        end
+        local isADS = ViewModelController:IsAiming()
 
         -- Guard: tactical sprint blocks fire (client-side presentation only).
         if Constants.TACTICAL_SPRINT_BLOCKS_GUN_USE
             and MovementController.IsTacticalSprinting()
+        then
+            return false
+        end
+
+        -- Guard: regular sprint blocks fire too — you cannot shoot while running.
+        -- GetMoveState() == "Sprinting" means isSprinting AND actually moving.
+        if Constants.SPRINT_BLOCKS_GUN_USE
+            and MovementController:GetMoveState() == "Sprinting"
         then
             return false
         end
@@ -261,7 +267,10 @@ function GunController:Start()
         -- ── Spread-perturbed raycast ──────────────────────────────────────────
         local camera    = workspace.CurrentCamera
         local origin    = camera.CFrame.Position
-        local baseDir   = camera.CFrame.LookVector
+        -- Use the same screen-space point as the visible free-aim reticle.
+        local offset = if Constants.FREE_AIM_ENABLED then FreeAimController:GetSmoothedAimOffset() else Vector2.zero
+        local aimPoint = camera.ViewportSize / 2 + offset
+        local baseDir = camera:ViewportPointToRay(aimPoint.X, aimPoint.Y).Direction
         local spread    = computeSpread(feel)
         local direction = applySpread(baseDir, spread)
 
@@ -281,32 +290,11 @@ function GunController:Start()
         )
         recoilResetTimer = feel.recoilResetTime :: number
 
-        -- Camera-space recoil kick: shifts the entire viewmodel up/right so the screen appears to
-        -- recoil even though we do not modify workspace.CurrentCamera.CFrame.
-        -- Per-weapon profiles supply a camera sub-table; weapons without a profile use WeaponFeel.
-        local hasPerWeaponProfile = equippedDef ~= nil and (equippedDef :: any).recoil ~= nil
-        if hasPerWeaponProfile then
-            -- Read camera kick from profile.camera.{hip,ads} sub-tables.
-            local profile = (equippedDef :: any).recoil
-            local camSub: any = if isADS then ((profile :: any).camera :: any) and ((profile :: any).camera :: any).ads
-                                          else ((profile :: any).camera :: any) and ((profile :: any).camera :: any).hip
-            local kickUpDeg    = if camSub and typeof((camSub :: any).kickUp)    == "number" then (camSub :: any).kickUp    :: number else (Constants.DEFAULT_CAMERA_RECOIL_KICK_UP    :: number)
-            local kickRightDeg = if camSub and typeof((camSub :: any).kickRight) == "number" then (camSub :: any).kickRight :: number else (Constants.DEFAULT_CAMERA_RECOIL_KICK_RIGHT :: number)
-            local kickUp    = math.rad(kickUpDeg    * (1 + recoilBuildup))
-            local kickRight = math.rad(kickRightDeg * (1 + recoilBuildup))
-            kickRight = recoilAltRight and kickRight or -kickRight
-            recoilAltRight = not recoilAltRight
-            recoilCFrame = recoilCFrame * CFrame.Angles(-kickUp, kickRight, 0)
-        else
-            -- WeaponFeel fallback (weapons that have no per-weapon recoil profile).
-            local kickUp    = math.rad((feel.recoilUp :: number) * (1 + recoilBuildup))
-            local kickRight = math.rad((feel.recoilRight :: number) * (1 + recoilBuildup))
-            if feel.recoilRightAlternate then
-                kickRight = recoilAltRight and kickRight or -kickRight
-                recoilAltRight = not recoilAltRight
-            end
-            recoilCFrame = recoilCFrame * CFrame.Angles(-kickUp, kickRight, 0)
-        end
+        local profile = equippedDef and (equippedDef :: any).recoil
+        local camSub = profile and profile.camera and (if isADS then profile.camera.ads else profile.camera.hip)
+        local kickUp = if camSub then camSub.kickUp else Constants.DEFAULT_CAMERA_RECOIL_KICK_UP
+        local kickSide = if camSub then camSub.kickRight else Constants.DEFAULT_CAMERA_RECOIL_KICK_RIGHT
+        CameraRecoil.Kick(kickUp * (1 + recoilBuildup), kickSide)
 
         -- ── Audio and visuals ─────────────────────────────────────────────────
         -- Use per-weapon fire sounds when available (WeaponData[weapon].sounds.fireFirstPerson).
@@ -382,26 +370,10 @@ function GunController:Start()
     -- Lerps recoilCFrame back toward identity each frame, then pushes the result
     -- to ViewModelController so the viewmodel tracks the recovery.
     RunService.RenderStepped:Connect(function(dt: number)
-        local feel = WeaponFeel[Constants.DEFAULT_WEAPON]
+        local feel = WeaponFeel[equippedWeaponName or Constants.DEFAULT_WEAPON] or WeaponFeel[Constants.DEFAULT_WEAPON]
         if not feel then return end
 
         -- Decay the recoil CFrame back to identity.
-        if recoilCFrame ~= CFrame.new() then
-            recoilCFrame = recoilCFrame:Lerp(
-                CFrame.new(),
-                math.min(1, dt * (feel.recoilRecoverySpeed :: number))
-            )
-            -- Snap to identity when close enough to avoid float drift.
-            local _, _, _, r00, r01, r02, r10, r11, r12, r20, r21, r22 = recoilCFrame:GetComponents()
-            local off = math.abs(1 - r00) + math.abs(r01) + math.abs(r02)
-                      + math.abs(r10) + math.abs(1 - r11) + math.abs(r12)
-                      + math.abs(r20) + math.abs(r21) + math.abs(1 - r22)
-            if off < 0.0001 then
-                recoilCFrame = CFrame.new()
-            end
-        end
-
-        -- Decay recoil buildup after last shot.
         if recoilResetTimer > 0 then
             recoilResetTimer = recoilResetTimer - dt
             if recoilResetTimer <= 0 then
@@ -412,7 +384,8 @@ function GunController:Start()
 
         -- Push the current recoil CFrame to ViewModelController every frame
         -- so the viewmodel smoothly returns to rest as recoilCFrame decays.
-        ViewModelController:SetRecoilOffset(recoilCFrame)
+        -- CameraRecoil owns camera rotation; do not apply it a second time to the gun.
+        ViewModelController:SetRecoilOffset(CFrame.new())
 
         -- Locomotion state: map MovementController state to viewmodel locomotion.
         -- GetMoveState() returns "Sprinting" for both shift-held run and tactical sprint;
@@ -459,6 +432,9 @@ function GunController:Start()
         -- reload multiplier stays accurate without creating a VMC→MC dependency.
         local nowReloading = ViewModelController:GetIsReloading()
         MovementController.SetReloading(nowReloading)
+        -- Sync fire state so MovementController can block a sprint start while shooting
+        -- (the "cannot run while shooting" half of the mutual exclusion).
+        MovementController.SetFiring(isAutoFiring)
         -- On the reload→done edge, exit ADS so the weapon returns to hip idle.
         if wasReloading and not nowReloading then
             ViewModelController:SetAiming(false)
@@ -495,6 +471,7 @@ function GunController:Start()
             Logger.debug("[GunController] Equipped: " .. Constants.DEFAULT_VIEWMODEL_WEAPON)
         else
             ViewModelController:HolsterWeapon()
+            CameraRecoil.Reset()
             equippedWeaponName = nil
             isAutoFiring = false
             lastLocomotionState = "Idle"
@@ -522,6 +499,9 @@ function GunController:Start()
     -- ensures GunController's local state matches so fire / reload remain gated.
     local respawnConn = LocalPlayer.CharacterAdded:Connect(function(_character: Model)
         equippedWeaponName = nil
+        CameraRecoil.Reset()
+        recoilBuildup = 0
+        recoilResetTimer = 0
         isAutoFiring = false
         lastLocomotionState = "Idle"
         -- Clear ADS state and movement animation set in MovementController on respawn.
@@ -554,7 +534,7 @@ function GunController:Start()
     table.insert(_connections, fireBeganConn)
 
     local fireEndedConn = UserInputService.InputEnded:Connect(function(input: InputObject, gameProcessed: boolean)
-        if gameProcessed then return end
+        -- Always release the trigger even if UI consumed the release.
         if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
         if not isAutoFiring then return end
         isAutoFiring = false
@@ -578,8 +558,9 @@ function GunController:Start()
         end
         ReloadRequest:FireServer()
         SoundController:PlayReload()
-        ViewModelController:PlayReloadAnimation()
-        Logger.debug("[GunController] Reload requested")
+        -- currentMag reflects the last AmmoChanged; <= 0 means this is an empty-mag reload.
+        ViewModelController:PlayReloadAnimation(currentMag <= 0)
+        Logger.debug("[GunController] Reload requested", currentMag <= 0 and "(empty)" or "(tactical)")
     end)
 
     -- ── Input: ADS (aim down sights) — MB2 toggle ─────────────────────────────
@@ -642,7 +623,7 @@ end
 -- Returns the current recoil CFrame (rotation offset applied to the viewmodel).
 -- Read by external systems that need to know current recoil state.
 function GunController:GetRecoilOffset(): CFrame
-    return recoilCFrame
+    return CameraRecoil.GetOffset()
 end
 
 return GunController

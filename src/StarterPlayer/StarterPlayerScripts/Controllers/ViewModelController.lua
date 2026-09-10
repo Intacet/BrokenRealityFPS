@@ -154,7 +154,7 @@ local vmInertiaCurrent:    number  = 1
 local vmRecoilTarget:        CFrame = CFrame.new()
 local vmRecoilCurrent:       CFrame = CFrame.new()
 local vmRecoilBuildup:       number = 0
-local vmRecoilYawDir:        number = 1
+local vmLastRecoilTime:      number = -math.huge
 local vmActiveKickSpeed:     number = 38
 local vmActiveRecoverySpeed: number = 18
 
@@ -229,6 +229,7 @@ local weaponEquipTrack:   AnimationTrack? = nil
 local weaponIdleTrack:    AnimationTrack? = nil
 local weaponFireTrack:    AnimationTrack? = nil
 local weaponReloadTrack:  AnimationTrack? = nil
+local weaponReloadEmptyTrack: AnimationTrack? = nil  -- optional; played by PlayReloadAnimation(true) when the mag is empty
 local weaponRunTrack:     AnimationTrack? = nil
 
 -- Animation state flags.
@@ -430,6 +431,314 @@ local function setFirstPerson(fp: boolean)
 end
 
 -- ============================================================
+-- Muzzle FX — Stage 1 (local, visual-only)
+-- ============================================================
+-- Built once per equipped viewmodel (in EquipWeapon), played every shot from
+-- PlayFireAnimation. All instances are children of the viewmodel Model, so they are
+-- destroyed with it; clearMuzzleFx() only drops references and bumps a token so any
+-- pending task.delay light callback becomes a no-op. No remotes, no server, no camera
+-- writes. Per-gun config: Constants.MUZZLE_FX.PROFILES[weaponName] over .DEFAULT.
+
+type MuzzleFxState = {
+    attachment        : Attachment?,
+    flash             : ParticleEmitter?,
+    smoke             : ParticleEmitter?,
+    spark             : ParticleEmitter?,
+    light             : PointLight?,
+    profile           : { [string]: any }?,
+    weaponName        : string?,
+    setupToken        : number,           -- bumped on every setup/clear; guards task.delay callbacks
+    warnedPlaceholder : boolean,          -- "textures are rbxassetid://0" — warn once
+    warnedAutoCreated : boolean,          -- "attachment was auto-created" — warn once
+    warnedNoAttachment: boolean,          -- "no attachment or barrel part found" — warn once
+}
+
+local muzzleFx: MuzzleFxState = {
+    attachment = nil, flash = nil, smoke = nil, spark = nil, light = nil,
+    profile = nil, weaponName = nil, setupToken = 0,
+    warnedPlaceholder = false, warnedAutoCreated = false, warnedNoAttachment = false,
+}
+
+-- Merge Constants.MUZZLE_FX.PROFILES[weaponName] over .DEFAULT (one level; all values are
+-- scalars/strings). Returns .DEFAULT directly when there is no per-weapon override.
+local function resolveMuzzleProfile(weaponName: string?): { [string]: any }
+    local cfg     = Constants.MUZZLE_FX :: any
+    local default = cfg.DEFAULT :: { [string]: any }
+    local override = (weaponName ~= nil) and (cfg.PROFILES :: any)[weaponName] or nil
+    if override == nil then
+        return default
+    end
+    local merged: { [string]: any } = {}
+    for k, v in default do merged[k] = v end
+    for k, v in override do merged[k] = v end
+    return merged
+end
+
+-- Creates (or reuses) the three ParticleEmitters and the PointLight under `muzzleAttachment`
+-- and configures them from `profile`. All start Enabled = false. Returns the four instances.
+local function createMuzzleFxEmitters(muzzleAttachment: Attachment, profile: { [string]: any })
+    assert(muzzleAttachment ~= nil, "muzzleAttachment is required")
+
+    local function seq(a: number, b: number): NumberSequence
+        return NumberSequence.new({
+            NumberSequenceKeypoint.new(0, a),
+            NumberSequenceKeypoint.new(1, b),
+        })
+    end
+
+    local flash = muzzleAttachment:FindFirstChild("MuzzleFlashEmitter") :: ParticleEmitter?
+    if flash == nil then
+        flash = Instance.new("ParticleEmitter")
+        flash.Name   = "MuzzleFlashEmitter"
+        flash.Parent = muzzleAttachment
+    end
+    flash.Enabled           = false
+    flash.Rate              = 0
+    flash.Texture           = profile.FLASH_TEXTURE
+    flash.Lifetime          = NumberRange.new(profile.FLASH_LIFETIME_MIN, profile.FLASH_LIFETIME_MAX)
+    flash.Speed             = NumberRange.new(profile.FLASH_SPEED_MIN, profile.FLASH_SPEED_MAX)
+    flash.Size              = seq(profile.FLASH_SIZE_START, profile.FLASH_SIZE_END)
+    flash.Transparency      = seq(0, 1)
+    flash.Rotation          = NumberRange.new(-180, 180)
+    flash.SpreadAngle       = Vector2.new(6, 6)
+    flash.EmissionDirection = Enum.NormalId.Front
+    flash.LightEmission     = 1
+    flash.LightInfluence    = 0
+    flash.Drag              = 0
+    flash.Color             = ColorSequence.new(Color3.fromRGB(255, 233, 190))
+
+    local smoke = muzzleAttachment:FindFirstChild("MuzzleSmokeEmitter") :: ParticleEmitter?
+    if smoke == nil then
+        smoke = Instance.new("ParticleEmitter")
+        smoke.Name   = "MuzzleSmokeEmitter"
+        smoke.Parent = muzzleAttachment
+    end
+    smoke.Enabled           = false
+    smoke.Rate              = 0
+    smoke.Texture           = profile.SMOKE_TEXTURE
+    smoke.Lifetime          = NumberRange.new(profile.SMOKE_LIFETIME_MIN, profile.SMOKE_LIFETIME_MAX)
+    smoke.Speed             = NumberRange.new(profile.SMOKE_SPEED_MIN, profile.SMOKE_SPEED_MAX)
+    smoke.Size              = seq(profile.SMOKE_SIZE_START, profile.SMOKE_SIZE_END)
+    smoke.Transparency      = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.45),
+        NumberSequenceKeypoint.new(1, 1),
+    })
+    smoke.Rotation          = NumberRange.new(-45, 45)
+    smoke.SpreadAngle       = Vector2.new(18, 18)
+    smoke.EmissionDirection = Enum.NormalId.Front
+    smoke.Acceleration      = Vector3.new(0, 2, 0)
+    smoke.LightEmission     = 0
+    smoke.LightInfluence    = 1
+    smoke.Drag              = 2.5
+    smoke.Color             = ColorSequence.new(Color3.fromRGB(120, 120, 120))
+
+    local spark = muzzleAttachment:FindFirstChild("MuzzleSparkEmitter") :: ParticleEmitter?
+    if spark == nil then
+        spark = Instance.new("ParticleEmitter")
+        spark.Name   = "MuzzleSparkEmitter"
+        spark.Parent = muzzleAttachment
+    end
+    spark.Enabled           = false
+    spark.Rate              = 0
+    spark.Texture           = profile.SPARK_TEXTURE
+    spark.Lifetime          = NumberRange.new(profile.SPARK_LIFETIME_MIN, profile.SPARK_LIFETIME_MAX)
+    spark.Speed             = NumberRange.new(profile.SPARK_SPEED_MIN, profile.SPARK_SPEED_MAX)
+    spark.Size              = NumberSequence.new(profile.SPARK_SIZE)
+    spark.Transparency      = seq(0, 0.6)
+    spark.Rotation          = NumberRange.new(-90, 90)
+    spark.SpreadAngle       = Vector2.new(32, 32)
+    spark.EmissionDirection = Enum.NormalId.Front
+    spark.Acceleration      = Vector3.new(0, -workspace.Gravity, 0)
+    spark.LightEmission     = 0.6
+    spark.LightInfluence    = 0
+    spark.Drag              = 1
+    spark.Color             = ColorSequence.new(Color3.fromRGB(255, 190, 100))
+
+    local light: PointLight? = muzzleAttachment:FindFirstChild("MuzzleFlashLight") :: PointLight?
+    if profile.LIGHT_ENABLED == true then
+        if light == nil then
+            light = Instance.new("PointLight")
+            light.Name   = "MuzzleFlashLight"
+            light.Parent = muzzleAttachment
+        end
+        light.Enabled    = false
+        light.Brightness  = profile.LIGHT_BRIGHTNESS
+        light.Range       = profile.LIGHT_RANGE
+        light.Color       = Color3.fromRGB(255, 205, 150)
+        light.Shadows     = false
+    elseif light ~= nil then
+        light:Destroy()
+        light = nil
+    end
+
+    return flash, smoke, spark, light
+end
+
+-- Drops all muzzle FX references and invalidates pending light callbacks. The instances
+-- themselves live under the viewmodel Model and are destroyed with it. Warn-once flags are
+-- deliberately NOT reset (they are per session).
+local function clearMuzzleFx()
+    muzzleFx.setupToken += 1
+    muzzleFx.attachment = nil
+    muzzleFx.flash      = nil
+    muzzleFx.smoke      = nil
+    muzzleFx.spark      = nil
+    muzzleFx.light      = nil
+    muzzleFx.profile    = nil
+    muzzleFx.weaponName = nil
+end
+
+-- Finds the muzzle Attachment on the current viewmodel (creating one on a barrel/muzzle
+-- part if configured and absent), builds the emitters, and stores references.
+-- Returns true on success, false if there is no usable attach point (fails gracefully).
+local function setupMuzzleFx(weaponName: string?): boolean
+    local model = ViewModelController.model
+    if model == nil then
+        return false
+    end
+    local cfg = Constants.MUZZLE_FX :: any
+
+    -- 1. Look for an existing Attachment named any of MUZZLE_ATTACHMENT_NAMES.
+    local wanted: { [string]: boolean } = {}
+    for _, n in ipairs(cfg.MUZZLE_ATTACHMENT_NAMES) do wanted[n] = true end
+    local attachment: Attachment? = nil
+    for _, d in ipairs(model:GetDescendants()) do
+        if d:IsA("Attachment") and wanted[d.Name] then
+            attachment = d
+            break
+        end
+    end
+
+    -- 2. None found — optionally auto-create one on a barrel/muzzle part.
+    if attachment == nil and cfg.AUTO_CREATE_ATTACHMENT_IF_MISSING == true then
+        local barrel: BasePart? = nil
+        for _, d in ipairs(model:GetDescendants()) do
+            if d:IsA("BasePart") then
+                local ln = d.Name:lower()
+                if string.find(ln, "barrel", 1, true) ~= nil or string.find(ln, "muzzle", 1, true) ~= nil then
+                    barrel = d
+                    break
+                end
+            end
+        end
+        if barrel ~= nil then
+            -- Best-effort placement: the barrel part's LONGEST local axis is treated as the
+            -- bore. Sit the attachment at that far face (+ configured offset) and orient it
+            -- so the emitters' Front direction (-Z) points outward along that axis. This is
+            -- only a fallback — author a real "MuzzleAttachment" in Studio per weapon.
+            local sz = barrel.Size
+            local axis: Vector3 = Vector3.zAxis
+            local halfLen: number = sz.Z * 0.5
+            if sz.X >= sz.Y and sz.X >= sz.Z then
+                axis, halfLen = Vector3.xAxis, sz.X * 0.5
+            elseif sz.Y >= sz.X and sz.Y >= sz.Z then
+                axis, halfLen = Vector3.yAxis, sz.Y * 0.5
+            end
+            local pos = axis * (halfLen + (cfg.AUTO_ATTACHMENT_FORWARD_OFFSET :: number))
+            local att = Instance.new("Attachment")
+            att.Name   = "MuzzleAttachment"
+            att.CFrame = CFrame.lookAt(pos, pos + axis)  -- -Z (emitter Front) points outward along the bore axis
+            att.Parent = barrel
+            attachment = att
+            if not muzzleFx.warnedAutoCreated then
+                muzzleFx.warnedAutoCreated = true
+                Logger.warn("[ViewModelController] MuzzleFX: auto-created MuzzleAttachment on '"
+                    .. barrel:GetFullName() .. "' — position it by hand in Studio for each weapon.")
+            end
+        end
+    end
+
+    -- 3. Still nothing — fail gracefully with a single warning.
+    if attachment == nil then
+        if not muzzleFx.warnedNoAttachment then
+            muzzleFx.warnedNoAttachment = true
+            Logger.warn("[ViewModelController] MuzzleFX: no muzzle attachment or barrel/muzzle part on the '"
+                .. tostring(weaponName) .. "' viewmodel — muzzle FX disabled for it.")
+        end
+        return false
+    end
+
+    local profile = resolveMuzzleProfile(weaponName)
+
+    if not muzzleFx.warnedPlaceholder
+        and (profile.FLASH_TEXTURE == "rbxassetid://0"
+            or profile.SMOKE_TEXTURE == "rbxassetid://0"
+            or profile.SPARK_TEXTURE == "rbxassetid://0")
+    then
+        muzzleFx.warnedPlaceholder = true
+        Logger.warn("[ViewModelController] MuzzleFX: placeholder particle textures (rbxassetid://0) in use — "
+            .. "replace FLASH_TEXTURE / SMOKE_TEXTURE / SPARK_TEXTURE in Constants.MUZZLE_FX.")
+    end
+
+    if cfg.DEBUG == true then
+        Logger.debug("[ViewModelController] MuzzleFX: attachment '" .. attachment:GetFullName()
+            .. "' resolved for " .. tostring(weaponName))
+    end
+
+    local flash, smoke, spark, light = createMuzzleFxEmitters(attachment, profile)
+
+    muzzleFx.attachment = attachment
+    muzzleFx.flash      = flash
+    muzzleFx.smoke      = smoke
+    muzzleFx.spark      = spark
+    muzzleFx.light      = light
+    muzzleFx.profile    = profile
+    muzzleFx.weaponName = weaponName
+    muzzleFx.setupToken += 1
+
+    if cfg.DEBUG == true then
+        Logger.debug("[ViewModelController] MuzzleFX: emitters created for " .. tostring(weaponName))
+    end
+    return true
+end
+
+-- Plays one local muzzle flash / smoke / spark burst + a very short light pulse.
+-- Called from PlayFireAnimation() so GunController needs no change. Never yields, never
+-- creates instances after the first setup, never logs per shot.
+function ViewModelController.PlayMuzzleFlash(): ()
+    local cfg = Constants.MUZZLE_FX :: any
+    if cfg.ENABLED ~= true then
+        return
+    end
+    if ViewModelController.model == nil then
+        return
+    end
+
+    -- Resolve/build once if references are missing or stale (first shot after an equip, or
+    -- the weapon changed). Not per shot once valid.
+    local att = muzzleFx.attachment
+    if muzzleFx.flash == nil
+        or muzzleFx.weaponName ~= equippedWeaponName
+        or (att ~= nil and att.Parent == nil)
+    then
+        if not setupMuzzleFx(equippedWeaponName) then
+            return
+        end
+    end
+
+    local profile = muzzleFx.profile
+    if profile == nil then
+        return
+    end
+
+    if muzzleFx.flash ~= nil then muzzleFx.flash:Emit(profile.FLASH_EMIT_COUNT) end
+    if muzzleFx.smoke ~= nil then muzzleFx.smoke:Emit(profile.SMOKE_EMIT_COUNT) end
+    if muzzleFx.spark ~= nil then muzzleFx.spark:Emit(profile.SPARK_EMIT_COUNT) end
+
+    local light = muzzleFx.light
+    if light ~= nil then
+        light.Enabled = true
+        local token = muzzleFx.setupToken
+        task.delay(profile.LIGHT_DURATION, function()
+            -- Safe no-op if the viewmodel changed / was destroyed since this was scheduled.
+            if muzzleFx.setupToken == token and light.Parent ~= nil then
+                light.Enabled = false
+            end
+        end)
+    end
+end
+
+-- ============================================================
 -- Public methods — weapon lifecycle
 -- ============================================================
 
@@ -439,6 +748,7 @@ function ViewModelController:init()
     clearReloadConnections()
     clearEquipConnections()
     clearAdsConnections()
+    clearMuzzleFx()  -- drop muzzle FX refs; instances die with the model destroyed below
     -- Stop and destroy all weapon animation tracks.
     if weaponEquipTrack then
         weaponEquipTrack:Stop()
@@ -459,6 +769,11 @@ function ViewModelController:init()
         weaponReloadTrack:Stop()
         weaponReloadTrack:Destroy()
         weaponReloadTrack = nil
+    end
+    if weaponReloadEmptyTrack then
+        weaponReloadEmptyTrack:Stop()
+        weaponReloadEmptyTrack:Destroy()
+        weaponReloadEmptyTrack = nil
     end
     if weaponRunTrack then
         weaponRunTrack:Stop()
@@ -515,7 +830,7 @@ function ViewModelController:init()
     vmRecoilTarget        = CFrame.new()
     vmRecoilCurrent       = CFrame.new()
     vmRecoilBuildup       = 0
-    vmRecoilYawDir        = 1
+    vmLastRecoilTime      = -math.huge
     vmActiveKickSpeed     = Constants.DEFAULT_VIEWMODEL_RECOIL_KICK_SPEED
     vmActiveRecoverySpeed = Constants.DEFAULT_VIEWMODEL_RECOIL_RECOVERY_SPEED
     vmSwayMouseTarget  = Vector2.zero
@@ -597,6 +912,11 @@ function ViewModelController:StopWeaponAnimations()
         weaponReloadTrack:Destroy()
         weaponReloadTrack = nil
     end
+    if weaponReloadEmptyTrack then
+        weaponReloadEmptyTrack:Stop()
+        weaponReloadEmptyTrack:Destroy()
+        weaponReloadEmptyTrack = nil
+    end
     if weaponRunTrack then
         weaponRunTrack:Stop()
         weaponRunTrack:Destroy()
@@ -652,7 +972,7 @@ function ViewModelController:StopWeaponAnimations()
     vmRecoilTarget        = CFrame.new()
     vmRecoilCurrent       = CFrame.new()
     vmRecoilBuildup       = 0
-    vmRecoilYawDir        = 1
+    vmLastRecoilTime      = -math.huge
     vmActiveKickSpeed     = Constants.DEFAULT_VIEWMODEL_RECOIL_KICK_SPEED
     vmActiveRecoverySpeed = Constants.DEFAULT_VIEWMODEL_RECOIL_RECOVERY_SPEED
     vmSwayMouseTarget  = Vector2.zero
@@ -704,6 +1024,7 @@ end
 -- IsWeaponEquipped() returns false after this call.
 function ViewModelController:HolsterWeapon()
     self:StopWeaponAnimations()
+    clearMuzzleFx()  -- drop muzzle FX refs; instances die with the model destroyed below
     if self.model then
         self.model:Destroy()
         self.model = nil
@@ -938,6 +1259,10 @@ function ViewModelController:EquipWeapon(weaponName: string)
     -- Load first-person animation tracks on the viewmodel clone's Animator.
     self:_setupWeaponAnimations(weaponName, data)
 
+    -- Build the local muzzle FX (flash / smoke / spark / light) on this viewmodel. Visual
+    -- only; failure is non-fatal and warns once. PlayMuzzleFlash() also re-runs this lazily.
+    setupMuzzleFx(weaponName)
+
     -- Load third-person animation tracks on the character's Humanoid.Animator.
     -- These overlay movement animations on the character body (visible in third-person
     -- and by other players).  Runs regardless of current camera perspective.
@@ -1074,6 +1399,18 @@ function ViewModelController:_setupWeaponAnimations(weaponName: string, data: an
     else
         Logger.debug("[ViewModelController] _setupWeaponAnimations: no reload animation ID for: "
             .. weaponName)
+    end
+
+    -- Load empty-reload track (optional; used by PlayReloadAnimation(true) when the mag is
+    -- empty). Same one-shot / Action-priority setup as the tactical reload above.
+    local reloadEmptyId: string = tostring(fp.reloadEmpty or "")
+    if reloadEmptyId ~= "" and reloadEmptyId ~= "rbxassetid://0" then
+        local reloadEmptyAnim = Instance.new("Animation")
+        reloadEmptyAnim.AnimationId = reloadEmptyId
+        local track = (animator :: Animator):LoadAnimation(reloadEmptyAnim)
+        track.Looped   = false
+        track.Priority = Enum.AnimationPriority.Action
+        weaponReloadEmptyTrack = track
     end
 
     -- Load run track (looped, Movement priority — plays in Run locomotion state).
@@ -1402,9 +1739,34 @@ function ViewModelController:Start()
                 inertiaY = vmMouseInertia.Y
             end
 
-            -- Rotation: yaw + pitch from aim offset; roll from aim + mouse inertia.
-            local freeAimYaw   = vmFreeAimBlended.X * math.rad(Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES) * w
-            local freeAimPitch = -vmFreeAimBlended.Y * math.rad(Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES) * w
+            -- Rotation: yaw + pitch turn the whole viewmodel so the muzzle points THROUGH
+            -- the floating crosshair, not just a small cosmetic lean. Convert the normalized
+            -- offset ([-1,1] at the deadzone edge) into the real angle that edge subtends at
+            -- the current FOV/viewport, scaled by FREE_AIM_VIEWMODEL_TRACK_FACTOR.
+            -- TRACK_FACTOR == 0 restores the old fixed-degree behaviour.
+            local track = Constants.FREE_AIM_VIEWMODEL_TRACK_FACTOR :: number
+            local freeAimYaw:   number
+            local freeAimPitch: number
+            if track > 0 then
+                local cam         = workspace.CurrentCamera
+                local pxHalfH     = cam and cam.ViewportSize.Y * 0.5 or 0
+                local maxAimAngle: number
+                if cam and pxHalfH > 0 then
+                    local halfFov = math.rad(cam.FieldOfView) * 0.5
+                    maxAimAngle = math.atan(
+                        (Constants.FREE_AIM_RADIUS_PIXELS :: number) / pxHalfH * math.tan(halfFov)
+                    )
+                else
+                    maxAimAngle = math.rad(Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES)
+                end
+                -- +offset.X = crosshair right → muzzle right → negative yaw about local +Y.
+                -- +offset.Y = crosshair down  → muzzle down  → negative pitch about local +X.
+                freeAimYaw   = -vmFreeAimBlended.X * maxAimAngle * track
+                freeAimPitch = -vmFreeAimBlended.Y * maxAimAngle * track
+            else
+                freeAimYaw   =  vmFreeAimBlended.X * math.rad(Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES) * w
+                freeAimPitch = -vmFreeAimBlended.Y * math.rad(Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES) * w
+            end
             local freeAimRoll  = -(vmFreeAimBlended.X + inertiaX) * math.rad(Constants.FREE_AIM_VIEWMODEL_ROLL_DEGREES) * w
 
             -- Translation opposite to movement gives the weapon a sense of physical mass.
@@ -1678,14 +2040,14 @@ function ViewModelController:Start()
         if Constants.VIEWMODEL_RECOIL_ENABLED then
             vmRecoilCurrent = vmRecoilCurrent:Lerp(
                 vmRecoilTarget,
-                math.min(1, dt * vmActiveKickSpeed)
+                1 - math.exp(-dt * vmActiveKickSpeed)
             )
             vmRecoilTarget = vmRecoilTarget:Lerp(
                 CFrame.new(),
-                math.min(1, dt * vmActiveRecoverySpeed)
+                1 - math.exp(-dt * vmActiveRecoverySpeed)
             )
-            if vmRecoilBuildup > 0 then
-                vmRecoilBuildup = math.max(0, vmRecoilBuildup - dt * vmActiveRecoverySpeed * 0.5)
+            if vmRecoilBuildup > 0 and os.clock() - vmLastRecoilTime > Constants.RECOIL_BURST_RESET_DELAY then
+                vmRecoilBuildup = math.max(0, vmRecoilBuildup - dt * Constants.RECOIL_BUILDUP_RECOVERY)
             end
             vmRecoilCF = vmRecoilCurrent
         else
@@ -1967,6 +2329,8 @@ function ViewModelController:PlayFireAnimation()
         end
         tpFireTrack:Play()
     end
+    -- Stage 1 local muzzle FX. Visual only; never yields, no per-shot allocation/log.
+    ViewModelController.PlayMuzzleFlash()
 end
 
 -- Plays the run AnimationTrack (looped, Movement priority).
@@ -1989,19 +2353,21 @@ end
 --   • no reload track     → no-op
 -- While reload plays: fire and run are blocked.
 -- When reload ends: resumes run if isRunning, else resumes idle.
-function ViewModelController:PlayReloadAnimation()
+function ViewModelController:PlayReloadAnimation(isEmpty: boolean?)
     if not self.model then return end
     if isReloading then
         Logger.debug("[ViewModelController] PlayReloadAnimation: already reloading — ignored")
         return
     end
-    if not weaponReloadTrack then
+    -- Pick the empty-mag reload when requested and available, otherwise the tactical reload;
+    -- fall back to whichever one exists.
+    local track = (isEmpty and weaponReloadEmptyTrack) or weaponReloadTrack or weaponReloadEmptyTrack
+    if not track then
         Logger.debug("[ViewModelController] PlayReloadAnimation: no reload track loaded — skipped")
         return
     end
     local capturedWeapon = equippedWeaponName
     local capturedModel = self.model
-    local track = weaponReloadTrack
     clearReloadConnections()
     isReloading = true
     local finished = false
@@ -2399,10 +2765,11 @@ function ViewModelController:SetAiming(entering: boolean)
                 end
             end
 
-            -- Play adsIn from the start with fade.
+            -- Play adsIn from the start with fade, then speed it up per Constants for a
+            -- snappier raise. AdjustSpeed must come AFTER Play — Play() resets speed to 1.
             track.TimePosition = 0
-            track:AdjustSpeed(1)
             track:Play(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
+            track:AdjustSpeed(Constants.VIEWMODEL_ADS_TRANSITION_SPEED_MULTIPLIER :: number)
             adsState = "Entering"
             adsIdleTime = 0
             Logger.debug("[ViewModelController] SetAiming: adsIn started (state = Entering)")
@@ -2490,6 +2857,7 @@ function ViewModelController:SetAiming(entering: boolean)
 
             track.TimePosition = 0
             track:Play(Constants.VIEWMODEL_ADS_TRACK_FADE_TIME)
+            track:AdjustSpeed(Constants.VIEWMODEL_ADS_TRANSITION_SPEED_MULTIPLIER :: number)  -- after Play; Play() resets speed to 1
             adsState = "Exiting"
 
             -- When adsOut finishes, return to Hip and resume idle/run.
@@ -2558,7 +2926,10 @@ end
 -- Only plays if adsState == "Aiming" (held ADS pose).
 -- Restartable: each shot re-plays from the start.
 function ViewModelController:PlayADSFireAnimation()
-    -- Only fire while in the held ADS pose.
+    -- Muzzle FX is independent of the ADS fire clip — a round left the barrel, so flash it
+    -- even mid-transition (the adsFire animation itself still only plays in the Aiming pose).
+    ViewModelController.PlayMuzzleFlash()
+    -- Only fire the ADS fire animation while in the held ADS pose.
     if adsState ~= "Aiming" then
         Logger.debug("[ViewModelController] PlayADSFireAnimation: not in Aiming state, skipped")
         return
@@ -2694,20 +3065,11 @@ function ViewModelController:ApplyRecoil(isAiming: boolean, recoilProfile: any?)
     local randomRollScale = if recoilProfile ~= nil and typeof((recoilProfile :: any).randomRollScale) == "number" then (recoilProfile :: any).randomRollScale :: number else 1.0
     local maxBuildup      = if recoilProfile ~= nil and typeof((recoilProfile :: any).maxBuildup)      == "number" then (recoilProfile :: any).maxBuildup      :: number else Constants.DEFAULT_VIEWMODEL_RECOIL_MAX_BUILDUP
     local buildupPerShot  = if recoilProfile ~= nil and typeof((recoilProfile :: any).buildupPerShot)  == "number" then (recoilProfile :: any).buildupPerShot  :: number else 0.10
-    local alternatingYaw  = recoilProfile ~= nil and (recoilProfile :: any).alternatingYaw == true
-
-    -- Scale pitch by buildup; position magnitude is constant per shot.
     local buildupMult = 1 + vmRecoilBuildup
     vmRecoilBuildup = math.min(vmRecoilBuildup + buildupPerShot, maxBuildup)
-
-    -- Yaw: alternating direction each shot when alternatingYaw=true; random otherwise.
-    local finalYaw: number
-    if alternatingYaw then
-        finalYaw = yaw * vmRecoilYawDir * (1 + (math.random() - 0.5) * randomYawScale * 0.5)
-        vmRecoilYawDir = -vmRecoilYawDir
-    else
-        finalYaw = yaw * (1 + (math.random() - 0.5) * 2 * randomYawScale)
-    end
+    vmLastRecoilTime = os.clock()
+    -- Small unbiased variation, not a forced left/right metronome.
+    local finalYaw = yaw * (math.random() * 2 - 1) * randomYawScale
     local finalRoll = roll * (1 + (math.random() - 0.5) * 2 * randomRollScale)
 
     local kick = CFrame.new(0, py, pz)

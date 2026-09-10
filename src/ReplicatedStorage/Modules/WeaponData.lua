@@ -103,6 +103,7 @@ WeaponData["AKS74"] = {
             idle     = "rbxassetid://129190523127392",
             fire     = "rbxassetid://74717397386282",
             reload   = "rbxassetid://111441223099962",
+            reloadEmpty = "rbxassetid://128124271528232",  -- played instead of `reload` when the magazine is empty
             walk     = "rbxassetid://81608747960669",    -- FP walk loop
             enterRun = "rbxassetid://112145779427488",   -- FP enter-run one-shot (Walk/Idle → Run)
             run      = "rbxassetid://120544335351994",   -- FP run loop

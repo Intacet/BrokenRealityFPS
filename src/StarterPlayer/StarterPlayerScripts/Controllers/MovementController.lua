@@ -355,6 +355,9 @@ local targetFov: number = 70  -- will be synced to Constants.DEFAULT_CAMERA_FOV 
 local isAiming:      boolean = false
 local isFocusZoomed: boolean = false
 local isReloading:   boolean = false  -- Task A/B: updated by SetReloading()
+-- Fire state (blocks starting a sprint) is stored as movementState.isFiring, updated each
+-- frame by GunController via SetFiring(). It lives in the table, not a module-level local,
+-- because MovementController's main chunk is at Luau's 200-register limit.
 
 -- Task B: first-person stance POV offset state.
 -- povOffsetCurrent: smoothed Y written to Humanoid.CameraOffset.Y each Heartbeat.
@@ -775,13 +778,28 @@ local function getTargetMoveSpeed(): number
     if isCrouchExitTransitioning and Constants.CROUCH_TRANSITION_SPEED_LOCK_ENABLED then
         return Constants.CROUCH_SPEED
     end
+
+    local base: number
     if movementState.isCrouching then
-        return Constants.CROUCH_SPEED
-    elseif movementState.isSprinting and movementState.isMoving then
-        return Constants.SPRINT_SPEED
+        base = Constants.CROUCH_SPEED
+    elseif movementState.isSprinting and movementState.isMoving and not isReloading then
+        base = Constants.SPRINT_SPEED
     else
-        return Constants.WALK_SPEED
+        base = Constants.WALK_SPEED
     end
+
+    -- A reload in progress slows the player slightly. Sprint is separately cancelled and
+    -- blocked while reloading (MovementController.SetReloading + the LeftShift handler), so
+    -- `base` here is normally WALK_SPEED during a reload.
+    if isReloading then
+        base *= Constants.RELOAD_MOVE_SPEED_MULTIPLIER :: number
+    end
+
+    -- Aiming down sights slows the player (sprint is already blocked while ADS).
+    if isAiming then
+        base *= Constants.ADS_MOVE_SPEED_MULTIPLIER :: number
+    end
+    return base
 end
 
 -- Sets Humanoid.WalkSpeed according to the current phase and movementState.
@@ -3680,6 +3698,12 @@ local function loadMovementAnimations(character: Model)
     isAiming       = false
     isFocusZoomed  = false
     isReloading    = false
+    movementState.isFiring = false
+    -- Restore ADS mouse sensitivity if a reset happened mid-ADS (no SetAiming(false) call).
+    if movementState.adsSensCache ~= nil then
+        UserInputService.MouseDeltaSensitivity = movementState.adsSensCache
+        movementState.adsSensCache = nil
+    end
     -- Task B/D: reset stance POV offset on respawn.
     povOffsetCurrent = 0
     povLandDip       = 0
@@ -5233,6 +5257,25 @@ function MovementController.SetAiming(aiming: boolean)
     if not aiming then
         isFocusZoomed = false
     end
+
+    -- ADS mouse sensitivity: cache the player's value on entry, restore it on exit.
+    -- Idempotent via the movementState.adsSensCache nil check (SetAiming is edge-driven,
+    -- but a stray repeat call must not stack the multiplier). Cache lives on the table,
+    -- not a module-local, because this file is at Luau's 200-register limit.
+    if Constants.ADS_SENSITIVITY_ENABLED then
+        local ms: any = movementState
+        if aiming then
+            if ms.adsSensCache == nil then
+                ms.adsSensCache = UserInputService.MouseDeltaSensitivity
+                UserInputService.MouseDeltaSensitivity =
+                    ms.adsSensCache * (Constants.ADS_SENSITIVITY_MULTIPLIER :: number)
+            end
+        elseif ms.adsSensCache ~= nil then
+            UserInputService.MouseDeltaSensitivity = ms.adsSensCache
+            ms.adsSensCache = nil
+        end
+    end
+
     updateSprintFov()
     if Constants.MOVEMENT_ANIMATION_DEBUG then
         Logger.debug("[MovementController] SetAiming → " .. tostring(aiming))
@@ -5271,8 +5314,26 @@ end
 function MovementController.SetReloading(reloading: boolean)
     assert(typeof(reloading) == "boolean",
         "[MovementController] SetReloading: reloading must be a boolean")
+    local wasReloading = isReloading
     isReloading = reloading
+    -- A reload starting cancels an active sprint; the LeftShift handler blocks a new one
+    -- from starting while isReloading. SetSprinting(false) restores speed / FOV / sensitivity.
+    if reloading and not wasReloading
+        and (Constants.RELOAD_BLOCKS_SPRINT :: boolean)
+        and (movementState.isSprinting or isTacticalSprinting)
+    then
+        MovementController.SetSprinting(false)
+    end
     updateSprintFov()
+end
+
+-- Synced each frame by GunController. While true, the LeftShift handler will not start a
+-- sprint ("cannot run while shooting"); the reverse block (cannot shoot while sprinting)
+-- lives in GunController.attemptFire. Gated by Constants.SPRINT_BLOCKS_GUN_USE.
+function MovementController.SetFiring(firing: boolean)
+    assert(typeof(firing) == "boolean",
+        "[MovementController] SetFiring: firing must be a boolean")
+    movementState.isFiring = firing
 end
 
 -- Stage 5A: returns the viewmodel offset CFrame pre-computed each Heartbeat.
@@ -5488,6 +5549,12 @@ function MovementController:destroy()
     isAiming       = false
     isFocusZoomed  = false
     isReloading    = false
+    movementState.isFiring = false
+    -- Restore ADS mouse sensitivity if a reset happened mid-ADS (no SetAiming(false) call).
+    if movementState.adsSensCache ~= nil then
+        UserInputService.MouseDeltaSensitivity = movementState.adsSensCache
+        movementState.adsSensCache = nil
+    end
     -- Task B/D: reset stance POV offset on destroy.
     povOffsetCurrent = 0
     povLandDip       = 0
@@ -5724,6 +5791,10 @@ function MovementController:Start()
             if UserInputService:GetFocusedTextBox() ~= nil then return end
             if MatchController:GetPhase() ~= Constants.Phase.ACTIVE then return end
             if movementState.isCrouching then return end
+            -- Cannot start a sprint (regular or tactical) while a reload is in progress.
+            if isReloading and (Constants.RELOAD_BLOCKS_SPRINT :: boolean) then return end
+            -- Cannot start a sprint while actively firing ("cannot run while shooting").
+            if movementState.isFiring and (Constants.SPRINT_BLOCKS_GUN_USE :: boolean) then return end
 
             -- Task A: while ADS, LeftShift activates focus zoom instead of sprint.
             if Constants.MOVEMENT_DISABLE_SPRINT_WHILE_ADS and isAiming then
