@@ -1285,6 +1285,13 @@ Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES = 0.45
 -- Suppressed during ADS so iron sights stay centered (see ViewModelController).
 Constants.FREE_AIM_VIEWMODEL_ROLL_DEGREES  = 0.12
 
+-- Trailing rotational "swing" from fast mouse motion, as a fraction of the full
+-- deadzone-edge aim angle. 0 = the muzzle only tracks the reticle (no weapon-mass lag
+-- on flicks); higher = the gun rotates further behind a fast flick before catching up.
+-- Multiplies the NORMALISED mouse-inertia velocity, so it is bounded no matter how fast
+-- the flick is, and is scaled by the per-state inertia weight (≈0 during ADS).
+Constants.FREE_AIM_VIEWMODEL_SWING_FACTOR  = 0.5
+
 -- Translation: viewmodel shifts slightly opposite to the aim/inertia direction.
 -- Gives the AK a sense of physical mass — the gun lags behind the look direction.
 -- X = lateral (studs), Y = vertical (studs), Z = depth (studs).

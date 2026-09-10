@@ -1,5 +1,34 @@
 # Changelog
 
+## Free-aim: rotation is now the primary hipfire effect + bounded flick swing (not Studio-tested)
+
+Follow-up to the Tarkov-style hipfire commit. Owner reported the viewmodel would not
+visibly rotate toward the aim when the mouse moved right — it "slid left and returned to
+centre" — while moving left looked fine.
+
+- **Root cause: scale mismatch in `ViewModelController`'s `freeAimCF`.** The raw
+  mouse-inertia velocity (`vmMouseInertia`, clamped to `MOUSE_INERTIA_MAX` ≈ 26–30) was
+  summed straight into the roll and X/Y translation terms alongside `vmFreeAimBlended`
+  (clamped to ≈ 1). On any fast mouse move the inertia term outweighed the reticle offset
+  ~30×, so the frame's dominant motion was a large lateral translation *opposite* the
+  flick, which then damped back to centre — burying the ~4° muzzle rotation. The rotation
+  math itself was already symmetric.
+- **Fix:** normalise the inertia to ~[-1, 1] (divide by `MOUSE_INERTIA_MAX`) before it is
+  used anywhere, so `(reticle + inertia)` sums stay bounded (≤ 2). The lateral lurch is
+  gone; the yaw/pitch that points the muzzle through the reticle is now the visible effect
+  and is equal-and-opposite left vs. right.
+- **Added a real rotational swing.** Fast mouse motion now folds the normalised inertia
+  into `freeAimYaw` / `freeAimPitch` (not just translation) as a trailing rotation —
+  weapon mass — scaled by the new `Constants.FREE_AIM_VIEWMODEL_SWING_FACTOR` (0.5) and
+  the per-state inertia weight (so it fades to ~0 in ADS like everything else). This is
+  the "swings on fast moves" the owner asked for.
+- One new constant (`FREE_AIM_VIEWMODEL_SWING_FACTOR`); no new remotes, no server/camera/
+  ammo/damage changes. `rojo build` clean; both modules compile in a Studio require.
+- **Still needs an in-game check** (MCP can't equip a weapon): confirm the gun now points
+  right when aiming right, the swing feels right, and whether any *constant* leftward lean
+  remains — if so that is the AKS-74 viewmodel idle animation / FakeCamera `BASE_OFFSET`
+  alignment, not free-aim, and must be fixed on the rig in Studio. See TECHNICAL_DEBT.
+
 ## Damage test dummy — Stages 4–6: blood, hit reactions, debug UI (not Studio-tested)
 
 - **Ragdoll impulse retuned** after owner test — it flung the rig across the room. Scale

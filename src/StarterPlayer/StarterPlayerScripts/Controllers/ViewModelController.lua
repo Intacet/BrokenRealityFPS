@@ -1773,26 +1773,30 @@ function ViewModelController:Start()
             )
             local w = vmInertiaCurrent
 
-            -- Inertia X/Y from mouse delta (adds roll momentum when mouse is moving fast).
-            local inertiaX: number = 0
-            local inertiaY: number = 0
+            -- Mouse-flick inertia, NORMALISED to ~[-1, 1]. The raw running velocity
+            -- (vmMouseInertia) is clamped to MOUSE_INERTIA_MAX (≈26-30) while
+            -- vmFreeAimBlended is clamped to ≈1, so the old code — which summed the raw
+            -- value straight into the roll/translation terms — let a fast mouse move
+            -- outweigh the reticle offset ~30×. Every flick became a big lateral lurch
+            -- that buried the rotation and then damped back to centre, which read as
+            -- "the gun won't point right, it just slides and returns". Normalise first,
+            -- then everything downstream composes on the same [-1, 1] scale.
+            local inertiaNormX: number = 0
+            local inertiaNormY: number = 0
             if Constants.FREE_AIM_MOUSE_INERTIA_ENABLED then
-                inertiaX = vmMouseInertia.X
-                inertiaY = vmMouseInertia.Y
+                local invMax = 1 / math.max(1, vmFreeAimProfile.MOUSE_INERTIA_MAX :: number)
+                inertiaNormX = math.clamp(vmMouseInertia.X * invMax, -1, 1)
+                inertiaNormY = math.clamp(vmMouseInertia.Y * invMax, -1, 1)
             end
 
-            -- Rotation: yaw + pitch turn the whole viewmodel so the muzzle points THROUGH
-            -- the floating crosshair, not just a small cosmetic lean. Convert the normalized
-            -- offset ([-1,1] at the deadzone edge) into the real angle that edge subtends at
-            -- the current FOV/viewport, scaled by FREE_AIM_VIEWMODEL_TRACK_FACTOR.
-            -- TRACK_FACTOR == 0 restores the old fixed-degree behaviour.
+            -- Angle the deadzone edge subtends at the current FOV/viewport: the muzzle
+            -- rotates by this × TRACK_FACTOR when the reticle sits at the edge, so bullets
+            -- leave where the gun points. Falls back to a fixed degree value with no camera.
             local track = vmFreeAimProfile.VIEWMODEL_TRACK_FACTOR :: number
-            local freeAimYaw:   number
-            local freeAimPitch: number
-            if track > 0 then
-                local cam         = workspace.CurrentCamera
-                local pxHalfH     = cam and cam.ViewportSize.Y * 0.5 or 0
-                local maxAimAngle: number
+            local maxAimAngle: number
+            do
+                local cam     = workspace.CurrentCamera
+                local pxHalfH  = cam and cam.ViewportSize.Y * 0.5 or 0
                 if cam and pxHalfH > 0 then
                     local halfFov = math.rad(cam.FieldOfView) * 0.5
                     -- Use the per-weapon deadzone radius so the muzzle angle matches the
@@ -1803,19 +1807,35 @@ function ViewModelController:Start()
                 else
                     maxAimAngle = math.rad(Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES)
                 end
-                -- +offset.X = crosshair right → muzzle right → negative yaw about local +Y.
-                -- +offset.Y = crosshair down  → muzzle down  → negative pitch about local +X.
-                freeAimYaw   = -vmFreeAimBlended.X * maxAimAngle * track
-                freeAimPitch = -vmFreeAimBlended.Y * maxAimAngle * track
+            end
+
+            -- Rotation is the PRIMARY free-aim effect (Tarkov-style): the whole viewmodel
+            -- yaws / pitches so the muzzle points THROUGH the floating reticle, plus a
+            -- trailing rotational "swing" from fast mouse motion (weapon mass) on top.
+            -- Both inputs are odd in sign, so left and right rotate by equal and opposite
+            -- amounts — the rotation itself has no asymmetry.
+            --   +vmFreeAimBlended.X = reticle right  → muzzle right → negative yaw about +Y.
+            --   +inertiaNormX       = flicking right → gun trails left → positive yaw.
+            -- track == 0 keeps the legacy fixed-degree cosmetic lean (no muzzle tracking).
+            local freeAimYaw:   number
+            local freeAimPitch: number
+            if track > 0 then
+                local swing = (Constants.FREE_AIM_VIEWMODEL_SWING_FACTOR :: number) * w
+                freeAimYaw   = (-vmFreeAimBlended.X * track + inertiaNormX * swing) * maxAimAngle
+                freeAimPitch = (-vmFreeAimBlended.Y * track + inertiaNormY * swing) * maxAimAngle
             else
                 freeAimYaw   =  vmFreeAimBlended.X * math.rad(Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES) * w
                 freeAimPitch = -vmFreeAimBlended.Y * math.rad(Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES) * w
             end
-            local freeAimRoll  = -(vmFreeAimBlended.X + inertiaX) * math.rad(Constants.FREE_AIM_VIEWMODEL_ROLL_DEGREES) * w
+
+            -- Roll + translation are secondary weight cues. With inertiaNorm on the same
+            -- ~[-1, 1] scale, the (reticle + inertia) sum stays bounded (≤ 2) instead of
+            -- spiking to ~30 on a flick.
+            local freeAimRoll  = -(vmFreeAimBlended.X + inertiaNormX) * math.rad(Constants.FREE_AIM_VIEWMODEL_ROLL_DEGREES) * w
 
             -- Translation opposite to movement gives the weapon a sense of physical mass.
-            local translateX = -(vmFreeAimBlended.X + inertiaX) * Constants.FREE_AIM_VIEWMODEL_TRANSLATE_X * w
-            local translateY = -(vmFreeAimBlended.Y + inertiaY) * Constants.FREE_AIM_VIEWMODEL_TRANSLATE_Y * w
+            local translateX = -(vmFreeAimBlended.X + inertiaNormX) * Constants.FREE_AIM_VIEWMODEL_TRANSLATE_X * w
+            local translateY = -(vmFreeAimBlended.Y + inertiaNormY) * Constants.FREE_AIM_VIEWMODEL_TRANSLATE_Y * w
             local translateZ =  vmFreeAimBlended.Magnitude * Constants.FREE_AIM_VIEWMODEL_TRANSLATE_Z * w
 
             freeAimCF = CFrame.new(translateX, translateY, translateZ)

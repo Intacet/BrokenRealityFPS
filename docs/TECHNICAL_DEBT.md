@@ -12,6 +12,18 @@ into firing"). Client-only; no server/remote/damage/ammo change. Open risks:
 - **Yaw sign is a guess.** `ViewModelController` rotates the viewmodel with
   `freeAimYaw = -vmFreeAimBlended.X * angle`. If the gun points *away* from the reticle in
   Studio, flip to `+vmFreeAimBlended.X`.
+- **Rotation-vs-slide fix (2026-09-09), not Studio-tested.** Owner reported the gun would
+  not visibly rotate right — it slid left and recentred. Cause: raw `vmMouseInertia`
+  (clamp ≈26–30) was summed into the roll/translation terms next to `vmFreeAimBlended`
+  (clamp ≈1), so fast moves were dominated by a lateral lurch. Now the inertia is
+  normalised to ≈[-1,1] first, and also feeds `freeAimYaw`/`freeAimPitch` as a trailing
+  swing via `Constants.FREE_AIM_VIEWMODEL_SWING_FACTOR` (0.5). `SWING_FACTOR` and the
+  reticle-tracking `maxAimAngle` (≈4° at the deadzone edge) are un-eyeballed guesses.
+- **A residual *constant* leftward lean, if any remains after the fix, is NOT free-aim.**
+  The free-aim yaw is small (≈4°), symmetric, and self-centres when the mouse settles. A
+  fixed cant that doesn't change when the camera turns is the AKS-74 viewmodel idle/hold
+  animation or the rig's FakeCamera → `BASE_OFFSET` alignment, and must be corrected on the
+  rig in Studio — no code knob covers it.
 - **Fire origin is the FP viewmodel muzzle**, a cosmetic rig ~2-3 studs from the camera and
   scaled/offset for screen framing — so close-range shots have slight parallax vs. a
   camera-centre ray (intended Tarkov behaviour, but tune `MuzzleAttachment` placement per
