@@ -3032,12 +3032,27 @@ local function detectVault(): { vaultType: string, landingPosition: Vector3, obs
     end
 
     -- ── Height classification ─────────────────────────────────────────────────
-    -- R6 HumanoidRootPart sits ~3 studs above the ground plane.
-    -- Obstacle height = top surface Y minus character feet Y.
-    local R6_FOOT_OFFSET: number = 3.0
-    local characterFeetY    = hrpPos.Y - R6_FOOT_OFFSET
-    local obstacleTopY      = ray2Result.Position.Y
-    local estimatedHeight   = obstacleTopY - characterFeetY
+    -- Measure the obstacle from ITS OWN base, not the player's feet — a jump, a ledge,
+    -- or standing on another vault bar must not make a tall wall read as short. Cast
+    -- straight down from just inside the struck face to find what the obstacle sits on.
+    local baseRayOrigin = ray1Result.Position + fwd * 0.15
+    local baseRayResult = workspace:Raycast(
+        baseRayOrigin,
+        Vector3.new(0, -(Constants.VAULT_CLEARANCE_HEIGHT * 2 + 24), 0),
+        params
+    )
+    local obstacleTopY  = ray2Result.Position.Y
+    local obstacleBaseY: number
+    if baseRayResult ~= nil then
+        obstacleBaseY = baseRayResult.Position.Y
+    else
+        -- Nothing under the obstacle within range → treat it as un-vaultably tall.
+        obstacleBaseY = obstacleTopY - 1000
+        if Constants.VAULT_DEBUG then
+            Logger.debug("[MovementController] detectVault: no floor beneath the obstacle face — treating as too tall")
+        end
+    end
+    local estimatedHeight = obstacleTopY - obstacleBaseY
 
     local vaultType: string?
     if estimatedHeight >= Constants.LOW_VAULT_MIN_HEIGHT

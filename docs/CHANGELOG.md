@@ -1,5 +1,22 @@
 # Changelog
 
+## Fix jumping / vaulting over walls that should be too tall
+
+- **Jump height.** Nothing was setting it, so characters used the R6 default
+  (`JumpPower 50` ≈ a 6.4-stud jump) — enough to clear the 6-stud "too tall" wall and
+  anything shorter. Added `StarterPlayer.$properties` in `default.project.json`:
+  `CharacterUseJumpPower = false`, `CharacterJumpHeight = 4.5`. A plain jump now peaks
+  ~4.4 studs — clears crates / low ledges, not a 6-stud wall.
+- **Vault height was measured from the player's feet**, so a jump, a ledge, or standing
+  on another vault bar made a tall wall read as short (a 6-stud wall while stood on the
+  4.25 bar classified as a 1.75-stud *LowVault*). `MovementController.detectVault` now
+  casts straight **down from just inside the struck face** to find the obstacle's own
+  base and measures `obstacleTopY - obstacleBaseY`. A 6-stud wall now reads 6 studs and
+  is rejected from every stance; no floor beneath the face → treated as un-vaultably
+  tall. Legit Low/Medium vaults are unchanged. Studio-verified (raycast harness):
+  LowBar → LowVault, MedBar → MediumVault, TooTall → REJECT from ground, mid-jump, and
+  while standing on the MedBar.
+
 ## Hold-to-ADS + collapsible dummy overlay + a crosshair toggle
 
 - **Hold to aim.** `Constants.ADS_HOLD_TO_AIM` (default true): MB2 InputBegan engages ADS,

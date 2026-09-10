@@ -199,6 +199,21 @@ setup with a single line.
 - Not caught by `rojo build` — it is a runtime compile error visible only when the module
   is required in Studio.
 
+## Vault / jump height (2026-09-10)
+
+- Jump height is now pinned via `StarterPlayer.$properties`
+  (`CharacterUseJumpPower = false`, `CharacterJumpHeight = 4.5`) in `default.project.json`
+  — a **structural** project change, so `rojo serve` must be restarted for it to sync, and
+  any code that later writes `Humanoid.JumpHeight`/`JumpPower` will silently override it.
+- `detectVault` measures obstacle height from the obstacle's own base via a downward
+  raycast just inside the struck face. Assumes the obstacle sits on something within
+  `VAULT_CLEARANCE_HEIGHT*2 + 24` studs below that face; a wall on a tall pillar, on
+  deep terrain, or floating reads as "no base → un-vaultably tall" and is rejected. Fine
+  for current geometry but a real map may need the search window widened, or a proper
+  "walk up to a raised ledge" case that this rejects.
+- The R6 foot offset is still assumed `3.0` studs elsewhere in the vault arc/landing math;
+  only the height *classification* was moved off the player-feet reference.
+
 
 ## Damage test dummy — Stages 1–6 (new; Stages 2–3 owner-tested, 1 & 4–6 not)
 
