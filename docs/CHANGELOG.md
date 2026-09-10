@@ -1,5 +1,133 @@
 # Changelog
 
+## Damage test dummy — Stages 4–6: blood, hit reactions, debug UI (not Studio-tested)
+
+- **Ragdoll impulse retuned** after owner test — it flung the rig across the room. Scale
+  45→1.5, clamp 4000→200, and the impulse now lands on the Torso (main mass) instead of
+  the hit limb, so it reads as a stagger. Both values in `Constants`.
+- **Blood (Stage 4).** New `BloodEffect` remote. New server `BloodService` (data only —
+  listens to `CombatEvents.DamageDealt`, computes intensity from `finalAmount`,
+  rate-limited per target, `FireAllClients`, creates zero instances). New client
+  `BloodController` (`Controllers/`, reusable, not dummy-bound): fixed pool of particle
+  bursts + a ring buffer of `BLOOD_MAX_MARKS` texture-free surface marks from raycasts
+  around the hit, Heartbeat expiry, hard caps. Global kill switch = `BR_BloodGlobalEnabled`
+  attribute on ReplicatedStorage (server-set, both sides read it live; flipping it off
+  clears existing blood at once). New `Constants` blood block.
+- **Hit reactions (Stage 5).** New server `HitReactionService`: on `DamageDealt`, for a
+  live non-ragdolled model tagged `BR_ReactionsEnabled`, writes a decaying additive
+  `Motor6D.Transform` offset on one joint chosen by hit region
+  (`Constants.REACTION_REGION_JOINTS`), strength from `finalAmount`, direction from the
+  shot vector in the rig's frame. Heartbeat lerps back to identity; every offset has a hard
+  deadline so it can't stick. Never touches C0/C1, `Motor6D.Enabled`, `PlatformStand` or
+  `WalkSpeed`. `applyReaction` is the single seam for an animation-based provider later.
+  New `Constants` reaction block.
+- **Debug UI (Stage 6).** New `DummyDevCommand` / `DummyDevState` remotes. `DummyService`
+  gained a dev-gated command handler (Studio or `Constants.DEV_USER_IDS`) — `subscribe` /
+  `reset` / `heal` / `infinite` / `blood` — and a throttled state stream. New client
+  `DummyDebugUI` (`Controllers/UI/`, built only for developers): per-dummy HP / last hit /
+  per-limb pool / INF / RAGDOLL, plus Reset / Heal / Infinite / Blood / Hitboxes buttons.
+  Hitbox viz is local `SelectionBox` adornments per R6 part — no server instances.
+- `ClientInit` registers `BloodController` (13) and `DummyDebugUI` (14). `RemoteSetup` and
+  `default.project.json` updated. Gore still absent — `CombatEvents` + the limb pool remain
+  the only seam it needs.
+- Not installed in Studio (blocked on the Rojo plugin reconnect), not committed.
+
+## Damage test dummy — Stages 1–3 (not Studio-tested, not committed)
+
+Developer-only tooling for weapon damage / hit reactions / blood / ragdoll / future gore.
+Built incrementally; Stages 4–6 (blood, reactions, debug UI) are paused for review. Gore is
+out of scope by design. See `docs/DAMAGE_TEST_DUMMY_PLAN.md`.
+
+- **Damage pipeline is now entity-agnostic and event-emitting.** New `CombatEvents`
+  (BindableEvents `DamageDealt` / `EntityKilled`, DamageService is the only producer) and
+  pure `DamageRules` (R6 part→region, region multiplier, final-damage math — mirrors
+  `DestructionRules`). New shared types `DamageType` / `HitRegion` / `DamageInfo` /
+  `DamageRequest`. New `Constants` "Combat" block (region multipliers, R6 part map,
+  tags/attributes, dummy + ragdoll tuning).
+- `DamageService` extended, not rewritten: `ApplyDamage(request)` damages players **and**
+  non-player Humanoid entities; `Apply()` is now a thin shim (region forced to Unknown, ×1
+  — legacy numbers unchanged) that also emits the combat events. Added tooling helpers
+  `Heal` / `SetInvincible` (unused until Stage 6).
+- `GunService` hit branch generalised: player → shared pipeline **with body part** (so
+  headshot multipliers apply to PvP too), a Humanoid model tagged `BR_DamageEntity` →
+  shared pipeline, breakable → `DestructionService`, else ignored. No dummy-specific weapon
+  code.
+- New `DummyService` (server Script): registers models tagged `BR_DamageDummy` (at start
+  and at runtime via CollectionService signals), primes the Humanoid, adds the generic
+  `BR_DamageEntity` tag, tracks a per-limb health pool from `DamageDealt` (bookkeeping only
+  — does not gate death), and on death ragdolls with the shot's preserved impulse then
+  respawns a fresh clone after `Constants.DUMMY_RESPAWN_DELAY`. Reset == respawn (a dead R6
+  Humanoid is not revived).
+- `RagdollService` generalised: `Apply(character, opts)` with player-only side effects
+  gated on `opts.player`; new `Restore(character)` (removes the constraints/attachments it
+  made, re-enables Motor6Ds) and `IsRagdolled`; preserves incoming shot impulse so deaths
+  vary; `BreakJointsOnDeath` forced off so joints survive for `Restore`. The player death
+  path is behaviourally unchanged. `BallSocketConstraint.UpperAngle` moved to Constants.
+- New `scripts/Build-TestDummy.luau`: one-shot **Studio** helper (Command Bar / temp
+  Script, not Lune) that builds a canonical R6 rig, tags it `BR_DamageDummy`, and parents
+  it to Workspace.
+- No new remotes. `default.project.json` maps the three new server modules.
+- Not installed in Studio, not committed, not Studio-verified. Intentional live change:
+  PvP headshots now do ×2 (`Constants.DAMAGE_REGION_MULTIPLIERS`).
+
+## Stage 1 first-person muzzle FX (MCP-verified in a Studio Play session)
+
+- New local, visual-only first-person muzzle flash for the viewmodel weapon:
+  brief ParticleEmitter flash + tiny smoke puff + small spark burst + a ~35 ms PointLight
+  pulse, played when the LOCAL player fires. All instances live under the viewmodel Model.
+- `Constants.MUZZLE_FX` (new): `ENABLED` / `DEBUG`, attachment name list, auto-create
+  settings, a `DEFAULT` tunable block, and per-weapon `PROFILES` (AKS74 + AR15) merged
+  over `DEFAULT` so the flash / smoke / spark / light can differ per gun.
+- `ViewModelController` (only client file touched): `resolveMuzzleProfile`,
+  `createMuzzleFxEmitters` (spec helper), `setupMuzzleFx`, `clearMuzzleFx`, and
+  `ViewModelController.PlayMuzzleFlash()`. Setup runs once per equipped viewmodel (in
+  `EquipWeapon`); `PlayMuzzleFlash()` is called from the end of `PlayFireAnimation()`
+  (hip fire) **and** the start of `PlayADSFireAnimation()` (fire while aiming — before its
+  "Aiming" pose guard, so a shot mid-ADS-transition still flashes), so **GunController was
+  not changed**. `init` / `HolsterWeapon` clear the references and bump a token so pending
+  `task.delay` light callbacks no-op.
+- ADS transition sped up: `Constants.VIEWMODEL_ADS_TRANSITION_SPEED_MULTIPLIER` (1.35) is
+  applied via `AnimationTrack:AdjustSpeed` to the adsIn and adsOut clips in `SetAiming`
+  (after `Play`, since `Play()` resets speed to 1). Raising/lowering the sights is ~35%
+  faster; animation assets untouched.
+- If the viewmodel has no `MuzzleAttachment`, one is auto-created on a BasePart named
+  "Barrel"/"Muzzle" (the AKS-74 viewmodel has a `Barrel` part) with a one-time warn.
+  Placeholder particle textures (`rbxassetid://0`) also warn once.
+- Verified in Studio via MCP: emitters + light created from the correct per-gun profile,
+  built once (not per shot — 30 fire calls kept the same 4 child instances), light pulses
+  true→false over `LIGHT_DURATION`, no Output errors, AR15 (no barrel part) fails
+  gracefully.
+- Visual-only. No server, remote, combat, ammo, reload, damage, or camera behaviour
+  changed. No third-person / replicated flash, tracers, shell ejection, or impact FX.
+
+## Reload / sprint / fire movement interactions (not Studio-tested)
+
+- **Reload ↔ sprint.** A reload in progress cancels an active sprint and blocks starting a
+  new one (`MovementController.SetReloading` → `SetSprinting(false)` on the edge; LeftShift
+  handler early-returns while `isReloading`). Gated by `Constants.RELOAD_BLOCKS_SPRINT`.
+- **Reload move speed.** While reloading, the movement target speed in `getTargetMoveSpeed`
+  (the one choke point both speed paths use) is multiplied by
+  `Constants.RELOAD_MOVE_SPEED_MULTIPLIER` — now **0.55** (was 0.85), roughly half / three-
+  fifths walk speed.
+- **Sprint ↔ fire (mutually exclusive).** New `Constants.SPRINT_BLOCKS_GUN_USE`. Cannot
+  fire while `MovementController:GetMoveState() == "Sprinting"` (new guard in
+  `GunController.attemptFire`, alongside the existing tactical-sprint guard). Cannot start a
+  sprint while auto-fire is active — GunController pushes fire state each frame via the new
+  `MovementController.SetFiring`, and the LeftShift handler early-returns while `isFiring`.
+  Whichever input came first wins; the other is ignored until released.
+- Client-side only; no server, remote, or animation change.
+
+## AKS-74 empty reload animation (not Studio-tested)
+
+- Added `WeaponData.AKS74.animations.firstPerson.reloadEmpty` (`rbxassetid://128124271528232`,
+  verified in-place: 179 keyframes / 3.7s).
+- `ViewModelController._setupWeaponAnimations` loads it into a new optional
+  `weaponReloadEmptyTrack` (cleared alongside `weaponReloadTrack` in `init` /
+  `StopWeaponAnimations`). `PlayReloadAnimation(isEmpty)` plays the empty track when
+  `isEmpty` and it is loaded, else falls back to the tactical `reload` track.
+- `GunController` passes `currentMag <= 0` so an empty-magazine reload uses the new clip.
+  No server or remote change — reload validation is unchanged.
+
 ## Wood/door destruction (main game, bullet-driven, no explosives)
 
 - Added `src/ServerScriptService/Services/DestructionService.lua` and `DestructionRules.lua`: server-authoritative, attribute-driven (`BR_BreakableProfile`) wood destruction, ported from the already offline-tested `prototypes/CityDistrict/DestructionService.lua` and retargeted from that isolated test subtree to the whole live main-game `workspace`. One profile, `Wood` (health 80), covers doors, crates, fences, planks — any wood prop.

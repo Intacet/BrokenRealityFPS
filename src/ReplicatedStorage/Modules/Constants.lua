@@ -224,6 +224,24 @@ Constants.RESPAWN_DELAY     = 5   -- seconds before a player re-enters play at r
 Constants.WALK_SPEED             = 14    -- default WalkSpeed for all players (studs/s)
 Constants.SPRINT_SPEED           = 22    -- WalkSpeed while sprinting
 Constants.CROUCH_SPEED           = 10    -- WalkSpeed while crouching
+-- Reload ↔ sprint interaction. RELOAD_BLOCKS_SPRINT: a reload in progress cancels an
+-- active sprint and stops a new one from starting (MovementController). While reloading,
+-- the movement target speed is multiplied by RELOAD_MOVE_SPEED_MULTIPLIER.
+Constants.RELOAD_BLOCKS_SPRINT          = true
+Constants.RELOAD_MOVE_SPEED_MULTIPLIER  = 0.55   -- roughly half / three-fifths walk speed while reloading
+
+-- Sprint ↔ fire interaction (regular sprint; TACTICAL_SPRINT_BLOCKS_GUN_USE covers tac-sprint).
+-- When true: cannot fire while GetMoveState() == "Sprinting", and cannot start a sprint
+-- while auto-fire is active. The two states are mutually exclusive.
+Constants.SPRINT_BLOCKS_GUN_USE = true
+
+-- Aiming down sights. While isAiming: movement target speed is multiplied by
+-- ADS_MOVE_SPEED_MULTIPLIER (getTargetMoveSpeed), and mouse look sensitivity is scaled by
+-- ADS_SENSITIVITY_MULTIPLIER (MovementController.SetAiming caches + restores the player's
+-- UserInputService.MouseDeltaSensitivity). Sprint is already blocked while ADS.
+Constants.ADS_MOVE_SPEED_MULTIPLIER  = 0.6
+Constants.ADS_SENSITIVITY_ENABLED    = true
+Constants.ADS_SENSITIVITY_MULTIPLIER = 0.55
 Constants.MOVEMENT_DIRECTION_DEADZONE = 0.15 -- Humanoid.MoveDirection magnitude below which the player is "Idle"
 Constants.SLIDE_SPEED            = 30    -- initial WalkSpeed for a normal-sprint slide
 Constants.SLIDE_DURATION         = 1.0   -- seconds a slide lasts before returning to crouch (was 0.6)
@@ -1107,6 +1125,10 @@ Constants.ADS_INPUT_USER_INPUT_TYPE = Enum.UserInputType.MouseButton2
 -- Fade time for ADS animation blend/transitions (in seconds).
 Constants.VIEWMODEL_ADS_TRACK_FADE_TIME = 0.03
 
+-- Playback-speed multiplier for the adsIn / adsOut transition clips (AnimationTrack:AdjustSpeed).
+-- > 1 makes raising/lowering the sights snappier without touching the animation assets.
+Constants.VIEWMODEL_ADS_TRANSITION_SPEED_MULTIPLIER = 1.35
+
 -- Crossfade duration for idle ↔ run and post-reload resume transitions.
 -- Longer than ADS (which needs to feel snappy) but short enough to feel responsive.
 Constants.VIEWMODEL_IDLE_RUN_FADE_TIME    = 0.18
@@ -1181,12 +1203,16 @@ Constants.FREE_AIM_RECENTER_SPEED                 = 7
 -- Also governs how quickly the lean drains to zero during ADS.
 Constants.FREE_AIM_VIEWMODEL_BLEND_SPEED   = 13
 
--- Maximum yaw (left/right) tilt of the viewmodel toward the aim point, in degrees.
+-- How closely the hip-fire viewmodel actually points THROUGH the floating crosshair.
+-- ViewModelController converts the normalized aim offset into the true angle the reticle
+-- subtends at the current FOV/viewport, then rotates the viewmodel by that angle × this
+-- factor. 1.0 = muzzle lands exactly on the reticle; lower = the gun trails it a little.
+-- Set to 0 to fall back to the old fixed-degree cosmetic lean (YAW/PITCH_DEGREES below).
+Constants.FREE_AIM_VIEWMODEL_TRACK_FACTOR  = 0.92
+
+-- Fixed-degree cosmetic lean, used only when FREE_AIM_VIEWMODEL_TRACK_FACTOR == 0.
 -- Suppressed during ADS so iron sights stay centered (see ViewModelController).
 Constants.FREE_AIM_VIEWMODEL_YAW_DEGREES   = 0.65
-
--- Maximum pitch (up/down) tilt of the viewmodel toward the aim point, in degrees.
--- Suppressed during ADS so iron sights stay centered (see ViewModelController).
 Constants.FREE_AIM_VIEWMODEL_PITCH_DEGREES = 0.45
 
 -- Maximum roll (clockwise tilt) of the viewmodel as the crosshair and inertia move horizontally.
@@ -1729,5 +1755,241 @@ Constants.DESTRUCTION_FRAGMENT_LIFT           = 6
 Constants.DESTRUCTION_FRAGMENT_SPIN           = 4
 Constants.DESTRUCTION_MIN_DIRECTION_MAGNITUDE = 0.001
 Constants.DESTRUCTION_DEBRIS_FOLDER_NAME      = "BR_Debris"
+
+-- ============================================================
+-- Combat — hit regions, damage types, developer test dummy, ragdoll impulse (2026-09-09)
+-- Consumed by DamageService / DamageRules (server), GunService (server),
+-- DummyService (server), RagdollService (server).
+-- See docs/DAMAGE_TEST_DUMMY_PLAN.md. Gore/dismemberment is intentionally out of scope.
+-- ============================================================
+
+-- Damage type tags. Mirrors Types.DamageType — keep both in sync (see Types.lua SYNC WARNING).
+-- Values are singleton-typed so `Constants.DamageType.Bullet` is assignable to Types.DamageType
+-- in --!strict callers without a cast at every use site.
+Constants.DamageType = {
+    Bullet    = "Bullet"    :: "Bullet",
+    Explosion = "Explosion" :: "Explosion",
+    Melee     = "Melee"     :: "Melee",
+    Fall      = "Fall"      :: "Fall",
+    Zone      = "Zone"      :: "Zone",
+    Unknown   = "Unknown"   :: "Unknown",
+}
+
+-- Hit regions for R6 rigs. Mirrors Types.HitRegion — keep both in sync. Singleton-typed
+-- for the same reason as DamageType above.
+Constants.HitRegion = {
+    Head     = "Head"     :: "Head",
+    Torso    = "Torso"    :: "Torso",
+    LeftArm  = "LeftArm"  :: "LeftArm",
+    RightArm = "RightArm" :: "RightArm",
+    LeftLeg  = "LeftLeg"  :: "LeftLeg",
+    RightLeg = "RightLeg" :: "RightLeg",
+    Unknown  = "Unknown"  :: "Unknown",
+}
+
+-- Per-region damage multiplier applied by DamageRules.ComputeFinalDamage.
+-- "Unknown" MUST stay 1.0 so the legacy DamageService:Apply path is byte-for-byte unchanged.
+Constants.DAMAGE_REGION_MULTIPLIERS = {
+    Head     = 2.0,
+    Torso    = 1.0,
+    LeftArm  = 0.85,
+    RightArm = 0.85,
+    LeftLeg  = 0.8,
+    RightLeg = 0.8,
+    Unknown  = 1.0,
+}
+
+-- Maps an R6 BasePart.Name to a HitRegion. DamageRules.RegionForPart returns
+-- Constants.HitRegion.Unknown for anything not listed here.
+Constants.R6_PART_REGIONS = {
+    ["Head"]             = "Head",
+    ["Torso"]            = "Torso",
+    ["HumanoidRootPart"] = "Torso",
+    ["Left Arm"]         = "LeftArm",
+    ["Right Arm"]        = "RightArm",
+    ["Left Leg"]         = "LeftLeg",
+    ["Right Leg"]        = "RightLeg",
+}
+
+-- Hard clamp on a single resolved hit so a bad WeaponData value multiplied by a
+-- region multiplier can never one-frame-delete a high-health entity.
+Constants.DAMAGE_MAX_PER_HIT = 500
+
+-- CollectionService tags and instance attributes. Systems key off these, never off
+-- hardcoded instance paths.
+Constants.TAG_DAMAGE_ENTITY      = "BR_DamageEntity"     -- any Humanoid Model GunService may damage through the shared pipeline (dummies now, NPCs later)
+Constants.TAG_DAMAGE_DUMMY       = "BR_DamageDummy"      -- developer test dummy; DummyService owns registration / death / reset
+Constants.ATTR_INFINITE_HEALTH   = "BR_InfiniteHealth"   -- model attribute: DamageService still fires damage events but does not reduce Humanoid.Health
+Constants.ATTR_REACTIONS_ENABLED = "BR_ReactionsEnabled" -- reserved for HitReactionService (Stage 5, not yet built)
+Constants.ATTR_BLOOD_ENABLED     = "BR_BloodEnabled"     -- reserved for BloodService (Stage 4, not yet built)
+
+-- Developer gating. Dev-only tooling (dummy control UI, Stage 6) is accepted from a
+-- player whose UserId is listed here, or from any client when RunService:IsStudio().
+Constants.DEV_USER_IDS = {
+    -- [175217234] = true,  -- fill in live-place developer UserIds; Studio is always allowed
+}
+
+-- Test dummy
+Constants.DUMMY_DEFAULT_MAX_HEALTH  = 100
+Constants.DUMMY_LIMB_MAX_HEALTH     = 100    -- per-limb pool; tracked from DamageDealt, does NOT gate death yet
+Constants.DUMMY_RESPAWN_DELAY       = 3      -- seconds after death before auto-respawn
+Constants.DUMMY_ATTR_MAX_HEALTH     = "BR_DummyMaxHealth"     -- optional per-instance Humanoid.MaxHealth override
+Constants.DUMMY_ATTR_MANUAL_RESPAWN = "BR_ManualRespawn"      -- attribute = true → no auto-respawn; reset only
+Constants.DUMMY_RUNTIME_ID_ATTRIBUTE = "BR_DummyRuntimeId"    -- set by DummyService; links a spawned model back to its record across respawns
+
+-- ── Blood (Stage 4) ─────────────────────────────────────────────────────────
+-- Server sends only { hitPosition, hitDirection, intensity, damageType } over BloodEffect;
+-- BloodController (client) reproduces every visual. All caps are client-side.
+Constants.BLOOD_ENABLED            = true   -- compile-time master switch
+Constants.BLOOD_GLOBAL_ATTRIBUTE   = "BR_BloodGlobalEnabled"  -- runtime kill switch: attribute on ReplicatedStorage, server-set, read by both sides. Unset = on.
+Constants.BLOOD_REFERENCE_DAMAGE   = 40     -- finalAmount that maps to intensity 1.0
+Constants.BLOOD_MIN_INTENSITY      = 0.25   -- a hit always produces at least this much
+Constants.BLOOD_EFFECT_RATE_LIMIT  = 0.045  -- min seconds between BloodEffect sends per target model
+-- Client burst
+Constants.BLOOD_POOL_SIZE            = 12    -- reused Attachment+ParticleEmitter pairs
+Constants.BLOOD_BURST_LIFETIME      = 1.4    -- seconds a pooled burst emitter stays parented before returning to the pool
+Constants.BLOOD_PARTICLES_BASE      = 4      -- emitted particles at intensity 0
+Constants.BLOOD_PARTICLES_PER_INTENSITY = 20 -- extra emitted particles at intensity 1
+Constants.BLOOD_COLOR               = Color3.fromRGB(112, 6, 6)
+-- Client surface marks (texture-free: small flat parts flush to the surface)
+Constants.BLOOD_SPLATTER_RAYS       = 5      -- rays cast around the hit point looking for nearby surfaces
+Constants.BLOOD_SPLATTER_RANGE      = 9      -- studs
+Constants.BLOOD_MAX_MARKS           = 40     -- ring buffer; oldest mark is destroyed when full
+Constants.BLOOD_MARK_LIFETIME       = 14     -- seconds before a mark fades and is destroyed
+Constants.BLOOD_MARK_SIZE_MIN       = 1.2    -- studs
+Constants.BLOOD_MARK_SIZE_MAX       = 4.0
+Constants.BLOOD_MARK_THICKNESS      = 0.05
+
+-- ── Hit reactions (Stage 5) ─────────────────────────────────────────────────
+-- Procedural flinch written to Motor6D.Transform, decayed to identity. Never touches
+-- C0/C1, PlatformStand, WalkSpeed or Motor6D.Enabled, so applying it to players later
+-- cannot brick movement or weapons.
+Constants.REACTION_REFERENCE_DAMAGE = 35     -- finalAmount that maps to strength 1.0
+Constants.REACTION_DURATION         = 0.32   -- seconds to decay from full flinch back to neutral
+Constants.REACTION_MAX_ANGLE_DEG    = 26     -- peak joint deflection at strength 1.0
+Constants.REACTION_MAX_STACK        = 1.6    -- a fresh hit mid-flinch can push strength up to this
+-- Region → which R6 Motor6D flinches. Missing / Unknown falls back to RootJoint (torso lean).
+Constants.REACTION_REGION_JOINTS = {
+    Head     = "Neck",
+    Torso    = "RootJoint",
+    LeftArm  = "Left Shoulder",
+    RightArm = "Right Shoulder",
+    LeftLeg  = "Left Hip",
+    RightLeg = "Right Hip",
+    Unknown  = "RootJoint",
+}
+
+-- ── Developer dummy control (Stage 6) ───────────────────────────────────────
+Constants.DUMMY_DEV_STATE_INTERVAL = 0.2    -- seconds between DummyDevState snapshots to subscribed dev clients
+
+-- Ragdoll (Stage 3). Preserved incoming shot force so deaths do not collapse identically.
+-- Impulse = hitDirection * finalAmount * SCALE, clamped to MAX_IMPULSE, applied to the
+-- Torso. Tuned down from the first pass (45 / 4000) which flung the rig across the room —
+-- an AKS body shot is now ~30 * 1.5 = 45 impulse on a ~3-mass torso ≈ a firm stagger.
+Constants.RAGDOLL_IMPULSE_SCALE          = 1.5    -- raise for a harder knockback, lower for a limp drop
+Constants.RAGDOLL_MAX_IMPULSE            = 200    -- clamp on the applied impulse magnitude
+Constants.RAGDOLL_BALLSOCKET_UPPER_ANGLE = 45     -- BallSocketConstraint.UpperAngle for converted joints (was hardcoded in RagdollService)
+
+-- Reference gunplay tuning, 2026-09-09. Angles in degrees; rates per second.
+Constants.CAMERA_RECOIL_SPRING = 18
+Constants.CAMERA_RECOIL_MAX_PITCH = 8
+Constants.CAMERA_RECOIL_MAX_YAW = 2
+Constants.CAMERA_RECOIL_MAX_VELOCITY = 160
+Constants.RECOIL_BURST_RESET_DELAY = 0.18
+Constants.RECOIL_BUILDUP_RECOVERY = 1.4
+
+-- ============================================================
+-- Muzzle FX — Stage 1 (2026-09-09)
+-- Local, visual-only first-person muzzle flash / smoke / sparks / light. Built and played
+-- entirely inside ViewModelController on the LOCAL client. No remotes, no server, no
+-- replicated third-person flash, no camera writes, no combat/ammo/reload interaction.
+--
+-- Per-gun: DEFAULT holds every tunable; PROFILES[<weaponName>] overrides only the keys it
+-- lists (everything else falls back to DEFAULT). So each weapon's flash/smoke/spark/light
+-- can differ without duplicating the whole block. weaponName matches the value passed to
+-- ViewModelController:EquipWeapon (e.g. Constants.DEFAULT_VIEWMODEL_WEAPON).
+--
+-- Textures are placeholder "rbxassetid://0" until real flash/smoke/spark art exists —
+-- the system still runs (Roblox renders a default particle), and ViewModelController
+-- Logger.warn()s once that they need replacing.
+-- ============================================================
+Constants.MUZZLE_FX = {
+    ENABLED = true,
+    DEBUG   = true,
+
+    -- Attachment lookup: ViewModelController searches the viewmodel's descendants for an
+    -- Attachment named any of these, in order. Expected authored name: "MuzzleAttachment".
+    MUZZLE_ATTACHMENT_NAMES = {
+        "MuzzleAttachment",
+        "Muzzle",
+        "BarrelAttachment",
+    },
+
+    -- If no muzzle Attachment is found, ViewModelController looks for a BasePart whose name
+    -- contains "Barrel" or "Muzzle" and creates an Attachment named "MuzzleAttachment" at
+    -- the far face along that part's LONGEST local axis (that axis is treated as the bore),
+    -- offset outward by AUTO_ATTACHMENT_FORWARD_OFFSET, oriented so emitters fire outward.
+    -- This is a fallback only — author a real MuzzleAttachment in Studio per weapon.
+    AUTO_CREATE_ATTACHMENT_IF_MISSING = true,
+    AUTO_ATTACHMENT_FORWARD_OFFSET    = 0,
+
+    -- Base tunables. Every PROFILES entry is merged over this table.
+    DEFAULT = {
+        FLASH_TEXTURE = "rbxassetid://0",
+        SMOKE_TEXTURE = "rbxassetid://0",
+        SPARK_TEXTURE = "rbxassetid://0",
+
+        FLASH_EMIT_COUNT = 1,
+        SMOKE_EMIT_COUNT = 2,
+        SPARK_EMIT_COUNT = 3,
+
+        FLASH_LIFETIME_MIN = 0.025,
+        FLASH_LIFETIME_MAX = 0.05,
+        SMOKE_LIFETIME_MIN = 0.18,
+        SMOKE_LIFETIME_MAX = 0.35,
+        SPARK_LIFETIME_MIN = 0.04,
+        SPARK_LIFETIME_MAX = 0.09,
+
+        FLASH_SPEED_MIN = 0,
+        FLASH_SPEED_MAX = 0,
+        SMOKE_SPEED_MIN = 0.8,
+        SMOKE_SPEED_MAX = 2.2,
+        SPARK_SPEED_MIN = 4,
+        SPARK_SPEED_MAX = 8,
+
+        FLASH_SIZE_START = 0.35,
+        FLASH_SIZE_END   = 0.05,
+        SMOKE_SIZE_START = 0.12,
+        SMOKE_SIZE_END   = 0.5,
+        SPARK_SIZE       = 0.035,
+
+        LIGHT_ENABLED    = true,
+        LIGHT_BRIGHTNESS = 2.5,
+        LIGHT_RANGE      = 7,
+        LIGHT_DURATION   = 0.035,
+    },
+
+    -- Per-weapon overrides. Add a key per gun; anything omitted uses DEFAULT unchanged.
+    PROFILES = {
+        -- AKS-74 (5.45×39): slightly larger flash, more smoke, a touch more light.
+        AKS74 = {
+            FLASH_SIZE_START = 0.42,
+            SMOKE_EMIT_COUNT = 3,
+            SMOKE_SIZE_END   = 0.6,
+            SPARK_EMIT_COUNT = 4,
+            LIGHT_BRIGHTNESS = 3.0,
+            LIGHT_RANGE      = 8,
+        },
+        -- AR-15 (5.56×45): tighter, cleaner flash, less smoke.
+        AR15 = {
+            FLASH_SIZE_START = 0.30,
+            SMOKE_EMIT_COUNT = 2,
+            SMOKE_SIZE_END   = 0.42,
+            SPARK_EMIT_COUNT = 2,
+            LIGHT_BRIGHTNESS = 2.2,
+            LIGHT_RANGE      = 6,
+        },
+    },
+}
 
 return Constants

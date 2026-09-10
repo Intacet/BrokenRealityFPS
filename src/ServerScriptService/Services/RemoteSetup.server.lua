@@ -69,6 +69,13 @@ makeEvent("KillFeed")           -- server → all clients | killer + victim name
 makeEvent("PartDestroyed")      -- server → all clients | trigger destruction VFX
 makeEvent("ZoneEffectApplied")  -- server → all clients | trigger visual overlay
 
+-- Combat feedback (character systems — not dummy-specific)
+makeEvent("BloodEffect")        -- server → all clients | reproduce a blood burst + surface marks at a hit point
+
+-- Developer dummy control (Studio / DEV_USER_IDS only; validated server-side)
+makeEvent("DummyDevCommand")    -- client → server | dev command: subscribe / reset / heal / infinite / blood / hitbox
+makeEvent("DummyDevState")      -- server → subscribed dev client | test-dummy state snapshot for the debug HUD
+
 -- World weapon model (third-person attachment)
 makeEvent("WeaponEquipState")   -- client → server | request equip/holster of world weapon model
 

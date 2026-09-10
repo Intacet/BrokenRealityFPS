@@ -98,6 +98,46 @@
           "$ignoreUnknownInstances": true,
           "$path": "src/ServerScriptService/Services/DamageService.lua"
         },
+        "DamageRules": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/DamageRules.lua"
+        },
+        "CombatEvents": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/CombatEvents.lua"
+        },
+        "DummyService": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/DummyService.server.lua",
+          "$properties": {
+            "Disabled": false,
+            "RunContext": "Legacy"
+          }
+        },
+        "BloodService": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/BloodService.server.lua",
+          "$properties": {
+            "Disabled": false,
+            "RunContext": "Legacy"
+          }
+        },
+        "HitReactionService": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/HitReactionService.server.lua",
+          "$properties": {
+            "Disabled": false,
+            "RunContext": "Legacy"
+          }
+        },
+        "DestructionService": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/DestructionService.lua"
+        },
+        "DestructionRules": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/DestructionRules.lua"
+        },
         "MatchEvents": {
           "$ignoreUnknownInstances": true,
           "$path": "src/ServerScriptService/Services/MatchEvents.lua"
@@ -169,13 +209,25 @@
             "$ignoreUnknownInstances": true,
             "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/MatchController.lua"
           },
+          "CameraRecoil": {
+            "$ignoreUnknownInstances": true,
+            "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/CameraRecoil.lua"
+          },
           "GunController": {
             "$ignoreUnknownInstances": true,
             "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/GunController.lua"
           },
+          "BloodController": {
+            "$ignoreUnknownInstances": true,
+            "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/BloodController.lua"
+          },
           "UI": {
             "$className": "Folder",
             "$ignoreUnknownInstances": true,
+            "DummyDebugUI": {
+              "$ignoreUnknownInstances": true,
+              "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/DummyDebugUI.lua"
+            },
             "KillFeedUI": {
               "$ignoreUnknownInstances": true,
               "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/KillFeedUI.lua"

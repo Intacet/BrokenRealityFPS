@@ -24,6 +24,15 @@
       "args": ["serve", "pilot.project.json"],
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
+    },
+    {
+      "label": "Broken Reality: Serve full code project (default.project.json)",
+      "detail": "Syncs the mapped scripts. Reconnect the Rojo Studio plugin after starting. Does not map Workspace/models/lighting. Uses rokit's Rojo 7.7.0 — the bundled .tools/rojo.exe is 7.6.1 and its API is incompatible with the current 7.7.0 Studio plugin (protocolVersion crash).",
+      "type": "process",
+      "command": "${env:USERPROFILE}/.rokit/tool-storage/rojo-rbx/rojo/7.7.0/rojo.exe",
+      "args": ["serve", "default.project.json"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
     }
   ]
 }

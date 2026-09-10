@@ -36,5 +36,69 @@ export type RoundStatePayload = {
     defenderWins : number, -- Defender round wins so far this match
 }
 
+-- ============================================================
+-- Combat / damage (2026-09-09)
+-- Shared by DamageService, DamageRules, GunService, DummyService, RagdollService,
+-- and future BloodService / HitReactionService / GoreService consumers.
+-- ============================================================
+
+-- Category of an incoming damage event. Only "Bullet" is produced today (GunService);
+-- the rest are declared now so future sources do not need a type change.
+--
+-- SYNC WARNING: mirrors Constants.DamageType. Luau cannot derive this union from the
+-- table, so both are separate declarations of the same set — change them together.
+export type DamageType = "Bullet" | "Explosion" | "Melee" | "Fall" | "Zone" | "Unknown"
+
+-- Which body region of an R6 rig was hit. "Unknown" is used when no hit part is known
+-- (e.g. the legacy DamageService:Apply path) and always carries a ×1 multiplier.
+--
+-- SYNC WARNING: mirrors Constants.HitRegion — change both together.
+export type HitRegion = "Head" | "Torso" | "LeftArm" | "RightArm" | "LeftLeg" | "RightLeg" | "Unknown"
+
+-- A single resolved damage application. DamageService builds the completed record
+-- (region resolved, finalAmount computed) and attaches it to CombatEvents.DamageDealt /
+-- CombatEvents.EntityKilled. Callers of DamageService:ApplyDamage pass the same shape
+-- with `finalAmount` omitted / 0 — DamageService fills it in.
+--
+-- targetPlayer : set when the target is a player; nil for NPCs / test dummies.
+-- targetModel  : the character Model (may be nil for a player with no character).
+-- attacker     : the responsible player, or nil for environment / hazard damage.
+-- sourceName   : weapon or hazard identifier for logs / kill feed ("" if unknown).
+-- region       : resolved hit region; "Unknown" when hitPart is nil.
+-- hitPart      : the exact BasePart the server raycast returned, or nil.
+-- hitPosition  : world-space hit point (server raycast result).
+-- hitDirection : normalized travel direction of the shot at impact.
+-- baseAmount   : pre-multiplier damage from the weapon definition.
+-- finalAmount  : baseAmount × region multiplier, clamped (filled in by DamageService).
+export type DamageInfo = {
+    targetPlayer : Player?,
+    targetModel  : Model?,
+    attacker     : Player?,
+    sourceName   : string,
+    damageType   : DamageType,
+    region       : HitRegion,
+    hitPart      : BasePart?,
+    hitPosition  : Vector3?,
+    hitDirection : Vector3?,
+    baseAmount   : number,
+    finalAmount  : number,
+}
+
+-- What a caller passes to DamageService:ApplyDamage. Same shape as DamageInfo but with
+-- the fields DamageService fills in itself left optional: `region` (derived from hitPart
+-- when omitted), `finalAmount` (always computed), and the string/enum defaults.
+export type DamageRequest = {
+    targetPlayer : Player?,
+    targetModel  : Model?,
+    attacker     : Player?,
+    sourceName   : string?,
+    damageType   : DamageType?,
+    region       : HitRegion?,
+    hitPart      : BasePart?,
+    hitPosition  : Vector3?,
+    hitDirection : Vector3?,
+    baseAmount   : number,
+}
+
 -- ModuleScripts must return a table, even if it only contains type exports.
 return {}

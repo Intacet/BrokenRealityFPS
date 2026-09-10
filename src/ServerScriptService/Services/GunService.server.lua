@@ -4,16 +4,21 @@
 --
 -- Validates weapon shots fired by clients.
 -- Clients fire WeaponFired with origin+direction+tick; GunService re-runs the
--- raycast on the server and calls DamageService:Apply() only if the shot hit a player,
--- or DestructionService:ApplyHit() if it hit a registered breakable wood prop instead.
+-- raycast on the server, then routes its single validated result:
+--   - a player character            →  DamageService:ApplyDamage() (with body-part region)
+--   - a tagged Humanoid entity       →  DamageService:ApplyDamage() (test dummy / future NPC)
+--   - a registered breakable prop    →  DestructionService:ApplyHit()
+--   - anything else                  →  ignored
 --
 -- What this script does NOT do:
---   - Apply player damage or track health        →  DamageService
---   - Track breakable prop health or debris       →  DestructionService
---   - Handle client input                         →  GunController (client)
+--   - Apply damage, track health, or map body parts  →  DamageService / DamageRules
+--   - Track breakable prop health or debris           →  DestructionService
+--   - Own or spawn test dummies                       →  DummyService
+--   - Handle client input                             →  GunController (client)
 
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
 
 -- ============================================================
 -- Dependencies
@@ -76,6 +81,26 @@ local function getPlayerFromPart(part: Instance): Player?
         if player.Character and part:IsDescendantOf(player.Character) then
             return player
         end
+    end
+    return nil
+end
+
+-- Walks up from `part` to the first ancestor Model that both contains a Humanoid and
+-- carries the Constants.TAG_DAMAGE_ENTITY CollectionService tag. That tag is the generic
+-- opt-in for "a non-player thing GunService is allowed to damage through the shared
+-- pipeline" — DummyService adds it to every test dummy; future NPC spawners would do the
+-- same. Returns nil for untagged models, props, and terrain, so the caller can fall
+-- through to DestructionService.
+local function getDamageableEntity(part: Instance): Model?
+    local node: Instance? = part
+    while node ~= nil and node ~= workspace do
+        if node:IsA("Model")
+            and CollectionService:HasTag(node, Constants.TAG_DAMAGE_ENTITY)
+            and node:FindFirstChildOfClass("Humanoid") ~= nil
+        then
+            return node
+        end
+        node = node.Parent
     end
     return nil
 end
@@ -255,31 +280,64 @@ WeaponFired.OnServerEvent:Connect(function(
         return  -- missed or exceeded weapon range
     end
 
-    -- ── Hit validation ───────────────────────────────────────────────────────
-    -- Confirm the hit part belongs to a player character (not a wall or prop).
-    local victim = getPlayerFromPart(result.Instance)
-    if not victim or victim == shooter then
-        -- Not a player: try the same already-validated raycast against DestructionService.
-        -- No-ops harmlessly (returns false) for anything that isn't a registered breakable.
-        DestructionService:ApplyHit(result.Instance, weaponDef.damage, result.Position, validDirection)
+    -- ── Hit routing ─────────────────────────────────────────────────────────
+    -- One validated raycast result → exactly one consumer. GunService never mutates
+    -- health or prop state and never fires HealthChanged itself.
+    local hitPart = result.Instance
+    local victim  = getPlayerFromPart(hitPart)
+
+    if victim ~= nil and victim ~= shooter then
+        -- Player hit. The shared pipeline now carries the hit part too, so headshot
+        -- multipliers (Constants.DAMAGE_REGION_MULTIPLIERS) apply to PvP as well.
+        -- Friendly fire is enforced inside DamageService, not here — see DEBT-009.
+        DamageService:ApplyDamage({
+            targetPlayer = victim,
+            targetModel  = victim.Character,
+            attacker     = shooter,
+            sourceName   = Constants.DEFAULT_WEAPON,
+            damageType   = Constants.DamageType.Bullet,
+            hitPart      = hitPart :: BasePart,
+            hitPosition  = result.Position,
+            hitDirection = validDirection,
+            baseAmount   = weaponDef.damage,
+        })
+
+        -- Cosmetic hitmarker for the shooter — carries no health or kill information.
+        HitConfirmed:FireClient(shooter)
+
+        Logger.debug(string.format(
+            "[GunService] %s hit %s (%s) for %d base dmg",
+            shooter.Name, victim.Name, hitPart.Name, weaponDef.damage
+        ))
         return
     end
 
-    -- ── Damage application ───────────────────────────────────────────────────
-    -- DamageService owns all health mutation. GunService never modifies health
-    -- directly and never reads or fires HealthChanged.
-    -- NOTE: friendly-fire is not blocked here — see DEBT-009.
-    DamageService:Apply(victim, weaponDef.damage, shooter)
+    if victim == nil then
+        -- Not a player. A tagged Humanoid entity (test dummy / future NPC) is damaged
+        -- through the same pipeline; otherwise fall back to a breakable prop. Both calls
+        -- no-op harmlessly for anything they do not own.
+        local entity = getDamageableEntity(hitPart)
+        if entity ~= nil then
+            DamageService:ApplyDamage({
+                targetModel  = entity,
+                attacker     = shooter,
+                sourceName   = Constants.DEFAULT_WEAPON,
+                damageType   = Constants.DamageType.Bullet,
+                hitPart      = hitPart :: BasePart,
+                hitPosition  = result.Position,
+                hitDirection = validDirection,
+                baseAmount   = weaponDef.damage,
+            })
+            HitConfirmed:FireClient(shooter)
+            Logger.debug(string.format(
+                "[GunService] %s hit entity %s (%s) for %d base dmg",
+                shooter.Name, entity.Name, hitPart.Name, weaponDef.damage
+            ))
+            return
+        end
 
-    -- ── Hit confirmation ──────────────────────────────────────────────────────
-    -- Tell the shooter's client to show a hitmarker. This is cosmetic only —
-    -- the client cannot infer health values or kill state from this event.
-    HitConfirmed:FireClient(shooter)
-
-    Logger.debug(string.format(
-        "[GunService] %s hit %s for %d dmg",
-        shooter.Name, victim.Name, weaponDef.damage
-    ))
+        DestructionService:ApplyHit(hitPart, weaponDef.damage, result.Position, validDirection)
+    end
 end)
 
 -- Handle magazine reload. The client fires this when the player presses R.

@@ -221,4 +221,16 @@ loadAndStart("GunController", function()
     return require(script.Parent:WaitForChild("GunController"))
 end)
 
+-- 13. BloodController — world blood VFX driven by the BloodEffect remote. No dependency on
+--     any other controller; no PlayerGui. Reusable character system, not dummy-specific.
+loadAndStart("BloodController", function()
+    return require(script.Parent:WaitForChild("BloodController"))
+end)
+
+-- 14. DummyDebugUI — developer-only test-dummy overlay. init() builds nothing unless
+--     RunService:IsStudio() or the local UserId is in Constants.DEV_USER_IDS. No deps.
+loadInitAndStart("DummyDebugUI", function()
+    return require(script.Parent:WaitForChild("UI"):WaitForChild("DummyDebugUI"))
+end)
+
 Logger.debug("[ClientInit] Startup complete")

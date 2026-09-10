@@ -2,15 +2,24 @@
 -- ModuleScript
 -- Location in Studio: ServerScriptService > Services > DamageService
 --
--- Owns all server-side health tracking.
--- Clients never modify health directly — they fire a remote; DamageService validates
--- and applies the change, then fires HealthChanged back to the affected client.
+-- Owns all server-side health tracking for players AND non-player Humanoid entities
+-- (developer test dummies now; NPCs later).
+-- Clients never modify health directly — they fire a remote; GunService validates the
+-- shot and calls DamageService, which applies the change and fires HealthChanged back to
+-- the affected client (players only).
+--
+-- Every accepted hit fires CombatEvents.DamageDealt; every lethal hit fires
+-- CombatEvents.EntityKilled. Those two BindableEvents are the extension point for
+-- BloodService, HitReactionService and a future GoreService — none of them require an
+-- edit to this file.
 --
 -- What this script does NOT do:
---   - Convert the character to a ragdoll  →  RagdollService (called from killPlayer)
+--   - Convert a character to a ragdoll  →  RagdollService (players: called from killPlayer;
+--                                          NPCs/dummies: DummyService listens to EntityKilled)
 --   - Remove ragdoll corpses  →  CorpseService (future)
 --   - Award kills, streaks, or XP  →  RewardService (future)
---   - Validate line-of-sight or range  →  will move here from GunService when built
+--   - Validate line-of-sight or range  →  GunService
+--   - Body-part → region mapping or damage arithmetic  →  DamageRules (pure module)
 
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -22,8 +31,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules    = ReplicatedStorage:WaitForChild("Modules")
 local Constants  = require(Modules:WaitForChild("Constants"))
 local Logger     = require(Modules:WaitForChild("Logger"))
+local Types      = require(Modules:WaitForChild("Types"))
 
 local MatchEvents     = require(script.Parent:WaitForChild("MatchEvents"))
+local CombatEvents    = require(script.Parent:WaitForChild("CombatEvents"))
+local DamageRules     = require(script.Parent:WaitForChild("DamageRules"))
 local RagdollService  = require(script.Parent:WaitForChild("RagdollService"))
 
 local Remotes       = ReplicatedStorage:WaitForChild("Remotes")
@@ -34,16 +46,18 @@ local KillFeed      = Remotes:WaitForChild("KillFeed")      :: RemoteEvent
 -- State
 -- ============================================================
 
--- Server-authoritative health table. Never trust a client-supplied health value.
+-- Server-authoritative player health table. Never trust a client-supplied health value.
 -- Keyed by Player; set to MAX_HEALTH on assignment and cleared on disconnect/reset.
+-- Non-player entities are NOT tracked here — their Humanoid.Health is authoritative and
+-- DummyService owns any per-limb bookkeeping.
 local playerHealth: { [Player]: number } = {}
 
 -- Team memberships received from TeamService via MatchEvents.TeamAssigned.
--- Used by getTeamName() for the friendly-fire guard in Apply(); also queried by GetTeam().
+-- Used by getTeamName() for the friendly-fire guard; also queried by GetTeam().
 local playerTeam: { [Player]: string } = {}
 
 -- ============================================================
--- Private helpers
+-- Private helpers — players
 -- ============================================================
 
 local function setHealth(player: Player, hp: number)
@@ -68,7 +82,7 @@ local function killPlayer(player: Player, attacker: Player?)
 
     local character = player.Character
     if character then
-        RagdollService:Apply(character, player, attacker)
+        RagdollService:Apply(character, { player = player, attacker = attacker })
     else
         Logger.warn("[DamageService] killPlayer: no character for", player.Name,
             "— ragdoll skipped; Humanoid.Died will not fire via this path")
@@ -106,28 +120,19 @@ local function getTeamName(player: Player): string?
 end
 
 -- ============================================================
--- Public API
+-- Private helpers — resolved damage application
 -- ============================================================
 
-local DamageService = {}
+-- Applies a completed DamageInfo to a player. Reproduces the historical Apply() path
+-- exactly (friendly-fire guard, playerHealth table, kill-vs-set), then fires the combat
+-- events so downstream systems see player hits the same way they see NPC hits.
+local function applyToPlayer(info: Types.DamageInfo)
+    local victim   = info.targetPlayer :: Player
+    local attacker = info.attacker
 
--- Apply `amount` points of damage to `victim`.
--- `attacker` is the Player responsible (nil for hazards, fall damage, etc.).
--- Always called from the server (GunService calls this once a shot is validated).
--- Never called directly from a client.
-function DamageService:Apply(victim: Player, amount: number, attacker: Player?)
-    if amount <= 0 then
-        return  -- ignore zero-damage and healing calls routed here by mistake
-    end
-
-    -- Friendly-fire guard: block same-team damage when Constants.FRIENDLY_FIRE_ENABLED is false.
-    -- getTeamName() checks the TeamAssigned cache first, then falls back to Player.Team.Name
-    -- so late-joiners whose cache entry is missing are still protected.
-    -- Skips for environment damage (attacker == nil) and when either team is truly unknown
-    -- (nil return) — never blocks damage when team membership cannot be confirmed.
     if not Constants.FRIENDLY_FIRE_ENABLED and attacker ~= nil then
         local attackerTeam = getTeamName(attacker)
-        local victimTeam   = getTeamName(victim)
+        local victimTeam    = getTeamName(victim)
         if attackerTeam ~= nil and victimTeam ~= nil and attackerTeam == victimTeam then
             Logger.debug("[DamageService] Blocked friendly fire:", attacker.Name, "→", victim.Name)
             return
@@ -140,13 +145,116 @@ function DamageService:Apply(victim: Player, amount: number, attacker: Player?)
         current = Constants.MAX_HEALTH
     end
 
-    local newHp = current - amount
+    local newHp = current - info.finalAmount
 
     if newHp <= 0 then
         killPlayer(victim, attacker)
+        CombatEvents.DamageDealt:Fire(info.targetModel, info)
+        CombatEvents.EntityKilled:Fire(info.targetModel, info)
     else
         setHealth(victim, newHp)
+        CombatEvents.DamageDealt:Fire(info.targetModel, info)
     end
+end
+
+-- Applies a completed DamageInfo to a non-player Humanoid entity (test dummy / NPC).
+-- Humanoid.Health is the authoritative store — there is no parallel table. A model
+-- flagged Constants.ATTR_INFINITE_HEALTH still emits DamageDealt (so blood, reactions and
+-- limb tracking keep working) but loses no health and can never die.
+local function applyToNonPlayer(info: Types.DamageInfo)
+    local model    = info.targetModel
+    local humanoid = model and model:FindFirstChildOfClass("Humanoid")
+    if humanoid == nil then
+        Logger.warn("[DamageService] ApplyDamage: non-player target has no Humanoid — ignored")
+        return
+    end
+    if humanoid.Health <= 0 then
+        return  -- already dead; ignore further hits until the owner respawns it
+    end
+
+    local infinite = model ~= nil and model:GetAttribute(Constants.ATTR_INFINITE_HEALTH) == true
+    if not infinite then
+        humanoid:TakeDamage(info.finalAmount)
+    end
+
+    CombatEvents.DamageDealt:Fire(model, info)
+
+    if not infinite and humanoid.Health <= 0 then
+        local killerName = info.attacker and info.attacker.DisplayName
+            or (info.sourceName ~= "" and info.sourceName)
+            or "environment"
+        Logger.debug("[DamageService]", model and model.Name or "entity", "killed by", killerName)
+        CombatEvents.EntityKilled:Fire(model, info)
+    end
+end
+
+-- ============================================================
+-- Public API
+-- ============================================================
+
+local DamageService = {}
+
+-- Entity-agnostic damage entry point. `request` is a Types.DamageInfo-shaped table with
+-- `finalAmount` omitted (or 0) — DamageService resolves the region, computes the final
+-- amount via DamageRules, then routes to the player or non-player path.
+--
+-- Always called from the server. GunService is the only in-tree caller for real shots;
+-- DamageService:Apply() below is a thin compatibility shim over this.
+function DamageService:ApplyDamage(request: Types.DamageRequest)
+    if request == nil then
+        return
+    end
+    local base = request.baseAmount
+    if typeof(base) ~= "number" or base <= 0 then
+        return  -- ignore zero-damage and healing calls routed here by mistake
+    end
+
+    -- Region: explicit value wins (the Apply() shim passes Unknown); otherwise derive it
+    -- from the hit part name. Unknown always carries a ×1 multiplier.
+    local region: Types.HitRegion = request.region
+        or DamageRules.RegionForPart(request.hitPart and (request.hitPart :: BasePart).Name)
+
+    local finalAmount = DamageRules.ComputeFinalDamage(base, region)
+    if finalAmount == nil then
+        Logger.warn("[DamageService] ApplyDamage: rejected non-finite/non-positive damage from",
+            (request.sourceName ~= nil and request.sourceName ~= "") and request.sourceName or "unknown source")
+        return
+    end
+
+    local info: Types.DamageInfo = {
+        targetPlayer = request.targetPlayer,
+        targetModel  = request.targetModel,
+        attacker     = request.attacker,
+        sourceName   = request.sourceName or "",
+        damageType   = request.damageType or Constants.DamageType.Unknown,
+        region       = region,
+        hitPart      = request.hitPart,
+        hitPosition  = request.hitPosition,
+        hitDirection = request.hitDirection,
+        baseAmount   = base,
+        finalAmount  = finalAmount,
+    }
+
+    if info.targetPlayer ~= nil then
+        applyToPlayer(info)
+    else
+        applyToNonPlayer(info)
+    end
+end
+
+-- Compatibility shim. Historical signature used everywhere before the pipeline was
+-- generalised: flat damage on a player, no body part. Behaviour is unchanged — region is
+-- forced to Unknown (×1) so the numbers match exactly; it now also emits combat events.
+function DamageService:Apply(victim: Player, amount: number, attacker: Player?)
+    self:ApplyDamage({
+        targetPlayer = victim,
+        targetModel  = victim.Character,
+        attacker     = attacker,
+        sourceName   = "",
+        damageType   = Constants.DamageType.Bullet :: Types.DamageType,
+        region       = Constants.HitRegion.Unknown :: Types.HitRegion,
+        baseAmount   = amount,
+    })
 end
 
 -- Returns the player's current health, or MAX_HEALTH if they have no entry yet.
@@ -160,6 +268,30 @@ end
 -- reflects the match-assigned team rather than any incidental Roblox team membership.
 function DamageService:GetTeam(player: Player): string?
     return playerTeam[player]
+end
+
+-- Tooling helper (used by DummyService reset / the Stage 6 debug UI). Heals a player or a
+-- non-player Humanoid model by `amount`, clamped to MaxHealth. Never fires damage events.
+function DamageService:Heal(target: Instance, amount: number)
+    if typeof(amount) ~= "number" or amount <= 0 then
+        return
+    end
+    if target:IsA("Player") then
+        local player  = target :: Player
+        local current = playerHealth[player] or Constants.MAX_HEALTH
+        setHealth(player, current + amount)
+    elseif target:IsA("Model") then
+        local humanoid = (target :: Model):FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.Health = math.min(humanoid.MaxHealth, humanoid.Health + amount)
+        end
+    end
+end
+
+-- Tooling helper. Toggles Constants.ATTR_INFINITE_HEALTH on a non-player model. While set,
+-- ApplyDamage still emits DamageDealt but removes no health and never kills it.
+function DamageService:SetInvincible(model: Model, enabled: boolean)
+    model:SetAttribute(Constants.ATTR_INFINITE_HEALTH, enabled == true)
 end
 
 -- ============================================================

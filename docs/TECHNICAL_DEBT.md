@@ -1,5 +1,83 @@
 # Technical debt and unresolved migration questions
 
+## Viewmodel / FX — Stage 1 muzzle flash (Studio verification: Yes, still required for visuals/tuning)
+
+Local first-person muzzle FX (`ViewModelController` + `Constants.MUZZLE_FX`). Runtime behaviour
+was MCP-verified in a Studio Play session (emitters/light built once from the right per-gun
+profile, light pulse, no Output errors, graceful fallback). Remaining risks:
+
+- **Placeholder particle textures** — `FLASH_TEXTURE` / `SMOKE_TEXTURE` / `SPARK_TEXTURE` are
+  `rbxassetid://0`; Roblox renders a default square particle. Replace with real flash/smoke/
+  spark art in `Constants.MUZZLE_FX.DEFAULT` (or per-profile). ViewModelController warns once.
+- **`MuzzleAttachment` should be authored in Studio per weapon.** The AKS-74 viewmodel has no
+  attachment, so one is auto-created on its `Barrel` part along that part's longest local axis
+  — a best-effort guess for position AND facing; the sign of "forward" may be wrong on some
+  rigs. Add a real `MuzzleAttachment` at the bore tip, pointing out the barrel, for each gun.
+- **No replicated third-person muzzle flash.** Other players see nothing; this is local-only.
+- **No bullet impacts, tracers, shell ejection, or surface FX.** Out of scope for Stage 1.
+- **FX values (emit counts, lifetimes, sizes, speeds, light range/brightness/duration) are
+  first guesses** and need eyeball tuning in Studio / a running app, especially once real
+  textures exist. Per-gun profiles (`Constants.MUZZLE_FX.PROFILES`) are stubs — only AKS74
+  and AR15 exist, and their differences are placeholders.
+- Adds 5 module-level locals to `ViewModelController.lua`; that file has headroom now, but see
+  the MovementController register-limit note below — the same limit applies here.
+
+## MovementController.lua is at Luau's 200-local-register limit (main chunk)
+
+`MovementController.lua` (~6500 lines) has so many module-level `local` declarations that its
+main chunk sits exactly at Luau's hard limit of 200 registers per function. Adding one more
+module-level `local` fails compilation with `Out of local registers ... exceeded limit 200`,
+which cascades: `ViewModelController` and `GunController` require `MovementController`, so a
+compile failure there takes down equip, fire, reload, sprint, and viewmodel/perspective
+setup with a single line.
+
+- Adding the sprint↔fire `isFiring` flag as a module-level `local` triggered exactly this;
+  it was moved into the existing `movementState` table (table fields cost no registers).
+- **Rule going forward:** do not add module-level `local`s to `MovementController.lua`.
+  Store new flags in `movementState` (or another existing table), or the file needs a
+  refactor that moves state into tables / splits it into sub-modules.
+- Not caught by `rojo build` — it is a runtime compile error visible only when the module
+  is required in Studio.
+
+
+## Damage test dummy — Stages 1–6 (new; Stages 2–3 owner-tested, 1 & 4–6 not)
+
+Damage pipeline generalisation + `DummyService` + `RagdollService` rework (1–3) and blood /
+hit reactions / debug UI (4–6). See `docs/DAMAGE_TEST_DUMMY_PLAN.md` for the full status
+table and the Stages 4–6 debt list. Highlights:
+
+- Stages 4–6 are not Studio-tested; the new `Constants` blocks (particle counts, mark caps,
+  flinch angle/duration, ragdoll impulse) are first guesses.
+- Hit reactions only render on rigs with no Animator writing `Transform` (the dummy). On
+  players the flinch is silently overwritten — the seam for an animation provider is the
+  single `applyReaction` function; no provider registry (YAGNI).
+- Blood marks are texture-free flat parts (no splatter texture asset was available);
+  `BloodEffect` is `FireAllClients` with no distance culling.
+- Dev tooling trusts `RunService:IsStudio()`; `Constants.DEV_USER_IDS` is empty until filled.
+- Ragdoll impulse was retuned down after the owner's first test (was flinging the rig);
+  the retune has not been re-tested.
+
+Open items (Stages 1–3):
+
+- Not installed in Studio, not committed, not Studio-verified. No Lune coverage — `DamageRules`
+  is pure and should get a `scripts/Test-Damage.luau`.
+- **PvP headshots now do ×2 damage.** The shared pipeline carries the hit part for players,
+  so `Constants.DAMAGE_REGION_MULTIPLIERS` applies to PvP, not only dummies. Intentional,
+  but a live gameplay change — zero out the multipliers to disable.
+- `Constants.DAMAGE_MAX_PER_HIT` (500) now clamps the legacy `DamageService:Apply` path,
+  which was previously un-clamped. Immaterial at current weapon/health values.
+- Self-hit no longer routes to `DestructionService:ApplyHit` (was a harmless no-op).
+- Limb health pool is tracked from `DamageDealt` but has no effect — it does not gate death
+  and nothing consumes it until a future `GoreService`.
+- Reset/respawn replaces the dummy Model from a template clone (a dead R6 Humanoid is not
+  reliably revivable). One retained template clone per live dummy.
+- `DamageService:Heal` / `:SetInvincible` landed early for Stage 6; currently unused.
+- `DummyService` service-level connections are tracked but never disconnected (server-
+  lifetime Script, same as `GunService` / `TeamService`). Per-dummy connections are cleaned.
+- Blood (Stage 4), hit reactions (Stage 5) and the debug UI + dev remotes (Stage 6) are not
+  built. `BR_ReactionsEnabled` / `BR_BloodEnabled` attributes are set on dummies but unused.
+- Gore/dismemberment deliberately absent; `CombatEvents` + the limb pool are the seam for it.
+
 ## Reload recovery patch
 
 Local code addresses an indefinite client reload lock and TP playback preventing FP playback. Visual asset load/permissions and joint compatibility remain unconfirmed in Studio. See RELOAD_DIAGNOSIS.md; no animation asset ID was changed. User testing and source reconciliation before installation are pending.
