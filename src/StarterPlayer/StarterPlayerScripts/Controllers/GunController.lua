@@ -219,6 +219,229 @@ local function computeSpread(feel: { [string]: any }): number
 end
 
 -- ============================================================
+-- Bullet impact FX (Stage 1 — local, visual-only, pooled)
+-- ============================================================
+-- A small dust/smoke puff + a few tiny sparks at the LOCAL predicted hit point.
+-- Local-only and visual-only: not replicated, never consulted for damage / ammo /
+-- hit validation, and it never writes the camera. Driven from attemptFire() with the
+-- existing client raycast result.
+--
+-- DEBT: this lives inside GunController because this task was scoped not to touch
+-- default.project.json, and a standalone Controller file would not sync without a
+-- Rojo map entry. Extract to
+-- src/StarterPlayer/StarterPlayerScripts/Controllers/ImpactFXController.lua (keeping
+-- the ImpactFX.PlayImpact / ImpactFX.Destroy shape, adding Start()) once the Rojo
+-- map can be updated. No connections are stored here — cleanup is time-based only.
+local ImpactFX = {}
+do
+    local FX = Constants.BULLET_IMPACT_FX :: any
+
+    type Rig = {
+        part: BasePart,
+        dust: ParticleEmitter,
+        spark: ParticleEmitter,
+        busy: boolean,
+        freeAt: number,
+    }
+
+    local rigs: { Rig } = {}            -- fixed pre-built pool (POOL_ENABLED)
+    local fxFolder: Folder? = nil
+    local liveCount = 0                 -- rigs currently emitting (bounds full-auto in both modes)
+    local warnedPlaceholder = false
+    local warnedCap = false
+    local initialized = false
+
+    local function buildRig(): Rig
+        local part = Instance.new("Part")
+        part.Name         = "BR_BulletImpactFx"
+        part.Size         = Vector3.one * 0.05
+        part.Transparency = 1
+        part.Anchored     = true
+        part.CanCollide   = false
+        part.CanQuery     = false
+        part.CanTouch     = false
+        part.CastShadow   = false
+        part.Locked       = true
+
+        local att = Instance.new("Attachment")
+        att.Name   = "FxAttachment"
+        att.Parent = part
+
+        local dust = Instance.new("ParticleEmitter")
+        dust.Name          = "Dust"
+        dust.Texture       = FX.IMPACT_TEXTURE
+        dust.Enabled       = false
+        dust.Rate          = 0
+        dust.Lifetime      = NumberRange.new(FX.DUST_LIFETIME_MIN, FX.DUST_LIFETIME_MAX)
+        dust.Speed         = NumberRange.new(FX.DUST_SPEED_MIN, FX.DUST_SPEED_MAX)
+        dust.Rotation      = NumberRange.new(-180, 180)
+        dust.RotSpeed      = NumberRange.new(-120, 120)
+        dust.Size          = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, FX.DUST_SIZE_START),
+            NumberSequenceKeypoint.new(1, FX.DUST_SIZE_END),
+        })
+        dust.Transparency  = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.4),
+            NumberSequenceKeypoint.new(1, 1),
+        })
+        dust.Color         = ColorSequence.new(Color3.fromRGB(150, 142, 130))
+        dust.Acceleration  = Vector3.new(0, -6, 0)
+        dust.SpreadAngle   = Vector2.new(38, 38)
+        dust.LightEmission = 0
+        dust.Drag          = 2
+        dust.Parent        = att
+
+        local spark = Instance.new("ParticleEmitter")
+        spark.Name          = "Spark"
+        spark.Texture       = FX.SPARK_TEXTURE
+        spark.Enabled       = false
+        spark.Rate          = 0
+        spark.Lifetime      = NumberRange.new(FX.SPARK_LIFETIME_MIN, FX.SPARK_LIFETIME_MAX)
+        spark.Speed         = NumberRange.new(FX.SPARK_SPEED_MIN, FX.SPARK_SPEED_MAX)
+        spark.Size          = NumberSequence.new(FX.SPARK_SIZE)
+        spark.Transparency  = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0),
+            NumberSequenceKeypoint.new(1, 0.3),
+        })
+        spark.Color         = ColorSequence.new(Color3.fromRGB(255, 221, 148))
+        spark.Acceleration  = Vector3.new(0, -40, 0)
+        spark.SpreadAngle   = Vector2.new(24, 24)
+        spark.LightEmission = 1
+        spark.Drag          = 4
+        spark.Parent        = att
+
+        return { part = part, dust = dust, spark = spark, busy = false, freeAt = 0 }
+    end
+
+    local function ensureInit()
+        if initialized then
+            return
+        end
+        initialized = true
+
+        local folder = Instance.new("Folder")
+        folder.Name   = "BR_ImpactFx"
+        folder.Parent = workspace
+        fxFolder = folder
+
+        if FX.POOL_ENABLED == true then
+            for _ = 1, (FX.POOL_SIZE :: number) do
+                local rig = buildRig()
+                rig.part.Parent = folder
+                table.insert(rigs, rig)
+            end
+        end
+
+        if FX.DEBUG == true then
+            Logger.debug(
+                "[GunController] ImpactFX ready — pooled:",
+                FX.POOL_ENABLED == true,
+                "cap:",
+                FX.POOL_SIZE
+            )
+        end
+    end
+
+    -- POOL_ENABLED: the rig whose burst has finished, else the one finishing soonest.
+    -- Never grows the pool, so full-auto can never add parts.
+    local function takeRig(): Rig
+        local now = os.clock()
+        local best: Rig? = nil
+        for _, r in ipairs(rigs) do
+            if not r.busy or now >= r.freeAt then
+                return r
+            end
+            if best == nil or r.freeAt < best.freeAt then
+                best = r
+            end
+        end
+        return best :: Rig
+    end
+
+    -- position: local predicted hit point. normal: surface normal (optional) — the
+    -- rig's +Y is aligned to it so the puff sprays off the surface.
+    function ImpactFX.PlayImpact(position: Vector3, normal: Vector3?): ()
+        assert(typeof(position) == "Vector3", "position must be a Vector3")
+        if normal ~= nil then
+            assert(typeof(normal) == "Vector3", "normal must be a Vector3")
+        end
+        if FX.ENABLED ~= true then
+            return
+        end
+
+        if not warnedPlaceholder
+            and (FX.IMPACT_TEXTURE == "rbxassetid://0" or FX.SPARK_TEXTURE == "rbxassetid://0")
+        then
+            warnedPlaceholder = true
+            Logger.warn(
+                "[GunController] ImpactFX: placeholder textures (rbxassetid://0) — set "
+                    .. "IMPACT_TEXTURE / SPARK_TEXTURE in Constants.BULLET_IMPACT_FX"
+            )
+        end
+
+        ensureInit()
+
+        -- Surface-aligned CFrame (fallback: unoriented at the point).
+        local cf: CFrame
+        local n = normal
+        if n ~= nil and n.Magnitude > 1e-4 then
+            n = n.Unit
+            local ref = if math.abs(n.Y) > 0.99 then Vector3.xAxis else Vector3.yAxis
+            local right = ref:Cross(n)
+            right = if right.Magnitude > 1e-4 then right.Unit else Vector3.xAxis
+            cf = CFrame.fromMatrix(position + n * (FX.IMPACT_SURFACE_OFFSET :: number), right, n)
+        else
+            cf = CFrame.new(position)
+        end
+
+        if FX.POOL_ENABLED == true then
+            local rig = takeRig()
+            rig.part.CFrame = cf
+            rig.busy   = true
+            rig.freeAt = os.clock() + (FX.IMPACT_PART_LIFETIME :: number)
+            rig.dust:Emit(FX.DUST_EMIT_COUNT :: number)
+            rig.spark:Emit(FX.SPARK_EMIT_COUNT :: number)
+            return
+        end
+
+        -- Pool disabled: bounded create-and-destroy. Still capped at POOL_SIZE
+        -- concurrent so a held trigger cannot grow parts without limit.
+        if liveCount >= (FX.POOL_SIZE :: number) then
+            if FX.DEBUG == true and not warnedCap then
+                warnedCap = true
+                Logger.debug("[GunController] ImpactFX: concurrent cap reached — dropping puffs")
+            end
+            return
+        end
+        local rig = buildRig()
+        rig.part.CFrame  = cf
+        rig.part.Parent  = fxFolder
+        liveCount += 1
+        rig.dust:Emit(FX.DUST_EMIT_COUNT :: number)
+        rig.spark:Emit(FX.SPARK_EMIT_COUNT :: number)
+        task.delay(FX.IMPACT_PART_LIFETIME :: number, function()
+            liveCount = math.max(0, liveCount - 1)
+            rig.part:Destroy()
+        end)
+    end
+
+    -- Recycle/destroy everything. Not wired yet — GunController has no destroy path
+    -- (DEBT-059); present for the eventual ImpactFXController extraction.
+    function ImpactFX.Destroy(): ()
+        for _, r in ipairs(rigs) do
+            r.part:Destroy()
+        end
+        table.clear(rigs)
+        if fxFolder ~= nil then
+            fxFolder:Destroy()
+            fxFolder = nil
+        end
+        liveCount = 0
+        initialized = false
+    end
+end
+
+-- ============================================================
 -- Controller
 -- ============================================================
 
@@ -406,26 +629,13 @@ function GunController:Start()
             end)
         end
 
-        -- ── Bullet impact effect ──────────────────────────────────────────────
-        if Constants.BULLET_IMPACT_ENABLED and hitResult ~= nil then
-            local impactSize = Constants.BULLET_IMPACT_SIZE :: number
-            local impact        = Instance.new("Part")
-            impact.Name         = "BulletImpact"
-            impact.Size         = Vector3.new(impactSize, impactSize, impactSize)
-            impact.Color        = Constants.BULLET_IMPACT_COLOR :: Color3
-            impact.Material     = Enum.Material.SmoothPlastic
-            impact.Transparency = Constants.BULLET_IMPACT_TRANSPARENCY :: number
-            impact.CanCollide   = false
-            impact.CastShadow   = false
-            impact.Anchored     = true
-            impact.CFrame       = CFrame.new(hitResult.Position)
-            impact.Parent       = workspace.CurrentCamera
-            local impactMesh    = Instance.new("SpecialMesh")
-            impactMesh.MeshType = Enum.MeshType.Sphere
-            impactMesh.Parent   = impact
-            task.delay(Constants.BULLET_IMPACT_LIFETIME :: number, function()
-                impact:Destroy()
-            end)
+        -- ── Local bullet impact FX (Stage 1) ─────────────────────────────────
+        -- Dust/smoke puff + tiny sparks at the LOCAL predicted hit point. Visual
+        -- only: not replicated, never consulted for damage / ammo / hit validation.
+        -- Pooled + bounded so full-auto cannot grow parts. ImpactFX.PlayImpact
+        -- self-gates on Constants.BULLET_IMPACT_FX.ENABLED.
+        if hitResult ~= nil then
+            ImpactFX.PlayImpact(hitResult.Position, hitResult.Normal)
         end
 
         return true

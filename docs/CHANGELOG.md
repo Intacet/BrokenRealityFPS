@@ -1,5 +1,37 @@
 # Changelog
 
+## Stage 1 local bullet impact FX (helper logic Studio-verified; in-game visuals not tested)
+
+When the local player fires and the client raycast hits a surface, a small dust/smoke
+puff + a few tiny sparks now play at the predicted hit point.
+
+- New `Constants.BULLET_IMPACT_FX` table (enable/debug flags, placeholder textures, emit
+  counts, lifetime/speed/size ranges, surface offset, `POOL_ENABLED` + `POOL_SIZE`).
+- New `ImpactFX` helper **inside `GunController.lua`** (not a separate controller — see
+  below): `ImpactFX.PlayImpact(position, normal?)` / `ImpactFX.Destroy()`. Fixed
+  pre-built pool of `POOL_SIZE` anchored invisible parts under a `workspace/BR_ImpactFx`
+  folder, each with an `Attachment` carrying a `Dust` and a `Spark` `ParticleEmitter`.
+  `PlayImpact` orients the part's +Y to the surface normal (offset out by
+  `IMPACT_SURFACE_OFFSET`), grabs the free rig (or the one finishing soonest — the pool
+  never grows), and `:Emit()`s both emitters. With `POOL_ENABLED = false` it falls back
+  to bounded create-and-destroy, still capped at `POOL_SIZE` concurrent. Cleanup is
+  time-based (`task.delay`) — no stored connections.
+- Wired in `attemptFire()`: `if hitResult ~= nil then ImpactFX.PlayImpact(hitResult.Position, hitResult.Normal) end`.
+  `PlayImpact` self-gates on `BULLET_IMPACT_FX.ENABLED`. No change to fire rate, spread,
+  bullet direction, `WeaponFired`, damage, ammo, recoil, camera, or the muzzle flash.
+- **Removed** the old single-sphere debug impact (`Constants.BULLET_IMPACT_ENABLED` /
+  `_SIZE` / `_LIFETIME` / `_TRANSPARENCY` / `_COLOR` and its inline `Part` block) — the
+  new FX replaces it, and keeping both would double-own the impact visual. The unrelated
+  `DEBUG_BULLET_IMPACT_MARKERS` muzzle-tip marker is untouched.
+- No new remotes, no server changes, no `default.project.json` change (the helper lives
+  in `GunController` precisely so no Rojo-map entry is needed this stage — extraction to
+  `ImpactFXController.lua` is filed as debt).
+- Studio-verified (Edit datamodel, self-cleaning harness): 300 rapid `PlayImpact` calls
+  raise no error, the part count stays pinned at `POOL_SIZE` (20), the `assert` guards
+  reject a non-`Vector3` position/normal, and `Destroy()` removes the folder. The actual
+  in-game look (equip → shoot wall/ground) is **not** MCP-testable — a weapon can't be
+  equipped from MCP — so eyeball tuning + placeholder-texture replacement remain.
+
 ## Hipfire: fire from the camera along the gun's rotation, not the viewmodel muzzle (not Studio-tested)
 
 Measured in a Studio Play session: the previous "fire from the viewmodel `MuzzleAttachment`"

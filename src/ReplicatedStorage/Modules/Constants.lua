@@ -1397,14 +1397,42 @@ Constants.DEBUG_BULLET_IMPACT_MARKER_SIZE         = 0.18   -- studs; sphere diam
 Constants.DEBUG_BULLET_IMPACT_MARKER_LIFETIME     = 0.08   -- seconds before destroy
 Constants.DEBUG_BULLET_IMPACT_MARKER_TRANSPARENCY = 0.35
 
--- ── Bullet impact effect ────────────────────────────────────────────────────────────────
--- Subtle neutral sphere rendered at the raycast hit point each shot.
--- Set BULLET_IMPACT_ENABLED = false to disable entirely (no Part is created).
-Constants.BULLET_IMPACT_ENABLED      = true
-Constants.BULLET_IMPACT_SIZE         = 0.12    -- studs; sphere diameter
-Constants.BULLET_IMPACT_LIFETIME     = 0.10    -- seconds before destroy
-Constants.BULLET_IMPACT_TRANSPARENCY = 0.45
-Constants.BULLET_IMPACT_COLOR        = Color3.fromRGB(170, 170, 170)
+-- ── Local bullet impact FX (Stage 1) ────────────────────────────────────────────────────
+-- Small dust/smoke puff + a few tiny sparks at the LOCAL predicted raycast hit point.
+-- Client-only, visual-only: not replicated, never consulted for damage / ammo / hit
+-- validation, no camera writes. Owned by the ImpactFX helper inside GunController (to be
+-- extracted to an ImpactFXController — see TECHNICAL_DEBT). Supersedes the old
+-- BULLET_IMPACT_* single-sphere debug marker, which has been removed.
+Constants.BULLET_IMPACT_FX = {
+    ENABLED = true,
+    DEBUG = true,
+
+    IMPACT_TEXTURE = "rbxassetid://0",
+    SPARK_TEXTURE = "rbxassetid://0",
+
+    DUST_EMIT_COUNT = 3,
+    SPARK_EMIT_COUNT = 2,
+
+    DUST_LIFETIME_MIN = 0.15,
+    DUST_LIFETIME_MAX = 0.35,
+    SPARK_LIFETIME_MIN = 0.04,
+    SPARK_LIFETIME_MAX = 0.08,
+
+    DUST_SPEED_MIN = 0.5,
+    DUST_SPEED_MAX = 2.5,
+    SPARK_SPEED_MIN = 3,
+    SPARK_SPEED_MAX = 7,
+
+    DUST_SIZE_START = 0.08,
+    DUST_SIZE_END = 0.35,
+    SPARK_SIZE = 0.025,
+
+    IMPACT_PART_LIFETIME = 1.0,
+    IMPACT_SURFACE_OFFSET = 0.025,
+
+    POOL_ENABLED = true,
+    POOL_SIZE = 20,
+}
 
 -- ── ViewModelController procedural sway ──────────────────────────────────────────────────
 -- A second, independent sway layer applied in ViewModelController's RenderStepped loop.
