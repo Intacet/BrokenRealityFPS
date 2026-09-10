@@ -2,10 +2,13 @@
 
 ## AI Stage 1D — grunts face the player + take cover between bursts
 
-- **Face the target.** `Humanoid.AutoRotate` is now off on grunts; a new
-  `faceToward` helper lerps the `HumanoidRootPart` to look at the target (or the
-  move goal) every think, so a grunt that walked in sideways turns and points its
-  rifle at the player while firing. `Constants.AI.FACE_TARGET` / `FACE_TURN_ALPHA`.
+- **Face the target while shooting.** In the stationary `Attack` state
+  `Humanoid.AutoRotate` is turned off and a new `faceToward` helper lerps the
+  `HumanoidRootPart` to point the rifle at the player, so a grunt that walked in
+  sideways turns to face you before/while firing. Walking states (Chase / Cover /
+  Patrol) keep `AutoRotate` on and face their travel direction — writing the root
+  CFrame every think while also walking would freeze the grunt in place.
+  `Constants.AI.FACE_TARGET` / `FACE_TURN_ALPHA`.
 - **Take cover after each burst.** New `Cover` state: when a burst finishes,
   `startBurst` arms `record.coverUntil`; while it's in the future `thinkNPC` moves
   the grunt to `findCoverPoint` (samples `COVER_SAMPLE_ANGLES` off the

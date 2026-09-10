@@ -200,19 +200,20 @@ Residual risks:
   `COVER_DURATION` for more aggressive grunts; it also interacts with
   `DETECTION_RANGE` / `LOSE_TARGET_RANGE` (a grunt that covers too far loses the
   target and drops to Chase).
-- **`AutoRotate = false` means `faceToward` is the *only* thing that rotates a
-  grunt.** Every `thinkNPC` branch that should orient the grunt must call it; a
-  new branch that forgets leaves the grunt frozen facing its last direction.
-- **`faceToward` sets `HumanoidRootPart.CFrame` every think (0.25 s), including
-  while walking to cover.** Cheap and it looks intentional (grunt strafes to cover
-  while watching the player), but writing the root CFrame mid-`MoveTo` can stutter
-  the walk and would fight hard against a knockback/ragdoll impulse if one ever
-  lands mid-think (AI ragdoll is not wired, so no conflict today). If it is janky
-  in Play, restrict `faceToward` to the stationary `Attack` state and let a
-  re-enabled `AutoRotate` handle Chase/Cover.
-- **Grunts moon-walk toward cover.** Because facing and move direction are
-  decoupled they back into cover rather than turning and running. Intended, but if
-  it reads badly, face the move goal during `Cover` instead of the target.
+- **Facing is state-split.** Walking states (Chase / Cover / Patrol) set
+  `Humanoid.AutoRotate = true` and face the way they move; only the stationary
+  `Attack` state sets `AutoRotate = false` and calls `faceToward` (a per-think
+  `HumanoidRootPart.CFrame:Lerp`). The first cut called `faceToward` in every
+  branch with AutoRotate off — writing the root CFrame every think while the
+  Humanoid was also walking froze the grunts on their spawn stud (fixed here). So
+  a grunt only truly points its rifle at the player while planted and shooting;
+  while chasing / covering it faces its travel direction, which is roughly at /
+  away from the player anyway. If a future branch needs the grunt to aim while
+  moving, it needs an `AlignOrientation`, not a CFrame write.
+- **`faceToward` still writes `HumanoidRootPart.CFrame`** (only in Attack, where
+  the grunt is stationary, so it no longer stops movement). It would still fight a
+  knockback / ragdoll impulse landing mid-think — AI ragdoll is not wired, so no
+  conflict today.
 
 ## Pre-round loadout menu — partial DEBT-013 (Studio verification: YES, required)
 

@@ -43,14 +43,17 @@
 -- of this degrades gracefully — a missing model or a failed LoadAnimation just
 -- warns once and the grunt still fires.
 --
--- Stage 1D face + cover (Constants.AI Stage 1D fields): AutoRotate is turned off
--- and faceToward() lerps the HumanoidRootPart to look at the target every think,
--- so grunts point their rifle at the player while engaging. After each burst
--- startBurst arms record.coverUntil; while it is in the future thinkNPC runs a
--- "Cover" branch that moves the grunt to findCoverPoint() (a raycast-sampled spot
--- that breaks LOS, else a plain retreat) and holds there until it expires, then
--- re-peeks and fires — a per-grunt peek/shoot/hide loop. No squad coordination,
--- no tagged cover objects, no pathfinding.
+-- Stage 1D face + cover (Constants.AI Stage 1D fields): while a grunt is walking
+-- (Chase / Cover / Patrol) it keeps Humanoid.AutoRotate on and faces the way it
+-- moves. In the stationary Attack state thinkNPC turns AutoRotate OFF and hands
+-- facing to faceToward(), which lerps the HumanoidRootPart to point the rifle at
+-- the player — done only there because writing the root CFrame every think while
+-- also walking stops the Humanoid dead. After each burst startBurst arms
+-- record.coverUntil; while it is in the future thinkNPC runs a "Cover" branch that
+-- moves the grunt to findCoverPoint() (a raycast-sampled spot that breaks LOS,
+-- else a plain retreat) and holds there until it expires, then re-peeks and fires
+-- — a per-grunt peek/shoot/hide loop. No squad coordination, no tagged cover
+-- objects, no pathfinding.
 --
 -- Deferred (see docs/TECHNICAL_DEBT.md — AI Stage 1A..1D): PathfindingService,
 -- ragdoll on AI death, rewards/points/killstreaks, AI types, squad cover/flanking,
@@ -308,9 +311,10 @@ local function buildRig(worldCFrame: CFrame): (Model, Humanoid, BasePart)
     humanoid.WalkSpeed           = AI.NPC_WALK_SPEED
     humanoid.BreakJointsOnDeath  = false
     humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-    -- Stage 1D: facing is driven manually by faceToward() (toward the target while
-    -- engaging, toward the move goal otherwise), not by the move direction.
-    humanoid.AutoRotate          = false
+    -- Stage 1D: AutoRotate is left ON (default) so walking grunts face the way they
+    -- move. thinkNPC turns it OFF only in the stationary Attack state and hands
+    -- facing to faceToward() there — writing HumanoidRootPart.CFrame every think
+    -- while also walking would stomp the Humanoid's movement.
     humanoid.Parent = model
 
     -- Stage 1C: an Animator is required to LoadAnimation on this rig.
@@ -1086,19 +1090,23 @@ local function thinkNPC(record: NPCRecord, now: number)
         local inLos = troot ~= nil and tchar ~= nil and canSee(record, tchar, troot)
 
         if AI.TAKE_COVER == true and record.coverUntil > now and troot ~= nil then
-            -- Stage 1D: a burst just finished — hold at / move to a cover spot that
-            -- breaks LOS, watching the player, until the cover window expires. Runs
-            -- ahead of the range/LOS check so reaching cover doesn't flip to Chase.
+            -- Stage 1D: a burst just finished — move to a cover spot that breaks
+            -- LOS until the cover window expires. Runs ahead of the range/LOS check
+            -- so reaching cover doesn't flip to Chase. AutoRotate faces the way it
+            -- walks (no CFrame write here — that would stomp the walk).
             setState(record, "Cover")
+            humanoid.AutoRotate = true
             humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
             if record.coverPoint == nil then
                 record.coverPoint = findCoverPoint(record, goal)
             end
             humanoid:MoveTo(record.coverPoint or root.Position)
-            faceToward(record, goal)
         elseif troot ~= nil and dist <= AI.ATTACK_RANGE and inLos then
+            -- Stationary + shooting: hand facing to faceToward() so the rifle
+            -- points at the player.
             setState(record, "Attack")
             record.coverPoint = nil
+            humanoid.AutoRotate = false
             humanoid.WalkSpeed = AI.ATTACK_MOVE_SPEED
             humanoid:MoveTo(root.Position)  -- hold position
             faceToward(record, goal)
@@ -1109,9 +1117,9 @@ local function thinkNPC(record: NPCRecord, now: number)
             setState(record, "Chase")
             record.coverUntil = 0
             record.coverPoint = nil
+            humanoid.AutoRotate = true
             humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
             humanoid:MoveTo(goal + record.slot)
-            faceToward(record, goal)
         end
         return
     end
@@ -1120,10 +1128,9 @@ local function thinkNPC(record: NPCRecord, now: number)
     record.coverUntil = 0
     record.coverPoint = nil
     setState(record, (#patrolPoints > 0) and "Patrol" or "Idle")
+    humanoid.AutoRotate = true
     humanoid.WalkSpeed = AI.NPC_WALK_SPEED
-    local patrolGoal = patrolDestination(record)
-    humanoid:MoveTo(patrolGoal)
-    faceToward(record, patrolGoal)
+    humanoid:MoveTo(patrolDestination(record))
 
     if record.isLeader and #patrolPoints > 0 then
         local squad = squads[record.squadId]
