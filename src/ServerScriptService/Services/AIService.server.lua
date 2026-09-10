@@ -3,6 +3,7 @@
 -- Location in Studio: ServerScriptService > Services > AIService
 --
 -- AI Stage 1A — basic server-owned squad NPC foundation.
+-- AI Stage 1B — combat feedback FX (muzzle flash / smoke / light / tracer / 3D sound).
 --
 -- Spawns simple R6 rifleman "grunt" squads from Workspace/AISpawns, patrols
 -- Workspace/AIPatrolPoints, detects players by server raycast line-of-sight,
@@ -10,7 +11,7 @@
 -- Easy to kill alone, dangerous in numbers — battlefield filler, not tactical AI.
 --
 -- ALL decisions are server-side. No remotes, no client AI scripts, no client
--- damage decisions. All tuning is in Constants.AI.
+-- damage decisions. All tuning is in Constants.AI / Constants.AI_COMBAT_FX.
 --
 -- Damage integration (uses existing extension points only — nothing else changed):
 --   * player -> AI : every NPC model is tagged Constants.TAG_DAMAGE_ENTITY, so
@@ -22,14 +23,24 @@
 --   * BloodService reacts to any CombatEvents.DamageDealt, so hits on/by AI
 --     already produce blood — a side effect, suppressible with BR_BloodEnabled.
 --
--- Deferred (see docs/TECHNICAL_DEBT.md — AI Stage 1A): PathfindingService,
+-- Stage 1B combat FX (Constants.AI_COMBAT_FX): server-created, world-replicated
+-- placeholder visuals — a muzzle flash + smoke puff + light pulse on an
+-- auto-created "AIMuzzleAttachment" (on the grunt's Right Arm, or HumanoidRootPart
+-- if absent — placeholder until AI weapon models exist), an optional short tracer
+-- Beam parented under Workspace/AI, and a 3D gunshot Sound. Emitters / light /
+-- sound are built ONCE per NPC in setupAICombatFx and reused; only the tracer
+-- creates a temporary part per shot (Debris-cleaned; AI fire rate is capped).
+-- Placeholder asset IDs (rbxassetid://0) warn once and do not crash.
+--
+-- Deferred (see docs/TECHNICAL_DEBT.md — AI Stage 1A/1B): PathfindingService,
 -- ragdoll on AI death, rewards/points/killstreaks, AI types, cover/flanking,
--- replicated muzzle flash / sound, AI animations.
+-- AI firing animations, final flash/smoke/sound art, tracer pooling.
 
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
+local Debris            = game:GetService("Debris")
 
 -- ============================================================
 -- Dependencies
@@ -42,15 +53,27 @@ local Logger    = require(Modules:WaitForChild("Logger"))
 -- DamageService is a sibling ModuleScript; the only in-tree caller besides GunService.
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 
--- Untyped view of the tuning table (heterogeneous fields; matches the pattern used
--- by TestAreaBuilder's `local CFG = Constants.DEV_TEST_AREA :: any`).
+-- Untyped views of the tuning tables (heterogeneous fields; matches the pattern
+-- used by TestAreaBuilder's `local CFG = Constants.DEV_TEST_AREA :: any`).
 local AI = Constants.AI :: any
+local FX = Constants.AI_COMBAT_FX :: any
 
 -- ============================================================
 -- Types
 -- ============================================================
 
 type AIState = "Idle" | "Patrol" | "Chase" | "Attack" | "Dead"
+
+-- Stage 1B combat FX instances, built once per NPC and reused every shot.
+-- All children of `attachment`, so they are destroyed with the NPC model.
+type AICombatFx = {
+    attachment: Attachment,
+    flash     : ParticleEmitter?,
+    smoke     : ParticleEmitter?,
+    light     : PointLight?,
+    sound     : Sound?,
+    lightToken: number,          -- guards the light-off task.delay against rapid re-fire
+}
 
 type NPCRecord = {
     model    : Model,
@@ -71,6 +94,7 @@ type NPCRecord = {
     firing    : boolean,
     fireThread: thread?,
     conns     : { RBXScriptConnection },
+    fx        : AICombatFx?,
     dead      : boolean,
 }
 
@@ -109,6 +133,8 @@ local npcCounter   = 0
 
 local warnedNoSpawns = false
 local warnedNoPatrol = false
+local warnedPlaceholderFx  = false  -- one-time: AI_COMBAT_FX still on rbxassetid://0
+local warnedNoMuzzleParent = false  -- one-time: an NPC rig had no Right Arm / HRP
 
 -- ============================================================
 -- Workspace folder discovery
@@ -338,6 +364,261 @@ local function coneSpread(dir: Vector3, maxAngleRad: number): Vector3
     return (dir + offset).Unit
 end
 
+-- ============================================================
+-- Stage 1B — AI combat feedback FX (server-created, world-replicated)
+--
+-- Placeholder visuals until AI weapon models exist. All per-NPC emitters / light /
+-- sound are built ONCE in setupAICombatFx and reused; only the tracer creates a
+-- temporary part per shot (Debris-cleaned; AI fire rate is capped so this is
+-- bounded — pooling is filed as future debt). No remotes, no client code.
+-- ============================================================
+
+-- One-time warning when flash / smoke / sound are still rbxassetid://0.
+local function warnPlaceholderFxOnce()
+    if warnedPlaceholderFx then
+        return
+    end
+    if FX.FLASH_TEXTURE == "rbxassetid://0"
+        or FX.SMOKE_TEXTURE == "rbxassetid://0"
+        or FX.GUNSHOT_SOUND_ID == "rbxassetid://0"
+    then
+        warnedPlaceholderFx = true
+        Logger.warn("[AIService] Constants.AI_COMBAT_FX still uses placeholder asset IDs (rbxassetid://0) — replace FLASH_TEXTURE / SMOKE_TEXTURE / GUNSHOT_SOUND_ID with real assets before shipping AI combat feedback")
+    end
+end
+
+-- The rig part the muzzle FX hang off. Placeholder ordering: Right Arm, then
+-- HumanoidRootPart. A real AI weapon model would supply its own muzzle part.
+local function muzzleParentFor(record: NPCRecord): BasePart?
+    local arm = record.model:FindFirstChild("Right Arm")
+    if arm ~= nil and arm:IsA("BasePart") and arm.Parent ~= nil then
+        return arm
+    end
+    if record.root.Parent ~= nil then
+        return record.root
+    end
+    return nil
+end
+
+-- Reuses a correctly-typed child of `parent` named `childName`, or replaces/creates it.
+local function reuseOrNew(parent: Instance, childName: string, className: string): Instance
+    local existing = parent:FindFirstChild(childName)
+    if existing ~= nil and existing.ClassName == className then
+        return existing
+    end
+    if existing ~= nil then
+        existing:Destroy()
+    end
+    local inst = Instance.new(className)
+    inst.Name = childName
+    return inst
+end
+
+-- Builds (or re-finds) the per-NPC muzzle attachment + flash / smoke emitters +
+-- light + sound. Idempotent: a second call is a no-op (record.fx already set),
+-- and even a forced re-run reuses existing children rather than duplicating.
+local function setupAICombatFx(npcRecord: NPCRecord): ()
+    assert(npcRecord ~= nil, "npcRecord is required")
+
+    if npcRecord.fx ~= nil or FX.ENABLED ~= true then
+        return
+    end
+
+    warnPlaceholderFxOnce()
+
+    local parentPart = muzzleParentFor(npcRecord)
+    if parentPart == nil then
+        if not warnedNoMuzzleParent then
+            warnedNoMuzzleParent = true
+            Logger.warn("[AIService] NPC rig has no Right Arm or HumanoidRootPart — AI muzzle FX skipped for", npcRecord.model.Name)
+        end
+        return
+    end
+
+    local attName: string = FX.MUZZLE_ATTACHMENT_NAME
+    local attInst = parentPart:FindFirstChild(attName)
+    local att: Attachment
+    if attInst ~= nil and attInst:IsA("Attachment") then
+        att = attInst :: Attachment
+    elseif FX.AUTO_CREATE_MUZZLE_ATTACHMENT == true then
+        local newAtt = Instance.new("Attachment")
+        newAtt.Name = attName
+        newAtt.Parent = parentPart
+        att = newAtt
+    else
+        return  -- no attachment and not allowed to create one
+    end
+    -- Part-local placement: -Z is "forward" for an R6 limb roughly facing ahead.
+    att.Position = Vector3.new(FX.MUZZLE_RIGHT_OFFSET, FX.MUZZLE_UP_OFFSET, -FX.MUZZLE_FORWARD_OFFSET)
+
+    -- Note: only table-driven values are set. Structural rendering defaults
+    -- (Enabled/Rate off, LightEmission/EmissionDirection, 0→1 transparency ramp)
+    -- carry no gameplay tuning. Flash/smoke have no dedicated colour constants yet.
+    local flash: ParticleEmitter? = nil
+    if FX.FLASH_ENABLED == true then
+        local e = reuseOrNew(att, "AIMuzzleFlashEmitter", "ParticleEmitter") :: ParticleEmitter
+        e.Texture        = FX.FLASH_TEXTURE
+        e.Enabled        = false
+        e.Rate           = 0
+        e.Lifetime       = NumberRange.new(FX.FLASH_LIFETIME_MIN, FX.FLASH_LIFETIME_MAX)
+        e.Speed          = NumberRange.new(0, 0)
+        e.Size           = NumberSequence.new(FX.FLASH_SIZE_START, FX.FLASH_SIZE_END)
+        e.Transparency   = NumberSequence.new(0, 1)
+        e.LightEmission  = 1
+        e.LightInfluence = 0
+        e.Parent         = att
+        flash = e
+    end
+
+    local smoke: ParticleEmitter? = nil
+    if FX.SMOKE_ENABLED == true then
+        local e = reuseOrNew(att, "AIMuzzleSmokeEmitter", "ParticleEmitter") :: ParticleEmitter
+        e.Texture           = FX.SMOKE_TEXTURE
+        e.Enabled           = false
+        e.Rate              = 0
+        e.Lifetime          = NumberRange.new(FX.SMOKE_LIFETIME_MIN, FX.SMOKE_LIFETIME_MAX)
+        e.Speed             = NumberRange.new(FX.SMOKE_SPEED_MIN, FX.SMOKE_SPEED_MAX)
+        e.Size              = NumberSequence.new(FX.SMOKE_SIZE_START, FX.SMOKE_SIZE_END)
+        e.Transparency      = NumberSequence.new(0, 1)
+        e.EmissionDirection = Enum.NormalId.Front
+        e.Parent            = att
+        smoke = e
+    end
+
+    local light: PointLight? = nil
+    if FX.LIGHT_ENABLED == true then
+        local l = reuseOrNew(att, "AIMuzzleFlashLight", "PointLight") :: PointLight
+        l.Brightness = FX.LIGHT_BRIGHTNESS
+        l.Range      = FX.LIGHT_RANGE
+        l.Enabled    = false
+        l.Parent     = att
+        light = l
+    end
+
+    local sound: Sound? = nil
+    if FX.SOUND_ENABLED == true then
+        local s = reuseOrNew(att, "AIGunshotSound", "Sound") :: Sound
+        s.SoundId            = FX.GUNSHOT_SOUND_ID
+        s.Volume             = FX.GUNSHOT_VOLUME
+        s.RollOffMode        = Enum.RollOffMode.InverseTapered
+        s.RollOffMinDistance = FX.GUNSHOT_ROLLOFF_MIN_DISTANCE
+        s.RollOffMaxDistance = FX.GUNSHOT_ROLLOFF_MAX_DISTANCE
+        s.Looped             = false
+        s.Parent             = att
+        sound = s
+    end
+
+    npcRecord.fx = {
+        attachment = att,
+        flash      = flash,
+        smoke      = smoke,
+        light      = light,
+        sound      = sound,
+        lightToken = 0,
+    }
+end
+
+-- A very short-lived tracer Beam between the muzzle and the shot end point.
+-- Temporary holder Part parented under Workspace/AI, Debris-cleaned. Bounded by
+-- the AI fire rate; pooling is future debt (see docs/TECHNICAL_DEBT.md).
+local function playAITracer(muzzleWorldPosition: Vector3, hitPosition: Vector3): ()
+    assert(typeof(muzzleWorldPosition) == "Vector3", "muzzleWorldPosition must be a Vector3")
+    assert(typeof(hitPosition) == "Vector3", "hitPosition must be a Vector3")
+    if FX.TRACER_ENABLED ~= true then
+        return
+    end
+    local folder = aiFolder
+    if folder == nil then
+        return
+    end
+
+    local holder = Instance.new("Part")
+    holder.Name         = "AITracer"
+    holder.Anchored     = true
+    holder.CanCollide   = false
+    holder.CanQuery     = false
+    holder.CanTouch     = false
+    holder.Transparency = 1
+    holder.Size         = Vector3.one * 0.05
+    holder.CFrame       = CFrame.new(muzzleWorldPosition)
+    holder:SetAttribute("BR_AITracer", true)
+
+    local a0 = Instance.new("Attachment")
+    a0.Parent = holder
+    local a1 = Instance.new("Attachment")
+    a1.Position = holder.CFrame:PointToObjectSpace(hitPosition)
+    a1.Parent = holder
+
+    local beam = Instance.new("Beam")
+    beam.Attachment0   = a0
+    beam.Attachment1   = a1
+    beam.Width0        = FX.TRACER_WIDTH_START
+    beam.Width1        = FX.TRACER_WIDTH_END
+    beam.Transparency  = NumberSequence.new(FX.TRACER_TRANSPARENCY_START, FX.TRACER_TRANSPARENCY_END)
+    beam.FaceCamera    = true
+    beam.LightEmission = 1
+    beam.Segments      = 1
+    beam.Parent        = holder
+
+    holder.Parent = folder
+
+    local life = FX.TRACER_LIFETIME
+    if typeof(life) ~= "number" or life <= 0 then
+        life = FX.CLEANUP_LIFETIME
+    end
+    Debris:AddItem(holder, life)
+end
+
+-- Plays the visible + audible feedback for one AI shot. Never yields the firing
+-- path. Emits from the pre-built per-NPC emitters, pulses the light with a
+-- token-guarded task.delay (safe after NPC death / service destroy), plays the
+-- one shared 3D sound, and draws the tracer when an end point is known.
+local function playAIShotFx(npcRecord: NPCRecord, muzzleWorldPosition: Vector3, hitPosition: Vector3?): ()
+    assert(npcRecord ~= nil, "npcRecord is required")
+    assert(typeof(muzzleWorldPosition) == "Vector3", "muzzleWorldPosition must be a Vector3")
+    if hitPosition ~= nil then
+        assert(typeof(hitPosition) == "Vector3", "hitPosition must be a Vector3")
+    end
+    if FX.ENABLED ~= true then
+        return
+    end
+
+    local fx = npcRecord.fx
+    if fx ~= nil and fx.attachment.Parent ~= nil then
+        if FX.FLASH_ENABLED == true and fx.flash ~= nil then
+            fx.flash:Emit(FX.FLASH_EMIT_COUNT)
+        end
+        if FX.SMOKE_ENABLED == true and fx.smoke ~= nil then
+            fx.smoke:Emit(FX.SMOKE_EMIT_COUNT)
+        end
+        if FX.LIGHT_ENABLED == true and fx.light ~= nil then
+            fx.lightToken += 1
+            local myToken = fx.lightToken
+            local theLight = fx.light
+            theLight.Enabled = true
+            task.delay(FX.LIGHT_DURATION, function()
+                -- theLight.Parent is nil once the NPC model is destroyed; the
+                -- token guard also stops a stale pulse darkening a later flash.
+                if theLight.Parent ~= nil and fx.lightToken == myToken then
+                    theLight.Enabled = false
+                end
+            end)
+        end
+        if FX.SOUND_ENABLED == true and fx.sound ~= nil
+            and fx.sound.SoundId ~= "rbxassetid://0" and fx.sound.SoundId ~= ""
+        then
+            local lo: number = FX.GUNSHOT_PLAYBACK_SPEED_MIN
+            local hi: number = FX.GUNSHOT_PLAYBACK_SPEED_MAX
+            fx.sound.PlaybackSpeed = lo + math.random() * (hi - lo)
+            fx.sound:Play()
+        end
+    end
+
+    if hitPosition ~= nil then
+        playAITracer(muzzleWorldPosition, hitPosition)
+    end
+end
+
 local function fireOneShot(record: NPCRecord)
     local target = record.target
     local troot  = targetRootOf(target)
@@ -354,7 +635,19 @@ local function fireOneShot(record: NPCRecord)
     end
     local dir = coneSpread(baseDir.Unit, math.rad(AI.SHOT_SPREAD_DEGREES))
 
-    local result = workspace:Raycast(origin, dir * AI.SHOT_RANGE, losParams)
+    local rayVec = dir * AI.SHOT_RANGE
+    local result = workspace:Raycast(origin, rayVec, losParams)
+
+    -- Stage 1B: play the visible + audible shot FX for every shot, hit or miss.
+    -- Reads only the muzzle / end position — the hit calculation is unchanged.
+    local muzzlePos: Vector3 = origin
+    local fx = record.fx
+    if fx ~= nil and fx.attachment.Parent ~= nil then
+        muzzlePos = fx.attachment.WorldPosition
+    end
+    local endPos: Vector3 = if result ~= nil then result.Position else origin + rayVec
+    playAIShotFx(record, muzzlePos, endPos)
+
     if result == nil then
         return
     end
@@ -532,6 +825,9 @@ local function disconnectRecord(record: NPCRecord)
         record.fireThread = nil
     end
     record.firing = false
+    -- Stage 1B: drop FX references. The emitters / light / sound are children of
+    -- the NPC model and die with it; the token-guarded light task.delay no-ops.
+    record.fx = nil
     for _, conn in ipairs(record.conns) do
         conn:Disconnect()
     end
@@ -612,6 +908,7 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
         firing    = false,
         fireThread= nil,
         conns     = {},
+        fx        = nil,
         dead      = false,
     }
 
@@ -623,6 +920,14 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
     table.insert(record.conns, diedConn)
 
     npcs[model] = record
+
+    -- Stage 1B: build the per-NPC muzzle FX once. pcall so a Studio FX quirk
+    -- (missing asset, odd rig) can never block a grunt from spawning.
+    local okFx, fxErr = pcall(setupAICombatFx, record)
+    if not okFx then
+        Logger.warn("[AIService] setupAICombatFx failed for", model.Name, "-", tostring(fxErr))
+    end
+
     return model
 end
 
@@ -830,6 +1135,14 @@ function AIService.Destroy(): ()
     table.clear(spawnParts)
     table.clear(patrolPoints)
 
+    -- Stage 1B tracer holder parts are parented under aiFolder, so destroying it
+    -- removes any that Debris has not yet collected. Sweep first for robustness in
+    -- case one was ever re-parented out.
+    for _, inst in ipairs(workspace:GetChildren()) do
+        if inst:GetAttribute("BR_AITracer") == true then
+            inst:Destroy()
+        end
+    end
     if aiFolder ~= nil and aiFolder.Parent ~= nil then
         aiFolder:Destroy()
     end

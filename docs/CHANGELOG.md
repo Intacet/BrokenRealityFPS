@@ -1,5 +1,27 @@
 # Changelog
 
+## AI Stage 1B — combat feedback FX for grunts
+
+- New `Constants.AI_COMBAT_FX` + `AIService` helpers `setupAICombatFx` /
+  `playAIShotFx` / `playAITracer`. When an AI grunt fires, `fireOneShot` now plays
+  **server-created, world-replicated placeholder FX** so players can see and hear
+  it: a small **muzzle flash + smoke puff + light pulse** off an auto-created
+  `AIMuzzleAttachment` (on the grunt's Right Arm, or HumanoidRootPart if absent —
+  placeholder until AI weapon models exist), an optional brief **tracer Beam**, and
+  a **3D gunshot Sound**. FX play on every shot, hit or miss.
+- Emitters / light / sound are built **once per NPC** and reused — not per shot.
+  Only the tracer makes a temporary holder Part per shot, `Debris`-cleaned and
+  parented under `Workspace/AI` (also swept by `Destroy()`). FX refs are cleared on
+  NPC death; the light pulse's `task.delay` is token-guarded and Parent-checked so
+  it never errors after death / service destroy.
+- Placeholder asset IDs (`FLASH_TEXTURE` / `SMOKE_TEXTURE` / `GUNSHOT_SOUND_ID` =
+  `rbxassetid://0`) are tolerated — `AIService` `Logger.warn`s once; the flash/smoke
+  show as default particles and the sound is skipped (no "failed to load" spam).
+- **No new remotes, no client files, no `GunService` / `DamageService` change.** AI
+  detection / chase / attack / damage / death is preserved exactly. Existing
+  Stage 1A behaviour unchanged. Not runtime-verified — Studio Play test required
+  (see docs/TECHNICAL_DEBT.md "AI Stage 1B").
+
 ## AI patrol zone in the test area
 
 - `TestAreaBuilder` now builds an "AI Patrol Zone" — a marked pad in a clear corner of

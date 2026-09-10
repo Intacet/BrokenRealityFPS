@@ -2129,6 +2129,66 @@ Constants.AI = {
     ATTACK_MOVE_SPEED       = 6,   -- WalkSpeed while in Attack (slow, not a hard stop)
 }
 
+-- ── AI Stage 1B — combat feedback FX for AIService grunts ───────────────────
+-- Server-created, world-replicated placeholder visuals/audio so players can SEE
+-- and HEAR AI fire: a tiny muzzle flash + smoke puff + light pulse + optional
+-- tracer beam + a 3D gunshot sound, all owned by AIService. Emitters / light /
+-- sound are built ONCE per NPC (under an auto-created "AIMuzzleAttachment" on the
+-- grunt's Right Arm, or HumanoidRootPart if absent — a placeholder until AI
+-- weapon models exist). Tracer parts are temporary, parented under Workspace/AI,
+-- and Debris-cleaned. No new remotes; no client code; no damage-path change.
+-- Placeholder asset IDs (rbxassetid://0) are tolerated — AIService warns once.
+Constants.AI_COMBAT_FX = {
+    ENABLED = true,
+    DEBUG = true,
+
+    MUZZLE_ATTACHMENT_NAME = "AIMuzzleAttachment",
+    AUTO_CREATE_MUZZLE_ATTACHMENT = true,
+    MUZZLE_FORWARD_OFFSET = 0,
+    MUZZLE_UP_OFFSET = 0,
+    MUZZLE_RIGHT_OFFSET = 0,
+
+    FLASH_ENABLED = true,
+    FLASH_TEXTURE = "rbxassetid://0",
+    FLASH_EMIT_COUNT = 1,
+    FLASH_LIFETIME_MIN = 0.025,
+    FLASH_LIFETIME_MAX = 0.05,
+    FLASH_SIZE_START = 0.35,
+    FLASH_SIZE_END = 0.05,
+
+    SMOKE_ENABLED = true,
+    SMOKE_TEXTURE = "rbxassetid://0",
+    SMOKE_EMIT_COUNT = 1,
+    SMOKE_LIFETIME_MIN = 0.12,
+    SMOKE_LIFETIME_MAX = 0.28,
+    SMOKE_SPEED_MIN = 0.5,
+    SMOKE_SPEED_MAX = 1.5,
+    SMOKE_SIZE_START = 0.08,
+    SMOKE_SIZE_END = 0.35,
+
+    LIGHT_ENABLED = true,
+    LIGHT_BRIGHTNESS = 1.5,
+    LIGHT_RANGE = 6,
+    LIGHT_DURATION = 0.035,
+
+    TRACER_ENABLED = true,
+    TRACER_LIFETIME = 0.055,
+    TRACER_WIDTH_START = 0.045,
+    TRACER_WIDTH_END = 0.015,
+    TRACER_TRANSPARENCY_START = 0.15,
+    TRACER_TRANSPARENCY_END = 1,
+
+    SOUND_ENABLED = true,
+    GUNSHOT_SOUND_ID = "rbxassetid://0",
+    GUNSHOT_VOLUME = 0.45,
+    GUNSHOT_PLAYBACK_SPEED_MIN = 0.96,
+    GUNSHOT_PLAYBACK_SPEED_MAX = 1.04,
+    GUNSHOT_ROLLOFF_MIN_DISTANCE = 12,
+    GUNSHOT_ROLLOFF_MAX_DISTANCE = 180,
+
+    CLEANUP_LIFETIME = 1.0,
+}
+
 -- ── Developer test area (TestAreaBuilder.server) ────────────────────────────
 -- Layout knobs for the generated developer sandbox under Workspace/<FOLDER_NAME>.
 -- All positions are world-space offsets from ORIGIN.

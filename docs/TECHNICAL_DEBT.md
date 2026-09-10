@@ -27,10 +27,12 @@ live models. This is **foundation only** — the AI system is NOT complete.
 - **Pathfinding is `Humanoid:MoveTo` only.** No `PathfindingService`. Grunts walk
   straight at the goal and will get stuck on walls, corners, and gaps.
   `PATH_RECALCULATE_INTERVAL` exists in `Constants.AI` but is currently unused
-  (reserved for a throttled `ComputeAsync` pass in Stage 1B).
+  (reserved for a throttled `ComputeAsync` pass in a **later** stage — Stage 1B was
+  combat feedback FX, not pathfinding).
 - **Shooting is a single burst raycast.** `fireOneShot` casts one ray per shot with
   a random cone (`SHOT_SPREAD_DEGREES`), flat `SHOT_DAMAGE` (region forced to
-  `Unknown`, so no AI headshots). No penetration, no projectile travel, no tracer.
+  `Unknown`, so no AI headshots). No penetration, no projectile travel. A cosmetic
+  tracer Beam is drawn per shot (Stage 1B — see below).
 - **player-to-AI damage relies on an existing path, not a dedicated hook.** NPCs are
   tagged `Constants.TAG_DAMAGE_ENTITY`, so `GunService.getDamageableEntity` →
   `DamageService:ApplyDamage` already damages them with no `GunService`/`DamageService`
@@ -46,8 +48,10 @@ live models. This is **foundation only** — the AI system is NOT complete.
 - **No ragdoll on AI death.** `BreakJointsOnDeath = false`; the model is just
   `Destroy()`ed after `DEATH_CLEANUP_DELAY`. `RagdollService` is untouched. Wiring
   `RagdollService:Apply` on `Humanoid.Died` is a later step.
-- **No replicated muzzle flash / sound / animation for AI.** Grunts shoot invisibly
-  and silently; they have no `Animator` / animation system and no weapon model.
+- **Muzzle flash / smoke / light / tracer / 3D sound now exist (Stage 1B — see the
+  section below), still no firing animation and no weapon model.** Grunts have no
+  `Animator` / animation system; the FX hang off a placeholder attachment on the
+  Right Arm / HumanoidRootPart.
 - **Blood is a free side effect.** `BloodService` reacts to any
   `CombatEvents.DamageDealt`, so shooting a grunt (or being shot by one) produces a
   blood burst on clients. Not explicitly wired; set `BR_BloodEnabled = false` on an
@@ -56,15 +60,70 @@ live models. This is **foundation only** — the AI system is NOT complete.
   grunt archetype, one ring formation, leader only used as the patrol-index advancer.
   Grunts are hostile to every player (no team logic).
 - **Server performance at `MAX_ACTIVE_NPCS` (12) is untested.** One `THINK_INTERVAL`
-  (0.25 s) loop over all NPCs plus per-NPC LOS raycasts and detached burst tasks;
-  needs a real Studio/server measurement before the cap is raised.
-- **All `Constants.AI` numbers are first-pass guesses** (ranges, damage, burst
-  timing, speeds, spacing) and need a Studio tuning pass.
+  (0.25 s) loop over all NPCs plus per-NPC LOS raycasts, detached burst tasks, and
+  now (Stage 1B) a per-shot `ParticleEmitter:Emit` × 2 + `Sound:Play` + a temporary
+  tracer Part + a `task.delay` light pulse; needs a real Studio/server measurement.
+- **All `Constants.AI` / `Constants.AI_COMBAT_FX` numbers are first-pass guesses**
+  (ranges, damage, burst timing, speeds, spacing, flash/smoke/light/tracer sizes and
+  lifetimes, sound rolloff) and need a Studio tuning pass.
 - **Self-running Script, no `Destroy()` caller.** Like the other `*.server.lua`
   services it starts itself at file end and lives for the server session;
   `AIService.Destroy()` exists and is correct but is only reachable from the command
   bar / a future require. Its per-NPC connections and burst threads *are* cleaned on
   death.
+
+## AI Stage 1B — combat feedback FX (Studio verification: REQUIRED, not done)
+
+`Constants.AI_COMBAT_FX` + new helpers in `AIService.server.lua`
+(`setupAICombatFx` / `playAIShotFx` / `playAITracer`) give AI shooting visible +
+audible feedback: a server-created, **world-replicated** muzzle flash + smoke puff
++ light pulse on an auto-created `AIMuzzleAttachment`, an optional short tracer
+`Beam`, and a 3D gunshot `Sound`. Emitters / light / sound are built **once per
+NPC** and reused; the tracer creates one temporary holder Part per shot,
+`Debris`-cleaned. `fireOneShot` calls `playAIShotFx` after the raycast (hit or
+miss) — the hit / damage calculation is unchanged. No remotes, no client code, no
+`GunService` / `DamageService` change. Open risks:
+
+- **Not runtime-verified.** `Constants.lua` + `AIService.server.lua` are content
+  edits (no `default.project.json` change), so a `rojo serve` restart is not needed,
+  but MCP can't drive a player into a grunt's Attack state or watch the FX. Needs a
+  Studio Play pass — see the test steps below.
+- **AI muzzle position is a placeholder.** The `AIMuzzleAttachment` is auto-created
+  on the grunt's **Right Arm** (or **HumanoidRootPart** if absent) at the
+  `MUZZLE_*_OFFSET` (all 0 by default). There is no AI weapon model, so the flash
+  comes from roughly the right-hand area, not a barrel tip, and "forward" is the
+  limb's local −Z which only loosely matches aim. Real AI weapon/world models later
+  should supply their own muzzle part and this heuristic can be dropped.
+- **Placeholder asset IDs.** `FLASH_TEXTURE` / `SMOKE_TEXTURE` / `GUNSHOT_SOUND_ID`
+  are `rbxassetid://0` — the flash/smoke render as the default particle square and
+  the sound does not play (guarded so it never emits a "failed to load" warning).
+  `AIService` `Logger.warn`s **once** on first NPC setup. Replace with real
+  flash / smoke sprites and a gunshot sound, then tune sizes / lifetimes / rolloff.
+- **Flash / smoke have no colour or transparency-curve constants.** They use a flat
+  0→1 transparency ramp and the emitter default colour (white). Add
+  `*_COLOR` / transparency-keypoint constants to `Constants.AI_COMBAT_FX` when the
+  real art goes in.
+- **Tracer parts are created per shot, not pooled.** Acceptable at Stage 1B because
+  the AI fire rate is capped (`SECONDS_BETWEEN_SHOTS` / `SECONDS_BETWEEN_BURSTS`,
+  `MAX_ACTIVE_NPCS`), each holder is `Debris:AddItem`-cleaned after
+  `TRACER_LIFETIME` (≈55 ms), and `Destroy()` sweeps any `BR_AITracer` strays +
+  destroys `Workspace/AI`. If NPC count or fire rate rises, pool the holder + Beam
+  (one reusable rig per shooter, or a small shared ring).
+- **AI shots still have no firing animation.** The arm does not move / recoil; the
+  flash just appears. An `Animator` + a simple fire clip is a later stage.
+- **AI gunshot audio needs final sound design + distance tuning.**
+  `GUNSHOT_VOLUME` (0.45), `GUNSHOT_ROLLOFF_MIN/MAX_DISTANCE` (12 / 180) and
+  `RollOffMode.InverseTapered` are guesses; a real gunshot asset will change the
+  perceived loudness and falloff. The single shared `Sound` is `:Play()`-restarted
+  each shot (fine for a capped burst rate, but overlapping tails are lost).
+- **The light pulse uses `task.delay` per shot.** Token-guarded and Parent-checked,
+  so it is safe after NPC death / `Destroy()` and never errors, but it is one
+  scheduled callback per shot rather than a pooled timer.
+- **`playAIShotFx` reads `muzzleWorldPosition` from the attachment** (falls back to
+  the ray origin). It is passed for the tracer + future use; the emitters / light /
+  sound are attachment-parented so they ignore it.
+- Still **no rewards / points / killstreaks**, **no AI types / advanced tactics**,
+  **no AI ragdoll integration** — all unchanged from Stage 1A.
 
 ## Pre-round loadout menu — partial DEBT-013 (Studio verification: YES, required)
 
@@ -172,7 +231,10 @@ profile, light pulse, no Output errors, graceful fallback). Remaining risks:
   attachment, so one is auto-created on its `Barrel` part along that part's longest local axis
   — a best-effort guess for position AND facing; the sign of "forward" may be wrong on some
   rigs. Add a real `MuzzleAttachment` at the bore tip, pointing out the barrel, for each gun.
-- **No replicated third-person muzzle flash.** Other players see nothing; this is local-only.
+- **No replicated third-person muzzle flash for players.** Other players see nothing;
+  this player viewmodel FX is local-only. (Separate system: AI grunts got a
+  server-created, world-replicated muzzle flash in AI Stage 1B — `Constants.AI_COMBAT_FX`
+  in `AIService`, not shared with this `Constants.MUZZLE_FX` player path.)
 - **Local bullet impact FX now exists** (Stage 1 — see next section). Tracers, shell
   ejection, and surface-specific FX are still out of scope.
 - **FX values (emit counts, lifetimes, sizes, speeds, light range/brightness/duration) are
