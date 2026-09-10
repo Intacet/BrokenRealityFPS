@@ -53,7 +53,8 @@ type Burst = { part: BasePart, mist: ParticleEmitter, droplet: ParticleEmitter, 
 local bursts: { Burst } = {}
 
 type Mark = { part: BasePart, bornAt: number, expireAt: number, baseT: number }
-local marks: { Mark } = {}          -- ring buffer, oldest first (all share one lifetime)
+local marks:  { Mark } = {}   -- anchored floor-pool marks + their satellites (ring buffer)
+local bodyFx: { Mark } = {}   -- small splatters + wound balls welded to a hit limb (ring buffer)
 
 local started = false
 
@@ -191,116 +192,189 @@ local function playBurst(position: Vector3, travelDir: Vector3, intensity: numbe
 end
 
 -- ============================================================
--- Surface marks
+-- Surface marks / body splatter / wounds
 -- ============================================================
 
-local function retireOldestMark()
-    local m = table.remove(marks, 1)
-    if m ~= nil then
-        m.part:Destroy()
-    end
-end
+local THICK = Constants.BLOOD_MARK_THICKNESS :: number
 
--- cf: surface-flat CFrame (Y = surface normal). size: nominal footprint (studs).
-local function addMark(cf: CFrame, size: number)
-    if #marks >= (Constants.BLOOD_MAX_MARKS :: number) then
-        retireOldestMark()
-    end
-
-    local now  = os.clock()
+local function randBaseT(): number
     local tMin: number = C.BLOOD_MARK_TRANSPARENCY_MIN
     local tMax: number = C.BLOOD_MARK_TRANSPARENCY_MAX
-    local baseT = tMin + math.random() * (tMax - tMin)
+    return tMin + math.random() * (tMax - tMin)
+end
 
+-- Perpendicular basis for a unit normal.
+local function basisFor(n: Vector3): (Vector3, Vector3)
+    local ref = if math.abs(n.Y) > 0.99 then Vector3.xAxis else Vector3.yAxis
+    local r = ref:Cross(n)
+    r = r.Magnitude > 1e-4 and r.Unit or Vector3.xAxis
+    local ang = math.random() * math.pi * 2
+    local right = (r * math.cos(ang) + n:Cross(r) * math.sin(ang)).Unit
+    return right, right:Cross(n).Unit
+end
+
+-- A flat, slightly irregular blood mark. Anchored under fxFolder, or welded to `weldTo`.
+local function makeFlatMark(cf: CFrame, size: number, weldTo: BasePart?): BasePart
     local part = Instance.new("Part")
     part.Name          = "BloodMark"
-    -- Irregular footprint so it does not read as a red tile.
     part.Size          = Vector3.new(
-        size * (0.72 + math.random() * 0.56),
-        Constants.BLOOD_MARK_THICKNESS :: number,
-        size * (0.72 + math.random() * 0.56)
+        size * (0.7 + math.random() * 0.6),
+        THICK,
+        size * (0.7 + math.random() * 0.6)
     )
     part.CFrame        = cf
-    part.Anchored      = true
     part.CanCollide    = false
     part.CanQuery      = false
     part.CanTouch      = false
     part.CastShadow    = false
     part.Locked        = true
     part.Material      = Enum.Material.SmoothPlastic
-    part.Color         = BLOOD_COLOR:Lerp(BLOOD_DARK, math.random() * 0.65)
+    part.Color         = BLOOD_COLOR:Lerp(BLOOD_DARK, math.random() * 0.6)
     part.Transparency  = 1    -- fades in via onHeartbeat
     part.TopSurface    = Enum.SurfaceType.Smooth
     part.BottomSurface = Enum.SurfaceType.Smooth
-    part.Parent        = fxFolder
-
-    table.insert(marks, {
-        part = part,
-        bornAt = now,
-        expireAt = now + (Constants.BLOOD_MARK_LIFETIME :: number),
-        baseT = baseT,
-    })
+    if weldTo ~= nil then
+        part.Anchored = false
+        part.Massless = true
+        part.Parent   = weldTo
+        local w = Instance.new("WeldConstraint")
+        w.Part0  = part
+        w.Part1  = weldTo
+        w.Parent = part
+    else
+        part.Anchored = true
+        part.Parent   = fxFolder
+    end
+    return part
 end
 
-local function spawnMarks(position: Vector3, travelDir: Vector3, intensity: number)
-    local rays  = Constants.BLOOD_SPLATTER_RAYS :: number
-    local range = Constants.BLOOD_SPLATTER_RANGE :: number
-    local sMin  = Constants.BLOOD_MARK_SIZE_MIN :: number
-    local sMax  = Constants.BLOOD_MARK_SIZE_MAX :: number
-    local thick = Constants.BLOOD_MARK_THICKNESS :: number
-    local sats  = Constants.BLOOD_MARK_SATELLITES :: number
-    local satRange = Constants.BLOOD_MARK_SATELLITE_RANGE :: number
-    local satSize  = Constants.BLOOD_MARK_SATELLITE_SIZE :: number
+-- A dark ball mostly sunk into the limb along the shot line — the "carved" wound.
+local function makeWound(position: Vector3, shotDir: Vector3, size: number, weldTo: BasePart): BasePart
+    local part = Instance.new("Part")
+    part.Name         = "BloodWound"
+    part.Shape        = Enum.PartType.Ball
+    part.Size         = Vector3.one * size
+    part.CFrame       = CFrame.new(position - shotDir * (size * (Constants.BLOOD_WOUND_SINK :: number)))
+    part.Color        = Constants.BLOOD_WOUND_COLOR :: Color3
+    part.Material     = Enum.Material.SmoothPlastic
+    part.CanCollide   = false
+    part.CanQuery     = false
+    part.CanTouch     = false
+    part.CastShadow   = false
+    part.Locked       = true
+    part.Anchored     = false
+    part.Massless     = true
+    part.Transparency = 1
+    part.Parent       = weldTo
+    local w = Instance.new("WeldConstraint")
+    w.Part0  = part
+    w.Part1  = weldTo
+    w.Parent = part
+    return part
+end
 
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = { fxFolder }
-    params.IgnoreWater = true
-    params.RespectCanCollide = true
-
-    local fwd = travelDir.Magnitude > 1e-3 and travelDir.Unit or Vector3.new(0, -1, 0)
-
-    for i = 1, rays do
-        local dir: Vector3
-        if i == 1 then
-            dir = fwd                                   -- the surface directly behind the hit
-        elseif i == 2 then
-            dir = Vector3.new(0, -1, 0)                 -- the floor below (pooling)
-        else
-            -- Biased toward the exit direction and downward, not fully random.
-            local jitter = Vector3.new(
-                (math.random() - 0.5) * 2,
-                -math.random(),
-                (math.random() - 0.5) * 2
-            )
-            dir = (fwd * 0.55 + jitter * 0.45)
-            dir = dir.Magnitude > 1e-3 and dir.Unit or Vector3.new(0, -1, 0)
+local function pushRecord(list: { Mark }, cap: number, part: BasePart, lifetime: number)
+    if #list >= cap then
+        local old = table.remove(list, 1)
+        if old ~= nil then
+            old.part:Destroy()
         end
+    end
+    local now = os.clock()
+    table.insert(list, { part = part, bornAt = now, expireAt = now + lifetime, baseT = randBaseT() })
+end
 
-        local result = workspace:Raycast(position, dir * range, params)
-        if result ~= nil then
-            local up = result.Normal
-            local baseRight = up:Cross(Vector3.xAxis)
-            if baseRight.Magnitude < 1e-3 then
-                baseRight = up:Cross(Vector3.zAxis)
+-- Probe around the hit for the limb that was struck (a BasePart under a Humanoid model).
+local function findHitLimb(position: Vector3, shotDir: Vector3): BasePart?
+    local rp = RaycastParams.new()
+    rp.FilterType = Enum.RaycastFilterType.Exclude
+    rp.FilterDescendantsInstances = { fxFolder }
+    rp.IgnoreWater = true
+    local probes = { shotDir, -shotDir, Vector3.yAxis, -Vector3.yAxis }
+    for _, d in ipairs(probes) do
+        local r = workspace:Raycast(position - d * 1.2, d * 2.4, rp)
+        if r ~= nil then
+            local model = r.Instance:FindFirstAncestorWhichIsA("Model")
+            if model ~= nil and model:FindFirstChildWhichIsA("Humanoid") ~= nil then
+                return r.Instance
             end
-            baseRight = baseRight.Unit
-            local ang = math.random() * math.pi * 2
-            local right = (baseRight * math.cos(ang) + up:Cross(baseRight) * math.sin(ang)).Unit
-            local look = right:Cross(up).Unit
+        end
+    end
+    return nil
+end
 
-            local size = math.clamp(sMin + math.random() * (sMax - sMin), sMin, sMax)
-                * (0.55 + 0.55 * intensity)
-            addMark(CFrame.fromMatrix(result.Position + up * thick, right, up, look), size)
+-- A BloodEffect only fires for a Humanoid that took damage, so `position` is always on a
+-- body: a few small welded splatters + one recessed wound there, plus a bigger pool of
+-- marks on the floor found by casting straight down (past the hit character).
+local function spawnBloodMarks(position: Vector3, travelDir: Vector3, intensity: number)
+    local shotDir = travelDir.Magnitude > 1e-3 and travelDir.Unit or Vector3.new(0, -1, 0)
+    local limb    = findHitLimb(position, shotDir)
+    local model   = limb ~= nil and limb:FindFirstAncestorWhichIsA("Model") or nil
 
-            -- A few tiny satellite spots scattered across the same surface plane.
-            for _ = 1, sats do
-                local off = right * ((math.random() - 0.5) * 2 * satRange)
-                    + look * ((math.random() - 0.5) * 2 * satRange)
-                addMark(
-                    CFrame.fromMatrix(result.Position + off + up * thick, right, up, look),
-                    satSize * (0.35 + math.random() * 0.65)
-                )
+    -- ── Body: small splatters welded to the limb (entry side faces the shooter). ──
+    local entryN = -shotDir
+    entryN = entryN.Magnitude > 1e-4 and entryN.Unit or Vector3.yAxis
+    local bodyMin: number = C.BLOOD_BODY_MARK_SIZE_MIN
+    local bodyMax: number = C.BLOOD_BODY_MARK_SIZE_MAX
+    local spread: number  = C.BLOOD_BODY_MARK_SPREAD
+    local eRight, eLook = basisFor(entryN)
+    for _ = 1, (C.BLOOD_BODY_MARK_COUNT :: number) do
+        local off = eRight * ((math.random() - 0.5) * 2 * spread)
+            + eLook * ((math.random() - 0.5) * 2 * spread)
+        local r2, l2 = basisFor(entryN)
+        local size = (bodyMin + math.random() * (bodyMax - bodyMin)) * (0.6 + 0.5 * intensity)
+        local cf = CFrame.fromMatrix(position + off + entryN * THICK, r2, entryN, l2)
+        local part = makeFlatMark(cf, size, limb)
+        pushRecord(bodyFx, C.BLOOD_MAX_BODY_FX, part, C.BLOOD_BODY_MARK_LIFETIME)
+    end
+
+    -- ── Wound: a dark ball carved into the limb. ──
+    if limb ~= nil and (C.BLOOD_WOUND_ENABLED :: boolean) then
+        local wMin: number = C.BLOOD_WOUND_SIZE_MIN
+        local wMax: number = C.BLOOD_WOUND_SIZE_MAX
+        local wsize = (wMin + math.random() * (wMax - wMin)) * (0.7 + 0.5 * intensity)
+        local wp = makeWound(position, shotDir, wsize, limb)
+        pushRecord(bodyFx, C.BLOOD_MAX_BODY_FX, wp, C.BLOOD_WOUND_LIFETIME)
+    end
+
+    -- ── Floor pool: bigger marks straight below the hit (and a step downrange). ──
+    local groundParams = RaycastParams.new()
+    groundParams.FilterType = Enum.RaycastFilterType.Exclude
+    groundParams.FilterDescendantsInstances = model ~= nil and { fxFolder, model } or { fxFolder }
+    groundParams.IgnoreWater = true
+
+    local gMin: number = C.BLOOD_GROUND_MARK_SIZE_MIN
+    local gMax: number = C.BLOOD_GROUND_MARK_SIZE_MAX
+    local gRange: number = C.BLOOD_GROUND_RANGE
+    local gSats: number  = C.BLOOD_GROUND_SATELLITES
+    local gSatRange: number = C.BLOOD_GROUND_SATELLITE_RANGE
+    local gSatSize: number  = C.BLOOD_GROUND_SATELLITE_SIZE
+
+    local horiz = Vector3.new(shotDir.X, 0, shotDir.Z)
+    horiz = horiz.Magnitude > 1e-3 and horiz.Unit or Vector3.zero
+    local origins = {
+        position,
+        position + horiz * (1.5 + 3 * intensity),
+    }
+    for _, org in ipairs(origins) do
+        local r = workspace:Raycast(org + Vector3.new(0, 0.25, 0), Vector3.new(0, -gRange, 0), groundParams)
+        if r ~= nil then
+            local up = r.Normal
+            local right, look = basisFor(up)
+            local size = (gMin + math.random() * (gMax - gMin)) * (0.6 + 0.7 * intensity)
+            pushRecord(marks, C.BLOOD_MAX_MARKS,
+                makeFlatMark(CFrame.fromMatrix(r.Position + up * THICK, right, up, look), size, nil),
+                C.BLOOD_MARK_LIFETIME)
+            for _ = 1, gSats do
+                local off = right * ((math.random() - 0.5) * 2 * gSatRange)
+                    + look * ((math.random() - 0.5) * 2 * gSatRange)
+                pushRecord(marks, C.BLOOD_MAX_MARKS,
+                    makeFlatMark(
+                        CFrame.fromMatrix(r.Position + off + up * THICK, right, up, look),
+                        gSatSize * (0.35 + math.random() * 0.65),
+                        nil
+                    ),
+                    C.BLOOD_MARK_LIFETIME)
             end
         end
     end
@@ -311,6 +385,10 @@ local function clearAll()
         m.part:Destroy()
     end
     table.clear(marks)
+    for _, m in ipairs(bodyFx) do
+        m.part:Destroy()
+    end
+    table.clear(bodyFx)
     for _, b in ipairs(bursts) do
         b.mist:Clear()
         b.droplet:Clear()
@@ -322,34 +400,41 @@ end
 -- Loop
 -- ============================================================
 
+local FADE_IN  = Constants.BLOOD_MARK_FADE_IN :: number
+local FADE_OUT = Constants.BLOOD_MARK_FADE_OUT :: number
+
+-- Expire, fade, and (for welded body fx) drop records whose limb was destroyed.
+local function sweep(list: { Mark }, now: number)
+    local i = 1
+    while i <= #list do
+        local m = list[i]
+        if m.part.Parent == nil or now >= m.expireAt then
+            m.part:Destroy()
+            table.remove(list, i)
+        else
+            local age  = now - m.bornAt
+            local left = m.expireAt - now
+            if age < FADE_IN then
+                m.part.Transparency = m.baseT + (1 - m.baseT) * (1 - age / FADE_IN)
+            elseif left < FADE_OUT then
+                m.part.Transparency = m.baseT + (1 - m.baseT) * (1 - left / FADE_OUT)
+            elseif m.part.Transparency ~= m.baseT then
+                m.part.Transparency = m.baseT
+            end
+            i += 1
+        end
+    end
+end
+
 local function onHeartbeat()
     local now = os.clock()
-
     for _, b in ipairs(bursts) do
         if b.busy and now >= b.freeAt then
             b.busy = false
         end
     end
-
-    -- marks is oldest-first; expired ones are always at the front.
-    while #marks > 0 and now >= marks[1].expireAt do
-        retireOldestMark()
-    end
-
-    -- Fade marks in on birth and out at end of life; hold flat opacity in between.
-    local fadeIn  = Constants.BLOOD_MARK_FADE_IN :: number
-    local fadeOut = Constants.BLOOD_MARK_FADE_OUT :: number
-    for _, m in ipairs(marks) do
-        local age  = now - m.bornAt
-        local left = m.expireAt - now
-        if age < fadeIn then
-            m.part.Transparency = m.baseT + (1 - m.baseT) * (1 - age / fadeIn)
-        elseif left < fadeOut then
-            m.part.Transparency = m.baseT + (1 - m.baseT) * (1 - left / fadeOut)
-        elseif m.part.Transparency ~= m.baseT then
-            m.part.Transparency = m.baseT
-        end
-    end
+    sweep(marks, now)
+    sweep(bodyFx, now)
 end
 
 -- ============================================================
@@ -373,7 +458,7 @@ function BloodController:Start()
         end
         local clampedIntensity = math.clamp(intensity, 0, 1)
         playBurst(position, travelDir, clampedIntensity)
-        spawnMarks(position, travelDir, clampedIntensity)
+        spawnBloodMarks(position, travelDir, clampedIntensity)
     end)
 
     ReplicatedStorage:GetAttributeChangedSignal(GLOBAL_ATTR):Connect(function()

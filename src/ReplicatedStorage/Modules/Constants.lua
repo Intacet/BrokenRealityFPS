@@ -2132,21 +2132,40 @@ Constants.BLOOD_DROPLET_SPREAD         = 22
 Constants.BLOOD_DROPLET_GRAVITY        = 130
 Constants.BLOOD_SPRAY_UP_BIAS          = 0.35 -- how much the spray axis tilts toward world up
 
--- Client surface marks (texture-free: small flat parts flush to the surface).
-Constants.BLOOD_SPLATTER_RAYS       = 5      -- rays cast around the hit looking for nearby surfaces
-Constants.BLOOD_SPLATTER_RANGE      = 11     -- studs
-Constants.BLOOD_MAX_MARKS           = 56     -- ring buffer (main marks + satellites); oldest destroyed when full
-Constants.BLOOD_MARK_LIFETIME       = 18     -- seconds before a mark is destroyed
-Constants.BLOOD_MARK_FADE_IN        = 0.1    -- seconds to fade a fresh mark in
+-- Client surface marks (texture-free flat parts). A character hit is split into: a few
+-- SMALL splatters welded to the limb, a dark recessed WOUND ball ("carved flesh"), and a
+-- BIGGER pool of marks on the floor found by casting straight down from the hit.
+Constants.BLOOD_MARK_LIFETIME       = 18     -- seconds a floor mark lives
+Constants.BLOOD_MARK_FADE_IN        = 0.1    -- seconds to fade a fresh mark/wound in
 Constants.BLOOD_MARK_FADE_OUT       = 5      -- seconds of fade-out at the end of life
-Constants.BLOOD_MARK_SIZE_MIN       = 0.4    -- studs (main mark)
-Constants.BLOOD_MARK_SIZE_MAX       = 1.9
 Constants.BLOOD_MARK_THICKNESS      = 0.04
-Constants.BLOOD_MARK_TRANSPARENCY_MIN = 0.08 -- base opacity range (randomised per mark)
-Constants.BLOOD_MARK_TRANSPARENCY_MAX = 0.32
-Constants.BLOOD_MARK_SATELLITES     = 3      -- tiny spatter spots dropped around each main mark
-Constants.BLOOD_MARK_SATELLITE_RANGE = 1.7   -- studs the satellites scatter across the surface
-Constants.BLOOD_MARK_SATELLITE_SIZE = 0.28   -- max satellite size
+Constants.BLOOD_MARK_TRANSPARENCY_MIN = 0.06 -- base opacity range (randomised per mark)
+Constants.BLOOD_MARK_TRANSPARENCY_MAX = 0.3
+
+-- Body splatter — small, welded to the hit limb so it rides the ragdoll / respawn.
+Constants.BLOOD_BODY_MARK_COUNT     = 3
+Constants.BLOOD_BODY_MARK_SIZE_MIN  = 0.18
+Constants.BLOOD_BODY_MARK_SIZE_MAX  = 0.5
+Constants.BLOOD_BODY_MARK_SPREAD    = 0.45   -- studs the small marks scatter around the entry
+Constants.BLOOD_BODY_MARK_LIFETIME  = 22
+
+-- Carved wound — a dark ball mostly sunk into the limb along the shot line.
+Constants.BLOOD_WOUND_ENABLED       = true
+Constants.BLOOD_WOUND_SIZE_MIN      = 0.16
+Constants.BLOOD_WOUND_SIZE_MAX      = 0.4
+Constants.BLOOD_WOUND_SINK          = 0.5    -- fraction of the ball buried in the surface
+Constants.BLOOD_WOUND_COLOR         = Color3.fromRGB(34, 3, 3)
+Constants.BLOOD_WOUND_LIFETIME      = 26
+Constants.BLOOD_MAX_BODY_FX         = 44     -- ring buffer for body splatters + wounds combined
+
+-- Floor pool — bigger marks below the hit.
+Constants.BLOOD_GROUND_RANGE        = 14     -- studs to search downward for a floor
+Constants.BLOOD_GROUND_MARK_SIZE_MIN = 0.6
+Constants.BLOOD_GROUND_MARK_SIZE_MAX = 2.4
+Constants.BLOOD_GROUND_SATELLITES   = 4      -- tiny spots around each floor mark
+Constants.BLOOD_GROUND_SATELLITE_RANGE = 2.2 -- studs the satellites scatter
+Constants.BLOOD_GROUND_SATELLITE_SIZE  = 0.4
+Constants.BLOOD_MAX_MARKS           = 60     -- ring buffer for floor marks + their satellites
 
 -- ── Hit reactions (Stage 5) ─────────────────────────────────────────────────
 -- Procedural flinch written to Motor6D.Transform, decayed to identity. Never touches

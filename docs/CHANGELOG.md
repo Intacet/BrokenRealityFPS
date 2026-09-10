@@ -1,5 +1,31 @@
 # Changelog
 
+## Blood marks: small welded body splatter + carved wound + bigger ground pool
+
+Owner feedback — the old marks plastered big flat red squares over the torso. Reworked
+`BloodController`'s mark logic (`Constants.BLOOD_*` restructured):
+
+- A `BloodEffect` only ever fires for a Humanoid that took damage, so the hit point is
+  always on a body. The mark spawn now splits into three parts:
+  - **Body splatter** — `BLOOD_BODY_MARK_COUNT` (3) *small* flat marks (≈0.18–0.5 studs)
+    scattered around the entry point, **welded to the struck limb** (found by a short probe
+    raycast) so they ride the ragdoll and vanish with the model on respawn.
+  - **Carved wound** — one dark near-black `Enum.PartType.Ball` (`BLOOD_WOUND_COLOR`,
+    ≈0.16–0.4 studs) sunk halfway into the limb along the shot line, also welded — reads as
+    a bullet cavity.
+  - **Ground pool** — the *bigger* marks (≈0.6–2.4 studs) + satellites, found by casting
+    straight **down** from the hit (past the hit character, which is excluded from that
+    ray). No floor within `BLOOD_GROUND_RANGE` → no ground marks (mid-air hit).
+- No more rays fired along the shot direction into the body, so nothing large sticks to the
+  torso. Welded body fx are a capped ring buffer (`BLOOD_MAX_BODY_FX`) with the same
+  fade-in / fade-out; the Heartbeat sweep also drops records whose limb was destroyed.
+- Removed `BLOOD_SPLATTER_RAYS/RANGE`, `BLOOD_MARK_SIZE_MIN/MAX`,
+  `BLOOD_MARK_SATELLITE*`; added `BLOOD_BODY_MARK_*`, `BLOOD_WOUND_*`, `BLOOD_GROUND_*`.
+  Burst (mist + droplets) unchanged. Server contract unchanged.
+- Studio-verified: probe finds the limb, 3 body marks + 1 wound-ball weld to it, the
+  down-ray finds the floor and places the bigger marks in `fxFolder`, ground marks measure
+  ~3× the body marks, self-cleans.
+
 ## Test-area damage dummies + a blood realism pass
 
 - **Dummies in the test area.** `Constants.DEV_TEST_AREA.SPAWN_DUMMIES` (default true) —

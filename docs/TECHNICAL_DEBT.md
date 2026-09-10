@@ -211,16 +211,24 @@ table and the Stages 4–6 debt list. Highlights:
 - Hit reactions only render on rigs with no Animator writing `Transform` (the dummy). On
   players the flinch is silently overwritten — the seam for an animation provider is the
   single `applyReaction` function; no provider registry (YAGNI).
-- **Blood realism pass (2026-09-10).** `BloodController` now does a two-emitter burst
-  (soft-sprite MIST that sprays back toward the shooter + tilts up, blank-square DROPLETS
-  that arc and fall on stronger gravity) and irregular surface marks (random footprint /
-  rotation / dark-red colour lerp / opacity, a few tiny satellite spatter spots per hit,
-  fade-in then fade-out). New `Constants.BLOOD_*` block (mist/droplet params, satellites,
-  `BLOOD_COLOR_DARK`). Still: marks are texture-free flat parts (no splatter decal asset),
-  no pooling of *marks* (only bursts are pooled — marks are a capped ring buffer of fresh
-  `Part`s), `BloodEffect` is `FireAllClients` with no distance culling, and the whole thing
-  is client-predicted (no server reconciliation). All numbers are first-eyeball guesses —
-  needs a Studio pass shooting a dummy.
+- **Blood realism pass (2026-09-10).** `BloodController` does a two-emitter burst
+  (soft-sprite MIST back toward the shooter + tilts up, blank-square DROPLETS that arc and
+  fall on stronger gravity). Marks are split by role: small flat **body splatter** + a dark
+  `Ball` **wound** both **welded to the struck limb** (found by a probe raycast), and
+  bigger **ground-pool** marks + satellites found by a downward ray that excludes the hit
+  character. New `Constants.BLOOD_BODY_MARK_*` / `BLOOD_WOUND_*` / `BLOOD_GROUND_*` /
+  `BLOOD_COLOR_DARK`. Remaining debt:
+  - Client-side `WeldConstraint` from a locally-made part to a **server-owned limb** —
+    works for local visuals, but if the limb's network ownership or CanCollide changes it
+    has not been stress-tested; the welded fx are never re-parented if the limb is swapped
+    without a Destroy (the sweep only reacts to `Parent == nil`).
+  - The limb probe (`findHitLimb`) is 4 short rays; a graze hit whose `hitPosition` sits
+    just off every body part gets no body marks / wound (falls back to burst only).
+  - Marks are texture-free flat parts (no splatter decal asset); the wound is a plain
+    dark ball, not real carved geometry.
+  - `BloodEffect` is `FireAllClients` with no distance culling; the whole thing is
+    client-predicted (no server reconciliation).
+  - All numbers are first-eyeball guesses — needs a Studio pass shooting a dummy.
 - Dev tooling trusts `RunService:IsStudio()`; `Constants.DEV_USER_IDS` is empty until filled.
 - Ragdoll impulse was retuned down after the owner's first test (was flinging the rig);
   the retune has not been re-tested.
