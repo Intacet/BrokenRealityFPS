@@ -1,5 +1,27 @@
 # Changelog
 
+## AI Stage 1A — basic server-owned squad NPC foundation
+
+- New `src/ServerScriptService/Services/AIService.server.lua` (self-running Script,
+  mapped in `default.project.json`) + new `Constants.AI` tuning table. Simple R6
+  rifleman "grunt" squads: spawn from `Workspace/AISpawns`, patrol
+  `Workspace/AIPatrolPoints` (missing folders → one `Logger.warn`, service still
+  starts), parent live models under `Workspace/AI`, detect players by server raycast
+  line-of-sight, chase, and burst-fire simple server raycasts. States: Idle / Patrol
+  / Chase / Attack / Dead. Dead grunts stop thinking and are destroyed after
+  `DEATH_CLEANUP_DELAY`. Active count hard-capped at `MAX_ACTIVE_NPCS`.
+- **No new remotes. No client AI scripts. No client damage decisions.** All AI
+  decisions are server-side.
+- Damage integration uses existing paths only — **no `GunService` / `DamageService`
+  edit**: player→AI via the `Constants.TAG_DAMAGE_ENTITY` tag + `GunService`'s
+  existing entity-hit path; AI→player via the public `DamageService:ApplyDamage`
+  (flat `Constants.AI.SHOT_DAMAGE`, `attacker = nil`).
+- **No killstreaks / points / rewards / airstrikes, no AI types, no monster AI, no
+  pathfinding (plain `MoveTo`), no ragdoll on AI death, no AI animations or weapon
+  models, no cover / flanking / suppression.** Foundation only.
+- Not runtime-verified (MCP can't place `AISpawns` parts or drive a player) — Studio
+  Play test required; see docs/TECHNICAL_DEBT.md "AI Stage 1A".
+
 ## Crosshair toggle for every player
 
 - The crosshair on/off control was only in `DummyDebugUI`, which builds for developers

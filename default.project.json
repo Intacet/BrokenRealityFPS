@@ -181,6 +181,14 @@
             "Disabled": false,
             "RunContext": "Legacy"
           }
+        },
+        "AIService": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/AIService.server.lua",
+          "$properties": {
+            "Disabled": false,
+            "RunContext": "Legacy"
+          }
         }
       }
     },

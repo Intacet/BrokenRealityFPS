@@ -1,5 +1,63 @@
 # Technical debt and unresolved migration questions
 
+## AI Stage 1A — server-owned squad NPC foundation (Studio verification: REQUIRED, not done)
+
+`AIService.server.lua` + `Constants.AI` add basic R6 rifleman "grunt" squads:
+spawn from `Workspace/AISpawns`, patrol `Workspace/AIPatrolPoints`, detect players
+by server raycast LOS, chase, and burst-fire server raycasts. `Workspace/AI` holds
+live models. This is **foundation only** — the AI system is NOT complete.
+
+- **Not runtime-verified.** `default.project.json` gained the `AIService` mapping
+  (structural — `rojo serve` restarted), but MCP can't create `Workspace/AISpawns`
+  parts, drive a player near a grunt, or watch chase/attack/death. Needs an
+  in-Studio Play pass: connect Rojo, add 1–2 anchored parts under
+  `Workspace/AISpawns` (optionally 2–4 under `Workspace/AIPatrolPoints`), Play Solo,
+  confirm `Workspace/AI` appears with squads, walk into `DETECTION_RANGE`, confirm
+  detect → chase → attack, kill a grunt (or set `Humanoid.Health = 0`), confirm
+  Dead state + model cleanup after `DEATH_CLEANUP_DELAY`, let it run several minutes
+  for Output spam / runaway count / server hitching, then Stop with no errors.
+- **Pathfinding is `Humanoid:MoveTo` only.** No `PathfindingService`. Grunts walk
+  straight at the goal and will get stuck on walls, corners, and gaps.
+  `PATH_RECALCULATE_INTERVAL` exists in `Constants.AI` but is currently unused
+  (reserved for a throttled `ComputeAsync` pass in Stage 1B).
+- **Shooting is a single burst raycast.** `fireOneShot` casts one ray per shot with
+  a random cone (`SHOT_SPREAD_DEGREES`), flat `SHOT_DAMAGE` (region forced to
+  `Unknown`, so no AI headshots). No penetration, no projectile travel, no tracer.
+- **player-to-AI damage relies on an existing path, not a dedicated hook.** NPCs are
+  tagged `Constants.TAG_DAMAGE_ENTITY`, so `GunService.getDamageableEntity` →
+  `DamageService:ApplyDamage` already damages them with no `GunService`/`DamageService`
+  edit. If that tag contract or `getDamageableEntity` changes, player→AI damage
+  silently breaks. AIService only listens for `Humanoid.Died`.
+- **AI-to-player damage** goes through `DamageService:ApplyDamage` with `attacker = nil`
+  (environment kill: no friendly-fire guard, `"environment"` in the kill feed, no
+  killer name). A proper "killed by an NPC" feed entry is deferred.
+- **No rewards / points / killstreaks / score.** AI death fires `CombatEvents.EntityKilled`
+  (via `DamageService`) but nothing consumes it for scoring; there is a `TODO` marker
+  in `onNPCDied` for a future `RewardService`. Ties into the existing
+  "Award kills, streaks, or XP → RewardService (future)" gap.
+- **No ragdoll on AI death.** `BreakJointsOnDeath = false`; the model is just
+  `Destroy()`ed after `DEATH_CLEANUP_DELAY`. `RagdollService` is untouched. Wiring
+  `RagdollService:Apply` on `Humanoid.Died` is a later step.
+- **No replicated muzzle flash / sound / animation for AI.** Grunts shoot invisibly
+  and silently; they have no `Animator` / animation system and no weapon model.
+- **Blood is a free side effect.** `BloodService` reacts to any
+  `CombatEvents.DamageDealt`, so shooting a grunt (or being shot by one) produces a
+  blood burst on clients. Not explicitly wired; set `BR_BloodEnabled = false` on an
+  NPC model to suppress.
+- **No AI types, factions, cover, suppression, flanking, or squad tactics.** One
+  grunt archetype, one ring formation, leader only used as the patrol-index advancer.
+  Grunts are hostile to every player (no team logic).
+- **Server performance at `MAX_ACTIVE_NPCS` (12) is untested.** One `THINK_INTERVAL`
+  (0.25 s) loop over all NPCs plus per-NPC LOS raycasts and detached burst tasks;
+  needs a real Studio/server measurement before the cap is raised.
+- **All `Constants.AI` numbers are first-pass guesses** (ranges, damage, burst
+  timing, speeds, spacing) and need a Studio tuning pass.
+- **Self-running Script, no `Destroy()` caller.** Like the other `*.server.lua`
+  services it starts itself at file end and lives for the server session;
+  `AIService.Destroy()` exists and is correct but is only reachable from the command
+  bar / a future require. Its per-NPC connections and burst threads *are* cleaned on
+  death.
+
 ## Pre-round loadout menu — partial DEBT-013 (Studio verification: YES, required)
 
 `LoadoutMenu` (client UI) + `LoadoutService` (server) + the `SelectLoadout` remote give
@@ -207,7 +265,9 @@ Open items / deferred:
   (not the test-area folder or a sub-folder), so between a rebuild and the sweep there is a
   brief window where an old and a new set could co-exist; the rig has no clothing / R15 /
   animation and no `HumanoidDescription`; DummyService's own service connections are never
-  disconnected (pre-existing). Still **no AI** — the dummies just stand and take hits.
+  disconnected (pre-existing). The **test dummies** still just stand and take hits — moving
+  AI now lives in the separate `AIService` (see "AI Stage 1A" above); its grunt NPCs are a
+  different tag (`BR_DamageEntity` only, not `BR_DamageDummy`) so DummyService ignores them.
 - **Extraction / loot-loop test area is deferred.** No objective, stash, exfil, or
   inventory props — out of scope for this task.
 - **No global lighting/atmosphere test.** `LightingTest` is self-contained props only;

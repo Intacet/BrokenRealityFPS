@@ -2061,7 +2061,7 @@ Constants.DAMAGE_MAX_PER_HIT = 500
 
 -- CollectionService tags and instance attributes. Systems key off these, never off
 -- hardcoded instance paths.
-Constants.TAG_DAMAGE_ENTITY      = "BR_DamageEntity"     -- any Humanoid Model GunService may damage through the shared pipeline (dummies now, NPCs later)
+Constants.TAG_DAMAGE_ENTITY      = "BR_DamageEntity"     -- any Humanoid Model GunService may damage through the shared pipeline (test dummies + AIService grunt NPCs)
 Constants.TAG_DAMAGE_DUMMY       = "BR_DamageDummy"      -- developer test dummy; DummyService owns registration / death / reset
 Constants.ATTR_INFINITE_HEALTH   = "BR_InfiniteHealth"   -- model attribute: DamageService still fires damage events but does not reduce Humanoid.Health
 Constants.ATTR_REACTIONS_ENABLED = "BR_ReactionsEnabled" -- reserved for HitReactionService (Stage 5, not yet built)
@@ -2071,6 +2071,62 @@ Constants.ATTR_BLOOD_ENABLED     = "BR_BloodEnabled"     -- reserved for BloodSe
 -- player whose UserId is listed here, or from any client when RunService:IsStudio().
 Constants.DEV_USER_IDS = {
     -- [175217234] = true,  -- fill in live-place developer UserIds; Studio is always allowed
+}
+
+-- ── AI Stage 1A — server-owned squad NPC foundation (AIService.server) ──────
+-- Simple R6 rifleman "grunt" squads: easy to kill alone, dangerous in numbers.
+-- ALL AI decisions are server-side. AIService spawns from Workspace/AISpawns,
+-- patrols Workspace/AIPatrolPoints, and parents live NPCs under Workspace/AI.
+-- NPCs are tagged Constants.TAG_DAMAGE_ENTITY, so the existing GunService →
+-- DamageService path already lets player bullets kill them; AI shots damage
+-- players through DamageService:ApplyDamage (no new remotes, no client AI).
+-- All AI tuning lives here — no magic numbers in AIService.
+Constants.AI = {
+    ENABLED = true,
+    DEBUG   = true,
+
+    FOLDER_NAME        = "AI",             -- Workspace child holding live NPC models
+    SPAWN_FOLDER_NAME  = "AISpawns",       -- Workspace folder of BasePart squad origins
+    PATROL_FOLDER_NAME = "AIPatrolPoints", -- Workspace folder of BasePart patrol destinations
+
+    MAX_ACTIVE_NPCS    = 12,
+    DEFAULT_SQUAD_SIZE = 3,
+    MAX_SQUADS         = 2,
+
+    SPAWN_ON_SERVER_START_IN_STUDIO = true,
+    SPAWN_DELAY_BETWEEN_NPCS        = 0.2,
+
+    NPC_RIG_TYPE    = "R6",
+    NPC_NAME_PREFIX = "BR_Grunt",
+
+    NPC_HEALTH      = 80,
+    NPC_WALK_SPEED  = 12,
+    NPC_CHASE_SPEED = 15,
+
+    THINK_INTERVAL            = 0.25,
+    PATH_RECALCULATE_INTERVAL = 1.0,  -- reserved; plain MoveTo re-issue cadence
+    TARGET_RECHECK_INTERVAL   = 0.35,
+
+    DETECTION_RANGE            = 120,
+    LOSE_TARGET_RANGE          = 160,
+    ATTACK_RANGE               = 90,
+    LINE_OF_SIGHT_HEIGHT_OFFSET = 2.5,
+
+    BURST_SHOTS_MIN      = 2,
+    BURST_SHOTS_MAX      = 4,
+    SECONDS_BETWEEN_SHOTS  = 0.16,
+    SECONDS_BETWEEN_BURSTS = 1.2,
+    SHOT_DAMAGE         = 8,
+    SHOT_SPREAD_DEGREES = 4.0,
+    SHOT_RANGE          = 220,
+
+    DEATH_CLEANUP_DELAY = 6,
+
+    -- Extra Stage 1A tuning (still Constants.AI — not magic numbers).
+    SQUAD_SPACING           = 6,   -- studs between squad members around leader/patrol/spawn
+    PATROL_ARRIVE_DISTANCE  = 8,   -- leader within this of a patrol point → advance the squad index
+    LAST_SEEN_CHASE_SECONDS = 3,   -- keep chasing a lost target's last position this long
+    ATTACK_MOVE_SPEED       = 6,   -- WalkSpeed while in Attack (slow, not a hard stop)
 }
 
 -- ── Developer test area (TestAreaBuilder.server) ────────────────────────────
