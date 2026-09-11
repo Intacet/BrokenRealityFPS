@@ -1,5 +1,26 @@
 # Changelog
 
+## Cover on the far side of the player + first-person weapon retraction
+
+- **Grunts hide where the player can't see them.** `findCoverPoint` now sweeps a
+  fuller ring of angles and, among spots whose line of sight to the player is
+  blocked, picks the one whose blocking obstacle is *nearest* (within
+  `Constants.AI.COVER_HUG_DISTANCE`) — so the grunt tucks against the far face of
+  that obstacle instead of standing behind a distant wall still half-exposed. The
+  `Cover` state also re-picks its spot if the player flanks around the cover and
+  regains line of sight while the grunt is parked there.
+- **Player weapon retraction (Tarkov close-quarters).** `ViewModelController` casts
+  one forward ray from just behind the camera each frame; when it hits a wall
+  within `Constants.VIEWMODEL_WALL_PROBE_DISTANCE` the whole viewmodel is pulled
+  back toward the player and the muzzle tucks up (`VIEWMODEL_WALL_PUSH_MAX` /
+  `VIEWMODEL_WALL_TUCK_MAX_DEG`), framerate-independently lerped and scaled down
+  while ADS. Appended last in the existing PivotTo chain next to the positional
+  recoil term. Purely cosmetic — `GunController` still fires from the camera /
+  free-aim solve, so shooting point-blank into a wall is unchanged.
+- `AIService` + `Constants.AI` (cover) and `ViewModelController` + `Constants`
+  (retraction) only — no new remotes, no server/damage/camera-writer change. MCP
+  checked the APIs; both need a Studio Play test (see docs/TECHNICAL_DEBT.md).
+
 ## AI Stage 1F — grunts crouch behind cover, guns retract off walls
 
 - **Crouch in cover.** In the `Cover` state a grunt now crossfades to the player's

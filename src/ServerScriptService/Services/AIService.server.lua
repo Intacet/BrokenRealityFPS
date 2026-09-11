@@ -1098,10 +1098,13 @@ local function pullFromWalls(pos: Vector3, awayDir: Vector3): Vector3
     return pos + unit * worst
 end
 
--- Stage 1D: pick a spot roughly COVER_SEEK_DISTANCE studs from the grunt, away
--- from `targetPos`, that breaks line of sight to the target. Samples a few angles
--- off the away-from-target vector; returns the first that is occluded, else a
--- plain retreat point (partial cover). Never returns nil.
+-- Stage 1D / 1F: pick a spot roughly COVER_SEEK_DISTANCE studs from the grunt that
+-- breaks line of sight to `targetPos`. Samples a ring of angles off the
+-- away-from-target vector; of the candidates whose LOS to the target is blocked,
+-- prefers the one whose blocking obstacle is *closest* (within COVER_HUG_DISTANCE)
+-- so the grunt ends up hugging the far side of that obstacle, fully out of the
+-- player's view — not merely behind some distant wall. Falls back to the first
+-- occluded candidate, then to a plain retreat point. Never returns nil.
 local function findCoverPoint(record: NPCRecord, targetPos: Vector3): Vector3
     local root = record.root
     local eye  = Vector3.new(0, AI.LINE_OF_SIGHT_HEIGHT_OFFSET, 0)
@@ -1111,17 +1114,32 @@ local function findCoverPoint(record: NPCRecord, targetPos: Vector3): Vector3
     end
     local awayDir  = flatAway.Unit
     local distance = AI.COVER_SEEK_DISTANCE
+    local hug      = AI.COVER_HUG_DISTANCE :: number
 
     local tchar: Model? = if record.target ~= nil then record.target.Character else nil
+    local bestPos: Vector3? = nil
+    local bestObstacleDist = math.huge
+    local fallbackPos: Vector3? = nil
+
     for _, deg in ipairs(AI.COVER_SAMPLE_ANGLES) do
         local dir = (CFrame.Angles(0, math.rad(deg), 0) * awayDir).Unit
         local candidate = root.Position + dir * distance
         local result = workspace:Raycast(candidate + eye, (targetPos + eye) - (candidate + eye), losParams)
         if result ~= nil and (tchar == nil or not result.Instance:IsDescendantOf(tchar)) then
-            return pullFromWalls(candidate, awayDir)  -- something sits between this spot and the target
+            -- Something occludes this spot. result.Distance is how far that obstacle
+            -- is from the candidate — small = the grunt would be tucked right behind it.
+            if fallbackPos == nil then
+                fallbackPos = candidate
+            end
+            if result.Distance <= hug and result.Distance < bestObstacleDist then
+                bestObstacleDist = result.Distance
+                bestPos = candidate
+            end
         end
     end
-    return pullFromWalls(root.Position + awayDir * distance, awayDir)
+
+    local chosen = bestPos or fallbackPos or (root.Position + awayDir * distance)
+    return pullFromWalls(chosen, awayDir)
 end
 
 -- Stage 1E: true if there is something to hug within COVER_ADJACENT_RADIUS of
@@ -1313,6 +1331,13 @@ local function thinkNPC(record: NPCRecord, now: number)
             humanoid.AutoRotate = true
             humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
             if record.coverPoint == nil then
+                record.coverPoint = findCoverPoint(record, troot.Position)
+            end
+            -- Stage 1F: if the player has moved around our cover and can see us again
+            -- (we're parked at the spot but still in LOS), pick a fresh one on the far
+            -- side of the nearest obstacle.
+            local cp = record.coverPoint
+            if inLos and cp ~= nil and (root.Position - cp).Magnitude <= AI.FIGHT_ARRIVE_DIST then
                 record.coverPoint = findCoverPoint(record, troot.Position)
             end
             humanoid:MoveTo(record.coverPoint or root.Position)

@@ -1749,6 +1749,22 @@ Constants.VIEWMODEL_MOVEMENT_INERTIA_CROUCH_MULTIPLIER = 0.65  -- reduced while 
 Constants.VIEWMODEL_MOVEMENT_INERTIA_MIN_SPEED           = 1.5  -- studs/s — below this: no accumulation
 Constants.VIEWMODEL_MOVEMENT_INERTIA_MAX_SPEED_REFERENCE = 24   -- studs/s — each axis clamped to this
 
+-- ── Viewmodel wall collision (Tarkov-style close-quarters weapon retraction) ────────────────
+-- ViewModelController casts one forward ray from the camera each RenderStepped; when it hits
+-- geometry within PROBE_DISTANCE the whole viewmodel is pulled back toward the player (camera-
+-- local +Z, same axis as positional recoil) and the muzzle tucks up, so the gun stops clipping
+-- through the wall you walk into. Purely visual — bullets still originate from the camera / free-
+-- aim solve in GunController, so point-blank aim is unchanged. Lerped for a soft ease in/out.
+Constants.VIEWMODEL_WALL_COLLISION_ENABLED   = true   -- master switch; false → wallCF is identity
+Constants.VIEWMODEL_WALL_COLLISION_DEBUG     = false  -- Logger.debug on large push changes
+Constants.VIEWMODEL_WALL_PROBE_DISTANCE      = 5.0    -- studs; wall nearer than this along camera look → retract
+Constants.VIEWMODEL_WALL_PROBE_BACKUP        = 1.0    -- studs; start the ray this far behind the camera so a wall at the camera plane still registers
+Constants.VIEWMODEL_WALL_PUSH_MAX            = 2.4    -- studs; maximum backward pull of the viewmodel at a flush wall
+Constants.VIEWMODEL_WALL_TUCK_MAX_DEG        = 20     -- degrees; muzzle tuck-up at full retract
+Constants.VIEWMODEL_WALL_LERP_SPEED          = 14     -- per-second rate the current retract chases the target (framerate-independent)
+Constants.VIEWMODEL_WALL_ADS_SCALE           = 0.5    -- multiplier on the retract while ADS (sights stay usable; you still can't aim through a wall)
+Constants.VIEWMODEL_WALL_EPSILON             = 0.001  -- below this retract fraction → snap to zero / identity
+
 -- ── Task A: ADS sprint disable + ADS focus zoom ─────────────────────────────────────────────
 -- FOV values for the three camera states.  Sprint FOV (SPRINT_CAMERA_FOV,
 -- TACTICAL_SPRINT_CAMERA_FOV) still applies when not ADS — these are ADS-specific.
@@ -2154,7 +2170,14 @@ Constants.AI = {
     TAKE_COVER          = true,
     COVER_DURATION      = 3.0,     -- seconds in cover before re-peeking
     COVER_SEEK_DISTANCE = 16,      -- studs from the grunt to test for a cover spot
-    COVER_SAMPLE_ANGLES = { 0, 40, -40, 75, -75 },  -- degrees off the away-from-target vector to sample
+    -- Fuller ring so a grunt can find cover to the side / slightly toward the player
+    -- (a pillar), not only directly away from them. 0 = straight away from the target.
+    COVER_SAMPLE_ANGLES = { 0, 25, -25, 50, -50, 80, -80, 115, -115, 150, -150, 180 },
+    -- The obstacle that breaks LOS must be within this of the candidate spot, else the
+    -- grunt would be hiding behind some far wall while still exposed up close. Picking
+    -- the candidate with the *nearest* such obstacle puts the grunt on the far side of
+    -- it, hugging cover, out of the player's view.
+    COVER_HUG_DISTANCE  = 7,
 
     -- ── Stage 1E — fight from cover, react to fire, flank a stale target ───
     HURT_COVER            = true,  -- taking any hit arms the cover window immediately

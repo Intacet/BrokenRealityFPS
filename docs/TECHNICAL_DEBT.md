@@ -291,8 +291,68 @@ additive `Motor6D` C0/C1 offsets apply and restore. Residual risks:
   wall behind it.
 - **No `HipHeight` change** (matches the player) — on steep/uneven ground the
   crouch clip can look like it floats.
-- **Follow-up not done:** the player's own first-person Tarkov weapon collision
-  (`ViewModelController`, a client file) is a separate task.
+
+### AI Stage 1F.1 — hide on the far side of cover (Studio verification: REQUIRED, not done)
+
+`findCoverPoint` now scores occluded candidates by how near the blocking obstacle
+is (`Constants.AI.COVER_HUG_DISTANCE`) and picks the nearest, so the grunt tucks
+against the far face of that obstacle; the `Cover` branch re-picks when the player
+flanks around and regains LOS. Risks:
+
+- **Still per-grunt, still heuristic.** The "obstacle within `COVER_HUG_DISTANCE`"
+  test is a single ray from the candidate to the player — a candidate beside a
+  pillar that the player can walk around in a second still counts. No notion of
+  which cover the squad is already using.
+- **Re-pick can thrash.** If every sampled candidate is exposed (open ground) the
+  grunt recomputes `findCoverPoint` every think while parked, issuing a new
+  `MoveTo` each time — it will jitter in place rather than commit. Bounded only by
+  `COVER_DURATION`.
+- **`COVER_SAMPLE_ANGLES` is now 12 rays × (cover + fight) per think per grunt.**
+  Cheap at the Stage-1 NPC cap but not free; revisit if the cap rises.
+- **Wall-clip risks from the base 1F block still apply** (side walls, un-eyeballed
+  C0/C1 signs, no pathfinding on the pulled-back spot).
+
+## Player first-person weapon retraction — Tarkov close-quarters (Studio verification: REQUIRED, not done)
+
+`ViewModelController.computeWallCollisionCF` + `Constants.VIEWMODEL_WALL_*`. One
+forward ray from `camera.Position - look * VIEWMODEL_WALL_PROBE_BACKUP` along the
+camera look each `RenderStepped`; a collidable hit within
+`VIEWMODEL_WALL_PROBE_DISTANCE` produces a camera-local `wallCF`
+(`CFrame.new(0,0,push) * CFrame.Angles(tuck,0,0)`) appended last in the PivotTo
+chain, next to the positional-recoil term, on both the hip and ADS-aligned pivots.
+`vmWallRetract` is a framerate-independent lerp (`1 - e^(-LERP_SPEED*dt)`), reset
+to 0 in both `init` reset blocks. MCP-checked the APIs
+(`RaycastParams.RespectCanCollide`, directional raycast, the CFrame chain + Lerp).
+Residual risks:
+
+- **Not runtime-verified.** Needs a first-person Play pass walking into walls at
+  various angles, hip and ADS.
+- **Push / tuck magnitudes and the tuck *sign* are un-eyeballed.** `push` is `+Z`
+  (toward the player, same as recoil — verified direction); `tuck` is
+  `CFrame.Angles(+x,0,0)` which should raise the muzzle. If the gun sinks or the
+  barrel drops into the floor, flip `VIEWMODEL_WALL_TUCK_MAX_DEG` negative or lower
+  `VIEWMODEL_WALL_PUSH_MAX`.
+- **Single centre ray.** A wall only to the left/right of the crosshair (gun
+  angled across a doorframe) does not retract; a thin railing the ray passes
+  between does not either. No spread of probes, no per-barrel-tip test.
+- **`wallCF` is right-multiplied onto both Lerp endpoints**, so during the ADS
+  blend the interpolation is `Lerp(A*w, B*w, α)`, not `Lerp(A,B,α)*w`. The
+  positional difference is tiny at these magnitudes but it is not mathematically
+  identical to applying `wallCF` after the blend.
+- **ADS alignment shifts.** Even at `VIEWMODEL_WALL_ADS_SCALE = 0.5` the sights
+  move off centre when you aim into a wall — intended (you can't ADS through a
+  wall) but it will feel different from games that just block the shot. Retune the
+  scale (0 disables it while aiming) after a test.
+- **`RespectCanCollide = true`** means the probe ignores non-collidable parts;
+  a map made of `CanCollide = false` decorative walls would not retract the gun.
+- **No interaction with the existing camera zoom / third-person switch.** In
+  third-person (`isFirstPerson` false) the viewmodel is hidden so `wallCF` is
+  moot, but the helper still raycasts every frame — a micro-cost, not gated on
+  visibility.
+- **Fire origin unchanged** by design (`GunController` camera / free-aim solve),
+  so a retracted gun visually behind the player's eye still fires straight —
+  correct for gameplay, but the muzzle-flash FX (`GetMuzzleWorldCFrame`) will play
+  at the retracted position.
 
 ## Pre-round loadout menu — partial DEBT-013 (Studio verification: YES, required)
 

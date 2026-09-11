@@ -15,7 +15,11 @@
 --
 -- PivotTo camera follow (every RenderStepped, only when self.model is non-nil):
 --   m:PivotTo(cam.CFrame * CAMERA_EXTRA_OFFSET * cameraInertiaCF * movementInertiaCF * viewRecoilCFrame
---             * vmRecoilCF * freeAimCF * swayCF * finalMoveCF * BASE_OFFSET * CFrame.new(0,0,recoilOffset))
+--             * vmRecoilCF * freeAimCF * swayCF * finalMoveCF * BASE_OFFSET * CFrame.new(0,0,recoilOffset)
+--             * wallCF)
+--   wallCF — Tarkov-style close-quarters retract: a forward camera ray (computeWallCollisionCF)
+--            pulls the viewmodel back toward the player + tucks the muzzle up when a wall is
+--            within Constants.VIEWMODEL_WALL_PROBE_DISTANCE. Cosmetic only — fire origin unchanged.
 --   CAMERA_EXTRA_OFFSET — constant base offset from the camera reference point (hipfire).
 --   cameraInertiaCF     — camera-turn inertia lag (viewmodel-only; excluded from ADS pivot).
 --   movementInertiaCF   — movement velocity inertia lag (viewmodel-only; excluded from ADS pivot).
@@ -124,6 +128,18 @@ local preAdsFirstPerson: boolean = Constants.FORCE_FIRST_PERSON
 
 -- Positional recoil offset (decays toward 0 each RenderStepped).
 local recoilOffset: number = 0
+
+-- Viewmodel wall collision (Tarkov-style close-quarters retraction).
+-- vmWallRetract: current retract fraction [0, 1], lerped toward the raycast result
+--   each RenderStepped (0 = clear, 1 = flush against a wall along the camera look).
+-- vmWallProbeParams: reused RaycastParams; FilterDescendantsInstances is refreshed
+--   each frame with the local character + the viewmodel model so the probe only
+--   sees world geometry.
+local vmWallRetract: number = 0
+local vmWallProbeParams: RaycastParams = RaycastParams.new()
+vmWallProbeParams.FilterType = Enum.RaycastFilterType.Exclude
+vmWallProbeParams.IgnoreWater = true
+vmWallProbeParams.RespectCanCollide = true
 
 -- Rotational recoil CFrame pushed by GunController each frame via SetRecoilOffset().
 local viewRecoilCFrame: CFrame = CFrame.new()
@@ -418,6 +434,70 @@ local function getCharacterAnimator(): Animator?
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return nil end
     return hum:FindFirstChildOfClass("Animator")
+end
+
+-- Tarkov-style close-quarters weapon retraction.
+-- Casts one forward ray from behind the camera along its look vector each frame;
+-- when it hits collidable geometry within VIEWMODEL_WALL_PROBE_DISTANCE, returns a
+-- camera-local CFrame that pulls the whole viewmodel back toward the player (+Z,
+-- same axis as positional recoil) and tucks the muzzle up. Framerate-independent
+-- lerp on vmWallRetract so it eases in / out instead of snapping. Returns identity
+-- when disabled, when there is no camera, or when nothing is close.
+-- Purely cosmetic: GunController still fires from the camera / free-aim solve, so
+-- shooting point-blank into a wall is unaffected.
+local function computeWallCollisionCF(m: Model, cam: Camera?, dt: number, adsAlpha: number): CFrame
+    if not Constants.VIEWMODEL_WALL_COLLISION_ENABLED or cam == nil then
+        vmWallRetract = 0
+        return CFrame.new()
+    end
+
+    local probeDist = Constants.VIEWMODEL_WALL_PROBE_DISTANCE :: number
+    local backup    = Constants.VIEWMODEL_WALL_PROBE_BACKUP :: number
+    local camCF     = cam.CFrame
+    local origin    = camCF.Position - camCF.LookVector * backup
+    local span      = probeDist + backup
+
+    local filter: { Instance } = { m }
+    local char = Players.LocalPlayer.Character
+    if char ~= nil then
+        table.insert(filter, char)
+    end
+    vmWallProbeParams.FilterDescendantsInstances = filter
+
+    local hit = workspace:Raycast(origin, camCF.LookVector * span, vmWallProbeParams)
+    local wanted = 0
+    if hit ~= nil then
+        -- hit.Distance is measured from `origin` (behind the camera); convert to a
+        -- 0..1 fraction of the probe span, 1 = wall right at the camera plane.
+        wanted = math.clamp(1 - hit.Distance / span, 0, 1)
+    end
+
+    -- Framerate-independent approach: alpha = 1 - e^(-rate * dt).
+    local rate  = Constants.VIEWMODEL_WALL_LERP_SPEED :: number
+    local alpha = 1 - math.exp(-rate * math.max(dt, 0))
+    vmWallRetract += (wanted - vmWallRetract) * alpha
+
+    if vmWallRetract < (Constants.VIEWMODEL_WALL_EPSILON :: number) then
+        vmWallRetract = 0
+        return CFrame.new()
+    end
+
+    local scale = 1
+    if adsAlpha > 0 then
+        scale = 1 - adsAlpha * (1 - (Constants.VIEWMODEL_WALL_ADS_SCALE :: number))
+    end
+    local t    = vmWallRetract * scale
+    local push = t * (Constants.VIEWMODEL_WALL_PUSH_MAX :: number)
+    local tuck = math.rad(t * (Constants.VIEWMODEL_WALL_TUCK_MAX_DEG :: number))
+
+    if Constants.VIEWMODEL_WALL_COLLISION_DEBUG then
+        Logger.debug(string.format("[ViewModelController] wall retract=%.2f push=%.2f", t, push))
+    end
+
+    -- Translate straight back toward the player, then tuck the muzzle up about the
+    -- pulled-back origin. +Z is toward the player (camera looks down -Z), matching
+    -- the positional-recoil term this sits next to in the pivot chain.
+    return CFrame.new(0, 0, push) * CFrame.Angles(tuck, 0, 0)
 end
 
 -- Plays the third-person equip one-shot then chains to the TP idle loop.
@@ -919,6 +999,7 @@ function ViewModelController:init()
     vmBreathWeight     = 0
     vmAccelTilt        = 0
     vmHorizSpeedPrev   = 0
+    vmWallRetract      = 0
     vmPrevCamCFrame       = CFrame.new()
     vmCamInertiaYaw       = 0
     vmCamInertiaPitch     = 0
@@ -1063,6 +1144,7 @@ function ViewModelController:StopWeaponAnimations()
     vmBreathWeight     = 0
     vmAccelTilt        = 0
     vmHorizSpeedPrev   = 0
+    vmWallRetract      = 0
     -- Third-person character tracks: stop and destroy (character is alive in this path).
     -- AnimationTrack:Destroy() severs Stopped connections synchronously, preventing any
     -- deferred equip-chain or reload-chain callback from firing after holster.
@@ -2368,6 +2450,9 @@ function ViewModelController:Start()
         --   finalMoveCF               — movement/bob CFrame from MovementController
         --   BASE_OFFSET               — rig FakeCamera-relative alignment offset
         --   CFrame.new(0,0,recoilOffset) — positional push-back recoil
+        --   wallCF                    — Tarkov-style wall-collision retract (+Z toward player + muzzle tuck)
+        local wallCF = computeWallCollisionCF(m, cam, dt, adsAimAlpha)
+
         local basePivot = cam.CFrame
             * CAMERA_EXTRA_OFFSET
             * cameraInertiaCF
@@ -2379,16 +2464,19 @@ function ViewModelController:Start()
             * finalMoveCF
             * BASE_OFFSET
             * CFrame.new(0, 0, recoilOffset)
+            * wallCF
 
         if adsAimAlpha > 0.001 then
             -- ADS-aligned pivot: no CAMERA_EXTRA_OFFSET → FakeCamera lands at cam.CFrame.
             -- viewRecoilCFrame and vmRecoilCF are both preserved so weapon kick is visible
             -- while aiming. freeAimCF and finalMoveCF are already identity during ADS.
+            -- wallCF is already ADS-scaled inside computeWallCollisionCF.
             local aimAlignedPivot = cam.CFrame
                 * viewRecoilCFrame
                 * vmRecoilCF
                 * BASE_OFFSET
                 * CFrame.new(0, 0, recoilOffset)
+                * wallCF
             m:PivotTo(basePivot:Lerp(aimAlignedPivot, adsAimAlpha))
         else
             m:PivotTo(basePivot)
