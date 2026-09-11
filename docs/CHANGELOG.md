@@ -1,5 +1,35 @@
 # Changelog
 
+## AI squad awareness and last-known-position memory
+
+- **Squads react together.** When one grunt spots (or is hit by) the player,
+  its whole squad goes on a time-bounded alert (not stuck alert forever), and
+  living squadmates within `ALERT_SHARE_RADIUS` learn roughly where the
+  player was and start investigating — even if they never personally saw
+  anything.
+- **Never a wallhack.** Shared awareness only ever changes where a grunt
+  walks. A grunt can only actually shoot with its own line of sight — that
+  was already true structurally and stays true regardless of any new flag.
+- **Investigate, don't beeline.** An alerted grunt with no target of its own
+  picks a random nearby offset near the shared position — not the exact
+  spot — and moves there using the existing anti-bunching/spacing logic, so
+  a squad converging on a last-known position doesn't stack on one point.
+  Once the shared position goes stale (`LAST_KNOWN_POSITION_MEMORY`) the
+  investigate goal clears.
+- **Alerts actually expire.** With no sighting or hit from any squad member
+  for `CLEAR_ALERT_AFTER_NO_CONTACT` seconds, the whole squad's alert clears
+  and everyone returns to Patrol/Idle — no permanent aggro.
+- New `Constants.AI_SQUAD_AWARENESS` table. Consolidates in place, rather
+  than duplicates, the earlier sticky `squad.alerted` reaction-tier flag
+  (now a proper expiring deadline) and reuses two `NPCRecord` fields that
+  already existed from an earlier pass — see docs/TECHNICAL_DEBT.md "AI
+  squad awareness" for that and every other scoping note.
+- `AIService` + `Constants.AI_SQUAD_AWARENESS` only — no new remotes, no
+  client files, `GunService`/`DamageService` untouched, existing spawning /
+  spacing / fire discipline / combat all preserved. MCP-checked the sharing,
+  throttling, alert-clearing, and investigate-goal logic in isolation; not
+  runtime-verified in Play.
+
 ## Kill All Bots button
 
 - New **KILL ALL BOTS** button in the loadout (`M`) menu, next to Respawn Bots.

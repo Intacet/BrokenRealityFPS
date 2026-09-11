@@ -2455,6 +2455,37 @@ Constants.AI_FIRE_DISCIPLINE = {
     WAITING_BOT_CAN_SHOOT        = false, -- escape hatch: true lets non-shooters fire anyway, bypassing the slot limit entirely — off by default, this IS the fire-discipline gate
 }
 
+-- ── AI squad awareness / last-known-position memory (AIService.server) ──────
+-- One grunt spotting (or being hit by) the player puts its whole squad "on
+-- edge" (a time-bounded alert, not sticky forever) and shares roughly where the
+-- player was with living squadmates nearby, so they investigate instead of
+-- staying oblivious — but a grunt without its OWN line of sight can never fire;
+-- shared awareness only ever changes movement, never the shoot gate. NOTE:
+-- squad reaction-tier selection now reads THIS table's timing (via the shared
+-- alert deadline) instead of the old sticky Constants.AI_COMBAT_TUNING-driven
+-- `squad.alerted` boolean from the earlier "fair combat tuning" pass — see
+-- docs/TECHNICAL_DEBT.md "AI squad awareness" for that and the per-NPC
+-- lastSawTargetAt / lastKnownTargetPosition fields this reuses instead of
+-- duplicating (both already existed from that same earlier pass).
+Constants.AI_SQUAD_AWARENESS = {
+    ENABLED = true,
+    DEBUG = true,
+
+    ALERT_SHARE_RADIUS    = 85,  -- studs; only squadmates within this of the spotting/hit grunt become isAlertedBySquad
+    ALERT_MEMORY_DURATION = 6.0, -- seconds; a sighting/hit keeps the squad on the fast "Alert" reaction tier this long
+    LAST_KNOWN_POSITION_MEMORY = 4.0, -- seconds; how long the shared position stays fresh enough to actually walk toward
+    LAST_KNOWN_POSITION_SHARE_INTERVAL = 0.75, -- seconds; throttles how often the shared position/alert broadcast actually re-runs, not every think
+
+    INVESTIGATE_DISTANCE_MIN = 8,  -- studs; an alerted-but-blind squadmate picks a random offset this far from the shared position — not the exact point
+    INVESTIGATE_DISTANCE_MAX = 20,
+    INVESTIGATE_ARRIVE_DISTANCE = 7, -- studs; once within this of the current investigate spot with nothing found, pick a different nearby offset instead of idling there
+
+    LOSE_TARGET_GRACE_TIME = 0.45, -- seconds after THIS grunt's own contact lapses before it starts relying on squad-shared data instead (this file's interpretation — see TECHNICAL_DEBT)
+    CLEAR_ALERT_AFTER_NO_CONTACT = 7.0, -- seconds with no sighting/hit from ANY member before the whole squad's alert clears and everyone returns to Patrol/Idle
+
+    REQUIRE_OWN_LOS_TO_SHOOT = true, -- documents (does not toggle — see attackSlotEligible) that shared awareness never lets a blind grunt shoot; "no wallhack shooting" is a hard invariant here, not tunable
+}
+
 -- ── Developer test area (TestAreaBuilder.server) ────────────────────────────
 -- Layout knobs for the generated developer sandbox under Workspace/<FOLDER_NAME>.
 -- All positions are world-space offsets from ORIGIN.

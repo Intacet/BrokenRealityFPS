@@ -514,6 +514,84 @@ live `AIService` require). Residual risks:
   is the only on/off switch (reverts every grunt to the pre-fire-discipline,
   no-slot-limit behavior); there's no "easy/normal/hard" tuning surface.
 
+## AI squad awareness / last-known-position memory (Studio verification: REQUIRED, not done)
+
+**Consolidation note:** two of the four `NPCRecord` fields this task asked for
+— `lastSawTargetAt` and `lastKnownTargetPosition` — already existed under
+those exact names from the earlier "fair combat tuning" pass; reused as-is,
+not duplicated. The squad-level "one bot's sighting alerts the squad" concept
+also already existed as a sticky `squad.alerted` boolean from that same pass
+(used only for reaction-tier selection); **superseded in place** by the new
+time-bounded `squad.alertUntil` — `armReaction` now checks `now < alertUntil`
+instead of the old boolean, so a squad's "Alert" reaction tier actually
+expires. `alerted` is left declared (not removed — no task said to), now
+unread. Same consolidation pattern as three earlier passes this session
+(Stage 1C-vs-1H reaction delay, squad-spacing's `record.slot`, fire
+discipline's attack-slot rename) — running a fourth parallel "is this squad
+alert" flag alongside `alertUntil` would have been actively confusing, not a
+neutral addition.
+
+New `shareSquadAlert` / `clearStaleSquadAlert` helpers, new `NPCRecord` fields
+`isAlertedBySquad` / `investigateGoal`, new `SquadRecord` fields `alertUntil`
+/ `lastKnownTargetPosition` / `lastKnownTargetPlayer` / `lastKnownUpdateAt` /
+`lastContactAt`. `AIService` + `Constants.AI_SQUAD_AWARENESS` only — no new
+remotes, no client files, `GunService`/`DamageService` untouched, spawning /
+spacing / fire discipline / chase / attack / combat FX / damage / death
+cleanup all preserved. MCP-checked the share/throttle/broadcast logic (radius
+gating, share-interval throttle), the alert-clear pre-filter and timing, the
+`armReaction` tier switch, and the investigate-goal recompute conditions
+(nil / arrived / stale-interval) with throwaway logic (not a live `AIService`
+require — that pattern has previously timed out in this environment).
+Residual risks:
+
+- **Not runtime-verified in Play.** Whether shared alerting and investigate
+  behavior actually reads as "believable" — the core design goal — has not
+  been observed.
+- **`LOSE_TARGET_GRACE_TIME` and `INVESTIGATE_ARRIVE_DISTANCE`'s exact roles
+  were not fully specified** by the task and are this file's interpretation:
+  `LOSE_TARGET_GRACE_TIME` gates how long after THIS grunt's own contact
+  lapses before it starts relying on squad-shared data instead of its own
+  memory (rather than, say, a general "flicker" debounce on LOS itself, which
+  risked touching the already-tuned Stage 1D/1E Attack↔Chase transition);
+  `INVESTIGATE_ARRIVE_DISTANCE` was wired to make an investigating grunt pick
+  a *different* nearby offset once it arrives and finds nothing, rather than
+  idling at the first spot forever. Both are defensible readings, not the
+  only possible ones — flag if the feel is off.
+- **Awareness is simple squad memory, not full sensory simulation.** No
+  hearing (a grunt does not react to unheard/unseen gunfire — the only
+  "alert without seeing" path is being hit directly, per spec point 3), no
+  line-of-sound occlusion, no smell/vibration, no distinction between a
+  suppressed vs. loud weapon.
+- **No gunshot-sound investigation system.** A miss that doesn't hit a grunt
+  produces no awareness signal at all — only a direct hit or a personal
+  sighting shares anything with the squad.
+- **No radio/callout UI or audio.** The "share alert" moment is silent and
+  invisible to the player — no bark, no radio chatter, no on-screen tell that
+  a squad has gone alert. Would be a good place for one later
+  (`shareSquadAlert`'s `isNewAlert` branch is exactly the hook point).
+- **No stealth system.** There's no player crouch-noise/visibility model this
+  plugs into — `findVisibleTarget`'s raycast LOS is the only detection input
+  that exists, unchanged by this task.
+- **Investigate goals have no obstacle/walkability check** — same caveat as
+  squad spacing's goals: a random offset near the shared position can land
+  somewhere the grunt can't actually path to (`Humanoid:MoveTo` will just
+  fail quietly).
+- **Radius-gated sharing uses a flat distance, not LOS or hearing range** —
+  `ALERT_SHARE_RADIUS` is a straight-line distance check between the alerting
+  grunt and each squadmate, so a squadmate on the other side of a thin wall
+  85 studs away is alerted exactly as readily as one in open ground the same
+  distance — no occlusion test. Kept simple deliberately ("not full sensory
+  simulation" per the task's own design goal), but worth revisiting if it
+  feels like squads communicate through solid geometry too easily.
+- **Three overlapping timers** (`LAST_KNOWN_POSITION_MEMORY` 4s <
+  `ALERT_MEMORY_DURATION` 6s < `CLEAR_ALERT_AFTER_NO_CONTACT` 7s) govern,
+  respectively: how long the shared position stays walkable-toward, how long
+  the squad keeps the fast reaction tier, and how long until the squad fully
+  stands down. Deliberately layered rather than merged into one constant, but
+  the three values are unplaytested together and could feel disjointed (e.g.
+  a squadmate still shown as "alert" for reaction purposes 2 extra seconds
+  after it's stopped actually investigating anywhere).
+
 ## Player first-person weapon retraction — Tarkov close-quarters (Studio verification: REQUIRED, not done)
 
 `ViewModelController.computeWallCollisionCF` + `Constants.VIEWMODEL_WALL_*`. One

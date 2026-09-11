@@ -122,6 +122,7 @@ local FX      = Constants.AI_COMBAT_FX :: any
 local TUNE    = Constants.AI_COMBAT_TUNING :: any  -- AI Stage 1C: reaction/aim-ramp/suppression tuning
 local SPACING    = Constants.AI_SQUAD_SPACING :: any    -- squad formation / anti-bunching tuning
 local DISCIPLINE = Constants.AI_FIRE_DISCIPLINE :: any  -- squad fire discipline (active shooter slots + non-shooter support)
+local AWARENESS  = Constants.AI_SQUAD_AWARENESS :: any  -- squad awareness sharing + last-known-position memory
 
 -- ============================================================
 -- Types
@@ -222,6 +223,12 @@ type NPCRecord = {
     attackSlotAssignedAt   : number,  -- os.clock() the slot was (most recently) granted; feeds ATTACK_SLOT_TIMEOUT
     lastSupportRepositionAt: number,  -- os.clock() of this non-shooter's last support/hold-angle goal pick
 
+    -- AI squad awareness (2026-09-11). lastSawTargetAt / lastKnownTargetPosition
+    -- above (Stage 1C) already cover "when/where did I personally last see the
+    -- target" — reused as-is, not duplicated.
+    isAlertedBySquad: boolean,  -- a squadmate within ALERT_SHARE_RADIUS saw/was hit recently; may investigate without own LOS
+    investigateGoal : Vector3?, -- a small random offset near the squad's shared lastKnownTargetPosition, picked once and reused until stale (not the exact point — "don't send every NPC to the same spot")
+
     dead      : boolean,
 }
 
@@ -231,8 +238,11 @@ type SquadRecord = {
     patrolIndex : number,
 
     -- AI Stage 1C — fair combat tuning (reaction/aim/suppression; NOT the attack-slot
-    -- fields, which moved to the fire-discipline block below in the 2026-09-11 pass)
-    alerted : boolean, -- sticky: true once any member has engaged a live target this squad's life
+    -- fields, which moved to the fire-discipline block below in the 2026-09-11 pass).
+    -- `alerted` is superseded by `alertUntil` below (2026-09-11 squad awareness
+    -- pass) — left declared, no longer read or written, per the project's "don't
+    -- remove existing values" convention for these tasks.
+    alerted : boolean,
 
     -- AI squad spacing / formation (2026-09-11)
     members                : { Model },             -- living members as of the last assignFormationSlots() pass
@@ -246,6 +256,17 @@ type SquadRecord = {
     -- rather than run twice — see docs/TECHNICAL_DEBT.md "AI squad fire discipline").
     activeShooterIds     : { [Model]: boolean }, -- grunts currently allowed to fire (MAX_ACTIVE_SHOOTERS_PER_SQUAD)
     lastAttackSlotUpdateAt: number,              -- os.clock() of the last updateSquadAttackSlots() pass
+
+    -- AI squad awareness (2026-09-11) — supersedes `alerted` above (now unread) for
+    -- reaction-tier selection: armReaction reads `now < alertUntil` instead of the
+    -- old sticky boolean, so a squad's "Alert" tier now actually expires. See
+    -- docs/TECHNICAL_DEBT.md "AI squad awareness" for that and every other
+    -- overlap this consolidates rather than duplicates.
+    alertUntil            : number,    -- os.clock() deadline; > now → squad reacts on the fast "Alert" reaction tier
+    lastKnownTargetPosition: Vector3?, -- shared sighting/hit position, nil once CLEAR_ALERT_AFTER_NO_CONTACT elapses
+    lastKnownTargetPlayer  : Player?,  -- who that position belongs to
+    lastKnownUpdateAt      : number,   -- os.clock() of the last share (also the LAST_KNOWN_POSITION_SHARE_INTERVAL throttle gate)
+    lastContactAt          : number,   -- os.clock() of the most recent sighting or hit, from ANY member — drives CLEAR_ALERT_AFTER_NO_CONTACT
 }
 
 -- ============================================================
@@ -529,7 +550,13 @@ local function armReaction(record: NPCRecord, now: number)
     local lo: number, hi: number, tier: string
     if now < record.recentlyDamagedUntil then
         lo, hi, tier = TUNE.REACTION_TIME_RECENTLY_DAMAGED_MIN :: number, TUNE.REACTION_TIME_RECENTLY_DAMAGED_MAX :: number, "RecentlyDamaged"
-    elseif squad ~= nil and squad.alerted then
+    elseif squad ~= nil and now < squad.alertUntil then
+        -- AI squad awareness (2026-09-11): reads the time-bounded alertUntil
+        -- (shareSquadAlert) instead of the old sticky `squad.alerted` boolean, so
+        -- a squad that hasn't had contact in a while correctly cools back down to
+        -- the slower "Unaware" tier rather than staying alert for the rest of its
+        -- life. armReaction itself no longer sets squad.alerted (or alertUntil) —
+        -- only an actual sighting/hit (shareSquadAlert) does that.
         lo, hi, tier = TUNE.REACTION_TIME_ALERT_MIN :: number, TUNE.REACTION_TIME_ALERT_MAX :: number, "Alert"
     else
         lo, hi, tier = TUNE.REACTION_TIME_UNAWARE_MIN :: number, TUNE.REACTION_TIME_UNAWARE_MAX :: number, "Unaware"
@@ -540,8 +567,83 @@ local function armReaction(record: NPCRecord, now: number)
     if TUNE.DEBUG == true then
         Logger.debug("[AIService]", record.model.Name, "reaction delay:", tier, string.format("%.2fs", delay))
     end
-    if squad ~= nil then
-        squad.alerted = true
+end
+
+-- AI squad awareness: called whenever a grunt has a confirmed live sighting
+-- (every TARGET_RECHECK_INTERVAL while it can see its target — not just on the
+-- first acquisition, so an ongoing engagement keeps the squad's alert timer
+-- topped up) or is hit. Refreshes the squad's shared alert-expiry fields, and —
+-- throttled to LAST_KNOWN_POSITION_SHARE_INTERVAL so this isn't rewritten every
+-- think by every seeing member — the shared last-known position, then marks
+-- living squadmates within ALERT_SHARE_RADIUS as isAlertedBySquad so they can
+-- start investigating even without their own line of sight. `targetPos == nil`
+-- (attacker unknown, or no position available) still puts the squad "on edge"
+-- (alertUntil/lastContactAt, faster reaction tier) without sharing anywhere to
+-- investigate toward, per spec point 3.
+local function shareSquadAlert(record: NPCRecord, targetPlayer: Player?, targetPos: Vector3?, now: number)
+    if AWARENESS.ENABLED ~= true then
+        return
+    end
+    local squad = squads[record.squadId]
+    if squad == nil then
+        return
+    end
+    squad.lastContactAt = now
+    squad.alertUntil = now + (AWARENESS.ALERT_MEMORY_DURATION :: number)
+    if targetPos == nil then
+        return
+    end
+    if now - squad.lastKnownUpdateAt < (AWARENESS.LAST_KNOWN_POSITION_SHARE_INTERVAL :: number) then
+        return
+    end
+    local isNewAlert = squad.lastKnownTargetPosition == nil
+    squad.lastKnownTargetPosition = targetPos
+    squad.lastKnownTargetPlayer   = targetPlayer
+    squad.lastKnownUpdateAt       = now
+    if AWARENESS.DEBUG == true and isNewAlert then
+        Logger.debug("[AIService] squad", squad.id, "alerted by", record.model.Name)
+    end
+    local radius = AWARENESS.ALERT_SHARE_RADIUS :: number
+    for otherModel, other in pairs(npcs) do
+        if other ~= record and not other.dead and other.squadId == record.squadId
+            and (other.root.Position - record.root.Position).Magnitude <= radius then
+            if AWARENESS.DEBUG == true and not other.isAlertedBySquad then
+                Logger.debug("[AIService]", otherModel.Name, "alerted by squadmate", record.model.Name)
+            end
+            other.isAlertedBySquad = true
+        end
+    end
+end
+
+-- Clears a squad's shared alert once no member has had contact (a sighting or a
+-- hit — see shareSquadAlert) for CLEAR_ALERT_AFTER_NO_CONTACT seconds: drops the
+-- shared last-known position and every living member's isAlertedBySquad /
+-- investigateGoal, so the squad genuinely returns to Patrol/Idle rather than
+-- staying aggro forever. Cheap early-return; safe to call from every member's
+-- think (mirrors updateSquadAttackSlots / ensureFormationAssigned's throttle
+-- pattern) — the pre-check skips the real work once a squad is already clear,
+-- which is the common case for a squad that's never made contact at all.
+local function clearStaleSquadAlert(squad: SquadRecord, now: number)
+    if AWARENESS.ENABLED ~= true then
+        return
+    end
+    if squad.lastKnownTargetPosition == nil and squad.alertUntil <= now then
+        return
+    end
+    if now - squad.lastContactAt < (AWARENESS.CLEAR_ALERT_AFTER_NO_CONTACT :: number) then
+        return
+    end
+    squad.alertUntil = 0
+    squad.lastKnownTargetPosition = nil
+    squad.lastKnownTargetPlayer = nil
+    for _, record in pairs(npcs) do
+        if record.squadId == squad.id then
+            record.isAlertedBySquad = false
+            record.investigateGoal = nil
+        end
+    end
+    if AWARENESS.DEBUG == true then
+        Logger.debug("[AIService] squad", squad.id, "alert cleared — no contact for", AWARENESS.CLEAR_ALERT_AFTER_NO_CONTACT :: number, "s")
     end
 end
 
@@ -575,6 +677,13 @@ local function attackSlotEligible(record: NPCRecord): boolean
     if (troot.Position - record.root.Position).Magnitude > (AI.ATTACK_RANGE :: number) then
         return false
     end
+    -- AI squad awareness's REQUIRE_OWN_LOS_TO_SHOOT documents this LOS check as an
+    -- intentional invariant of this codebase rather than a togglable behavior: the
+    -- canSee() requirement immediately below is NOT gated on the flag, so setting
+    -- it false does not enable shooting without LOS — "no wallhack shooting" is a
+    -- hard restriction on this task, not a tunable. The flag exists so future code
+    -- reading Constants.AI_SQUAD_AWARENESS can assert/document the invariant
+    -- without re-deriving it. See docs/TECHNICAL_DEBT.md "AI squad awareness".
     local tchar: Model? = if record.target ~= nil then record.target.Character else nil
     if tchar == nil or not canSee(record, tchar, troot) then
         return false
@@ -1755,11 +1864,14 @@ local function thinkNPC(record: NPCRecord, now: number)
     updateWeaponCollision(record)
 
     -- Squad spacing: keep this grunt's formation slot fresh (cheap no-op unless
-    -- FORMATION_SLOT_REASSIGN_INTERVAL has actually elapsed).
+    -- FORMATION_SLOT_REASSIGN_INTERVAL has actually elapsed). Squad awareness:
+    -- clear a stale alert the same way (cheap no-op unless CLEAR_ALERT_AFTER_NO_CONTACT
+    -- has actually elapsed since the squad's last sighting/hit).
     do
         local squad = squads[record.squadId]
         if squad ~= nil then
             ensureFormationAssigned(squad, now)
+            clearStaleSquadAlert(squad, now)
         end
     end
 
@@ -1793,6 +1905,9 @@ local function thinkNPC(record: NPCRecord, now: number)
                     record.lastKnownTargetPosition = sroot.Position
                 end
                 record.lastSeenClock = now
+                -- AI squad awareness: share this (re-)confirmed sighting with the
+                -- squad every recheck, not just on first acquisition.
+                shareSquadAlert(record, seen, sroot ~= nil and sroot.Position or nil, now)
             end
         elseif record.target ~= nil then
             local tr   = targetRootOf(record.target)
@@ -2063,6 +2178,57 @@ local function thinkNPC(record: NPCRecord, now: number)
         return
     end
 
+    -- ── No own memory, but a squadmate shared a last-known position ─────────
+    -- Only reached once this grunt's OWN sighting (above) is long gone — personal
+    -- memory always takes priority over secondhand squad info. LOSE_TARGET_GRACE_TIME
+    -- gives a brief beat after this grunt's own contact lapses before it leans on
+    -- squad-shared data (this file's interpretation of that constant — not
+    -- explicit in the spec; see docs/TECHNICAL_DEBT.md "AI squad awareness").
+    if AWARENESS.ENABLED == true and record.isAlertedBySquad then
+        local squad = squads[record.squadId]
+        local sharedPos = squad ~= nil and squad.lastKnownTargetPosition or nil
+        local fresh = squad ~= nil and (now - squad.lastKnownUpdateAt) <= (AWARENESS.LAST_KNOWN_POSITION_MEMORY :: number)
+        local pastGrace = (now - record.lastSawTargetAt) >= (AWARENESS.LOSE_TARGET_GRACE_TIME :: number)
+        if sharedPos ~= nil and fresh and pastGrace then
+            setCrouched(record, false)
+            record.coverUntil = 0
+            record.coverPoint = nil
+            record.fightPoint = nil
+            -- Reuses the "Search" state rather than adding a dedicated
+            -- "Investigate" AIState — a label-only difference that would otherwise
+            -- touch the state type and every state-keyed system (fire discipline's
+            -- setState hook, debug logs) for no behavioral gain.
+            setState(record, "Search")
+            humanoid.AutoRotate = true
+            humanoid.WalkSpeed = AI.NPC_WALK_SPEED
+            -- Pick a fresh small offset near (not exactly at) the shared position —
+            -- either the current one has gone stale (MOVE_GOAL_RECALCULATE_INTERVAL,
+            -- reusing the squad-spacing cadence rather than a new constant, so the
+            -- offset doesn't jitter every think) or the grunt actually reached it
+            -- (INVESTIGATE_ARRIVE_DISTANCE) and should check a different nearby spot
+            -- rather than idling there. issueSquadMoveGoal's own throttle governs
+            -- the actual MoveTo reissue on top of either trigger.
+            local arrived = record.investigateGoal ~= nil
+                and (root.Position - (record.investigateGoal :: Vector3)).Magnitude <= (AWARENESS.INVESTIGATE_ARRIVE_DISTANCE :: number)
+            if record.investigateGoal == nil or arrived
+                or (now - record.lastMoveGoalAt) >= (SPACING.MOVE_GOAL_RECALCULATE_INTERVAL :: number) then
+                local ang  = math.random() * math.pi * 2
+                local distLo, distHi = AWARENESS.INVESTIGATE_DISTANCE_MIN :: number, AWARENESS.INVESTIGATE_DISTANCE_MAX :: number
+                local dist = distLo + math.random() * (distHi - distLo)
+                record.investigateGoal = sharedPos + Vector3.new(math.cos(ang), 0, math.sin(ang)) * dist
+                if AWARENESS.DEBUG == true then
+                    Logger.debug("[AIService]", record.model.Name, "investigating near squad's last-known position")
+                end
+            end
+            -- investigateGoal is already a final, individually-offset position, so
+            -- radius 0: separation + throttle only (matches every other
+            -- individually-computed goal in this file).
+            issueSquadMoveGoal(record, humanoid, record.investigateGoal :: Vector3, 0, now)
+            return
+        end
+        record.investigateGoal = nil
+    end
+
     -- No target: patrol between points, or idle near the squad spawn.
     setCrouched(record, false)
     record.coverUntil = 0
@@ -2107,6 +2273,11 @@ local function disconnectRecord(record: NPCRecord)
     record.crouchTrack = nil
     record.rightShoulder = nil
     record.gripMotor = nil
+    -- AI squad awareness: this grunt is about to leave `npcs` (onNPCDied does that
+    -- right after calling this), so nothing else could read these again — cleared
+    -- anyway for hygiene, matching every other per-death field above.
+    record.isAlertedBySquad = false
+    record.investigateGoal = nil
     for _, conn in ipairs(record.conns) do
         conn:Disconnect()
     end
@@ -2305,6 +2476,9 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
         attackSlotAssignedAt    = 0,
         lastSupportRepositionAt = 0,
 
+        isAlertedBySquad = false,
+        investigateGoal  = nil,
+
         dead      = false,
     }
 
@@ -2388,6 +2562,16 @@ local function spawnSquad(spawnCFrame: CFrame?, squadSize: number?): { Model }
 
         activeShooterIds       = {},
         lastAttackSlotUpdateAt = -math.huge,  -- guarantees the first updateSquadAttackSlots() call always runs regardless of server os.clock() at spawn time
+
+        alertUntil             = 0,
+        lastKnownTargetPosition = nil,
+        lastKnownTargetPlayer   = nil,
+        -- -math.huge, same reasoning/bug class as lastAttackSlotUpdateAt above: a
+        -- 0-init would let the LAST_KNOWN_POSITION_SHARE_INTERVAL throttle in
+        -- shareSquadAlert skip a squad's very first-ever share if it happens within
+        -- the first 0.75s of server life.
+        lastKnownUpdateAt      = -math.huge,
+        lastContactAt          = 0,  -- safe at 0: clearStaleSquadAlert's own pre-filter (lastKnownTargetPosition == nil) shields this before it's ever checked
     }
 
     local models: { Model } = {}
@@ -2558,6 +2742,13 @@ function AIService.Start(): ()
                 record.lastKnownTargetPosition = aroot.Position
                 record.lastSeenClock = now
             end
+            -- AI squad awareness: share the attacker + position (when known) with
+            -- the squad, per spec point 3.
+            shareSquadAlert(record, attacker, aroot ~= nil and aroot.Position or nil, now)
+        else
+            -- Attacker unknown (e.g. environment damage) — still puts the squad on
+            -- edge without a location to share or investigate toward.
+            shareSquadAlert(record, nil, nil, now)
         end
     end)
     table.insert(serviceConns, dmgConn)
