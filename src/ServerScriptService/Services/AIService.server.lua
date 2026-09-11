@@ -8,6 +8,7 @@
 -- AI Stage 1D — face the target while engaging + duck into cover between bursts.
 -- AI Stage 1E — fight from cover, break to cover the instant you're hit, and
 --               flank a stale last-known position instead of giving up.
+-- AI Stage 1F — crouch while in cover + retract the gun/arm away from a near wall.
 --
 -- Spawns simple R6 rifleman "grunt" squads from Workspace/AISpawns, patrols
 -- Workspace/AIPatrolPoints, detects players by server raycast line-of-sight,
@@ -57,6 +58,15 @@
 -- — a per-grunt peek/shoot/hide loop. No squad coordination, no tagged cover
 -- objects, no pathfinding.
 --
+-- Stage 1F crouch + weapon-vs-wall (Constants.AI Stage 1F fields): while in the
+-- Cover state a grunt plays the player's own third-person crouch idle clip
+-- (Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed.CrouchIdle); every think
+-- updateWeaponCollision() casts a forward chest-ray and, when a wall is within
+-- GUN_COLLISION_DISTANCE, additively pulls the welded gun (grip Motor6D C1) and
+-- the Right Shoulder Motor6D C0 back toward the body so nothing pokes through.
+-- findCoverPoint / findFightingPosition results are pulled WALL_STANDOFF studs
+-- clear of walls. The player first-person version of this is a separate client task.
+--
 -- Stage 1E fight-from-cover / react / flank (Constants.AI Stage 1E fields): the
 -- Attack branch first walks to findFightingPosition() (a spot within
 -- FIGHT_SEEK_DISTANCE that keeps LOS to the target AND has an obstacle within
@@ -68,7 +78,7 @@
 -- an arc via flankPointFor() (per-grunt flankSide alternates), converging on the
 -- spot; after SEARCH_DURATION with no sighting it drops back to patrol.
 --
--- Deferred (see docs/TECHNICAL_DEBT.md — AI Stage 1A..1E): PathfindingService,
+-- Deferred (see docs/TECHNICAL_DEBT.md — AI Stage 1A..1F): PathfindingService,
 -- ragdoll on AI death, rewards/points/killstreaks, AI types, real squad
 -- cover/flanking coordination, suppression, jump/climb animation, reload
 -- animation, final flash/smoke/sound art, tracer pooling, extracting the
@@ -155,6 +165,16 @@ type NPCRecord = {
     conns     : { RBXScriptConnection },
     fx        : AICombatFx?,
     anim      : AIAnim?,
+
+    -- Stage 1F
+    crouched           : boolean,          -- currently in the crouch pose
+    crouchTrack        : AnimationTrack?,  -- the player's CrouchIdle clip, loaded lazily
+    retract            : number,           -- 0..1 lerped wall proximity (gun/arm pull-back amount)
+    rightShoulder      : Motor6D?,         -- the Right Shoulder joint (base pose + retract offset)
+    rightShoulderBaseC0: CFrame,           -- its C0 before any retract offset
+    gripMotor          : Motor6D?,         -- the welded-gun grip Motor6D (Handle -> Right Arm)
+    gripBaseC1         : CFrame,           -- its C1 before any retract offset
+
     dead      : boolean,
 }
 
@@ -257,7 +277,7 @@ local function makePart(name: string, size: Vector3, color: Color3): BasePart
     return part
 end
 
-local function makeMotor(name: string, part0: BasePart, part1: BasePart, c0: CFrame, c1: CFrame)
+local function makeMotor(name: string, part0: BasePart, part1: BasePart, c0: CFrame, c1: CFrame): Motor6D
     local motor = Instance.new("Motor6D")
     motor.Name   = name
     motor.Part0  = part0
@@ -265,10 +285,12 @@ local function makeMotor(name: string, part0: BasePart, part1: BasePart, c0: CFr
     motor.C0     = c0
     motor.C1     = c1
     motor.Parent = part0
+    return motor
 end
 
--- Builds a standard R6 rig at the given world CFrame. Returns (model, humanoid, root).
-local function buildRig(worldCFrame: CFrame): (Model, Humanoid, BasePart)
+-- Builds a standard R6 rig at the given world CFrame.
+-- Returns (model, humanoid, root, rightShoulderMotor).
+local function buildRig(worldCFrame: CFrame): (Model, Humanoid, BasePart, Motor6D)
     local model = Instance.new("Model")
 
     local root  = makePart("HumanoidRootPart", Vector3.new(2, 2, 1), BODY_COLOR)
@@ -315,7 +337,7 @@ local function buildRig(worldCFrame: CFrame): (Model, Humanoid, BasePart)
     makeMotor("Left Shoulder", torso, lArm,
         CFrame.new(-1, 0.5, 0, 0, 0, -1, 0, 1, 0, 1, 0, 0),
         CFrame.new(0.5, 0.5, 0, 0, 0, -1, 0, 1, 0, 1, 0, 0))
-    makeMotor("Right Shoulder", torso, rArm,
+    local rightShoulder = makeMotor("Right Shoulder", torso, rArm,
         CFrame.new(1, 0.5, 0, 0, 0, 1, 0, 1, 0, -1, 0, 0),
         CFrame.new(-0.5, 0.5, 0, 0, 0, 1, 0, 1, 0, -1, 0, 0))
     makeMotor("Left Hip", torso, lLeg,
@@ -345,7 +367,7 @@ local function buildRig(worldCFrame: CFrame): (Model, Humanoid, BasePart)
     model.PrimaryPart = root
     model:PivotTo(worldCFrame)
 
-    return model, humanoid, root
+    return model, humanoid, root, rightShoulder
 end
 
 -- Ring formation offset for member `index` (1-based) of a squad of `size`.
@@ -800,6 +822,11 @@ local function attachAIWorldWeapon(record: NPCRecord): ()
     motor.C0     = Constants.WORLD_AKS74_GRIP_C0
     motor.C1     = Constants.WORLD_AKS74_GRIP_C1
     motor.Parent = rightArmInst
+
+    -- Stage 1F: remember the grip joint + its rest C1 so updateWeaponCollision can
+    -- additively pull the gun toward the body near a wall.
+    record.gripMotor  = motor
+    record.gripBaseC1 = motor.C1
 end
 
 -- Loads idle/walk (default R6) + thirdPerson idle/fire/equip on the grunt's
@@ -855,6 +882,21 @@ local function setupAIAnimation(record: NPCRecord): ()
                     equipTrack:Play(AI.WEAPON_EQUIP_ANIM_FADE)
                 end
             end
+        end
+    end
+
+    -- Stage 1F: preload (don't play) the crouch pose — the player's own
+    -- third-person CrouchIdle, with the Constants.AI fallback if that table moves.
+    if AI.CROUCH_IN_COVER == true then
+        local crouchId: any = AI.CROUCH_IDLE_ANIM_ID
+        local okTbl, fromTable = pcall(function()
+            return (Constants :: any).MOVEMENT_ANIMATION_IDS.R6.Unarmed.CrouchIdle
+        end)
+        if okTbl and typeof(fromTable) == "string" and fromTable ~= "" then
+            crouchId = fromTable
+        end
+        if typeof(crouchId) == "string" and crouchId ~= "" then
+            record.crouchTrack = loadTrack(animator, crouchId, true, Enum.AnimationPriority.Action)
         end
     end
 
@@ -1032,6 +1074,30 @@ local function faceToward(record: NPCRecord, worldPos: Vector3)
     root.CFrame = root.CFrame:Lerp(CFrame.lookAt(root.Position, flat), AI.FACE_TURN_ALPHA)
 end
 
+-- Stage 1F: nudge `pos` back along `awayDir` if a wall is closer than WALL_STANDOFF
+-- in the aim direction or on either flank, so the grunt does not stand flush
+-- against the wall it is using (which is how its arm ends up poking through).
+local function pullFromWalls(pos: Vector3, awayDir: Vector3): Vector3
+    local standoff = AI.WALL_STANDOFF :: number
+    if standoff <= 0 or awayDir.Magnitude < 0.1 then
+        return pos
+    end
+    local eye  = Vector3.new(0, AI.LINE_OF_SIGHT_HEIGHT_OFFSET, 0)
+    local unit = awayDir.Unit
+    local worst = 0
+    for _, deg in ipairs({ 180, 140, -140, 90, -90 }) do  -- 180 = straight toward the target
+        local dir = (CFrame.Angles(0, math.rad(deg), 0) * unit).Unit
+        local hit = workspace:Raycast(pos + eye, dir * standoff, losParams)
+        if hit ~= nil then
+            worst = math.max(worst, standoff - hit.Distance)
+        end
+    end
+    if worst <= 0 then
+        return pos
+    end
+    return pos + unit * worst
+end
+
 -- Stage 1D: pick a spot roughly COVER_SEEK_DISTANCE studs from the grunt, away
 -- from `targetPos`, that breaks line of sight to the target. Samples a few angles
 -- off the away-from-target vector; returns the first that is occluded, else a
@@ -1052,10 +1118,10 @@ local function findCoverPoint(record: NPCRecord, targetPos: Vector3): Vector3
         local candidate = root.Position + dir * distance
         local result = workspace:Raycast(candidate + eye, (targetPos + eye) - (candidate + eye), losParams)
         if result ~= nil and (tchar == nil or not result.Instance:IsDescendantOf(tchar)) then
-            return candidate  -- something sits between this spot and the target
+            return pullFromWalls(candidate, awayDir)  -- something sits between this spot and the target
         end
     end
-    return root.Position + awayDir * distance
+    return pullFromWalls(root.Position + awayDir * distance, awayDir)
 end
 
 -- Stage 1E: true if there is something to hug within COVER_ADJACENT_RADIUS of
@@ -1099,7 +1165,7 @@ local function findFightingPosition(record: NPCRecord, targetPos: Vector3): Vect
             local losHit = workspace:Raycast(c + eye, (targetPos + eye) - (c + eye), losParams)
             local seesTarget = losHit == nil or (tchar ~= nil and losHit.Instance:IsDescendantOf(tchar))
             if seesTarget and hasNearbyCover(c, targetPos) then
-                return c
+                return pullFromWalls(c, awayDir)
             end
         end
     end
@@ -1122,6 +1188,66 @@ local function flankPointFor(record: NPCRecord, lastSeenPos: Vector3): Vector3
     return lastSeenPos + perp * lateral
 end
 
+-- Stage 1F: crossfade the grunt between its rifle idle stance and the player's
+-- crouch pose. Idempotent (record.crouched). Only one of the two plays at a time.
+local function setCrouched(record: NPCRecord, on: boolean)
+    if record.crouched == on then
+        return
+    end
+    record.crouched = on
+    local fade: number = AI.CROUCH_ANIM_FADE
+    local ct = record.crouchTrack
+    local wi = record.anim and record.anim.weaponIdle or nil
+    if on then
+        if ct ~= nil then ct:Play(fade) end
+        if wi ~= nil then wi:Stop(fade) end
+    else
+        if ct ~= nil then ct:Stop(fade) end
+        if wi ~= nil then wi:Play(fade) end
+    end
+end
+
+-- Stage 1F: cast a forward chest-ray; when a wall is within GUN_COLLISION_DISTANCE
+-- additively pull the welded gun (grip C1) and the Right Shoulder joint (C0) back
+-- toward the body so the rifle / arm never poke through. Composes on top of the
+-- Animator's Transform and restores cleanly when clear. Lerped, so it eases in.
+local function updateWeaponCollision(record: NPCRecord)
+    local shoulder = record.rightShoulder
+    if shoulder == nil or AI.GUN_COLLISION_ENABLED ~= true then
+        return
+    end
+
+    local maxDist = (AI.GUN_COLLISION_DISTANCE :: number)
+    local torso   = record.model:FindFirstChild("Torso")
+    local from    = (torso ~= nil and torso:IsA("BasePart"))
+        and (torso :: BasePart).Position
+        or record.root.Position
+    local origin  = from + Vector3.new(0, AI.LINE_OF_SIGHT_HEIGHT_OFFSET, 0)
+    local hit     = workspace:Raycast(origin, record.root.CFrame.LookVector * maxDist, losParams)
+    local wanted  = if hit ~= nil then math.clamp(1 - hit.Distance / maxDist, 0, 1) else 0
+
+    record.retract += (wanted - record.retract) * (AI.GUN_RETRACT_ALPHA :: number)
+    local grip = record.gripMotor
+
+    if record.retract < 0.01 then
+        record.retract = 0
+        if grip ~= nil then
+            grip.C1 = record.gripBaseC1
+        end
+        shoulder.C0 = record.rightShoulderBaseC0
+        return
+    end
+
+    local t    = record.retract
+    local back = t * (AI.GUN_RETRACT_MAX :: number)
+    if grip ~= nil then
+        grip.C1 = record.gripBaseC1 * CFrame.new(0, 0, back)
+    end
+    shoulder.C0 = record.rightShoulderBaseC0
+        * CFrame.new(0, back * 0.25, back * 0.6)
+        * CFrame.Angles(-math.rad(t * (AI.GUN_RETRACT_TUCK_DEG :: number)), 0, 0)
+end
+
 local function thinkNPC(record: NPCRecord, now: number)
     if record.dead then
         return
@@ -1130,6 +1256,9 @@ local function thinkNPC(record: NPCRecord, now: number)
     if humanoid.Parent == nil or root.Parent == nil then
         return
     end
+
+    -- Stage 1F: pull the gun/arm off any near wall every think, in every state.
+    updateWeaponCollision(record)
 
     -- ── Target acquisition / validation ──────────────────────────────────────
     if now >= record.nextTargetCheckClock then
@@ -1179,6 +1308,7 @@ local function thinkNPC(record: NPCRecord, now: number)
             -- breaks LOS until the window expires. Ahead of the range/LOS check so
             -- reaching cover doesn't flip to Chase.
             setState(record, "Cover")
+            setCrouched(record, true)  -- Stage 1F: hunker down while in cover
             record.fightPoint = nil
             humanoid.AutoRotate = true
             humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
@@ -1188,6 +1318,7 @@ local function thinkNPC(record: NPCRecord, now: number)
             humanoid:MoveTo(record.coverPoint or root.Position)
         elseif dist <= AI.ATTACK_RANGE and inLos then
             setState(record, "Attack")
+            setCrouched(record, false)  -- stand to keep the aimed-rifle look while firing
             record.coverPoint = nil
             local spot = record.fightPoint
             if spot == nil and AI.FIGHT_FROM_COVER == true then
@@ -1211,6 +1342,7 @@ local function thinkNPC(record: NPCRecord, now: number)
             end
         else
             setState(record, "Chase")
+            setCrouched(record, false)
             record.coverUntil = 0
             record.coverPoint = nil
             record.fightPoint = nil
@@ -1224,6 +1356,7 @@ local function thinkNPC(record: NPCRecord, now: number)
     -- ── No live target, but a last-known position to work ──────────────────
     local lastSeen = record.lastSeenPos
     if lastSeen ~= nil then
+        setCrouched(record, false)
         record.coverUntil = 0
         record.coverPoint = nil
         record.fightPoint = nil
@@ -1243,6 +1376,7 @@ local function thinkNPC(record: NPCRecord, now: number)
     end
 
     -- No target: patrol between points, or idle near the squad spawn.
+    setCrouched(record, false)
     record.coverUntil = 0
     record.coverPoint = nil
     record.fightPoint = nil
@@ -1281,6 +1415,10 @@ local function disconnectRecord(record: NPCRecord)
     record.coverUntil = 0
     record.coverPoint = nil
     record.fightPoint = nil
+    -- Stage 1F: motors + tracks are children of the NPC model and die with it.
+    record.crouchTrack = nil
+    record.rightShoulder = nil
+    record.gripMotor = nil
     for _, conn in ipairs(record.conns) do
         conn:Disconnect()
     end
@@ -1331,7 +1469,7 @@ end
 
 local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean, index: number, size: number): Model
     npcCounter += 1
-    local model, humanoid, root = buildRig(worldCFrame)
+    local model, humanoid, root, rightShoulder = buildRig(worldCFrame)
     model.Name = AI.NPC_NAME_PREFIX .. "_" .. tostring(squadId) .. "_" .. tostring(npcCounter)
     model:SetAttribute("BR_AINpc", true)
     CollectionService:AddTag(model, Constants.TAG_DAMAGE_ENTITY)
@@ -1368,6 +1506,15 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
         conns     = {},
         fx        = nil,
         anim      = nil,
+
+        crouched            = false,
+        crouchTrack         = nil,
+        retract             = 0,
+        rightShoulder       = rightShoulder,
+        rightShoulderBaseC0 = rightShoulder.C0,
+        gripMotor           = nil,
+        gripBaseC1          = CFrame.new(),
+
         dead      = false,
     }
 

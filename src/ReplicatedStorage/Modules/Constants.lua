@@ -2166,6 +2166,22 @@ Constants.AI = {
     SEARCH_DURATION       = 12,    -- total seconds to hunt a lost target before returning to patrol
     FLANK_OFFSET_DISTANCE = 14,    -- max lateral offset when approaching a stale last-known position
     FLANK_CURVE_DISTANCE  = 30,    -- beyond this range the full offset applies; nearer → converge on the spot
+
+    -- ── Stage 1F — crouch behind cover + weapon-vs-wall retraction ─────────
+    CROUCH_IN_COVER     = true,    -- play the crouch pose while in the Cover state
+    CROUCH_ANIM_FADE    = 0.25,
+    -- The player's own third-person crouch idle
+    -- (Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed.CrouchIdle). AIService reads it
+    -- from there at load; this is the fallback if that table's shape ever changes.
+    CROUCH_IDLE_ANIM_ID = "rbxassetid://81947601552045",
+
+    WALL_STANDOFF = 4,             -- keep cover / fighting positions this many studs clear of a wall in front
+
+    GUN_COLLISION_ENABLED  = true,
+    GUN_COLLISION_DISTANCE = 5,    -- forward ray length; a wall nearer than this retracts the gun + right arm
+    GUN_RETRACT_MAX        = 2.2,  -- max studs the welded gun + right arm pull back
+    GUN_RETRACT_TUCK_DEG   = 30,   -- max degrees the muzzle tucks up as it retracts
+    GUN_RETRACT_ALPHA      = 0.35, -- lerp per think toward the target retract amount (0 = clear, 1 = flush against wall)
 }
 
 -- ── AI Stage 1B — combat feedback FX for AIService grunts ───────────────────

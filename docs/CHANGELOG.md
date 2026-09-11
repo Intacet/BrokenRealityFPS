@@ -1,5 +1,32 @@
 # Changelog
 
+## AI Stage 1F — grunts crouch behind cover, guns retract off walls
+
+- **Crouch in cover.** In the `Cover` state a grunt now crossfades to the player's
+  own `CrouchIdle` clip (`Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed.CrouchIdle`,
+  no `HipHeight` change — pure animation) instead of standing upright. It stands
+  again the instant it re-peeks to `Attack` so the aimed-rifle look reads, then
+  crouches on the next between-burst duck. Flag-gated `CROUCH_IN_COVER`.
+- **Guns stop poking through walls.** A new `updateWeaponCollision` runs every
+  think for every live grunt: a forward chest-ray of `GUN_COLLISION_DISTANCE`
+  studs, and when it hits map geometry the welded rifle's grip `Motor6D` (C1) and
+  the `Right Shoulder` `Motor6D` (C0) are additively pulled back toward the body —
+  Tarkov-style — up to `GUN_RETRACT_MAX` studs with a `GUN_RETRACT_TUCK_DEG` muzzle
+  tuck, lerped by `GUN_RETRACT_ALPHA`. Composes on top of the animation and
+  restores cleanly when the grunt backs off. Flag-gated `GUN_COLLISION_ENABLED`.
+- **Stand off the wall.** `findCoverPoint` / `findFightingPosition` results are run
+  through a new `pullFromWalls` that shoves the spot `WALL_STANDOFF` studs clear of
+  any wall it's flush against, so grunts fight from a step back rather than face-first.
+- Per-grunt heuristics only: the crouch clip is a no-gun full-body pose so the
+  welded rifle rides low while crouched; the retraction is one forward ray so a
+  wall to the side still clips; `pullFromWalls` has no pathfinding. See
+  docs/TECHNICAL_DEBT.md "AI Stage 1F".
+- **`AIService` + `Constants.AI` only** — no new remotes, no client files, no
+  `default.project.json` / `GunService` / `DamageService` / `WorldWeaponService`
+  change. The player's own first-person Tarkov weapon collision
+  (`ViewModelController`) is a separate follow-up client task. MCP-checked the APIs;
+  the behaviour needs a Studio Play test.
+
 ## AI Stage 1E — grunts fight from cover, react to fire, flank a lost target
 
 - **Don't stand in the open.** The `Attack` state now walks to `findFightingPosition`

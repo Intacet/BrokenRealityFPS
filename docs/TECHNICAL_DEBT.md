@@ -253,6 +253,47 @@ BindableEvent. Residual risks:
 - Still **no suppression fire, no squad tactics, no AI ragdoll, no rewards** —
   unchanged from earlier stages.
 
+## AI Stage 1F — crouch in cover + weapon-vs-wall retraction (Studio verification: REQUIRED, not done)
+
+New `Constants.AI` Stage 1F fields + `AIService` helpers `setCrouched` /
+`updateWeaponCollision` / `pullFromWalls`; `buildRig` returns the Right Shoulder
+`Motor6D`; `setupAIAnimation` preloads the player's `CrouchIdle` clip;
+`attachAIWorldWeapon` stores the grip `Motor6D`. `AIService` + `Constants.AI` only;
+no new remotes, no client files, no `GunService` / `DamageService` /
+`MovementController` / `ViewModelController` change. MCP-checked:
+`Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed.CrouchIdle` loads server-side, the
+additive `Motor6D` C0/C1 offsets apply and restore. Residual risks:
+
+- **Not runtime-verified in Play.** MCP can't watch the crouch pose or the arm
+  pull-back — needs a Studio Play pass.
+- **The crouch clip is a no-gun full-body pose.** The rifle is welded to the Right
+  Arm, so while crouched the gun rides wherever `CrouchIdle` puts the arm — low /
+  off to the side, not a rifle-ready crouch. Intentional for "hunkered behind
+  cover"; a real crouched-rifle third-person clip (not in `WeaponData`) would be
+  better. `EnterCrouch`/`ExitCrouch` transitions are not used (they bend the R6
+  through the floor per the player's own `CROUCH_USE_ENTER_TRANSITION_ANIMATION`
+  note) — the crossfade is a plain `Play(fade)`/`Stop(fade)`.
+- **Crouch only in `Cover`, not while firing.** `Attack` stands so the aimed-rifle
+  look reads correctly; the grunt therefore stands up each time it peeks to shoot,
+  crouches on the between-burst duck. If "crouch-peek-fire" is wanted it needs a
+  crouched aim clip.
+- **`updateWeaponCollision` is one forward chest-ray.** A wall to the *side* of the
+  muzzle still clips; the ray also can't see players/other grunts (`losParams`
+  excludes the AI folder), only map geometry. The C1 `+Z` / shoulder tuck signs
+  and the `0.25` / `0.6` mix factors are un-eyeballed — if the gun pushes *forward*
+  or the elbow *drops* near a wall, flip the signs in the helper.
+- **Retraction runs at the 0.25 s think rate**, lerped by `GUN_RETRACT_ALPHA` so it
+  eases rather than snapping, but it is not a per-frame follow — a grunt that
+  rushes a wall will clip for a couple of thinks before the arm catches up.
+- **`pullFromWalls` has no pathfinding.** A position pulled back off a wall can
+  land somewhere the grunt can't actually walk to; and it only pushes straight
+  back along the away-from-target axis, so it can shove the grunt into a *different*
+  wall behind it.
+- **No `HipHeight` change** (matches the player) — on steep/uneven ground the
+  crouch clip can look like it floats.
+- **Follow-up not done:** the player's own first-person Tarkov weapon collision
+  (`ViewModelController`, a client file) is a separate task.
+
 ## Pre-round loadout menu — partial DEBT-013 (Studio verification: YES, required)
 
 `LoadoutMenu` (client UI) + `LoadoutService` (server) + the `SelectLoadout` remote give
