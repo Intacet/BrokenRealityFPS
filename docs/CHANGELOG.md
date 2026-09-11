@@ -1,5 +1,34 @@
 # Changelog
 
+## AI Stage 1H — combat realism pass + a Respawn Bots button
+
+- **Reaction time.** A grunt no longer fires the instant it spots you: acquiring
+  a NEW live target (a fresh sighting, or a new attacker from a from-behind hit)
+  arms a random 0.15–0.45s beat (`Constants.AI.REACTION_TIME_MIN/MAX`) before its
+  first shot — it still tracks/faces you during that beat. Re-confirming the same
+  target on every recheck, or re-peeking from `Cover` mid-firefight, does not
+  re-arm it, so an ongoing engagement never stutters.
+- **Per-grunt aim skill + moving-target penalty.** Each grunt rolls a spread
+  multiplier once at spawn (`AIM_SKILL_VARIANCE`, clamped) so not every rifle
+  shoots identically, plus extra spread scaled by the target's live velocity
+  (`AIM_MOVING_TARGET_*`) — a sprinting/strafing player is harder to hit than
+  someone standing still.
+- **Wounded grunts hunker down longer.** `coverDurationFor()` multiplies
+  `COVER_DURATION` by `LOW_HEALTH_COVER_MULTIPLIER` once a grunt's health drops
+  to `LOW_HEALTH_RATIO`, used by both the post-burst cover-arm and the
+  hurt-reaction listener.
+- **RESPAWN BOTS button**, in `LoadoutMenu`, available to every player in Studio
+  and on a published server alike. Fires a new `RespawnBots` RemoteEvent; the
+  server's `AIService.RespawnAllSquads()` instantly clears every live grunt (no
+  ragdoll — a reset, not a kill) and spawns fresh squads at `Workspace/AISpawns`.
+  One shared server-wide cooldown (`Constants.AI.RESPAWN_COOLDOWN_SECONDS`, not
+  per-player) so it can't be spammed to grief other players' fights; the button's
+  own countdown is a cosmetic mirror of that, not the real gate.
+- Deliberately out of scope: reload (rejected earlier in Stage 1C), grenades,
+  squad tactics, pathfinding, morale/retreat. `AIService` + `Constants.AI` +
+  `LoadoutMenu` + `RemoteSetup` only. MCP-checked the math + `AssemblyLinearVelocity`;
+  not runtime-verified (see docs/TECHNICAL_DEBT.md "AI Stage 1H").
+
 ## Fix: AI never spawned on a published server
 
 - **Root cause:** `AIService`'s opening-squad spawn was gated

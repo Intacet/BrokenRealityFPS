@@ -17,6 +17,12 @@
 -- A mid-round Deploy is honoured but only takes effect at the next PREP, because
 -- GunService / TeamService read the attributes when they assign teams and ammo.
 --
+-- RESPAWN BOTS fires the RespawnBots RemoteEvent — AIService.RespawnAllSquads()
+-- instantly clears every live AI grunt and spawns fresh squads at Workspace/AISpawns.
+-- Available to every player, in Studio and a published server alike; the server
+-- holds one shared cooldown (Constants.AI.RESPAWN_COOLDOWN_SECONDS) so it can't be
+-- spammed — this button's countdown is a cosmetic mirror of that, not the real gate.
+--
 -- Initialized by ClientInit via loadInitAndStart():
 --   1. init(playerGui) — builds every GUI instance
 --   2. Start()         — connects input + RoundStateChanged, seeds selection
@@ -41,6 +47,7 @@ local CrosshairUI = require(script.Parent:WaitForChild("CrosshairUI"))
 local Remotes           = ReplicatedStorage:WaitForChild("Remotes")
 local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEvent
 local SelectLoadout     = Remotes:WaitForChild("SelectLoadout")     :: RemoteEvent
+local RespawnBots       = Remotes:WaitForChild("RespawnBots")       :: RemoteEvent
 
 local LocalPlayer = Players.LocalPlayer
 local LOADOUT     = Constants.LOADOUT :: any
@@ -74,6 +81,8 @@ local panel        : Frame
 local deployBtn    : TextButton
 local crosshairBtn : TextButton
 local crosshairLbl : TextLabel
+local respawnBtn   : TextButton
+local respawnLbl   : TextLabel
 
 -- weapon key → { button: TextButton, stroke: UIStroke, selectable: boolean }
 local weaponRows : { [string]: { button: TextButton, stroke: UIStroke, selectable: boolean } } = {}
@@ -90,6 +99,10 @@ local selectedTeam    : string = LOADOUT.DEFAULT_TEAM_PREF
 local lastPhase       : string = Constants.Phase.LOBBY
 -- Mirror of CrosshairUI:IsUserEnabled(); the button label follows it.
 local crosshairEnabled = true
+-- Client-side mirror of the server's shared RESPAWN_COOLDOWN_SECONDS gate — purely
+-- cosmetic (disables the button + shows a countdown); the server is the real gate
+-- and simply ignores a request that arrives too soon.
+local respawnCooldownUntil = 0
 
 -- ============================================================
 -- Build helpers
@@ -147,6 +160,35 @@ local function refreshSelectionHighlight()
     for choice, row in pairs(teamRows) do
         row.stroke.Enabled = choice == selectedTeam
     end
+end
+
+-- Drives the RESPAWN BOTS button through its cooldown: disables it and counts down
+-- the label, then restores it. Purely cosmetic — the server holds the real gate
+-- (Constants.AI.RESPAWN_COOLDOWN_SECONDS) and just ignores a request that arrives
+-- too soon, so a stale/missed client countdown can never let a request through early.
+local function runRespawnCooldown(seconds: number)
+    respawnCooldownUntil = os.clock() + seconds
+    task.spawn(function()
+        while os.clock() < respawnCooldownUntil do
+            if respawnBtn ~= nil then
+                respawnBtn.Active = false
+                respawnBtn.AutoButtonColor = false
+            end
+            if respawnLbl ~= nil then
+                respawnLbl.Text = string.format("RESPAWN BOTS (%ds)", math.max(0, math.ceil(respawnCooldownUntil - os.clock())))
+                respawnLbl.TextColor3 = DIM_GREY
+            end
+            task.wait(0.2)
+        end
+        if respawnBtn ~= nil then
+            respawnBtn.Active = true
+            respawnBtn.AutoButtonColor = true
+        end
+        if respawnLbl ~= nil then
+            respawnLbl.Text = "RESPAWN BOTS"
+            respawnLbl.TextColor3 = WHITE
+        end
+    end)
 end
 
 -- Syncs the crosshair toggle label from CrosshairUI's current user setting.
@@ -266,9 +308,10 @@ function LoadoutMenu:init(playerGui: PlayerGui)
     backdrop.Parent              = screenGui
 
     -- Panel
-    local TOGGLE_H = 30  -- crosshair toggle button
+    local TOGGLE_H = 30  -- crosshair toggle / respawn-bots button row height
     local weaponBlockH = #LOADOUT.WEAPONS * CARD_H + (#LOADOUT.WEAPONS - 1) * CARD_GAP
-    local panelH = PAD + 28 + 22 + weaponBlockH + 24 + 20 + ROW_H + 20 + ROW_H + 8 + TOGGLE_H + 8 + 16 + PAD
+    local panelH = PAD + 28 + 22 + weaponBlockH + 24 + 20 + ROW_H + 20 + ROW_H + 8
+        + TOGGLE_H + 8 + TOGGLE_H + 8 + 16 + PAD
 
     panel                    = Instance.new("Frame")
     panel.Name               = "Panel"
@@ -368,6 +411,19 @@ function LoadoutMenu:init(playerGui: PlayerGui)
         12, true, WHITE, Enum.TextXAlignment.Center)
     y += TOGGLE_H + 8
 
+    -- Respawn bots — available to every player, dev and published alike. Server owns
+    -- the real cooldown (Constants.AI.RESPAWN_COOLDOWN_SECONDS); this just requests it.
+    local respawnButton = makeButton(panel,
+        UDim2.fromOffset(innerW, TOGGLE_H),
+        UDim2.fromOffset(PAD, y),
+        CARD_COLOR)
+    respawnBtn = respawnButton
+    respawnBtn.Name = "RespawnBots"
+    respawnLbl = makeLabel(respawnBtn, "RESPAWN BOTS",
+        UDim2.fromScale(1, 1), UDim2.fromScale(0, 0),
+        12, true, WHITE, Enum.TextXAlignment.Center)
+    y += TOGGLE_H + 8
+
     makeLabel(panel,
         string.format("[%s] close", LOADOUT.TOGGLE_KEY.Name),
         UDim2.fromOffset(innerW, 16), UDim2.fromOffset(PAD, y),
@@ -408,6 +464,18 @@ function LoadoutMenu:Start()
             CrosshairUI:SetUserEnabled(crosshairEnabled)
         end)
         refreshCrosshairButton()
+    end)
+
+    -- Respawn bots — fires immediately; the server is the real gate (silently
+    -- ignores a request inside its cooldown), so a stale client countdown is safe.
+    respawnBtn.Activated:Connect(function()
+        if os.clock() < respawnCooldownUntil then
+            return
+        end
+        RespawnBots:FireServer()
+        Logger.debug("[LoadoutMenu] Respawn Bots requested")
+        local cooldown = (Constants.AI :: any).RESPAWN_COOLDOWN_SECONDS
+        runRespawnCooldown(typeof(cooldown) == "number" and cooldown or 8)
     end)
 
     -- Toggle key.

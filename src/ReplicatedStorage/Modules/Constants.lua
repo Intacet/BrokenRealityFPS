@@ -2109,6 +2109,13 @@ Constants.AI = {
     DEFAULT_SQUAD_SIZE = 3,
     MAX_SQUADS         = 2,
 
+    -- ── Manual respawn (RespawnBots remote, fired from the LoadoutMenu button) ──
+    -- Any player can request a full AI reset — every live/pending-cleanup grunt is
+    -- destroyed immediately (no ragdoll; this is a manual reset, not a kill) and
+    -- fresh squads spawn at the AISpawns points. One shared server-wide cooldown
+    -- (not per-player) so it can't be spammed to grief other players' fights.
+    RESPAWN_COOLDOWN_SECONDS = 8,
+
     SPAWN_ON_SERVER_START_IN_STUDIO    = true,
     -- Published servers previously never spawned any AI at all (this flag did not
     -- exist, so the Studio-only gate below silently skipped every live server).
@@ -2219,6 +2226,40 @@ Constants.AI = {
     -- held together by Motor6Ds that RagdollService would otherwise convert). Blood
     -- already works: BloodService reacts to the same CombatEvents.DamageDealt.
     RAGDOLL_ON_DEATH = true,
+
+    -- ── Stage 1H — combat realism pass ──────────────────────────────────────
+    -- None of this is new tactics (still per-grunt, still Humanoid:MoveTo, still no
+    -- reload/grenades — those remain deliberately out of scope). It targets the
+    -- "twitch-perfect clone" feel: a beat before a freshly-spotted target gets shot
+    -- at, aim that is not identical rifle-to-rifle, and worse aim against a target
+    -- that is actually moving.
+
+    -- Reaction time: a random delay between a grunt acquiring a NEW live target
+    -- (first sighting, or a different attacker on being shot from an unseen angle)
+    -- and its first shot at that target. Re-engaging the SAME target after a
+    -- Cover peek does not re-roll this — they already know where you are.
+    REACTION_TIME_MIN = 0.15,
+    REACTION_TIME_MAX = 0.45,
+
+    -- Per-grunt aim skill: a spread multiplier rolled once at spawn (record.aimSkill)
+    -- so not every grunt shoots with identical accuracy. 1.0 = Constants.AI.SHOT_SPREAD_DEGREES
+    -- unchanged; clamped to [AIM_SKILL_MIN, AIM_SKILL_MAX].
+    AIM_SKILL_VARIANCE = 0.35,
+    AIM_SKILL_MIN       = 0.6,
+    AIM_SKILL_MAX       = 1.5,
+
+    -- Moving-target spread bonus: extra spread (degrees) added on top of the
+    -- per-grunt skill spread, scaled by the target's current speed — a sprinting /
+    -- strafing player is harder to hit than someone standing still. 0 speed = no
+    -- bonus; AIM_MOVING_TARGET_SPEED_REF studs/s or faster = the full bonus.
+    AIM_MOVING_TARGET_SPREAD_ENABLED    = true,
+    AIM_MOVING_TARGET_SPEED_REF         = 24,   -- studs/s (roughly a sprinting player)
+    AIM_MOVING_TARGET_SPREAD_BONUS_DEG  = 3.5,
+
+    -- Wounded grunts hunker down longer than a fresh one on the same cover timer —
+    -- Cover / hurt-reaction both read this via coverDurationFor().
+    LOW_HEALTH_RATIO           = 0.3,   -- Humanoid.Health / MaxHealth at/below this counts as "wounded"
+    LOW_HEALTH_COVER_MULTIPLIER = 1.8,  -- COVER_DURATION is multiplied by this while wounded
 }
 
 -- ── AI Stage 1B — combat feedback FX for AIService grunts ───────────────────

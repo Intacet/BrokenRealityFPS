@@ -388,6 +388,70 @@ BallSocketConstraints with `BR_Ragdolled` set. Residual risks:
 - **Blood assumed working** from the shared `DamageDealt` path — not
   independently re-verified for the AI target in this change.
 
+## AI Stage 1H — combat realism pass + manual respawn button (Studio verification: REQUIRED, not done)
+
+Two independent changes landed together:
+
+**Realism** — `fireOneShot` spread = `SHOT_SPREAD_DEGREES * record.aimSkill` (a
+per-grunt multiplier rolled once at spawn) plus a bonus scaled by the target's
+`AssemblyLinearVelocity` (harder to hit a moving player). A new
+`record.engageAtClock`, armed only when the live target actually **changes**
+(fresh sighting, or a new attacker via the hit-reaction listener), delays
+`startBurst` by a random `REACTION_TIME_MIN`–`MAX` beat — the grunt still tracks
+the target during that beat (`faceToward` runs regardless), it just doesn't
+fire instantly. `coverDurationFor()` stretches `COVER_DURATION` while
+`Humanoid.Health / MaxHealth <= LOW_HEALTH_RATIO`.
+
+**Manual respawn** — a new `RespawnBots` RemoteEvent (client → server, no
+payload) + `AIService.RespawnAllSquads()` (destroys every live/pending-cleanup
+grunt with no ragdoll — a reset, not a kill — then re-spawns fresh squads),
+wired to a **RESPAWN BOTS** button in `LoadoutMenu`. One shared server-wide
+cooldown (`Constants.AI.RESPAWN_COOLDOWN_SECONDS`), not per-player.
+
+`AIService` + `Constants.AI` + `LoadoutMenu` + `RemoteSetup` only. MCP-checked
+the math (reaction-time range, aim-skill clamp, moving-target spread, low-health
+ratio) and `AssemblyLinearVelocity` as an engine API; `RespawnAllSquads` was not
+independently exercised live (it reuses the `AIService.Destroy()` teardown
+pattern already verified in Stage 1G). Residual risks:
+
+- **Not runtime-verified in Play.** Reaction-time feel, aim-skill variance, the
+  moving-target penalty, and the respawn button all need a live pass.
+- **Reaction time only gates the FIRST shot of a new engagement**, not every
+  shot — intentional (real hesitation is at first contact, not per-round), but
+  means a grunt that loses and instantly re-acquires the *same* target (e.g.
+  LOS flickers behind a thin rail) fires without any pause, because
+  `record.target ~= seen` is false. A target that actually goes fully `nil`
+  first (the `LAST_SEEN_CHASE_SECONDS` window) and comes back does get a fresh
+  beat.
+- **`aimSkill` and the moving-target bonus are additive on the same cone**, so a
+  low-skill grunt (`aimSkill` near `AIM_SKILL_MAX`) shooting at a sprinting
+  target can reach a fairly wide effective cone — not hard-capped beyond the two
+  individual constants; could feel too forgiving/punishing depending on how the
+  two combine in practice. Tune `AIM_SKILL_VARIANCE` / `AIM_MOVING_TARGET_SPREAD_BONUS_DEG`
+  after a test.
+- **`AssemblyLinearVelocity` includes vertical speed** (jumping/falling counts
+  as "moving") — not obviously wrong (a jumping target is genuinely harder to
+  hit) but untested whether it feels right vs. horizontal-only speed.
+- **Wounded grunts only stay in cover longer** — they don't actively disengage,
+  call for help, or retreat toward their squad. No morale/rout behavior, no
+  squad awareness of a wounded member.
+- **`RespawnAllSquads` has no confirmation / feedback to the requester** beyond
+  the button's own cosmetic countdown — no toast/sound on success, and a
+  request that lands during the cooldown is silently dropped server-side with
+  only a debug log, not surfaced to the player who clicked.
+- **Respawn destroys grunts mid-anything** (mid-burst, mid-crouch, mid-retreat)
+  with no ragdoll and no FX — an instant pop, by design (it's a reset button,
+  not a kill), but worth confirming it doesn't look jarring or leave a
+  half-played fire animation / sound hanging.
+- **No access control on the remote** beyond the shared cooldown — any player,
+  including a spectator or someone not actually fighting the AI, can trigger it
+  for the whole server. Acceptable for a PvPvE test/zone context; would need a
+  host/permission check if this ships toward a competitive mode.
+- **Still no reload, no grenades, no squad tactics, no pathfinding** — explicitly
+  out of scope for this pass (reload was already rejected in Stage 1C); "as
+  realistic as possible" was interpreted as bounded human-like imperfection +
+  wound response, not a tactics/AI-navigation overhaul.
+
 ## Pre-round loadout menu — partial DEBT-013 (Studio verification: YES, required)
 
 `LoadoutMenu` (client UI) + `LoadoutService` (server) + the `SelectLoadout` remote give

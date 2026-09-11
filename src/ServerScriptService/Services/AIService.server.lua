@@ -110,6 +110,10 @@ local CombatEvents = require(script.Parent:WaitForChild("CombatEvents"))
 -- dead grunt flops with the shot's knockback instead of freezing then vanishing.
 local RagdollService = require(script.Parent:WaitForChild("RagdollService"))
 
+-- Stage 1H: RespawnBots — created by RemoteSetup before any Service needs it.
+local Remotes      = ReplicatedStorage:WaitForChild("Remotes")
+local RespawnBots  = Remotes:WaitForChild("RespawnBots") :: RemoteEvent
+
 -- Untyped views of the tuning tables (heterogeneous fields; matches the pattern
 -- used by TestAreaBuilder's `local CFG = Constants.DEV_TEST_AREA :: any`).
 local AI = Constants.AI :: any
@@ -181,6 +185,10 @@ type NPCRecord = {
     -- Stage 1G — death ragdoll
     lastHit   : Types.DamageInfo?,         -- most recent accepted hit on this grunt (for the death impulse)
 
+    -- Stage 1H — combat realism
+    engageAtClock: number,  -- os.clock() before which this grunt will not fire at its current target (reaction time)
+    aimSkill     : number,  -- per-grunt spread multiplier, rolled once at spawn
+
     dead      : boolean,
 }
 
@@ -199,6 +207,8 @@ local running   = false
 local mainThread: thread? = nil
 local serviceConns: { RBXScriptConnection } = {}
 local didAutoSpawn = false
+-- Stage 1H: shared server-wide cooldown gate for the RespawnBots remote.
+local lastManualRespawnClock = -math.huge
 
 local aiFolder : Folder? = nil
 local losParams: RaycastParams = RaycastParams.new()
@@ -447,6 +457,14 @@ end
 -- ============================================================
 -- Shooting (server raycast, no remotes)
 -- ============================================================
+
+-- Stage 1H: a random beat before a grunt opens fire on a freshly-acquired target —
+-- called only when the target actually changes (see the two call sites), not on
+-- every think, so an ongoing firefight never re-hesitates mid-engagement.
+local function reactionDelay(): number
+    local lo, hi = AI.REACTION_TIME_MIN :: number, AI.REACTION_TIME_MAX :: number
+    return lo + math.random() * (hi - lo)
+end
 
 -- Random direction inside a cone of half-angle `maxAngleRad` about `dir`.
 local function coneSpread(dir: Vector3, maxAngleRad: number): Vector3
@@ -959,7 +977,17 @@ local function fireOneShot(record: NPCRecord)
     if baseDir.Magnitude < 1e-3 then
         return
     end
-    local dir = coneSpread(baseDir.Unit, math.rad(AI.SHOT_SPREAD_DEGREES))
+
+    -- Stage 1H: per-grunt aim skill (rolled at spawn) plus extra spread against a
+    -- target that is actually moving — real aim tracks a sprinting/strafing target
+    -- worse than a stationary one. AssemblyLinearVelocity reads the live HRP.
+    local spreadDeg = (AI.SHOT_SPREAD_DEGREES :: number) * record.aimSkill
+    if AI.AIM_MOVING_TARGET_SPREAD_ENABLED == true then
+        local speed = troot.AssemblyLinearVelocity.Magnitude
+        local ref   = AI.AIM_MOVING_TARGET_SPEED_REF :: number
+        spreadDeg  += math.clamp(speed / ref, 0, 1) * (AI.AIM_MOVING_TARGET_SPREAD_BONUS_DEG :: number)
+    end
+    local dir = coneSpread(baseDir.Unit, math.rad(spreadDeg))
 
     local rayVec = dir * AI.SHOT_RANGE
     local result = workspace:Raycast(origin, rayVec, losParams)
@@ -1007,6 +1035,21 @@ local function fireOneShot(record: NPCRecord)
     end
 end
 
+-- Stage 1H: a grunt that has taken damage down toward AI.LOW_HEALTH_RATIO stays in
+-- cover longer than a fresh one on the same COVER_DURATION timer — real fighters
+-- get warier once they're actually hurt, not just once they've fired a burst.
+local function coverDurationFor(record: NPCRecord): number
+    local base = AI.COVER_DURATION :: number
+    local humanoid = record.humanoid
+    if humanoid.MaxHealth <= 0 then
+        return base
+    end
+    if humanoid.Health / humanoid.MaxHealth <= (AI.LOW_HEALTH_RATIO :: number) then
+        return base * (AI.LOW_HEALTH_COVER_MULTIPLIER :: number)
+    end
+    return base
+end
+
 -- Starts one burst on a detached task that stops safely on death / service destroy.
 local function startBurst(record: NPCRecord)
     if record.firing or record.dead or not running then
@@ -1029,7 +1072,7 @@ local function startBurst(record: NPCRecord)
         -- Stage 1D: arm the cover window so thinkNPC ducks this grunt away before
         -- the next burst. The burst loop already bailed on state ~= "Attack".
         if not record.dead and running and AI.TAKE_COVER == true then
-            record.coverUntil = os.clock() + (AI.COVER_DURATION :: number)
+            record.coverUntil = os.clock() + coverDurationFor(record)
         end
         if not record.dead and running then
             task.wait(AI.SECONDS_BETWEEN_BURSTS)
@@ -1289,6 +1332,11 @@ local function thinkNPC(record: NPCRecord, now: number)
         record.nextTargetCheckClock = now + AI.TARGET_RECHECK_INTERVAL
         local seen = findVisibleTarget(record)
         if seen ~= nil then
+            -- Stage 1H: only a NEW target gets a reaction-time beat before the first
+            -- shot; re-confirming the same one every recheck must not re-hesitate.
+            if record.target ~= seen then
+                record.engageAtClock = now + reactionDelay()
+            end
             record.target = seen
             local sroot = targetRootOf(seen)
             if sroot ~= nil then
@@ -1367,7 +1415,9 @@ local function thinkNPC(record: NPCRecord, now: number)
                 humanoid.WalkSpeed = AI.ATTACK_MOVE_SPEED
                 humanoid:MoveTo(root.Position)
                 faceToward(record, troot.Position)
-                if not record.firing then
+                -- Stage 1H: raise/track the target during the reaction-time window but
+                -- hold fire until it elapses — a beat before shooting, not an instant flick.
+                if not record.firing and now >= record.engageAtClock then
                     startBurst(record)
                 end
             end
@@ -1602,6 +1652,12 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
 
         lastHit   = nil,
 
+        engageAtClock = 0,
+        aimSkill = math.clamp(
+            1 + (math.random() * 2 - 1) * (AI.AIM_SKILL_VARIANCE :: number),
+            AI.AIM_SKILL_MIN :: number, AI.AIM_SKILL_MAX :: number
+        ),
+
         dead      = false,
     }
 
@@ -1800,11 +1856,16 @@ function AIService.Start(): ()
         -- the killing shot's direction / weapon (mirrors DummyService.record.lastHit).
         record.lastHit = info
         if AI.HURT_COVER == true then
-            record.coverUntil = os.clock() + (AI.COVER_DURATION :: number)
+            record.coverUntil = os.clock() + coverDurationFor(record)
             record.coverPoint = nil  -- force a fresh hide spot away from the new threat
         end
         local attacker = info.attacker
         if attacker ~= nil then
+            -- Stage 1H: shot from an unseen angle — still take a beat to identify the
+            -- threat before returning fire, same reaction-time rule as a fresh sighting.
+            if record.target ~= attacker then
+                record.engageAtClock = os.clock() + reactionDelay()
+            end
             record.target = attacker
             local aroot = targetRootOf(attacker)
             if aroot ~= nil then
@@ -1830,6 +1891,24 @@ function AIService.Start(): ()
     end)
     table.insert(serviceConns, addedConn)
 
+    -- Stage 1H: any player can request a full AI reset from the LoadoutMenu button,
+    -- dev and published alike. Server-authoritative and cooldown-gated (shared, not
+    -- per-player) so it can't be spammed to grief other players' fights. task.spawn
+    -- because RespawnAllSquads/spawnSquad yields (task.wait between squad members).
+    local respawnConn = RespawnBots.OnServerEvent:Connect(function(player: Player)
+        local now = os.clock()
+        local cooldown = AI.RESPAWN_COOLDOWN_SECONDS :: number
+        if now - lastManualRespawnClock < cooldown then
+            return
+        end
+        lastManualRespawnClock = now
+        Logger.debug("[AIService] RespawnAllSquads requested by", player.Name)
+        task.spawn(function()
+            AIService.RespawnAllSquads()
+        end)
+    end)
+    table.insert(serviceConns, respawnConn)
+
     if autoSpawnEnabled() and #spawnParts == 0 then
         local flagName = if RunService:IsStudio()
             then "SPAWN_ON_SERVER_START_IN_STUDIO"
@@ -1844,6 +1923,52 @@ end
 -- Public wrapper (asserts live in spawnSquad).
 function AIService.SpawnSquad(spawnCFrame: CFrame?, squadSize: number?): { Model }
     return spawnSquad(spawnCFrame, squadSize)
+end
+
+-- Stage 1H: full manual reset — instantly destroys every live/pending-cleanup grunt
+-- (no ragdoll; this is a reset, not a kill) and spawns fresh squads at the current
+-- AISpawns points. Mirrors the teardown half of AIService.Destroy() but leaves the
+-- service (loop, connections) running. Re-collects spawnParts first in case
+-- TestAreaBuilder rebuilt the zone since Start(). Returns the number of squads spawned.
+function AIService.RespawnAllSquads(): number
+    if not started or not running then
+        Logger.warn("[AIService] RespawnAllSquads called before Start() / after Destroy() — ignored")
+        return 0
+    end
+
+    for _, record in pairs(npcs) do
+        disconnectRecord(record)
+        if record.model.Parent ~= nil then
+            record.model:Destroy()
+        end
+    end
+    for _, record in ipairs(pendingCleanup) do
+        disconnectRecord(record)
+        if record.model.Parent ~= nil then
+            record.model:Destroy()
+        end
+    end
+    table.clear(npcs)
+    table.clear(pendingCleanup)
+    table.clear(squads)
+
+    spawnParts, warnedNoSpawns = collectParts(AI.SPAWN_FOLDER_NAME, warnedNoSpawns)
+    if #spawnParts == 0 then
+        Logger.warn("[AIService] RespawnAllSquads: Workspace." .. AI.SPAWN_FOLDER_NAME .. " has no spawn parts — nothing to spawn")
+        return 0
+    end
+
+    local spawned = 0
+    for i = 1, AI.MAX_SQUADS do
+        if not running or activeCount() >= AI.MAX_ACTIVE_NPCS then
+            break
+        end
+        local part = spawnParts[((i - 1) % #spawnParts) + 1]
+        spawnSquad(part.CFrame, AI.DEFAULT_SQUAD_SIZE)
+        spawned += 1
+    end
+    Logger.debug("[AIService] RespawnAllSquads: spawned", spawned, "squad(s) — active", activeCount())
+    return spawned
 end
 
 -- Number of NPCs that are alive and thinking.
