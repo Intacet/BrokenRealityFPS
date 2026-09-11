@@ -1555,7 +1555,6 @@ local function thinkNPC(record: NPCRecord, now: number)
             -- breaks LOS until the window expires. Ahead of the range/LOS check so
             -- reaching cover doesn't flip to Chase.
             setState(record, "Cover")
-            setCrouched(record, true)  -- Stage 1F: hunker down while in cover
             record.fightPoint = nil
             humanoid.AutoRotate = true
             humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
@@ -1564,15 +1563,21 @@ local function thinkNPC(record: NPCRecord, now: number)
             end
             -- Stage 1F: if the player has moved around our cover and can see us again
             -- (we're parked at the spot but still in LOS), pick a fresh one on the far
-            -- side of the nearest obstacle.
+            -- side of the nearest obstacle — this also stands the grunt back up (see
+            -- below) since `arrived` becomes false against the fresh, not-yet-reached spot.
             local cp = record.coverPoint
             if inLos and cp ~= nil and (root.Position - cp).Magnitude <= AI.FIGHT_ARRIVE_DIST then
                 record.coverPoint = findCoverPoint(record, troot.Position)
+                cp = record.coverPoint
             end
-            humanoid:MoveTo(record.coverPoint or root.Position)
+            -- Only crouch once actually AT the cover spot — crouching mid-sprint while
+            -- still exposed and running there is exactly what looked wrong; stand (run)
+            -- there, then drop into cover on arrival.
+            local arrived = cp ~= nil and (root.Position - cp).Magnitude <= AI.FIGHT_ARRIVE_DIST
+            setCrouched(record, arrived)
+            humanoid:MoveTo(cp or root.Position)
         elseif dist <= AI.ATTACK_RANGE and inLos then
             setState(record, "Attack")
-            setCrouched(record, false)  -- stand to keep the aimed-rifle look while firing
             record.coverPoint = nil
             local spot = record.fightPoint
             if spot == nil and AI.FIGHT_FROM_COVER == true then
@@ -1580,12 +1585,17 @@ local function thinkNPC(record: NPCRecord, now: number)
                 record.fightPoint = spot
             end
             if spot ~= nil and (root.Position - spot).Magnitude > AI.FIGHT_ARRIVE_DIST then
-                -- Still moving into a cover-adjacent firing spot.
+                -- Still moving into a cover-adjacent firing spot — stand while moving.
+                setCrouched(record, false)
                 humanoid.AutoRotate = true
                 humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
                 humanoid:MoveTo(spot)
             else
-                -- Planted (at cover, or no cover found) — face the player and fire.
+                -- Planted. Crouch — and fire from the crouch, nothing blocks that —
+                -- only when the plant spot is real cover (`spot ~= nil`, from
+                -- findFightingPosition); with no cover nearby there's nothing to crouch
+                -- behind, so stand in the open instead.
+                setCrouched(record, spot ~= nil)
                 humanoid.AutoRotate = false
                 humanoid.WalkSpeed = AI.ATTACK_MOVE_SPEED
                 humanoid:MoveTo(root.Position)

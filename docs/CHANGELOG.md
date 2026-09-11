@@ -1,5 +1,22 @@
 # Changelog
 
+## Fix: grunts crouch only on arrival at cover, and now fire from the crouch
+
+- **No more instant-crouch-and-waddle.** `Cover` and the `Attack` planted branch
+  now only switch to the crouch pose once the grunt has actually *arrived* at its
+  cover / fighting spot (`(root.Position - spot).Magnitude <= FIGHT_ARRIVE_DIST`)
+  — it stands (runs normally) on the way there. Previously it crouched the
+  instant it decided to retreat, mid-sprint across open ground, which read as
+  "gets shot, instantly crouches, waddles to cover."
+- **Grunts now fire while crouched.** `Attack` no longer forces standing to
+  shoot — once planted at real cover (a spot `findFightingPosition` actually
+  found), it crouches *and* fires from the crouch; nothing in the fire path was
+  ever gated on pose, so this only needed the crouch-suppression removed. With
+  no cover nearby it still stands in the open, same as before.
+- `AIService` only, reusing the existing `FIGHT_ARRIVE_DIST` constant for both
+  the Cover and Attack arrival checks. Not runtime-verified — see
+  docs/TECHNICAL_DEBT.md "AI Stage 1F".
+
 ## AI Stage 1C — fair combat tuning (reaction tiers, aim ramp, suppression, target memory, squad attack slots)
 
 - **Tiered reaction delay.** Replaces the flat Stage 1H reaction beat with three

@@ -268,15 +268,26 @@ additive `Motor6D` C0/C1 offsets apply and restore. Residual risks:
   pull-back — needs a Studio Play pass.
 - **The crouch clip is a no-gun full-body pose.** The rifle is welded to the Right
   Arm, so while crouched the gun rides wherever `CrouchIdle` puts the arm — low /
-  off to the side, not a rifle-ready crouch. Intentional for "hunkered behind
-  cover"; a real crouched-rifle third-person clip (not in `WeaponData`) would be
-  better. `EnterCrouch`/`ExitCrouch` transitions are not used (they bend the R6
-  through the floor per the player's own `CROUCH_USE_ENTER_TRANSITION_ANIMATION`
-  note) — the crossfade is a plain `Play(fade)`/`Stop(fade)`.
-- **Crouch only in `Cover`, not while firing.** `Attack` stands so the aimed-rifle
-  look reads correctly; the grunt therefore stands up each time it peeks to shoot,
-  crouches on the between-burst duck. If "crouch-peek-fire" is wanted it needs a
-  crouched aim clip.
+  off to the side, not a rifle-ready crouch. **(2026-09-10: now also used while
+  actively firing — see below — so this visual mismatch is more visible than when
+  crouching only meant hiding.)** A real crouched-rifle third-person clip (not in
+  `WeaponData`) would be better. `EnterCrouch`/`ExitCrouch` transitions are not
+  used (they bend the R6 through the floor per the player's own
+  `CROUCH_USE_ENTER_TRANSITION_ANIMATION` note) — the crossfade is a plain
+  `Play(fade)`/`Stop(fade)`.
+- **Crouch now gates on arrival, and Attack crouches at real cover (2026-09-10,
+  fixing user-reported "gets shot, instantly crouches and waddles to cover").**
+  Both the `Cover` branch and the `Attack` planted branch now crouch only once
+  `(root.Position - spot).Magnitude <= FIGHT_ARRIVE_DIST` — while still moving to
+  either spot the grunt stands (runs) there, then crouches on arrival. `Attack`
+  crouches (and fires from the crouch — nothing gates `startBurst` on pose) only
+  when planted at real cover (`findFightingPosition` returned a spot); with no
+  cover nearby it stands in the open, same as before. Reuses `FIGHT_ARRIVE_DIST`
+  for the Cover-arrival check too (was previously unused there) rather than adding
+  a parallel constant. Not runtime-verified — the fix is structurally sound
+  (mirrors the pre-existing Attack `spot ~= nil` moving/planted split) but the
+  actual look (does the crouch-fire pose read OK, does the stand→crouch snap feel
+  abrupt without a transition anim) needs a Studio Play pass.
 - **`updateWeaponCollision` is one forward chest-ray.** A wall to the *side* of the
   muzzle still clips; the ray also can't see players/other grunts (`losParams`
   excludes the AI folder), only map geometry. The C1 `+Z` / shoulder tuck signs

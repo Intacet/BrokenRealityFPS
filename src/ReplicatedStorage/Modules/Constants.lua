@@ -2203,7 +2203,12 @@ Constants.AI = {
     FLANK_CURVE_DISTANCE  = 30,    -- beyond this range the full offset applies; nearer → converge on the spot
 
     -- ── Stage 1F — crouch behind cover + weapon-vs-wall retraction ─────────
-    CROUCH_IN_COVER     = true,    -- play the crouch pose while in the Cover state
+    -- Master switch: preloads the crouch AnimationTrack at all. The grunt only
+    -- actually crouches once it has ARRIVED at a real cover/fighting spot — never
+    -- while still moving there — and it fires normally while crouched (2026-09-10:
+    -- previously it stood to fire and crouched the instant it decided to retreat,
+    -- even mid-sprint across open ground, which looked wrong).
+    CROUCH_IN_COVER     = true,
     CROUCH_ANIM_FADE    = 0.25,
     -- The player's own third-person crouch idle
     -- (Constants.MOVEMENT_ANIMATION_IDS.R6.Unarmed.CrouchIdle). AIService reads it
