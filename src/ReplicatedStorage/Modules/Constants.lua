@@ -2190,6 +2190,14 @@ Constants.AI = {
     -- the candidate with the *nearest* such obstacle puts the grunt on the far side of
     -- it, hugging cover, out of the player's view.
     COVER_HUG_DISTANCE  = 7,
+    -- Covering fire while retreating (2026-09-10, user-reported: grunts jogged to
+    -- cover in dead silence instead of fighting on the way there). While NOT YET at
+    -- the cover spot, the grunt periodically stops, faces the player, and fires a
+    -- burst back — then resumes walking. Once actually arrived it still goes fully
+    -- quiet as before (that part of Cover is unchanged). false = old silent retreat.
+    COVER_RETREAT_FIRE     = true,
+    COVER_RETREAT_SHOT_MIN = 1.4,   -- seconds; minimum gap between retreat covering-fire bursts
+    COVER_RETREAT_SHOT_MAX = 2.2,
 
     -- ── Stage 1E — fight from cover, react to fire, flank a stale target ───
     HURT_COVER            = true,  -- taking any hit arms the cover window immediately

@@ -1,5 +1,27 @@
 # Changelog
 
+## Fix: grunts fire back while retreating to cover instead of jogging there silently
+
+- **Covering fire.** The `Cover` state's not-yet-arrived path is now a
+  bounding-overwatch loop: walk toward the hide spot, periodically stop, face
+  the player, and fire a burst back, then resume walking once the burst ends
+  — instead of silently jogging to cover with your back turned. Cadence is
+  `Constants.AI.COVER_RETREAT_SHOT_MIN/MAX` (randomized), gated by
+  `COVER_RETREAT_FIRE`. Once actually arrived at the hide spot it still goes
+  fully quiet for the rest of the window, same as before.
+- `startBurst`'s internal loop now allows firing while `state == "Cover"` as
+  well as `"Attack"` (it previously self-aborted immediately if called from
+  any state but `Attack`).
+- Deliberately never combines a `faceToward` root-CFrame write with an active
+  `Humanoid:MoveTo` in the same think — reuses the exact "stop completely, then
+  face + fire" pattern `Attack` already uses, rather than trying to have the
+  grunt face the player while still walking (that combination is what froze
+  grunts in place in the original Stage 1D bug).
+- `AIService` + `Constants.AI` only. Not squad-attack-slot-limited (a retreat
+  burst doesn't consume/respect `MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD`) — see
+  docs/TECHNICAL_DEBT.md "AI Stage 1F". MCP-checked the branch logic and burst
+  guard; not runtime-verified in Play.
+
 ## Fix: grunts crouch only on arrival at cover, and now fire from the crouch
 
 - **No more instant-crouch-and-waddle.** `Cover` and the `Attack` planted branch

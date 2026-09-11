@@ -164,6 +164,7 @@ type NPCRecord = {
     coverPoint : Vector3?,  -- LOS-broken hide spot for Cover, cleared on return to Attack
     fightPoint : Vector3?,  -- Stage 1E: cover-adjacent spot that keeps LOS, for Attack
     flankSide  : number,    -- Stage 1E: -1 / +1, which way this grunt arcs into a stale last-known pos
+    nextCoverShotClock: number,  -- os.clock() before which the Cover branch won't stop to fire a covering-fire burst while retreating
 
     nextThinkClock      : number,
     nextTargetCheckClock: number,
@@ -1197,14 +1198,19 @@ local function startBurst(record: NPCRecord)
             Logger.debug("[AIService]", record.model.Name, "burst x" .. tostring(shots), "at", tname)
         end
         for _ = 1, shots do
-            if record.dead or not running or record.state ~= "Attack" or record.target == nil then
+            -- "Attack" is the normal planted firefight; "Cover" is a covering-fire
+            -- burst fired while retreating (see the Cover branch's bounding-overwatch
+            -- pulse) — both are valid states to keep shooting in. Anything else
+            -- (Chase/Search/Patrol/dead) means the target/engagement ended; stop.
+            if record.dead or not running or record.target == nil
+                or (record.state ~= "Attack" and record.state ~= "Cover") then
                 break
             end
             fireOneShot(record)
             task.wait(AI.SECONDS_BETWEEN_SHOTS)
         end
         -- Stage 1D: arm the cover window so thinkNPC ducks this grunt away before
-        -- the next burst. The burst loop already bailed on state ~= "Attack".
+        -- the next burst. The burst loop already bailed on an invalid state above.
         if not record.dead and running and AI.TAKE_COVER == true then
             record.coverUntil = os.clock() + coverDurationFor(record)
         end
@@ -1551,12 +1557,11 @@ local function thinkNPC(record: NPCRecord, now: number)
         end
 
         if AI.TAKE_COVER == true and record.coverUntil > now then
-            -- Burst just finished OR just got shot — hold at / move to a spot that
-            -- breaks LOS until the window expires. Ahead of the range/LOS check so
-            -- reaching cover doesn't flip to Chase.
+            -- Burst just finished OR just got shot — head for a spot that breaks LOS
+            -- until the window expires. Ahead of the range/LOS check so reaching cover
+            -- doesn't flip to Chase.
             setState(record, "Cover")
             record.fightPoint = nil
-            humanoid.AutoRotate = true
             humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
             if record.coverPoint == nil then
                 record.coverPoint = findCoverPoint(record, troot.Position)
@@ -1575,7 +1580,35 @@ local function thinkNPC(record: NPCRecord, now: number)
             -- there, then drop into cover on arrival.
             local arrived = cp ~= nil and (root.Position - cp).Magnitude <= AI.FIGHT_ARRIVE_DIST
             setCrouched(record, arrived)
-            humanoid:MoveTo(cp or root.Position)
+
+            if arrived then
+                -- At the hide spot: break LOS and go quiet for the rest of the window.
+                humanoid.AutoRotate = true
+                humanoid:MoveTo(cp or root.Position)
+            elseif AI.COVER_RETREAT_FIRE == true and record.firing then
+                -- Mid covering-fire burst (started below on an earlier think): hold
+                -- still and keep facing the player — startBurst's own loop is doing
+                -- the actual shooting. Do NOT re-issue MoveTo(cp) here or it cancels
+                -- the plant; AutoRotate/faceToward + an active MoveTo fight each other
+                -- (this is what froze grunts in place back in Stage 1D).
+                humanoid.AutoRotate = false
+                humanoid:MoveTo(root.Position)
+                faceToward(record, troot.Position)
+            elseif AI.COVER_RETREAT_FIRE == true and inLos and now >= record.nextCoverShotClock then
+                -- Bounding-overwatch pulse: stop, face the player, fire a burst back,
+                -- then resume walking to cover once it (and its cooldown) finishes.
+                local lo, hi = AI.COVER_RETREAT_SHOT_MIN :: number, AI.COVER_RETREAT_SHOT_MAX :: number
+                record.nextCoverShotClock = now + lo + math.random() * (hi - lo)
+                humanoid.AutoRotate = false
+                humanoid:MoveTo(root.Position)
+                faceToward(record, troot.Position)
+                startBurst(record)
+            else
+                -- Between shots, no LOS, or the retreat-fire flag is off — just keep
+                -- retreating toward cover.
+                humanoid.AutoRotate = true
+                humanoid:MoveTo(cp or root.Position)
+            end
         elseif dist <= AI.ATTACK_RANGE and inLos then
             setState(record, "Attack")
             record.coverPoint = nil
@@ -1840,6 +1873,7 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
         coverPoint = nil,
         fightPoint = nil,
         flankSide  = (index % 2 == 0) and 1 or -1,
+        nextCoverShotClock = 0,
 
         nextThinkClock       = 0,
         nextTargetCheckClock = 0,

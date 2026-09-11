@@ -288,6 +288,50 @@ additive `Motor6D` C0/C1 offsets apply and restore. Residual risks:
   (mirrors the pre-existing Attack `spot ~= nil` moving/planted split) but the
   actual look (does the crouch-fire pose read OK, does the stand→crouch snap feel
   abrupt without a transition anim) needs a Studio Play pass.
+- **Covering fire while retreating to cover (2026-09-10, user-reported: "they
+  don't shoot back while running to cover, they should go to cover while facing
+  the player and shooting back").** The `Cover` branch's not-yet-arrived path is
+  now a bounding-overwatch loop: walk toward the hide spot (`AutoRotate = true`,
+  no facing writes — safe, matches every other walking state) until
+  `record.nextCoverShotClock` elapses, then stop (`AutoRotate = false`,
+  `MoveTo(root.Position)`, `faceToward`) and fire a burst via the same
+  `startBurst` the `Attack` state uses, then resume walking once the burst (and
+  its post-burst cooldown) ends. `startBurst`'s internal loop had to be relaxed
+  from `record.state ~= "Attack"` to `record.state ~= "Attack" and ~= "Cover"` so
+  it doesn't immediately self-abort when called from `Cover`. Deliberately never
+  combines `faceToward` (a root CFrame write) with an active `MoveTo` in the same
+  think — that exact combination is what froze grunts in place in the original
+  Stage 1D bug, so this reuses the already-proven-safe "stop completely, THEN
+  face+fire" pattern from `Attack` rather than trying to face the player while
+  actually walking. Flag-gated `Constants.AI.COVER_RETREAT_FIRE`, cadence
+  `COVER_RETREAT_SHOT_MIN/MAX`. Once actually arrived at the hide spot, behavior
+  is unchanged (goes fully quiet for the rest of the window). Not runtime-verified
+  — the state-machine logic was checked in isolation, not the in-game feel or
+  timing. Residual risks:
+  - **Not squad-attacker-slot-limited.** `updateSquadAttackSlots`
+    (`Constants.AI_COMBAT_TUNING.MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD`) only
+    counts grunts in `Attack`; a retreating grunt's covering-fire burst doesn't
+    consume/respect a slot, so it's possible for more grunts to be shooting at
+    once than the squad cap intends if some are retreating while others are
+    fighting. Judged acceptable for a first pass — squads are small (≤4) and
+    retreat bursts are short and infrequent — but worth revisiting if it feels
+    like too much simultaneous fire.
+  - **No reaction-time gate on the retreat burst** (`record.reactionReadyAt` is
+    only checked in `Attack`) — intentional, since retreat-fire is always against
+    an already-engaged target (reaction time modeled the beat before the FIRST
+    shot on a new target, which already happened earlier), but means a covering
+    burst can start the instant `nextCoverShotClock` elapses with no extra beat.
+  - **The grunt only faces the player while STOPPED to fire**, never while
+    actually walking (backpedaling-while-aiming is not attempted — that needs an
+    upper-body aim-twist system independent of `Humanoid:MoveTo`, out of scope
+    here and a nontrivial addition). The visual is "walk, plant, burst, walk
+    again," not a continuous fighting-withdrawal strafe.
+  - **`coverUntil` re-arms on every retreat burst** (`startBurst`'s existing
+    end-of-burst line), which can extend how long a grunt keeps bounding toward
+    cover if the player keeps giving it LOS — bounded in practice because arrival
+    is purely positional (checked every think regardless of the timer), so the
+    grunt still reaches the hide spot on schedule; it just may fire 1-2 more
+    covering bursts than a fixed-duration design would along the way.
 - **`updateWeaponCollision` is one forward chest-ray.** A wall to the *side* of the
   muzzle still clips; the ray also can't see players/other grunts (`losParams`
   excludes the AI folder), only map geometry. The C1 `+Z` / shoulder tuck signs
