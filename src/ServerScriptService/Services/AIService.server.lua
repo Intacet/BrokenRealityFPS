@@ -119,7 +119,8 @@ local RespawnBots  = Remotes:WaitForChild("RespawnBots") :: RemoteEvent
 local AI      = Constants.AI :: any
 local FX      = Constants.AI_COMBAT_FX :: any
 local TUNE    = Constants.AI_COMBAT_TUNING :: any  -- AI Stage 1C: reaction/aim-ramp/suppression tuning
-local SPACING = Constants.AI_SQUAD_SPACING :: any  -- squad formation / anti-bunching tuning
+local SPACING    = Constants.AI_SQUAD_SPACING :: any    -- squad formation / anti-bunching tuning
+local DISCIPLINE = Constants.AI_FIRE_DISCIPLINE :: any  -- squad fire discipline (active shooter slots + non-shooter support)
 
 -- ============================================================
 -- Types
@@ -215,6 +216,11 @@ type NPCRecord = {
     lastMoveAnchor    : Vector3?,  -- the RAW target (player pos / patrol point / etc, before spread+jitter+separation) that goal was computed from —
                                     -- compared against on each think so the MOVE_GOAL_RECALCULATE_INTERVAL throttle isn't defeated by jitter re-rolling every time
 
+    -- AI squad fire discipline (2026-09-11)
+    hasAttackSlot          : boolean, -- mirrors squad.activeShooterIds[model] — true = this grunt is one of the squad's active shooters right now
+    attackSlotAssignedAt   : number,  -- os.clock() the slot was (most recently) granted; feeds ATTACK_SLOT_TIMEOUT
+    lastSupportRepositionAt: number,  -- os.clock() of this non-shooter's last support/hold-angle goal pick
+
     dead      : boolean,
 }
 
@@ -223,16 +229,22 @@ type SquadRecord = {
     spawnCFrame : CFrame,
     patrolIndex : number,
 
-    -- AI Stage 1C — fair combat tuning
-    alerted             : boolean,             -- sticky: true once any member has engaged a live target this squad's life
-    attackerSlots       : { [Model]: boolean }, -- grunts currently allowed to fire (MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD)
-    nextAttackSlotRecheck: number,              -- os.clock() of the next updateSquadAttackSlots() pass
+    -- AI Stage 1C — fair combat tuning (reaction/aim/suppression; NOT the attack-slot
+    -- fields, which moved to the fire-discipline block below in the 2026-09-11 pass)
+    alerted : boolean, -- sticky: true once any member has engaged a live target this squad's life
 
     -- AI squad spacing / formation (2026-09-11)
     members                : { Model },             -- living members as of the last assignFormationSlots() pass
     leader                 : Model?,                 -- the current leader/anchor (original spawn leader if alive, else the first survivor)
     formationSlotAssignments: { [Model]: number },   -- model -> formation slot index, mirrored onto each NPCRecord.formationSlotIndex
     lastFormationAssignAt  : number,                 -- os.clock() of the last (re)assignment
+
+    -- AI squad fire discipline (2026-09-11) — supersedes the original Stage 1C
+    -- attackerSlots/nextAttackSlotRecheck fields (renamed to match the fire-
+    -- discipline task's required names; same mechanism, consolidated in place
+    -- rather than run twice — see docs/TECHNICAL_DEBT.md "AI squad fire discipline").
+    activeShooterIds     : { [Model]: boolean }, -- grunts currently allowed to fire (MAX_ACTIVE_SHOOTERS_PER_SQUAD)
+    lastAttackSlotUpdateAt: number,              -- os.clock() of the last updateSquadAttackSlots() pass
 }
 
 -- ============================================================
@@ -542,45 +554,124 @@ local function aimBandFor(t: number): string
     return "Fresh"
 end
 
--- AI Stage 1C: caps how many grunts in one squad actively fire at once
--- (MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD) so a 3-grunt squad doesn't all laser the
--- player simultaneously — the extras hold their planted Attack position (still
--- tracking/facing the player) without pulling the trigger until a slot opens.
--- Sticky: an existing holder keeps its slot as long as it stays eligible, so slots
--- don't flicker between squadmates every recheck; only vacated slots are refilled.
--- Cheap: re-evaluated at most once per ATTACK_SLOT_RECHECK_INTERVAL per squad,
--- guarded below, and squads are small (MAX_ACTIVE_NPCS = 12 total).
-local function updateSquadAttackSlots(squad: SquadRecord, now: number)
-    if now < squad.nextAttackSlotRecheck then
+-- AI squad fire discipline. Base combat eligibility for holding an attack slot at
+-- all, independent of slot availability: dead, no live target, out of
+-- ATTACK_RANGE, or no line of sight (no wallhack shooting — squadmates seeing
+-- the player does not let a blind grunt shoot) all disqualify. Deliberately does
+-- NOT check record.state == "Attack" here — that's what calls this in the first
+-- place (only the Attack-planted branch ever asks), and keeping it a pure
+-- target/range/LOS predicate makes it independently testable and reusable.
+local function attackSlotEligible(record: NPCRecord): boolean
+    if record.dead then
+        return false
+    end
+    local troot = targetRootOf(record.target)
+    if troot == nil then
+        return false
+    end
+    if (troot.Position - record.root.Position).Magnitude > (AI.ATTACK_RANGE :: number) then
+        return false
+    end
+    local tchar: Model? = if record.target ~= nil then record.target.Character else nil
+    if tchar == nil or not canSee(record, tchar, troot) then
+        return false
+    end
+    return true
+end
+
+-- Required helper (exact signature per the fire-discipline task spec). True only
+-- when the grunt is combat-eligible (see attackSlotEligible) AND its squad
+-- currently has a free attack slot — or it already holds one (so a still-eligible
+-- current shooter reads as "can use its slot", not "needs a new one").
+local function canNpcUseAttackSlot(npcRecord: NPCRecord): boolean
+    if not attackSlotEligible(npcRecord) then
+        return false
+    end
+    local squad = squads[npcRecord.squadId]
+    if squad == nil then
+        return false
+    end
+    if squad.activeShooterIds[npcRecord.model] == true then
+        return true
+    end
+    local held = 0
+    for _ in pairs(squad.activeShooterIds) do
+        held += 1
+    end
+    return held < (DISCIPLINE.MAX_ACTIVE_SHOOTERS_PER_SQUAD :: number)
+end
+
+-- Immediately drops `record`'s attack slot, if it holds one — called from
+-- setState() on every transition OUT of "Attack" (dies, loses target, leaves
+-- attack range/LOS, retreats to Cover, etc.), so a slot frees up right away
+-- instead of lingering up to ATTACK_SLOT_RECHECK_INTERVAL stale.
+local function releaseAttackSlot(record: NPCRecord)
+    if not record.hasAttackSlot then
         return
     end
-    squad.nextAttackSlotRecheck = now + (TUNE.ATTACK_SLOT_RECHECK_INTERVAL :: number)
-    local maxSlots = TUNE.MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD :: number
-
-    local function eligible(record: NPCRecord?): boolean
-        return record ~= nil and not record.dead and record.state == "Attack" and record.target ~= nil
+    record.hasAttackSlot = false
+    local squad = squads[record.squadId]
+    if squad ~= nil then
+        squad.activeShooterIds[record.model] = nil
     end
+end
 
-    -- Drop holders that are no longer eligible (dead, lost target, left Attack).
-    for model in pairs(squad.attackerSlots) do
-        if not eligible(npcs[model]) then
-            squad.attackerSlots[model] = nil
+-- Caps how many grunts in one squad actively fire at once
+-- (MAX_ACTIVE_SHOOTERS_PER_SQUAD) so a 3-4 grunt squad doesn't all laser the
+-- player simultaneously — the extras hold their planted Attack position (still
+-- tracking/facing the player, or repositioning — see the Attack-planted branch)
+-- without pulling the trigger until a slot opens. Sticky: an existing holder
+-- keeps its slot as long as it stays eligible, so slots don't flicker between
+-- squadmates every recheck; only vacated slots are refilled. A slot is also
+-- force-released after ATTACK_SLOT_TIMEOUT even if still eligible, so one grunt
+-- can't hog it forever. Cheap: re-evaluated at most once per
+-- ATTACK_SLOT_RECHECK_INTERVAL per squad, guarded below, and squads are small
+-- (MAX_ACTIVE_NPCS = 12 total).
+local function updateSquadAttackSlots(squad: SquadRecord, now: number)
+    assert(squad ~= nil, "squadRecord is required")
+    assert(typeof(now) == "number", "now must be a number")
+    if now - squad.lastAttackSlotUpdateAt < (DISCIPLINE.ATTACK_SLOT_RECHECK_INTERVAL :: number) then
+        return
+    end
+    squad.lastAttackSlotUpdateAt = now
+    local maxSlots = DISCIPLINE.MAX_ACTIVE_SHOOTERS_PER_SQUAD :: number
+    local timeout  = DISCIPLINE.ATTACK_SLOT_TIMEOUT :: number
+
+    -- Drop holders that are no longer eligible, or have held the slot past timeout.
+    for model in pairs(squad.activeShooterIds) do
+        local record = npcs[model]
+        local expired = record ~= nil and timeout > 0 and (now - record.attackSlotAssignedAt) >= timeout
+        if record == nil or not attackSlotEligible(record) or expired then
+            squad.activeShooterIds[model] = nil
+            if record ~= nil then
+                record.hasAttackSlot = false
+            end
+            if DISCIPLINE.DEBUG == true then
+                Logger.debug("[AIService]", model.Name, "attack slot released",
+                    expired and "(timeout)" or "(no longer eligible)")
+            end
         end
     end
 
     -- Fill any remaining slots from eligible squad members that don't hold one yet.
     local held = 0
-    for _ in pairs(squad.attackerSlots) do
+    for _ in pairs(squad.activeShooterIds) do
         held += 1
     end
     if held < maxSlots then
-        for model, record in pairs(npcs) do
+        for _, model in ipairs(squad.members) do
             if held >= maxSlots then
                 break
             end
-            if record.squadId == squad.id and squad.attackerSlots[model] == nil and eligible(record) then
-                squad.attackerSlots[model] = true
+            local record = npcs[model]
+            if record ~= nil and squad.activeShooterIds[model] == nil and attackSlotEligible(record) then
+                squad.activeShooterIds[model] = true
+                record.hasAttackSlot = true
+                record.attackSlotAssignedAt = now
                 held += 1
+                if DISCIPLINE.DEBUG == true then
+                    Logger.debug("[AIService]", model.Name, "attack slot assigned")
+                end
             end
         end
     end
@@ -1244,6 +1335,12 @@ local function setState(record: NPCRecord, newState: AIState)
     if record.state == newState then
         return
     end
+    -- Fire discipline: leaving Attack (dies, loses target, leaves range/LOS,
+    -- retreats to Cover, ...) immediately frees this grunt's attack slot rather
+    -- than leaving it stale for up to ATTACK_SLOT_RECHECK_INTERVAL.
+    if record.state == "Attack" and newState ~= "Attack" then
+        releaseAttackSlot(record)
+    end
     record.state = newState
     if AI.DEBUG then
         Logger.debug("[AIService]", record.model.Name, "state ->", newState)
@@ -1838,37 +1935,92 @@ local function thinkNPC(record: NPCRecord, now: number)
                 -- now also be the squad-spacing COMBAT_SPREAD_RADIUS fallback above,
                 -- which has no cover guarantee); otherwise stand in the open.
                 setCrouched(record, spot ~= nil and hasNearbyCover(spot, troot.Position))
-                humanoid.AutoRotate = false
                 humanoid.WalkSpeed = AI.ATTACK_MOVE_SPEED
-                humanoid:MoveTo(root.Position)
-                faceToward(record, troot.Position)
 
-                -- AI Stage 1C: raise/track the target during the reaction-time window
-                -- but hold fire until reactionReadyAt — a beat before shooting, not an
-                -- instant flick. "If target is lost before reactionReadyAt, do not
-                -- shoot magically" is automatic: this branch only runs while troot is
-                -- non-nil (a live, in-range target), so losing the target routes to
-                -- Chase/Search instead and startBurst is simply never reached.
-                local reactionReady = now >= record.reactionReadyAt
-                if reactionReady and record.reactionAnnouncedAt ~= record.reactionReadyAt then
-                    record.reactionAnnouncedAt = record.reactionReadyAt
-                    if TUNE.DEBUG == true then
-                        Logger.debug("[AIService]", record.model.Name, "reaction-ready, engaging")
-                    end
-                end
-
-                -- Per-squad attack slot: at most MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD
-                -- grunts in this squad fire at once. Extras stay planted and aimed
-                -- (everything above still runs) but hold fire until a slot frees up.
+                -- AI fire discipline: at most MAX_ACTIVE_SHOOTERS_PER_SQUAD grunts in
+                -- this squad may actually pull the trigger at once. Consolidates the
+                -- original Stage 1C per-squad attack-slot mechanism in place (renamed
+                -- fields/constants, added LOS/range eligibility + a timeout) rather
+                -- than running it twice under two names — see docs/TECHNICAL_DEBT.md
+                -- "AI squad fire discipline".
                 local squad = squads[record.squadId]
                 local hasAttackSlot = true
-                if TUNE.ENABLED == true and squad ~= nil then
+                if DISCIPLINE.ENABLED == true and squad ~= nil then
                     updateSquadAttackSlots(squad, now)
-                    hasAttackSlot = squad.attackerSlots[record.model] == true
+                    hasAttackSlot = record.hasAttackSlot
                 end
 
-                if not record.firing and reactionReady and hasAttackSlot then
-                    startBurst(record)
+                if hasAttackSlot then
+                    -- Active shooter: face the player and fire once reaction-time
+                    -- elapses. "If target is lost before reactionReadyAt, do not shoot
+                    -- magically" is automatic: this branch only runs while troot is
+                    -- non-nil (a live, in-range target), so losing the target routes
+                    -- to Chase/Search instead and startBurst is simply never reached.
+                    humanoid.AutoRotate = false
+                    humanoid:MoveTo(root.Position)
+                    faceToward(record, troot.Position)
+
+                    local reactionReady = now >= record.reactionReadyAt
+                    if reactionReady and record.reactionAnnouncedAt ~= record.reactionReadyAt then
+                        record.reactionAnnouncedAt = record.reactionReadyAt
+                        if TUNE.DEBUG == true then
+                            Logger.debug("[AIService]", record.model.Name, "reaction-ready, engaging")
+                        end
+                    end
+                    if not record.firing and reactionReady then
+                        startBurst(record)
+                    end
+                else
+                    -- No attack slot: never startBurst here (WAITING_BOT_CAN_SHOOT is
+                    -- false by default — see below for the explicit opt-in escape
+                    -- hatch). Track the target and/or reposition to a support/hold
+                    -- position instead of stacking damage on top of the active
+                    -- shooters and instead of just standing there doing nothing.
+                    if DISCIPLINE.ENABLED ~= true or DISCIPLINE.WAITING_BOT_CAN_TRACK_TARGET == true then
+                        humanoid.AutoRotate = false
+                        faceToward(record, troot.Position)
+                    else
+                        humanoid.AutoRotate = true
+                    end
+
+                    if DISCIPLINE.ENABLED == true and DISCIPLINE.WAITING_BOT_CAN_CHASE == true then
+                        -- Only pick a NEW support spot on the (randomized,
+                        -- non-shooter-specific) reposition timer — "do not jitter
+                        -- between goals" — issueSquadMoveGoal's own throttle then
+                        -- governs how often that goal is actually re-issued.
+                        local lo, hi = DISCIPLINE.NON_SHOOTER_REPOSITION_INTERVAL_MIN :: number,
+                            DISCIPLINE.NON_SHOOTER_REPOSITION_INTERVAL_MAX :: number
+                        if now - record.lastSupportRepositionAt >= (lo + math.random() * (hi - lo)) then
+                            record.lastSupportRepositionAt = now
+                            -- Alternate between holding farther back at a firing angle
+                            -- and moving up closer to support — reuses the squad-
+                            -- spacing formation direction for which side to favor.
+                            local dir = formationDirectionForSlot(record.formationSlotIndex)
+                            if dir.Magnitude < 0.01 then
+                                local ang = math.random() * math.pi * 2
+                                dir = Vector3.new(math.cos(ang), 0, math.sin(ang))
+                            end
+                            local holdAngle = math.random() < 0.5
+                            local distLo = if holdAngle then DISCIPLINE.HOLD_ANGLE_DISTANCE_MIN :: number else DISCIPLINE.SUPPORT_MOVE_DISTANCE_MIN :: number
+                            local distHi = if holdAngle then DISCIPLINE.HOLD_ANGLE_DISTANCE_MAX :: number else DISCIPLINE.SUPPORT_MOVE_DISTANCE_MAX :: number
+                            local dist = distLo + math.random() * (distHi - distLo)
+                            local supportSpot = troot.Position + dir * dist
+                            humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
+                            -- supportSpot is already a final, individually-computed
+                            -- position (per-grunt formation direction + random
+                            -- distance), so radius 0: separation + throttle only.
+                            issueSquadMoveGoal(record, humanoid, supportSpot, 0, now)
+                        end
+                    else
+                        humanoid:MoveTo(root.Position)
+                    end
+
+                    -- Escape hatch (off by default): explicitly let waiting bots fire
+                    -- anyway, bypassing the slot limit. Reads Constants.AI.SHOT_* via
+                    -- the normal startBurst/fireOneShot path, no separate damage logic.
+                    if DISCIPLINE.WAITING_BOT_CAN_SHOOT == true and not record.firing and now >= record.reactionReadyAt then
+                        startBurst(record)
+                    end
                 end
             end
         else
@@ -2021,6 +2173,10 @@ local function onNPCDied(record: NPCRecord)
     npcs[record.model] = nil
     table.insert(pendingCleanup, record)
 
+    -- Fire discipline: free this grunt's attack slot immediately on death (setState's
+    -- own release hook never runs here since onNPCDied sets record.state directly).
+    releaseAttackSlot(record)
+
     -- Squad spacing: reassign formation slots immediately on a death (per spec —
     -- not waiting for the next FORMATION_SLOT_REASSIGN_INTERVAL) so the rest of the
     -- squad doesn't keep orbiting a now-vacant slot. If that leaves nobody alive,
@@ -2142,6 +2298,10 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
         lastMoveGoalAt     = 0,
         lastMoveAnchor     = nil,
 
+        hasAttackSlot           = false,
+        attackSlotAssignedAt    = 0,
+        lastSupportRepositionAt = 0,
+
         dead      = false,
     }
 
@@ -2216,14 +2376,15 @@ local function spawnSquad(spawnCFrame: CFrame?, squadSize: number?): { Model }
         spawnCFrame = origin,
         patrolIndex = 1,
 
-        alerted               = false,
-        attackerSlots         = {},
-        nextAttackSlotRecheck = 0,
+        alerted = false,
 
         members                 = {},
         leader                  = nil,
         formationSlotAssignments = {},
         lastFormationAssignAt   = 0,
+
+        activeShooterIds       = {},
+        lastAttackSlotUpdateAt = -math.huge,  -- guarantees the first updateSquadAttackSlots() call always runs regardless of server os.clock() at spawn time
     }
 
     local models: { Model } = {}

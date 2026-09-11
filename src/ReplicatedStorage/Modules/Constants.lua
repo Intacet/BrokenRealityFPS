@@ -2414,6 +2414,38 @@ Constants.AI_SQUAD_SPACING = {
     MOVE_GOAL_RECALCULATE_INTERVAL = 1.0, -- seconds; a travel MoveTo goal is only recomputed/reissued this often, or sooner if the underlying anchor moved past MOVE_GOAL_JITTER studs
 }
 
+-- ── AI squad fire discipline (AIService.server) ─────────────────────────────
+-- Limits how many grunts in one squad actively pull the trigger at once, so a
+-- 3-4 bot squad pressures the player instead of instantly deleting them with
+-- everyone firing simultaneously. NOTE: MAX_ACTIVE_SHOOTERS_PER_SQUAD and
+-- ATTACK_SLOT_RECHECK_INTERVAL duplicate (same values) Constants.AI_COMBAT_TUNING's
+-- MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD / ATTACK_SLOT_RECHECK_INTERVAL from the
+-- earlier "fair combat tuning" pass — AIService's attack-slot system was
+-- consolidated in place to read this table as authoritative rather than running
+-- two competing "who gets to shoot" gates; the AI_COMBAT_TUNING pair are left
+-- in place, now unread. See docs/TECHNICAL_DEBT.md "AI squad fire discipline".
+Constants.AI_FIRE_DISCIPLINE = {
+    ENABLED = true,
+    DEBUG = true,
+
+    MAX_ACTIVE_SHOOTERS_PER_SQUAD = 2,
+    ATTACK_SLOT_RECHECK_INTERVAL  = 0.5,  -- seconds between updateSquadAttackSlots() passes per squad
+    ATTACK_SLOT_TIMEOUT           = 2.5,  -- seconds; a slot is force-released after this even if still eligible, so one grunt can't hog it forever
+
+    NON_SHOOTER_REPOSITION_INTERVAL_MIN = 1.5, -- seconds; how often a non-shooter picks a NEW support/hold-angle goal
+    NON_SHOOTER_REPOSITION_INTERVAL_MAX = 3.5,
+
+    HOLD_ANGLE_DISTANCE_MIN = 25, -- studs from the target; non-shooters "holding an angle" (watching, not closing in) pick a distance in this range
+    HOLD_ANGLE_DISTANCE_MAX = 85,
+
+    SUPPORT_MOVE_DISTANCE_MIN = 8,  -- studs from the target; non-shooters moving up to support pick a distance in this range instead
+    SUPPORT_MOVE_DISTANCE_MAX = 22,
+
+    WAITING_BOT_CAN_TRACK_TARGET = true,  -- non-shooters still faceToward the player instead of facing travel direction
+    WAITING_BOT_CAN_CHASE        = true,  -- non-shooters may reposition (see the two interval/distance pairs above) instead of freezing in place
+    WAITING_BOT_CAN_SHOOT        = false, -- escape hatch: true lets non-shooters fire anyway, bypassing the slot limit entirely — off by default, this IS the fire-discipline gate
+}
+
 -- ── Developer test area (TestAreaBuilder.server) ────────────────────────────
 -- Layout knobs for the generated developer sandbox under Workspace/<FOLDER_NAME>.
 -- All positions are world-space offsets from ORIGIN.

@@ -1,5 +1,32 @@
 # Changelog
 
+## AI squad fire discipline
+
+- **Only 1-2 bots fire at once per squad** (`MAX_ACTIVE_SHOOTERS_PER_SQUAD`) —
+  a 3-4 grunt squad now pressures the player instead of everyone opening up
+  simultaneously. Consolidates and hardens the per-squad attack-slot
+  mechanism from the earlier "fair combat tuning" pass rather than running a
+  second copy of it: slot eligibility now requires a live target, attack
+  range, **and line of sight** (no wallhack shooting — a squadmate seeing the
+  player doesn't let a blind grunt fire), and a slot force-releases after
+  `ATTACK_SLOT_TIMEOUT` even if the holder is still eligible, so one grunt
+  can't hog it forever.
+- **Slots release immediately**, not on the next recheck, the instant a grunt
+  dies, loses its target, or leaves the `Attack` state for any reason
+  (retreats to Cover, target goes out of range/LOS, ...).
+- **Non-shooters don't just stand there.** A grunt without a slot still
+  tracks the player (faces it) and, every couple of seconds, picks a new
+  support position — either holding back to watch an angle or moving up
+  closer to support — instead of freezing in place or piling onto the active
+  shooters' target.
+- New `Constants.AI_FIRE_DISCIPLINE` table. `AIService` + that table only —
+  no new remotes, no client files, `GunService`/`DamageService` untouched,
+  existing damage integration and active-shooter burst timing unchanged.
+  MCP-checked the slot assignment/drop/timeout logic and the support-distance
+  selection (catching and fixing a real initialization bug along the way);
+  not runtime-verified in Play (see docs/TECHNICAL_DEBT.md "AI squad fire
+  discipline").
+
 ## AI squad spacing and anti-bunching
 
 - **Formation slots.** Each squad now assigns a formation slot to every living

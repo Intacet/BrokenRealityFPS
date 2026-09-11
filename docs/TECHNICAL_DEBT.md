@@ -442,6 +442,78 @@ Residual risks:
   cover guarantee — worth confirming in Play that this doesn't make grunts
   wander more than intended when genuinely no cover exists nearby.
 
+## AI squad fire discipline (Studio verification: REQUIRED, not done)
+
+**Consolidation note:** this task asked for a `Constants.AI_FIRE_DISCIPLINE`
+table and a `local function updateSquadAttackSlots(squadRecord, now)` helper —
+both already existed (as `Constants.AI_COMBAT_TUNING` fields and an
+`AIService.updateSquadAttackSlots`) from the earlier "fair combat tuning"
+pass, with the same values for `MAX_ACTIVE_SHOOTERS_PER_SQUAD` /
+`MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD` (2) and the recheck interval (0.5s).
+Rather than run two "who gets to shoot" gates side by side, the existing
+mechanism was **rewritten in place**: `SquadRecord.attackerSlots` /
+`nextAttackSlotRecheck` renamed to this task's required
+`activeShooterIds` / `lastAttackSlotUpdateAt`; `updateSquadAttackSlots` gained
+the required `assert`s and now reads `Constants.AI_FIRE_DISCIPLINE` as
+authoritative. `Constants.AI_COMBAT_TUNING.MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD`
+/ `ATTACK_SLOT_RECHECK_INTERVAL` are left in `Constants.lua` (not removed —
+neither task said to remove existing values) but are now unread. Same pattern
+as the Stage 1C-vs-1H reaction-delay merge and the squad-spacing
+`record.slot` supersession earlier this session — three consolidations in one
+file's history now; worth a dedicated cleanup pass eventually to delete the
+genuinely dead constants once nobody's relying on their presence.
+
+New `attackSlotEligible` / `canNpcUseAttackSlot` / `releaseAttackSlot`
+helpers, new `NPCRecord` fields (`hasAttackSlot`, `attackSlotAssignedAt`,
+`lastSupportRepositionAt`). `AIService` + `Constants.AI_FIRE_DISCIPLINE` only
+— no new remotes, no client files, `GunService`/`DamageService` untouched,
+`DamageService` integration and active-shooter burst timing unchanged. MCP-
+checked slot assignment, the eligibility drop / timeout logic, and the
+non-shooter support-distance random selection with throwaway logic (not a
+live `AIService` require). Residual risks:
+
+- **Not runtime-verified in Play.** Whether the pressure actually reads as
+  "dangerous but fair" — the core design goal — has not been observed.
+- **Found and fixed a real bug during the isolated logic check:**
+  `SquadRecord.lastAttackSlotUpdateAt` initialized to `0`, and
+  `updateSquadAttackSlots`'s guard is `now - last < RECHECK_INTERVAL → skip`.
+  Since a fresh Roblox server's `os.clock()` starts near 0 too, a squad's
+  very first attack-slot pass could — in principle, if a grunt reached the
+  Attack-planted branch in the first ~0.5s of server life — skip assigning
+  any shooter at all. Fixed by initializing to `-math.huge` (matching the
+  pattern already used for other "must always fire on the first check"
+  fields in this file, e.g. `lastDamageCallAt`). In practice this window is
+  extremely unlikely to matter (spawning + walking into range takes longer
+  than 0.5s), but it was a real latent bug, not just theoretical — worth
+  double-checking similar `= 0`-initialized throttle fields elsewhere if any
+  more get added.
+- **Active shooter selection is simple: eligibility + squad member iteration
+  order, no ranking.** "Prefer bots with clear LOS and good position" is
+  satisfied only in the sense that LOS is a hard eligibility requirement —
+  there's no scoring for "best" position among several eligible candidates
+  (closest, best angle, etc.); whichever eligible member is encountered first
+  in `squad.members` order fills a vacancy.
+- **Non-shooter support positions are rough vector math, not tactical.**
+  `troot.Position + formationDirectionForSlot(...) * randomDistance` — no
+  raycast/walkability check (same caveat as squad spacing's goals), no
+  concept of "behind cover while supporting," no coordination with what the
+  active shooters are doing. A non-shooter can end up standing somewhere
+  awkward, in the open, or even closer to the player than a shooter.
+- **No true suppression/flanking roles yet.** Non-shooters are functionally
+  identical to each other (reposition or hold, chosen randomly per cycle) —
+  no dedicated "flanker," "suppressor," or "spotter" behavior. Explicitly out
+  of scope for this task ("no advanced flanking").
+- **`ATTACK_SLOT_TIMEOUT` is untested for feel.** A slot force-releasing at
+  2.5s even from an actively-firing, still-fully-eligible shooter could cause
+  a visible mid-burst-adjacent handoff; `startBurst`'s own burst+cooldown
+  cycle is usually longer than 2.5s (`SECONDS_BETWEEN_BURSTS` plus a
+  multi-shot burst), so this may fire mid-engagement more often than intended
+  — worth watching in Play and lengthening `ATTACK_SLOT_TIMEOUT` if slot
+  handoffs look twitchy.
+- **No difficulty presets** — `Constants.AI_FIRE_DISCIPLINE.ENABLED = false`
+  is the only on/off switch (reverts every grunt to the pre-fire-discipline,
+  no-slot-limit behavior); there's no "easy/normal/hard" tuning surface.
+
 ## Player first-person weapon retraction — Tarkov close-quarters (Studio verification: REQUIRED, not done)
 
 `ViewModelController.computeWallCollisionCF` + `Constants.VIEWMODEL_WALL_*`. One
