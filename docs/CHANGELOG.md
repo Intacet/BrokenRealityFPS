@@ -1,5 +1,21 @@
 # Changelog
 
+## Fix: AI never spawned on a published server
+
+- **Root cause:** `AIService`'s opening-squad spawn was gated
+  `RunService:IsStudio() and Constants.AI.SPAWN_ON_SERVER_START_IN_STUDIO` — there
+  was no published-server equivalent, so a live/published game never spawned a
+  single grunt even though `TestAreaBuilder` (already fixed for
+  `DEV_TEST_AREA.RUN_IN_PUBLISHED`) was correctly building the
+  `Workspace/AISpawns` / `AIPatrolPoints` parts for it to use. Studio Play always
+  worked, masking this.
+- New `Constants.AI.SPAWN_ON_SERVER_START_IN_PUBLISHED` (default `true`, same
+  pattern as `DEV_TEST_AREA.RUN_IN_PUBLISHED`). `studioAutoSpawn` renamed
+  `autoSpawnSquads`, gated by a new `autoSpawnEnabled()` that picks the Studio or
+  published flag. `didStudioAutoSpawn` renamed `didAutoSpawn`.
+- `Constants.AI` + `AIService` only — no new remotes, no other file touched.
+  `rojo build` clean.
+
 ## AI grunts ragdoll + bleed on death like the test dummies
 
 - **Death ragdoll.** On `Humanoid.Died` a grunt is handed to the same

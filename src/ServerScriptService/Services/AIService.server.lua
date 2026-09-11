@@ -198,7 +198,7 @@ local started   = false
 local running   = false
 local mainThread: thread? = nil
 local serviceConns: { RBXScriptConnection } = {}
-local didStudioAutoSpawn = false
+local didAutoSpawn = false
 
 local aiFolder : Folder? = nil
 local losParams: RaycastParams = RaycastParams.new()
@@ -1715,20 +1715,32 @@ local function mainLoop()
     end
 end
 
--- Runs the one-time Studio opening spawn (idempotent via didStudioAutoSpawn). Safe
--- to call again once spawn parts appear — e.g. TestAreaBuilder creating
+-- Gate for the one-time opening squad spawn below: Studio uses
+-- SPAWN_ON_SERVER_START_IN_STUDIO, a published server uses
+-- SPAWN_ON_SERVER_START_IN_PUBLISHED — same split as
+-- Constants.DEV_TEST_AREA.RUN_IN_PUBLISHED, which is what actually builds the
+-- Workspace/AISpawns + AIPatrolPoints parts this reads.
+local function autoSpawnEnabled(): boolean
+    if RunService:IsStudio() then
+        return AI.SPAWN_ON_SERVER_START_IN_STUDIO == true
+    end
+    return AI.SPAWN_ON_SERVER_START_IN_PUBLISHED == true
+end
+
+-- Runs the one-time opening spawn (idempotent via didAutoSpawn). Safe to call
+-- again once spawn parts appear — e.g. TestAreaBuilder creating
 -- Workspace/AISpawns after this service already started (script order is not fixed).
-local function studioAutoSpawn()
-    if didStudioAutoSpawn or not running then
+local function autoSpawnSquads()
+    if didAutoSpawn or not running then
         return
     end
-    if not (RunService:IsStudio() and AI.SPAWN_ON_SERVER_START_IN_STUDIO == true) then
+    if not autoSpawnEnabled() then
         return
     end
     if #spawnParts == 0 then
         return
     end
-    didStudioAutoSpawn = true
+    didAutoSpawn = true
     task.spawn(function()
         for i = 1, AI.MAX_SQUADS do
             if not running or activeCount() >= AI.MAX_ACTIVE_NPCS then
@@ -1746,8 +1758,8 @@ end
 
 local AIService = {}
 
--- Idempotent. Discovers Workspace folders, starts the single update loop, and (in
--- Studio, if enabled) spawns the opening squads.
+-- Idempotent. Discovers Workspace folders, starts the single update loop, and (if
+-- enabled for this environment — see autoSpawnEnabled) spawns the opening squads.
 function AIService.Start(): ()
     if started then
         if AI.DEBUG then
@@ -1811,17 +1823,20 @@ function AIService.Start(): ()
         end
         if child.Name == AI.SPAWN_FOLDER_NAME then
             spawnParts, warnedNoSpawns = collectParts(AI.SPAWN_FOLDER_NAME, warnedNoSpawns)
-            studioAutoSpawn()
+            autoSpawnSquads()
         elseif child.Name == AI.PATROL_FOLDER_NAME then
             patrolPoints, warnedNoPatrol = collectParts(AI.PATROL_FOLDER_NAME, warnedNoPatrol)
         end
     end)
     table.insert(serviceConns, addedConn)
 
-    if RunService:IsStudio() and AI.SPAWN_ON_SERVER_START_IN_STUDIO == true and #spawnParts == 0 then
-        Logger.warn("[AIService] SPAWN_ON_SERVER_START_IN_STUDIO is on but Workspace." .. AI.SPAWN_FOLDER_NAME .. " has no spawn parts yet — will spawn if one appears")
+    if autoSpawnEnabled() and #spawnParts == 0 then
+        local flagName = if RunService:IsStudio()
+            then "SPAWN_ON_SERVER_START_IN_STUDIO"
+            else "SPAWN_ON_SERVER_START_IN_PUBLISHED"
+        Logger.warn("[AIService]", flagName, "is on but Workspace." .. AI.SPAWN_FOLDER_NAME .. " has no spawn parts yet — will spawn if one appears")
     end
-    studioAutoSpawn()
+    autoSpawnSquads()
 
     Logger.debug("[AIService] started — spawns:", #spawnParts, "patrol points:", #patrolPoints)
 end
@@ -1841,7 +1856,7 @@ end
 function AIService.Destroy(): ()
     running = false
     started = false
-    didStudioAutoSpawn = false
+    didAutoSpawn = false
 
     for _, conn in ipairs(serviceConns) do
         conn:Disconnect()

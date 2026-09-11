@@ -2109,8 +2109,13 @@ Constants.AI = {
     DEFAULT_SQUAD_SIZE = 3,
     MAX_SQUADS         = 2,
 
-    SPAWN_ON_SERVER_START_IN_STUDIO = true,
-    SPAWN_DELAY_BETWEEN_NPCS        = 0.2,
+    SPAWN_ON_SERVER_START_IN_STUDIO    = true,
+    -- Published servers previously never spawned any AI at all (this flag did not
+    -- exist, so the Studio-only gate below silently skipped every live server).
+    -- Same on/off pattern as Constants.DEV_TEST_AREA.RUN_IN_PUBLISHED, which is what
+    -- actually builds the Workspace/AISpawns + AIPatrolPoints parts AIService reads.
+    SPAWN_ON_SERVER_START_IN_PUBLISHED = true,
+    SPAWN_DELAY_BETWEEN_NPCS           = 0.2,
 
     NPC_RIG_TYPE    = "R6",
     NPC_NAME_PREFIX = "BR_Grunt",
