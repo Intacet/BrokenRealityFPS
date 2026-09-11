@@ -354,6 +354,40 @@ Residual risks:
   correct for gameplay, but the muzzle-flash FX (`GetMuzzleWorldCFrame`) will play
   at the retracted position.
 
+## AI Stage 1G — grunt death ragdoll (Studio verification: REQUIRED, not done)
+
+`AIService` `require`s `RagdollService` and `onNPCDied` → `ragdollDeadNPC` mirrors
+`DummyService.onDummyDied`: destroy the welded gun (+ its grip `Motor6D` on the
+Right Arm), build a per-weapon impulse from `record.lastHit`, `RagdollService:Apply`
+(pcall-wrapped). `record.lastHit` is set in the existing `CombatEvents.DamageDealt`
+listener. Verified in a live Server datamodel that a 15-joint rig with a
+9-part welded gun reduces to the 6 body joints and all 6 convert to
+BallSocketConstraints with `BR_Ragdolled` set. Residual risks:
+
+- **Not play-tested.** MCP confirmed the joint teardown/conversion, not how the
+  body actually falls, whether the impulse reads right, or that nothing errors
+  when a grunt dies mid-crouch / mid-move / mid-burst in a real round.
+- **The gun just vanishes.** Dummies have no weapon, so this matches them, but a
+  dropped rifle would look better. A weapon-drop path was considered and left out —
+  detaching the model as a falling rigid assembly (restore mass + collision,
+  `SetNetworkOwner(nil)`, re-parent to the AI folder / a debris folder) is the
+  follow-up.
+- **No `SetNetworkOwner` retry / no anchored-part guard beyond RagdollService's
+  own.** `RagdollService:Apply` force-sets server ownership; if a grunt part is
+  somehow anchored (it shouldn't be) the impulse is absorbed.
+- **No corpse system.** The model is still `Destroy()`ed after
+  `Constants.AI.DEATH_CLEANUP_DELAY` (6 s) — the ragdoll pops out of existence
+  rather than sinking / fading. Same as before Stage 1G, now more noticeable.
+- **`record.lastHit` can be stale.** If a grunt dies from a non-`DamageDealt`
+  cause (a future hazard, `Humanoid.Health` set directly, a fall) `lastHit` holds
+  the previous hit or nil → the impulse is from the wrong direction or absent
+  (body just crumples). Acceptable for now (all current damage is `DamageDealt`).
+- **`AIService.Destroy()` does not `RagdollService:Restore`** the pending-cleanup
+  corpses before destroying them — fine because the model is destroyed whole, but
+  if a revive/corpse-reuse system ever appears this needs revisiting.
+- **Blood assumed working** from the shared `DamageDealt` path — not
+  independently re-verified for the AI target in this change.
+
 ## Pre-round loadout menu — partial DEBT-013 (Studio verification: YES, required)
 
 `LoadoutMenu` (client UI) + `LoadoutService` (server) + the `SelectLoadout` remote give

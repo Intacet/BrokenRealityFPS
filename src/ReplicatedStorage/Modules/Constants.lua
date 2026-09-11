@@ -2205,6 +2205,15 @@ Constants.AI = {
     GUN_RETRACT_MAX        = 2.2,  -- max studs the welded gun + right arm pull back
     GUN_RETRACT_TUCK_DEG   = 30,   -- max degrees the muzzle tucks up as it retracts
     GUN_RETRACT_ALPHA      = 0.35, -- lerp per think toward the target retract amount (0 = clear, 1 = flush against wall)
+
+    -- ── Stage 1G — death ragdoll (same RagdollService path the test dummies use) ──
+    -- On Humanoid.Died the grunt is handed to RagdollService:Apply with an impulse
+    -- built from its last accepted hit (Constants.RAGDOLL_WEAPON_IMPULSE by
+    -- DamageInfo.sourceName, else RAGDOLL_IMPULSE_DEFAULT) — identical to
+    -- DummyService.onDummyDied. The welded AKS-74 is removed first (its parts are
+    -- held together by Motor6Ds that RagdollService would otherwise convert). Blood
+    -- already works: BloodService reacts to the same CombatEvents.DamageDealt.
+    RAGDOLL_ON_DEATH = true,
 }
 
 -- ── AI Stage 1B — combat feedback FX for AIService grunts ───────────────────

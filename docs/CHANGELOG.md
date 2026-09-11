@@ -1,5 +1,25 @@
 # Changelog
 
+## AI grunts ragdoll + bleed on death like the test dummies
+
+- **Death ragdoll.** On `Humanoid.Died` a grunt is handed to the same
+  `RagdollService:Apply` the test dummies use, with a knockback impulse built from
+  its last accepted hit (`Constants.RAGDOLL_WEAPON_IMPULSE` by weapon name, else
+  `RAGDOLL_IMPULSE_DEFAULT`) — the exact path as `DummyService.onDummyDied`. The
+  body flops with the shot instead of freezing upright and vanishing; the corpse
+  is still cleared after `Constants.AI.DEATH_CLEANUP_DELAY`.
+- The welded AKS-74 is removed first (its parts are held together by `Motor6D`s
+  that `RagdollService` would otherwise convert to loose ball sockets), grip joint
+  included. Gated by `Constants.AI.RAGDOLL_ON_DEATH`.
+- **Blood** already worked — `BloodService` reacts to the same
+  `CombatEvents.DamageDealt` for any target, so shooting a grunt bleeds exactly
+  like shooting a dummy. No change needed.
+- `AIService` + `Constants.AI` only — new `require` of the existing
+  `RagdollService`, no new remotes, no `RagdollService` / `DummyService` /
+  `DamageService` / `BloodService` edit. Verified the teardown + ragdoll in a live
+  Server datamodel (15 joints → 6 body joints convert, gun gone); the in-game
+  feel needs a Studio Play test.
+
 ## Cover on the far side of the player + first-person weapon retraction
 
 - **Grunts hide where the player can't see them.** `findCoverPoint` now sweeps a

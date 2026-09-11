@@ -106,6 +106,9 @@ local DamageService = require(script.Parent:WaitForChild("DamageService"))
 -- (DamageService is the sole producer). Stage 1E listens to DamageDealt so a grunt
 -- reacts the instant it is shot.
 local CombatEvents = require(script.Parent:WaitForChild("CombatEvents"))
+-- Stage 1G: the same physics-ragdoll service DummyService uses on dummy death, so a
+-- dead grunt flops with the shot's knockback instead of freezing then vanishing.
+local RagdollService = require(script.Parent:WaitForChild("RagdollService"))
 
 -- Untyped views of the tuning tables (heterogeneous fields; matches the pattern
 -- used by TestAreaBuilder's `local CFG = Constants.DEV_TEST_AREA :: any`).
@@ -174,6 +177,9 @@ type NPCRecord = {
     rightShoulderBaseC0: CFrame,           -- its C0 before any retract offset
     gripMotor          : Motor6D?,         -- the welded-gun grip Motor6D (Handle -> Right Arm)
     gripBaseC1         : CFrame,           -- its C1 before any retract offset
+
+    -- Stage 1G — death ragdoll
+    lastHit   : Types.DamageInfo?,         -- most recent accepted hit on this grunt (for the death impulse)
 
     dead      : boolean,
 }
@@ -1450,6 +1456,58 @@ local function disconnectRecord(record: NPCRecord)
     table.clear(record.conns)
 end
 
+-- Stage 1G: hand the dead grunt to the same RagdollService the test dummies use.
+-- The welded AKS-74 is removed first — its parts are joined by Motor6Ds that
+-- RagdollService:Apply would convert to BallSocketConstraints, scattering the rifle
+-- into loose floating pieces. The knockback impulse is built exactly like
+-- DummyService.onDummyDied (per-weapon RAGDOLL_WEAPON_IMPULSE, else the default).
+local function ragdollDeadNPC(record: NPCRecord)
+    if AI.RAGDOLL_ON_DEATH ~= true then
+        return
+    end
+    if RagdollService:IsRagdolled(record.model) then
+        return
+    end
+
+    -- Drop the grip Motor6D (it lives on the Right Arm, not inside the gun model) so
+    -- RagdollService's Motor6D sweep doesn't hit a joint with a destroyed Part1.
+    local rightArm = record.model:FindFirstChild(Constants.WORLD_WEAPON_R6_RIGHT_ARM_NAME)
+    if rightArm ~= nil then
+        local grip = rightArm:FindFirstChild(Constants.WORLD_WEAPON_GRIP_MOTOR_NAME)
+        if grip ~= nil then
+            grip:Destroy()
+        end
+    end
+    local gun = record.model:FindFirstChild(Constants.WORLD_WEAPON_CHARACTER_MODEL_NAME)
+    if gun ~= nil then
+        gun:Destroy()
+    end
+
+    local info = record.lastHit
+    local impulse: Vector3? = nil
+    if info ~= nil and info.hitDirection ~= nil and info.finalAmount > 0 then
+        local byWeapon = (Constants.RAGDOLL_WEAPON_IMPULSE :: any) or {}
+        local prof = (info.sourceName ~= nil and byWeapon[info.sourceName])
+            or (Constants.RAGDOLL_IMPULSE_DEFAULT :: any)
+            or { SCALE = 4.5, MAX = 320 }
+        local mag = math.min(info.finalAmount * prof.SCALE, prof.MAX)
+        impulse = info.hitDirection.Unit * mag
+    end
+
+    local hitPart: BasePart? = if info ~= nil then info.hitPart else nil
+    local sourceName: string? = if info ~= nil then info.sourceName else nil
+    local ok, err = pcall(function()
+        RagdollService:Apply(record.model, {
+            impulse    = impulse,
+            hitPart    = hitPart,
+            sourceName = sourceName,
+        })
+    end)
+    if not ok then
+        Logger.warn("[AIService] ragdoll failed for", record.model.Name, "-", tostring(err))
+    end
+end
+
 local function onNPCDied(record: NPCRecord)
     if record.dead then
         return
@@ -1460,6 +1518,8 @@ local function onNPCDied(record: NPCRecord)
     disconnectRecord(record)
     npcs[record.model] = nil
     table.insert(pendingCleanup, record)
+
+    ragdollDeadNPC(record)
 
     if AI.DEBUG then
         Logger.debug("[AIService]", record.model.Name, "died — cleanup in", AI.DEATH_CLEANUP_DELAY, "s")
@@ -1539,6 +1599,8 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
         rightShoulderBaseC0 = rightShoulder.C0,
         gripMotor           = nil,
         gripBaseC1          = CFrame.new(),
+
+        lastHit   = nil,
 
         dead      = false,
     }
@@ -1722,6 +1784,9 @@ function AIService.Start(): ()
         if record == nil or record.dead then
             return
         end
+        -- Stage 1G: remember the latest hit so onNPCDied can shove the ragdoll with
+        -- the killing shot's direction / weapon (mirrors DummyService.record.lastHit).
+        record.lastHit = info
         if AI.HURT_COVER == true then
             record.coverUntil = os.clock() + (AI.COVER_DURATION :: number)
             record.coverPoint = nil  -- force a fresh hide spot away from the new threat
