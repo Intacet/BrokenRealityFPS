@@ -1,5 +1,41 @@
 # Changelog
 
+## AI dynamic big-map navigation (AIPatrolPoints now optional)
+
+- **AI no longer needs hand-placed patrol points.** Workspace/AIPatrolPoints is
+  now optional — if it exists, squads still patrol it exactly as before; if it's
+  missing or empty, squads dynamically roam near their spawn instead (a random
+  reachable ground point sampled 35–100 studs out, walked to, a short cooldown,
+  then a new one), so a squad works on a large hand-built map without a designer
+  placing points everywhere.
+- **Squads path around obstacles when roaming, searching, or investigating.** A
+  new PathfindingService-backed helper computes a waypoint route and follows it,
+  with a stuck check that forces a repath (or a fresh goal entirely) if a bot
+  makes no real progress for a couple seconds, and a plain straight-line
+  fallback if pathfinding is disabled or fails. Applied to dynamic roaming and
+  both "investigate a last-known position" behaviors (a bot's own stale memory,
+  and a squad-shared last-known-position from AI squad awareness).
+- **Combat movement is untouched.** Chasing a target you can currently see,
+  fighting/planting, retreating to cover, and bound-and-cover advancing all keep
+  their existing direct movement exactly as before — pathfinding is deliberately
+  scoped to roam/search/investigate only, so already-tuned close-combat feel and
+  responsiveness aren't affected.
+- New `Constants.AI_NAVIGATION` table + `AIService` helpers
+  `sampleReachableGroundNear` / `computePath` / `followNavGoal` / `dynamicRoam`.
+  Foundation-only, not a navmesh editor, not designer-authored AI zones, no
+  doors/ladders/vaulting/climbing, no strategic map-level planner — see
+  docs/TECHNICAL_DEBT.md "AI dynamic navigation" for every scoping note and
+  known limitation.
+- `AIService.server.lua` + `Constants.lua` only — no new remotes, no client
+  files, `GunService`/`DamageService` untouched, existing spawning / spacing /
+  fire discipline / awareness / bounding / combat FX / damage / death cleanup
+  all preserved. `rojo build` clean; MCP-checked the ground-sampling radius math,
+  slope rejection, stuck-detection timing, waypoint-advance logic, and a real
+  `PathfindingService:CreatePath`/`ComputeAsync` call with these agent
+  parameters in a live Server datamodel; not runtime-verified in Play (Studio
+  was mid-Play-session during this check, so the Edit datamodel wasn't
+  available for the usual pre-Play static pass either — flagged, not skipped).
+
 ## AI squad bound-and-cover movement
 
 - **Squads advance more naturally.** When a squad is alert with a known

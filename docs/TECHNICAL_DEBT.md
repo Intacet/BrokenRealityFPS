@@ -28,7 +28,13 @@ live models. This is **foundation only** — the AI system is NOT complete.
   straight at the goal and will get stuck on walls, corners, and gaps.
   `PATH_RECALCULATE_INTERVAL` exists in `Constants.AI` but is currently unused
   (reserved for a throttled `ComputeAsync` pass in a **later** stage — Stage 1B was
-  combat feedback FX, not pathfinding).
+  combat feedback FX, not pathfinding). **Partially addressed (2026-09-11) by "AI
+  dynamic navigation"** (see that entry below): `PathfindingService` is now used,
+  but only for dynamic roaming and Search/investigate goals — every combat
+  movement path called out here (Chase/Attack/Cover/bound-and-cover) still walks
+  straight at its goal via `Humanoid:MoveTo`, exactly as this entry originally
+  described, and can still get stuck on walls/corners/gaps in combat. This
+  bullet is left in place rather than marked fully resolved.
 - **Shooting is a single burst raycast.** `fireOneShot` casts one ray per shot with
   a random cone (`SHOT_SPREAD_DEGREES`), flat `SHOT_DAMAGE` (region forced to
   `Unknown`, so no AI headshots). No penetration, no projectile travel. A cosmetic
@@ -575,7 +581,14 @@ Residual risks:
 - **Investigate goals have no obstacle/walkability check** — same caveat as
   squad spacing's goals: a random offset near the shared position can land
   somewhere the grunt can't actually path to (`Humanoid:MoveTo` will just
-  fail quietly).
+  fail quietly). **Improved (2026-09-11) by "AI dynamic navigation":** the
+  investigate goal now routes through `PathfindingService` (`followNavGoal`)
+  instead of a bare `MoveTo`, so it can path *around* obstacles, and an
+  unreachable offset now gets abandoned for a fresh one on the next think
+  (a stuck signal) instead of silently failing forever — but the offset
+  itself is still an unvalidated random point, so a goal that lands somewhere
+  genuinely unreachable (not just obstructed) is still possible; it now just
+  recovers instead of getting stuck on it.
 - **Radius-gated sharing uses a flat distance, not LOS or hearing range** —
   `ALERT_SHARE_RADIUS` is a straight-line distance check between the alerting
   grunt and each squadmate, so a squadmate on the other side of a thin wall
@@ -695,6 +708,137 @@ risks:
 - **No animation/callout polish.** A Mover advancing and a Cover bot holding
   look identical to their existing Chase/Attack poses — no distinct "moving
   up" or "covering" animation, stance, or barked line.
+
+## AI dynamic navigation (Studio verification: REQUIRED, not done)
+
+**Scope note up front:** this is explicitly a **navigation foundation**, not a
+finished big-map AI system — dynamic roaming, search, and investigate on
+sampled ground points, plus throttled `PathfindingService` support. No
+designer-authored AI zones, no navmesh editor tooling, no doors/ladders/
+vaulting/climbing, no strategic map-level planner, no vehicle navigation. All
+per the task's own stated boundaries.
+
+New `Constants.AI_NAVIGATION` table + `AIService` helpers
+`sampleReachableGroundNear` / `computePath` / `followNavGoal` / `dynamicRoam`,
+new `NPCRecord` path-following fields (`currentPath`, `currentWaypointIndex`,
+`currentNavigationGoal`, `lastPathRecalculateAt`, `lastStuckCheckAt`,
+`lastStuckCheckPosition`, `stuckSince`) and roam fields (`roamGoal`,
+`roamCooldownUntil`). `collectParts` gained an `optional: boolean?` parameter
+so a missing/empty `Workspace/AIPatrolPoints` logs a `Logger.debug` "this is
+fine" note instead of `Logger.warn` — `AISpawns` is unchanged and still warns,
+it remains required. `AIService` + `Constants.AI_NAVIGATION` only — no new
+remotes, no client files, `GunService`/`DamageService` untouched, spawning /
+spacing / fire discipline / awareness / bounding / cover / combat FX / damage /
+death cleanup all preserved. MCP-checked (throwaway logic against a live
+Server datamodel, not a live `AIService` require) the ground-sampling
+radius-band math, the slope-rejection threshold, stuck-detection timing
+(wedged-in-place vs. steadily-moving sequences), waypoint catch-up/advance
+logic, the goal-change path-invalidation threshold, the `-math.huge`
+recalculate-throttle init (same bug class caught 3× already this session —
+`lastAttackSlotUpdateAt` / `lastKnownUpdateAt` / `lastBoundEvaluateAt`), and a
+real `PathfindingService:CreatePath`/`ComputeAsync` call with this task's exact
+agent parameters, which completed without error. One throwaway-test authoring
+mistake was caught and corrected during that check (a waypoint-advance test
+seeded an unrealistic starting index — the real `currentWaypointIndex` only
+ever advances forward as a grunt actually walks a path in order, so "already
+near the final waypoint" can't realistically start back at waypoint 1); noted
+here for transparency, not because it changed any shipped logic. Studio's Edit
+datamodel was unavailable during this check (a Play session was already
+running in the target Studio instance), so verification ran against the
+Server datamodel instead of the usual pre-Play Edit pass — not a substitute
+for the Studio test steps below. Residual risks:
+
+- **Not runtime-verified in Play.** Whether roaming/searching actually reads
+  as "natural" on a real large map, whether `PathfindingService` costs are
+  acceptable with several squads active at once, and whether the stuck
+  threshold (`PATH_STUCK_TIME` = 2s) is well-tuned for real geometry have not
+  been observed.
+- **`PathfindingService` can be expensive and needs stress testing.** Each
+  `computePath` call is a real navmesh query; it's throttled to
+  `PATH_RECALCULATE_INTERVAL` (1.5s) per NPC and only triggered when a path is
+  missing, exhausted, or the grunt is stuck — but there is no cross-NPC
+  scheduling to spread simultaneous compute calls across different think
+  ticks (spec point 8, "do not compute many paths for all NPCs in the same
+  frame if easy to avoid," was not implemented — every NPC's own
+  `AI.THINK_INTERVAL` stagger is the only spreading effect, and it's
+  incidental, not designed for this). With `MAX_ACTIVE_NPCS` bots all newly
+  alerted/roaming at once, a burst of simultaneous `ComputeAsync` calls is
+  possible and unmeasured.
+- **Dynamic roaming is simple and may choose weird destinations.**
+  `sampleReachableGroundNear` is a blind angle+radius raycast sample — it has
+  no concept of "interesting" locations, rooms, cover, or the shape of the
+  map beyond "is there walkable, non-steep, collidable ground here." A roam
+  goal can land in a random open field, a tiny ledge, or technically-valid
+  ground that reads as a strange place for a patrol to wander to. There is no
+  concept of a "patrol route shape" the way authored `AIPatrolPoints` gives —
+  dynamic roam is uncoordinated per-grunt wandering near the anchor, not a
+  designed circuit.
+- **No designer-authored AI zones yet.** Nothing here lets a level designer
+  mark "patrol this room, not that one," bias roam sampling toward specific
+  areas, or exclude regions (a hazard, an out-of-bounds zone, a room that
+  should stay empty) from ground sampling. `RANDOM_ROAM_RADIUS_MIN/MAX` is a
+  single flat radius band around one anchor point per squad.
+- **No strategic map-level AI planner.** Each grunt/squad reasons only about
+  its own immediate roam/search goal — there is no shared understanding of
+  the map's layout, no squad-to-squad coordination beyond what already
+  existed (spacing/fire-discipline/awareness/bounding), and no notion of
+  "cover this objective" or "hold this lane."
+- **No doors/ladders/vaulting/climbing.** `AGENT_CAN_CLIMB` is `false` and
+  nothing opens a door — a roam/search goal on the far side of a closed door
+  or behind a ladder-only gap will fail to path (falls back to a direct
+  `MoveTo`, which will then just walk into the obstacle) or `computePath`
+  will return `nil` for that goal, discarded on the next pick.
+- **Ground sampling can be fooled by thin or layered geometry.** The
+  validation raycast is a single downward cast from directly above the
+  candidate XZ point — a thin overhang, a bridge over a pit, or stacked
+  floors can validate a point that isn't actually the intended walkable
+  surface (e.g. sampling lands on a rooftop instead of the street below it,
+  or a walkway over water). `MAX_GROUND_SLOPE_NORMAL_Y` filters slope, not
+  which of several stacked hits is "the right one" — `workspace:Raycast`
+  returns the nearest hit along the ray, which is usually correct but not
+  guaranteed to be the intended floor on a vertically complex map.
+- **Stuck detection retries the same path/goal; `dynamicRoam` is the only
+  caller that reacts by picking a genuinely different destination.** The
+  squad-shared investigate branch also drops its goal on a stuck signal (a
+  fresh nearby offset is picked next think), but the personal stale-last-seen
+  Search branch (`flankPointFor`) does not check `followNavGoal`'s stuck
+  return at all — a flank point behind unreachable geometry can keep
+  retrying via `issueSquadMoveGoal`'s own throttle without ever being
+  abandoned for a different point. Left this way because `flankPointFor`'s
+  arc-converging behavior already has its own SEARCH_DURATION expiry
+  (Stage 1E) that eventually drops the grunt back to Patrol/Idle regardless,
+  so a wedged flank point self-resolves, just not as quickly as it could.
+- **Scope boundary: pathfinding applies to roam + Search/investigate only,
+  not to any combat movement.** Chase-toward-a-visible-target, the Attack
+  fighting-spot transit, the Cover retreat, and bound-and-cover's Mover
+  advance all keep their pre-existing direct `Humanoid:MoveTo`, unchanged —
+  a deliberate interpretation of "navigation foundation" to avoid touching
+  already-tuned close-combat responsiveness/latency in the same pass that
+  adds a new, unverified system. This means combat movement still won't path
+  around obstacles on a large map — only roam/search/investigate do. Flagged
+  as a scope decision, not an oversight, but worth revisiting once this
+  foundation is Play-verified and trusted.
+- **`SEARCH_RADIUS_MIN/MAX` supersedes `AI_SQUAD_AWARENESS.INVESTIGATE_DISTANCE_MIN/MAX`
+  in place**, same consolidation pattern used four times already this
+  session (Stage 1C-vs-1H reaction delay, squad-spacing's `record.slot`,
+  fire discipline's attack-slot rename, squad awareness's `alerted` flag) —
+  the awareness pass's own fields are left declared, now unread, rather than
+  running two parallel "how far to offset the investigate goal" knobs.
+- **No per-NPC path-compute scheduling/stagger.** See the `PathfindingService`
+  cost note above — this is the most likely source of a real hitch under
+  load and the top candidate for the "stress testing" the task asked to flag.
+- **`currentPath` holds a cached waypoint LIST, not a live `Path` instance** —
+  a minor, deliberate deviation from the task's literal field-name
+  implication (`currentPath: Path?`) for practicality: re-deriving an index
+  into a live `Path` object every think is awkward compared to holding the
+  already-fetched `{ PathWaypoint }` array. Typed and commented at the
+  declaration site; functionally equivalent for this task's purposes.
+- **No `Path.Blocked` event subscription.** Waypoint blockage is caught by the
+  existing polling stuck-check on its own cadence (`PATH_STUCK_CHECK_INTERVAL`),
+  not instantly via an event listener — simpler (no per-NPC connection to
+  store/disconnect) at the cost of reacting a beat slower than an event-driven
+  version would. Nothing to disconnect currently exists because nothing
+  subscribes; flagged here since the task's cleanup section anticipated one.
 
 ## Player first-person weapon retraction — Tarkov close-quarters (Studio verification: REQUIRED, not done)
 

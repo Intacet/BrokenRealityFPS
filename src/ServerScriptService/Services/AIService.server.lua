@@ -78,17 +78,35 @@
 -- an arc via flankPointFor() (per-grunt flankSide alternates), converging on the
 -- spot; after SEARCH_DURATION with no sighting it drops back to patrol.
 --
--- Deferred (see docs/TECHNICAL_DEBT.md — AI Stage 1A..1F): PathfindingService,
+-- AI dynamic navigation (Constants.AI_NAVIGATION, 2026-09-11): lets squads roam,
+-- search, and investigate on a big map without hand-placed Workspace/AIPatrolPoints.
+-- sampleReachableGroundNear() picks a random downward-raycast-validated ground
+-- point within a radius band; computePath()/followNavGoal() wrap
+-- PathfindingService (agent params from Constants.AI_NAVIGATION), waypoint-by-
+-- waypoint via Humanoid:MoveTo, with a distance-over-time stuck check and a plain
+-- MoveTo fallback if pathfinding is disabled or fails. Applied ONLY to Idle/Patrol
+-- dynamic roaming (dynamicRoam(), used when Workspace/AIPatrolPoints doesn't
+-- exist — authored patrol points still work exactly as before) and the two
+-- "Search" state goals (this grunt's own stale last-seen flank, and the squad-
+-- shared investigate-last-known-position goal) — every combat movement path
+-- (Chase toward a live target, Attack transit, Cover retreat, bound-and-cover)
+-- deliberately keeps its existing direct Humanoid:MoveTo, unchanged, to preserve
+-- already-tuned close-combat responsiveness. See docs/TECHNICAL_DEBT.md "AI
+-- dynamic navigation" for that scoping and every other limitation.
+--
+-- Deferred (see docs/TECHNICAL_DEBT.md — AI Stage 1A..1F, AI dynamic navigation):
 -- ragdoll on AI death, rewards/points/killstreaks, AI types, real squad
 -- cover/flanking coordination, suppression, jump/climb animation, reload
 -- animation, final flash/smoke/sound art, tracer pooling, extracting the
--- WorldWeaponService attach body into a shared module.
+-- WorldWeaponService attach body into a shared module, doors/ladders/vaulting,
+-- a designer-authored AI-zone/navmesh-region system, a strategic map-level planner.
 
-local Players           = game:GetService("Players")
-local RunService        = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local CollectionService = game:GetService("CollectionService")
-local Debris            = game:GetService("Debris")
+local Players            = game:GetService("Players")
+local RunService         = game:GetService("RunService")
+local PathfindingService = game:GetService("PathfindingService")
+local ReplicatedStorage  = game:GetService("ReplicatedStorage")
+local CollectionService  = game:GetService("CollectionService")
+local Debris             = game:GetService("Debris")
 
 -- ============================================================
 -- Dependencies
@@ -124,6 +142,7 @@ local SPACING    = Constants.AI_SQUAD_SPACING :: any    -- squad formation / ant
 local DISCIPLINE = Constants.AI_FIRE_DISCIPLINE :: any  -- squad fire discipline (active shooter slots + non-shooter support)
 local AWARENESS  = Constants.AI_SQUAD_AWARENESS :: any  -- squad awareness sharing + last-known-position memory
 local BOUNDING   = Constants.AI_BOUNDING :: any  -- squad bound-and-cover movement (Mover/Cover roles)
+local NAV        = Constants.AI_NAVIGATION :: any  -- dynamic big-map navigation (ground sampling + PathfindingService)
 
 -- ============================================================
 -- Types
@@ -237,6 +256,25 @@ type NPCRecord = {
     tacticalRole    : ("Mover" | "Cover" | "Shooter" | "Support")?,
     boundDestination: Vector3?, -- the Mover's current bound point (nil for every other role); computed once per assignment, held until arrival/timeout
 
+    -- AI dynamic navigation (2026-09-11) — path-following state, shared by every
+    -- nav-mode goal (dynamic roam and both Search-state goals below). currentPath
+    -- is the cached waypoint LIST from the most recent successful
+    -- Path:GetWaypoints() call, not a live Path instance — simpler to hold an
+    -- index into than re-deriving one from a Path object every think.
+    currentPath           : { PathWaypoint }?,
+    currentWaypointIndex  : number,
+    currentNavigationGoal : Vector3?,
+    lastPathRecalculateAt : number,
+    lastStuckCheckAt      : number,
+    lastStuckCheckPosition: Vector3?,
+    stuckSince            : number, -- os.clock() progress last stalled; 0 = not currently stuck
+
+    -- AI dynamic navigation — roaming (2026-09-11). Only read/written by
+    -- dynamicRoam() (Idle/Patrol with no Workspace/AIPatrolPoints); independent of
+    -- the path-following fields above, which roam shares with Search/investigate.
+    roamGoal         : Vector3?,
+    roamCooldownUntil: number,
+
     dead      : boolean,
 }
 
@@ -341,12 +379,22 @@ end
 
 -- Collects BasePart children of a named Workspace folder. Warns once (via the
 -- passed flag setter) if the folder is missing or empty; never errors.
-local function collectParts(folderName: string, alreadyWarned: boolean): ({ BasePart }, boolean)
+-- `optional` (AI dynamic navigation, 2026-09-11) downgrades that one-time notice
+-- to a Logger.debug "this is fine" message instead of Logger.warn — used for
+-- Workspace/AIPatrolPoints, which dynamic roaming makes non-required.
+-- Workspace/AISpawns callers leave it unset and keep the original warn behavior.
+local function collectParts(folderName: string, alreadyWarned: boolean, optional: boolean?): ({ BasePart }, boolean)
     local out: { BasePart } = {}
     local folder = workspace:FindFirstChild(folderName)
     if folder == nil then
         if not alreadyWarned then
-            Logger.warn("[AIService] Workspace." .. folderName .. " is missing — AIService still starts, that source is just empty")
+            if optional == true then
+                if NAV.DEBUG == true then
+                    Logger.debug("[AIService] Workspace." .. folderName .. " not found — optional, using dynamic roaming instead")
+                end
+            else
+                Logger.warn("[AIService] Workspace." .. folderName .. " is missing — AIService still starts, that source is just empty")
+            end
         end
         return out, true
     end
@@ -356,7 +404,13 @@ local function collectParts(folderName: string, alreadyWarned: boolean): ({ Base
         end
     end
     if #out == 0 and not alreadyWarned then
-        Logger.warn("[AIService] Workspace." .. folderName .. " has no BasePart children")
+        if optional == true then
+            if NAV.DEBUG == true then
+                Logger.debug("[AIService] Workspace." .. folderName .. " has no BasePart children — optional, using dynamic roaming instead")
+            end
+        else
+            Logger.warn("[AIService] Workspace." .. folderName .. " has no BasePart children")
+        end
         return out, true
     end
     return out, alreadyWarned
@@ -1566,6 +1620,176 @@ local function getSeparationAdjustedGoal(npcRecord: NPCRecord, desiredGoal: Vect
     return adjusted
 end
 
+-- ============================================================
+-- AI dynamic navigation (ground sampling + PathfindingService)
+-- ============================================================
+-- Foundation only: lets squads roam/search/investigate on a large map without
+-- hand-placed Workspace/AIPatrolPoints. See the file-header comment and
+-- docs/TECHNICAL_DEBT.md "AI dynamic navigation" for exactly which movement
+-- paths this does (roam, Search/investigate) and does not (Chase/Attack/Cover/
+-- bound-and-cover, all left as a direct Humanoid:MoveTo) touch.
+
+-- Picks a random reachable ground point within [minRadius, maxRadius] studs of
+-- `origin` via a downward raycast sample — "reachable" here means "valid
+-- standable ground" (real, collidable, not too steep), not "provably pathable
+-- from here"; computePath() is what actually verifies a route exists. Tries up
+-- to GROUND_SAMPLE_ATTEMPTS times; nil if none of them validate.
+local function sampleReachableGroundNear(origin: Vector3, minRadius: number, maxRadius: number): Vector3?
+    assert(typeof(origin) == "Vector3", "origin must be a Vector3")
+    assert(typeof(minRadius) == "number", "minRadius must be a number")
+    assert(typeof(maxRadius) == "number", "maxRadius must be a number")
+
+    local attempts     = NAV.GROUND_SAMPLE_ATTEMPTS :: number
+    local sampleHeight = NAV.GROUND_SAMPLE_HEIGHT :: number
+    local sampleDepth  = NAV.GROUND_SAMPLE_DEPTH :: number
+    local maxSlope     = NAV.MAX_GROUND_SLOPE_NORMAL_Y :: number
+    local lo, hi = math.min(minRadius, maxRadius), math.max(minRadius, maxRadius)
+
+    for _ = 1, attempts do
+        local ang  = math.random() * math.pi * 2
+        local dist = lo + math.random() * math.max(hi - lo, 0)
+        local candidate = origin + Vector3.new(math.cos(ang) * dist, 0, math.sin(ang) * dist)
+        local rayOrigin = Vector3.new(candidate.X, origin.Y + sampleHeight, candidate.Z)
+        local hit = workspace:Raycast(rayOrigin, Vector3.new(0, -sampleDepth, 0), losParams)
+        if hit ~= nil and hit.Instance ~= nil and hit.Instance:IsA("BasePart") then
+            -- A valid floor's normal points mostly straight up; reject steep
+            -- surfaces (walls, roofs) and non-collidable "geometry" (decals,
+            -- CanCollide-false dressing isn't real ground to stand on).
+            if hit.Normal.Y >= maxSlope and hit.Instance.CanCollide == true then
+                return hit.Position
+            end
+        end
+    end
+    return nil
+end
+
+-- Computes a PathfindingService path from `startPosition` to `goalPosition`
+-- using the agent parameters in Constants.AI_NAVIGATION. Fully pcall'd —
+-- CreatePath/ComputeAsync can throw on bad input or an unready navmesh — and
+-- returns nil on any failure or a non-Success status, never erroring the
+-- caller's think. Stateless and unthrottled by design; followNavGoal() (the
+-- only caller) is what respects PATH_RECALCULATE_INTERVAL per NPC.
+local function computePath(startPosition: Vector3, goalPosition: Vector3): Path?
+    local ok, result = pcall(function()
+        local path = PathfindingService:CreatePath({
+            AgentRadius = NAV.AGENT_RADIUS,
+            AgentHeight = NAV.AGENT_HEIGHT,
+            AgentCanJump = NAV.AGENT_CAN_JUMP,
+            AgentCanClimb = NAV.AGENT_CAN_CLIMB,
+            WaypointSpacing = NAV.WAYPOINT_SPACING,
+        })
+        path:ComputeAsync(startPosition, goalPosition)
+        return path
+    end)
+    if not ok or result == nil then
+        return nil
+    end
+    local path = result :: Path
+    if path.Status ~= Enum.PathStatus.Success then
+        return nil
+    end
+    return path
+end
+
+-- Advances `record` toward `goal` using a PathfindingService path when
+-- Constants.AI_NAVIGATION allows it — waypoint by waypoint via Humanoid:MoveTo,
+-- with a distance-over-time stuck check — falling back to a direct
+-- Humanoid:MoveTo when pathfinding is disabled, a path attempt fails, or
+-- FALLBACK_TO_MOVE_TO_ON_PATH_FAIL is set. Path (re)computation itself is
+-- throttled to PATH_RECALCULATE_INTERVAL per NPC via record.lastPathRecalculateAt
+-- — never every think, never every frame. Returns true once `record` has made
+-- no real progress for at least PATH_STUCK_TIME, so a caller like dynamicRoam
+-- can abandon this goal and pick a different one instead of waiting out a full
+-- cooldown; returns false otherwise (including whenever pathfinding is off).
+local function followNavGoal(record: NPCRecord, humanoid: Humanoid, goal: Vector3, now: number): boolean
+    if NAV.ENABLED ~= true or NAV.USE_PATHFINDING ~= true then
+        humanoid:MoveTo(goal)
+        return false
+    end
+
+    -- A materially different goal invalidates whatever path we were following.
+    if record.currentNavigationGoal == nil
+        or (goal - (record.currentNavigationGoal :: Vector3)).Magnitude > (NAV.PATH_WAYPOINT_REACHED_DISTANCE :: number) then
+        record.currentNavigationGoal = goal
+        record.currentPath = nil
+        record.currentWaypointIndex = 1
+        record.lastPathRecalculateAt = -math.huge -- force an immediate compute below
+        record.stuckSince = 0
+    end
+
+    -- Stuck check: the root hasn't moved PATH_STUCK_DISTANCE_THRESHOLD in
+    -- PATH_STUCK_TIME, sampled at most every PATH_STUCK_CHECK_INTERVAL — cheap,
+    -- no per-frame work.
+    if now - record.lastStuckCheckAt >= (NAV.PATH_STUCK_CHECK_INTERVAL :: number) then
+        local last = record.lastStuckCheckPosition
+        local moved = last == nil or (record.root.Position - (last :: Vector3)).Magnitude >= (NAV.PATH_STUCK_DISTANCE_THRESHOLD :: number)
+        record.lastStuckCheckAt = now
+        record.lastStuckCheckPosition = record.root.Position
+        if moved then
+            record.stuckSince = 0
+        elseif record.stuckSince == 0 then
+            record.stuckSince = now
+        end
+    end
+    local stuck = record.stuckSince ~= 0 and now - record.stuckSince >= (NAV.PATH_STUCK_TIME :: number)
+
+    local waypoints = record.currentPath
+    local needsCompute = waypoints == nil or record.currentWaypointIndex > #waypoints
+    if (needsCompute or stuck) and now - record.lastPathRecalculateAt >= (NAV.PATH_RECALCULATE_INTERVAL :: number) then
+        record.lastPathRecalculateAt = now
+        local path = computePath(record.root.Position, goal)
+        local points: { PathWaypoint }? = nil
+        if path ~= nil then
+            local ok, result = pcall(function()
+                return (path :: Path):GetWaypoints()
+            end)
+            if ok and result ~= nil and #result > 0 then
+                points = result
+            end
+        end
+        record.currentPath = points
+        record.currentWaypointIndex = 1
+        if points ~= nil then
+            record.stuckSince = 0 -- got a fresh path; give it a chance before flagging stuck again
+            if NAV.DEBUG == true then
+                Logger.debug("[AIService]", record.model.Name, "path computed —", #points, "waypoint(s)")
+            end
+        elseif NAV.DEBUG == true then
+            Logger.debug("[AIService]", record.model.Name, "path computation failed or empty")
+        end
+        waypoints = points
+    end
+
+    if waypoints == nil or #waypoints == 0 then
+        if NAV.FALLBACK_TO_MOVE_TO_ON_PATH_FAIL == true then
+            humanoid:MoveTo(goal)
+        end
+        return stuck
+    end
+
+    -- Advance past any waypoint already reached — handles a low think rate
+    -- skipping straight past a close one instead of stepping through each.
+    while record.currentWaypointIndex <= #waypoints do
+        local wp = waypoints[record.currentWaypointIndex]
+        local flat = Vector3.new(wp.Position.X, record.root.Position.Y, wp.Position.Z)
+        if (record.root.Position - flat).Magnitude <= (NAV.PATH_WAYPOINT_REACHED_DISTANCE :: number) then
+            record.currentWaypointIndex += 1
+        else
+            humanoid:MoveTo(wp.Position)
+            if wp.Action == Enum.PathWaypointAction.Jump and (NAV.AGENT_CAN_JUMP :: boolean) == true then
+                humanoid.Jump = true
+            end
+            return stuck
+        end
+    end
+    -- Ran off the end this same think (the last waypoint was already within
+    -- range) — hold at the final goal; the caller's own arrival check (roam's
+    -- ROAM_GOAL_REACHED_DISTANCE, investigate's INVESTIGATE_ARRIVE_DISTANCE)
+    -- picks the next one.
+    humanoid:MoveTo(goal)
+    return stuck
+end
+
 -- Shared throttled MoveTo issuance for every "travel toward a destination"
 -- branch (Patrol/Idle, Chase, Search, Attack/Cover transit) — never the
 -- stationary "hold position" MoveTo(root.Position) calls elsewhere in this file,
@@ -1584,19 +1808,91 @@ end
 -- for a goal that is already an individually-computed final position (an Attack
 -- fighting spot, a Cover hide point, a flank point) — those only get separation,
 -- never spread/jitter, so they aren't pulled off a validated cover/LOS spot.
-local function issueSquadMoveGoal(record: NPCRecord, humanoid: Humanoid, anchor: Vector3, radius: number, now: number)
+--
+-- `useNav` (AI dynamic navigation, 2026-09-11; default/omitted = false) routes
+-- the final MoveTo through followNavGoal() instead of a direct MoveTo — used only
+-- by dynamic roam and the two Search-state goals, never by any combat movement
+-- call site (those all omit it, unchanged). Returns nil when the throttle above
+-- skipped this think (no new info yet); otherwise followNavGoal's stuck flag
+-- (always false when useNav isn't true).
+local function issueSquadMoveGoal(record: NPCRecord, humanoid: Humanoid, anchor: Vector3, radius: number, now: number, useNav: boolean?): boolean?
     local lastAnchor = record.lastMoveAnchor
     local intervalPassed = now - record.lastMoveGoalAt >= (SPACING.MOVE_GOAL_RECALCULATE_INTERVAL :: number)
     local anchorMoved = lastAnchor == nil or (anchor - lastAnchor).Magnitude >= (SPACING.MOVE_GOAL_JITTER :: number)
     if not intervalPassed and not anchorMoved then
-        return
+        return nil
     end
     local desired = if radius > 0 then squadSpreadGoal(record, anchor, radius) else anchor
     local adjusted = getSeparationAdjustedGoal(record, desired)
     record.lastMoveAnchor  = anchor
     record.currentMoveGoal = adjusted
     record.lastMoveGoalAt  = now
+    if useNav == true then
+        return followNavGoal(record, humanoid, adjusted, now)
+    end
     humanoid:MoveTo(adjusted)
+    return false
+end
+
+-- AI dynamic navigation: Idle/Patrol behavior when there are no authored
+-- Workspace/AIPatrolPoints — picks a reachable ground point within
+-- RANDOM_ROAM_RADIUS_MIN/MAX of the squad's spawn/anchor, paths to it (via
+-- issueSquadMoveGoal in nav mode, so it still gets squad-spacing spread +
+-- separation — multiple bots don't all roam to the exact same point), and once
+-- arrived (or abandoned as stuck) waits ROAM_GOAL_COOLDOWN_MIN..MAX before
+-- picking another. Holds at the anchor if no valid ground sample is found.
+local function dynamicRoam(record: NPCRecord, humanoid: Humanoid, now: number)
+    local squad = squads[record.squadId]
+    local anchor = if squad ~= nil then squad.spawnCFrame.Position else record.root.Position
+
+    if record.roamGoal ~= nil then
+        local arrived = (record.root.Position - (record.roamGoal :: Vector3)).Magnitude <= (NAV.ROAM_GOAL_REACHED_DISTANCE :: number)
+        if arrived then
+            local lo, hi = NAV.ROAM_GOAL_COOLDOWN_MIN :: number, NAV.ROAM_GOAL_COOLDOWN_MAX :: number
+            record.roamCooldownUntil = now + lo + math.random() * (hi - lo)
+            record.roamGoal = nil
+            record.currentNavigationGoal = nil
+            record.currentPath = nil
+            if NAV.DEBUG == true then
+                Logger.debug("[AIService]", record.model.Name, "reached roam goal — cooling down")
+            end
+            humanoid:MoveTo(record.root.Position) -- stop cleanly instead of coasting past it
+            return
+        end
+    end
+
+    if now < record.roamCooldownUntil then
+        humanoid:MoveTo(record.root.Position)
+        return
+    end
+
+    if record.roamGoal == nil then
+        local point = sampleReachableGroundNear(anchor, NAV.RANDOM_ROAM_RADIUS_MIN :: number, NAV.RANDOM_ROAM_RADIUS_MAX :: number)
+        record.roamGoal = point
+        if point == nil then
+            -- No valid sample this attempt — hold near the anchor (still through
+            -- the squad-spacing spread so several idling bots don't stack) and try
+            -- again next think rather than spamming raycasts every tick.
+            issueSquadMoveGoal(record, humanoid, anchor, SPACING.IDLE_SPREAD_RADIUS :: number, now)
+            return
+        end
+        if NAV.DEBUG == true then
+            Logger.debug("[AIService]", record.model.Name, "picked a new roam goal")
+        end
+    end
+
+    -- roamGoal is already a final, individually-sampled point, so radius 0 —
+    -- still routed through issueSquadMoveGoal for its separation nudge + shared
+    -- throttle, in nav mode so it actually paths there.
+    local stuck = issueSquadMoveGoal(record, humanoid, record.roamGoal :: Vector3, 0, now, true)
+    if stuck == true then
+        if NAV.DEBUG == true then
+            Logger.debug("[AIService]", record.model.Name, "roam goal unreachable — picking a different one")
+        end
+        record.roamGoal = nil
+        record.currentNavigationGoal = nil
+        record.currentPath = nil
+    end
 end
 
 -- ============================================================
@@ -2444,9 +2740,13 @@ local function thinkNPC(record: NPCRecord, now: number)
             -- Stale: move in and flank the last-known position on an arc. flankPointFor
             -- already spreads squadmates via flankSide (Stage 1E) — that logic is
             -- untouched here; radius 0 layers on separation + throttling only.
+            -- AI dynamic navigation: nav-mode (useNav = true) so this actually paths
+            -- around obstacles on a big map instead of a straight-line MoveTo — see
+            -- docs/TECHNICAL_DEBT.md "AI dynamic navigation" for why Chase above (the
+            -- fresh-sighting branch) deliberately keeps the direct MoveTo instead.
             setState(record, "Search")
             humanoid.WalkSpeed = AI.NPC_WALK_SPEED
-            issueSquadMoveGoal(record, humanoid, flankPointFor(record, lastSeen), 0, now)
+            issueSquadMoveGoal(record, humanoid, flankPointFor(record, lastSeen), 0, now, true)
         end
         return
     end
@@ -2486,7 +2786,14 @@ local function thinkNPC(record: NPCRecord, now: number)
             if record.investigateGoal == nil or arrived
                 or (now - record.lastMoveGoalAt) >= (SPACING.MOVE_GOAL_RECALCULATE_INTERVAL :: number) then
                 local ang  = math.random() * math.pi * 2
-                local distLo, distHi = AWARENESS.INVESTIGATE_DISTANCE_MIN :: number, AWARENESS.INVESTIGATE_DISTANCE_MAX :: number
+                -- AI dynamic navigation: consolidated onto NAV.SEARCH_RADIUS_MIN/MAX
+                -- (the task's required "search goals around last known position"
+                -- radius) in place of the awareness pass's own INVESTIGATE_DISTANCE_MIN/
+                -- MAX — same role, one radius knob rather than two. AWARENESS's fields
+                -- are left declared, now unread, per this project's established
+                -- consolidate-in-place convention; see docs/TECHNICAL_DEBT.md "AI
+                -- dynamic navigation".
+                local distLo, distHi = NAV.SEARCH_RADIUS_MIN :: number, NAV.SEARCH_RADIUS_MAX :: number
                 local dist = distLo + math.random() * (distHi - distLo)
                 record.investigateGoal = sharedPos + Vector3.new(math.cos(ang), 0, math.sin(ang)) * dist
                 if AWARENESS.DEBUG == true then
@@ -2495,31 +2802,56 @@ local function thinkNPC(record: NPCRecord, now: number)
             end
             -- investigateGoal is already a final, individually-offset position, so
             -- radius 0: separation + throttle only (matches every other
-            -- individually-computed goal in this file).
-            issueSquadMoveGoal(record, humanoid, record.investigateGoal :: Vector3, 0, now)
+            -- individually-computed goal in this file). AI dynamic navigation:
+            -- nav-mode (useNav = true) so investigating actually paths there on a
+            -- big map; if it turns out unreachable (stuck), drop it so the next
+            -- think picks a fresh nearby offset instead of pounding a dead spot.
+            local stuck = issueSquadMoveGoal(record, humanoid, record.investigateGoal :: Vector3, 0, now, true)
+            if stuck == true then
+                if AWARENESS.DEBUG == true then
+                    Logger.debug("[AIService]", record.model.Name, "investigate goal unreachable — picking a different one")
+                end
+                record.investigateGoal = nil
+                record.currentNavigationGoal = nil
+                record.currentPath = nil
+            end
             return
         end
         record.investigateGoal = nil
     end
 
-    -- No target: patrol between points, or idle near the squad spawn.
+    -- No target: patrol authored Workspace/AIPatrolPoints if any exist, else roam
+    -- dynamically (AI dynamic navigation — AIPatrolPoints is optional, not
+    -- required). Idle near the squad spawn only if navigation is itself disabled.
     setCrouched(record, false)
     record.coverUntil = 0
     record.coverPoint = nil
     record.fightPoint = nil
-    setState(record, (#patrolPoints > 0) and "Patrol" or "Idle")
     humanoid.AutoRotate = true
     humanoid.WalkSpeed = AI.NPC_WALK_SPEED
-    issueSquadMoveGoal(record, humanoid, patrolDestination(record), SPACING.IDLE_SPREAD_RADIUS :: number, now)
 
-    if record.isLeader and #patrolPoints > 0 then
-        local squad = squads[record.squadId]
-        if squad ~= nil then
-            local pt = patrolPoints[((squad.patrolIndex - 1) % #patrolPoints) + 1]
-            if (root.Position - pt.Position).Magnitude <= AI.PATROL_ARRIVE_DISTANCE then
-                squad.patrolIndex += 1
+    if #patrolPoints > 0 then
+        setState(record, "Patrol")
+        issueSquadMoveGoal(record, humanoid, patrolDestination(record), SPACING.IDLE_SPREAD_RADIUS :: number, now)
+
+        if record.isLeader then
+            local squad = squads[record.squadId]
+            if squad ~= nil then
+                local pt = patrolPoints[((squad.patrolIndex - 1) % #patrolPoints) + 1]
+                if (root.Position - pt.Position).Magnitude <= AI.PATROL_ARRIVE_DISTANCE then
+                    squad.patrolIndex += 1
+                end
             end
         end
+    elseif NAV.ENABLED == true then
+        setState(record, "Idle")
+        dynamicRoam(record, humanoid, now)
+    else
+        -- Navigation disabled and no patrol points: the original pre-navigation
+        -- Idle behavior — hold near the squad spawn (patrolDestination's own
+        -- fallback when patrolPoints is empty).
+        setState(record, "Idle")
+        issueSquadMoveGoal(record, humanoid, patrolDestination(record), SPACING.IDLE_SPREAD_RADIUS :: number, now)
     end
 end
 
@@ -2555,6 +2887,15 @@ local function disconnectRecord(record: NPCRecord)
     -- squad's currentMoverNpcId/coveringNpcIds bookkeeping if it held one) so a
     -- dead or destroyed grunt never leaves a stuck role behind.
     releaseBoundRole(record)
+    -- AI dynamic navigation: drop any in-progress path/roam state. disconnectRecord
+    -- is also called from non-death paths (RespawnAllSquads, Destroy()), so this is
+    -- what satisfies "Destroy() clears all path/nav data" — Destroy() already
+    -- routes every record through here.
+    record.currentPath = nil
+    record.currentWaypointIndex = 1
+    record.currentNavigationGoal = nil
+    record.stuckSince = 0
+    record.roamGoal = nil
     for _, conn in ipairs(record.conns) do
         conn:Disconnect()
     end
@@ -2758,6 +3099,22 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
 
         tacticalRole     = nil,
         boundDestination = nil,
+
+        currentPath            = nil,
+        currentWaypointIndex   = 1,
+        currentNavigationGoal  = nil,
+        -- -math.huge, same reasoning/bug class as several throttle-gate fields
+        -- above (lastAttackSlotUpdateAt / lastKnownUpdateAt / lastBoundEvaluateAt):
+        -- a 0-init would let PATH_RECALCULATE_INTERVAL / PATH_STUCK_CHECK_INTERVAL
+        -- skip this grunt's very first pathfinding/stuck check if it happens within
+        -- the first couple seconds of server life.
+        lastPathRecalculateAt  = -math.huge,
+        lastStuckCheckAt       = -math.huge,
+        lastStuckCheckPosition = nil,
+        stuckSince             = 0,
+
+        roamGoal          = nil,
+        roamCooldownUntil = 0,
 
         dead      = false,
     }
@@ -2973,7 +3330,7 @@ function AIService.Start(): ()
     losParams.FilterDescendantsInstances = { folder }
 
     spawnParts,   warnedNoSpawns = collectParts(AI.SPAWN_FOLDER_NAME, warnedNoSpawns)
-    patrolPoints, warnedNoPatrol = collectParts(AI.PATROL_FOLDER_NAME, warnedNoPatrol)
+    patrolPoints, warnedNoPatrol = collectParts(AI.PATROL_FOLDER_NAME, warnedNoPatrol, true)
 
     mainThread = task.spawn(mainLoop)
 
@@ -3052,7 +3409,7 @@ function AIService.Start(): ()
             spawnParts, warnedNoSpawns = collectParts(AI.SPAWN_FOLDER_NAME, warnedNoSpawns)
             autoSpawnSquads()
         elseif child.Name == AI.PATROL_FOLDER_NAME then
-            patrolPoints, warnedNoPatrol = collectParts(AI.PATROL_FOLDER_NAME, warnedNoPatrol)
+            patrolPoints, warnedNoPatrol = collectParts(AI.PATROL_FOLDER_NAME, warnedNoPatrol, true)
         end
     end)
     table.insert(serviceConns, addedConn)

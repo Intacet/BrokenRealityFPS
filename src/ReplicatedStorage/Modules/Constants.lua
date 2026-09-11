@@ -2141,7 +2141,14 @@ Constants.AI = {
     NPC_CHASE_SPEED = 15,
 
     THINK_INTERVAL            = 0.25,
-    PATH_RECALCULATE_INTERVAL = 1.0,  -- reserved; plain MoveTo re-issue cadence
+    -- Reserved since Stage 1A for a throttled ComputeAsync pass "in a later
+    -- stage" (see its own comment history) — that stage is AI dynamic
+    -- navigation's Constants.AI_NAVIGATION.PATH_RECALCULATE_INTERVAL (1.5s)
+    -- below, a separate field per that task's own required table, not a rename
+    -- of this one. This field is left declared, still unread by AIService, per
+    -- the project's "don't remove existing values" convention — see
+    -- docs/TECHNICAL_DEBT.md "AI dynamic navigation".
+    PATH_RECALCULATE_INTERVAL = 1.0,  -- reserved, unused; see comment above
     TARGET_RECHECK_INTERVAL   = 0.35,
 
     DETECTION_RANGE            = 120,
@@ -2518,6 +2525,56 @@ Constants.AI_BOUNDING = {
     SWAP_AFTER_MAX_TIME      = 4.5,  -- seconds; a mover that hasn't arrived by this long is swapped out anyway (stuck-on-geometry safety net)
 
     DO_NOT_BOUND_WITHIN_ATTACK_RANGE = 18, -- studs; once the closest living squad member is this near the shared target position, stop bounding and let Chase/Attack/fire-discipline take over directly
+}
+
+-- ── AI dynamic big-map navigation (AIService.server) ──────────────────────────
+-- Foundation-only navigation so squads work on a large map without hand-placed
+-- Workspace/AIPatrolPoints: sampleReachableGroundNear() picks a random validated
+-- ground point in a radius band via a downward raycast; computePath() /
+-- followNavGoal() wrap PathfindingService (agent params below) for waypoint
+-- travel, with a stuck check and a plain Humanoid:MoveTo fallback. Applied only
+-- to Idle/Patrol dynamic roaming (when AIPatrolPoints doesn't exist — authored
+-- points still work exactly as before) and the two "Search" state goals (stale
+-- last-seen flank, squad-shared last-known-position investigate). Every combat
+-- movement path (Chase-toward-a-live-target, Attack transit, Cover retreat,
+-- bound-and-cover) is untouched, still a direct MoveTo — see
+-- docs/TECHNICAL_DEBT.md "AI dynamic navigation" for that scoping and every
+-- other simplification. Not a navmesh editor, not designer-authored AI zones,
+-- not a strategic map-level planner, no doors/ladders/vaulting/climbing.
+Constants.AI_NAVIGATION = {
+    ENABLED = true,
+    DEBUG = true,
+
+    USE_PATHFINDING = true,
+
+    PATH_RECALCULATE_INTERVAL     = 1.5,  -- seconds between PathfindingService compute attempts per NPC — the expensive call is throttled to this, never every think
+    PATH_WAYPOINT_REACHED_DISTANCE = 5,   -- studs; also doubles as "goal changed enough to invalidate the current path" in followNavGoal
+    PATH_STUCK_CHECK_INTERVAL     = 0.75, -- seconds between stuck-distance samples
+    PATH_STUCK_DISTANCE_THRESHOLD = 1.5,  -- studs of root movement, per check, below which a grunt is considered not-progressing
+    PATH_STUCK_TIME               = 2.0,  -- seconds of no progress before a grunt is flagged "stuck" (forces a repath attempt; callers like dynamicRoam may abandon the goal entirely)
+
+    AGENT_RADIUS    = 2.5,
+    AGENT_HEIGHT    = 5,
+    AGENT_CAN_JUMP  = true,
+    AGENT_CAN_CLIMB = false,
+    WAYPOINT_SPACING = 6,
+
+    RANDOM_ROAM_RADIUS_MIN = 35,  -- studs from squad spawn/anchor; dynamic Idle/Patrol roaming
+    RANDOM_ROAM_RADIUS_MAX = 100,
+    SEARCH_RADIUS_MIN      = 20,  -- studs from the squad's shared last-known target position; drives the squad-shared investigate goal offset (supersedes AI_SQUAD_AWARENESS.INVESTIGATE_DISTANCE_MIN/MAX in place — that pair is left declared, now unread)
+    SEARCH_RADIUS_MAX      = 60,
+
+    GROUND_SAMPLE_ATTEMPTS      = 10,  -- sampleReachableGroundNear retries before giving up and returning nil
+    GROUND_SAMPLE_HEIGHT        = 80,  -- studs above the sample origin's Y that the validation raycast starts from
+    GROUND_SAMPLE_DEPTH         = 160, -- studs the validation raycast casts downward
+    MAX_GROUND_SLOPE_NORMAL_Y   = 0.55, -- a hit surface normal's Y must be at least this (≈56° from vertical) to count as walkable ground, not a wall/roof
+
+    ROAM_GOAL_REACHED_DISTANCE = 8,   -- studs; how close counts as "arrived" at a roam goal
+    ROAM_GOAL_COOLDOWN_MIN     = 2.5, -- seconds to wait after reaching (or abandoning) a roam goal before picking another
+    ROAM_GOAL_COOLDOWN_MAX     = 5.0,
+
+    FALLBACK_TO_MOVE_TO_ON_PATH_FAIL = true, -- if pathfinding fails/returns no waypoints, fall back to a direct Humanoid:MoveTo(goal) rather than the grunt freezing in place
+    AIPATROLPOINTS_OPTIONAL          = true, -- documents the behavior collectParts()/thinkNPC already implement — Workspace/AIPatrolPoints missing or empty no longer warns as a misconfiguration and dynamic roaming takes over
 }
 
 -- ── Developer test area (TestAreaBuilder.server) ────────────────────────────
