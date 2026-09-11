@@ -1,5 +1,29 @@
 # Changelog
 
+## Fix: stuck cursor + instant mid-round weapon switch from the loadout menu
+
+- **Cursor stuck visible after spawning in.** `LoadoutMenu`'s cursor-restore
+  used to run once, at the moment the menu closed, checking whatever
+  `CameraMode` happened to be at that instant — a race against
+  `ViewModelController` flipping `CameraMode` to `LockFirstPerson` on respawn
+  (two independently-timed events). New `syncCursorToCameraMode()` is now also
+  driven by a live `CameraMode` change signal, so whichever event lands second
+  still gets the cursor into the right state.
+- **Selecting a weapon in the loadout menu now switches you immediately** if
+  you're already spawned in with a weapon out, instead of only taking effect
+  at the next round's PREP. `GunController` holsters and re-equips through its
+  own existing branches the instant `BR_LoadoutPrimary` changes during ACTIVE;
+  `GunService` re-runs `setupAmmo` on the same change so the new weapon gets
+  its own full mag/reserve instead of inheriting a leftover count from the old
+  one. A holstered player is untouched — their next manual equip already reads
+  the new selection.
+- `LoadoutMenu.lua` is this session's own file (committed normally). The
+  `GunController.lua` / `GunService.server.lua` additions are small, additive
+  listeners only — but both files are being actively rewritten by a parallel
+  shotgun-support session, so they're left **uncommitted** to avoid losing or
+  conflicting with that work; either could be overwritten by its next save.
+  Not runtime-verified in Play.
+
 ## Fix: grunts fire back while retreating to cover instead of jogging there silently
 
 - **Covering fire.** The `Cover` state's not-yet-arrived path is now a

@@ -603,15 +603,35 @@ each player server-owned pre-round state in two Player attributes:
   and `WeaponData.lua` / `WeaponFeel.lua` are owned by a parallel work session. Unlock =
   add the data + a `ReplicatedStorage/ViewModels` asset, then flip `selectable = true`
   in `Constants.LOADOUT.WEAPONS`. No other code change.
-- **Cursor-hide overlap with `GunController`.** While the menu is open it forces the OS
-  cursor visible + unlocked; on close it re-locks only when
-  `LocalPlayer.CameraMode == LockFirstPerson`. `GunController.applyFirstPersonAim` also
-  drives `MouseIconEnabled` / `MouseBehavior`, so an edge case (holster mid-menu, phase
-  flip on the same frame) can leave the cursor in the wrong state until the next
-  equip/holster. Acceptable for a rough menu; a single cursor-owner arbiter is the fix.
-- **`LOCK_EDITS_DURING_ACTIVE = false`.** A mid-round Deploy is accepted and only takes
-  effect at the next PREP (attributes are read in `assignTeams` / `setupAmmo`), so there
-  is no mid-round advantage. Set the flag true to reject ACTIVE-phase edits outright.
+- **Cursor-hide race, partially fixed (2026-09-10, user-reported: "the cursor is
+  back on the screen").** On close, `setOpen(false)` used to re-lock the cursor
+  only if `LocalPlayer.CameraMode == LockFirstPerson` **at that exact instant** —
+  but the menu closes off `RoundStateChanged` (a remote) while `CameraMode` flips
+  to `LockFirstPerson` off `CharacterAdded` (`ViewModelController`), two
+  independently-timed events. Whichever landed second left the cursor stuck
+  visible. Fixed by making the cursor-sync a standing reaction
+  (`syncCursorToCameraMode`, driven by both the menu closing AND a
+  `CameraMode` `GetPropertyChangedSignal`), not a one-shot check. Still true and
+  still open: `GunController.applyFirstPersonAim` independently drives the same
+  two properties keyed off weapon-equip state, so a holster/menu-open on the same
+  frame can still race between the two owners — a single cursor-owner arbiter
+  remains the real fix, this only closes the specific timing gap that was hit.
+  Not runtime-verified (this session has no way to reproduce the exact race).
+- **`LOCK_EDITS_DURING_ACTIVE = false` — mid-round switch now equips immediately
+  (2026-09-10, user-reported: "when I click the shotgun... I should switch to
+  that weapon").** `GunController` now re-equips instantly (holster + re-equip,
+  reusing its own existing branches) when `BR_LoadoutPrimary` changes while the
+  player already holds a weapon in `ACTIVE`; `GunService` mirrors this by
+  re-running `setupAmmo` (full mag/reserve for the NEW weapon) on the same
+  attribute change, fixing what would otherwise be a leftover ammo-count
+  mismatch (e.g. still "22" rounds after switching from a 30-round mag to a
+  6-round one). Both are additive listeners in `GunController.lua` /
+  `GunService.server.lua` — **files a parallel session is actively rewriting for
+  shotgun support; left uncommitted** so they aren't lost/conflicted, and could
+  be overwritten by that session's next full-file save. No client/server change
+  to a holstered player (their next manual equip already reads the fresh
+  attribute) and no change to `LOCK_EDITS_DURING_ACTIVE` itself — this is a
+  parallel behavior, not a bypass of that flag. Not runtime-verified.
 - **PREP is `PREP_TIME` (2 s) in dev config**, so the menu auto-opens on LOBBY / RESULTS
   only and is otherwise M-key driven. If PREP is lengthened, add `Constants.Phase.PREP`
   back to `Constants.LOADOUT.AUTO_OPEN_PHASES`.

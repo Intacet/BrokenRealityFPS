@@ -225,6 +225,25 @@ local function seedFromAttributes()
     end
 end
 
+-- Hands the cursor back to gameplay only when we're in a locked first-person
+-- view and the menu is closed; otherwise leaves the default lobby cursor alone
+-- (third-person wants a free cursor for camera orbit). Split out from setOpen()
+-- and also driven by a CameraMode change signal below: closing the menu and
+-- ViewModelController flipping CameraMode to LockFirstPerson on respawn are two
+-- independently-timed events (menu close comes from RoundStateChanged, camera
+-- mode comes from CharacterAdded) — whichever lands first left the cursor stuck
+-- visible if this only ran once, at close time, against whatever CameraMode
+-- happened to already be.
+local function syncCursorToCameraMode()
+    if isOpen then
+        return  -- the menu owns the cursor while it's up
+    end
+    if LocalPlayer.CameraMode == Enum.CameraMode.LockFirstPerson then
+        UserInputService.MouseIconEnabled = false
+        UserInputService.MouseBehavior    = Enum.MouseBehavior.LockCenter
+    end
+end
+
 local function setOpen(open: boolean)
     if open == isOpen then
         return
@@ -239,12 +258,7 @@ local function setOpen(open: boolean)
         UserInputService.MouseIconEnabled = true
         UserInputService.MouseBehavior    = Enum.MouseBehavior.Default
     else
-        -- Hand the cursor back to gameplay only when we're in a locked
-        -- first-person view; otherwise leave the default lobby cursor alone.
-        if LocalPlayer.CameraMode == Enum.CameraMode.LockFirstPerson then
-            UserInputService.MouseIconEnabled = false
-            UserInputService.MouseBehavior    = Enum.MouseBehavior.LockCenter
-        end
+        syncCursorToCameraMode()
     end
 end
 
@@ -494,6 +508,11 @@ function LoadoutMenu:Start()
             onPhase(raw.phase)
         end
     end)
+
+    -- Re-sync the cursor whenever CameraMode itself changes (respawn flips it to
+    -- LockFirstPerson via ViewModelController, on its own timing relative to the
+    -- phase transition above) — see syncCursorToCameraMode's comment.
+    LocalPlayer:GetPropertyChangedSignal("CameraMode"):Connect(syncCursorToCameraMode)
 
     -- Seed the initial selection and phase, then open if we're already in a menu phase.
     seedFromAttributes()
