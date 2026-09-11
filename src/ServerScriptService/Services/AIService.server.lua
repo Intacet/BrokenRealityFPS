@@ -116,9 +116,10 @@ local RespawnBots  = Remotes:WaitForChild("RespawnBots") :: RemoteEvent
 
 -- Untyped views of the tuning tables (heterogeneous fields; matches the pattern
 -- used by TestAreaBuilder's `local CFG = Constants.DEV_TEST_AREA :: any`).
-local AI   = Constants.AI :: any
-local FX   = Constants.AI_COMBAT_FX :: any
-local TUNE = Constants.AI_COMBAT_TUNING :: any  -- AI Stage 1C: reaction/aim-ramp/suppression tuning
+local AI      = Constants.AI :: any
+local FX      = Constants.AI_COMBAT_FX :: any
+local TUNE    = Constants.AI_COMBAT_TUNING :: any  -- AI Stage 1C: reaction/aim-ramp/suppression tuning
+local SPACING = Constants.AI_SQUAD_SPACING :: any  -- squad formation / anti-bunching tuning
 
 -- ============================================================
 -- Types
@@ -207,6 +208,13 @@ type NPCRecord = {
     lastDamageCallAt    : number,    -- os.clock() of the last accepted DamageService call (MIN_TIME_BETWEEN_DAMAGE_CALLS guard)
     aimBand             : string?,   -- last logged ramp band ("Fresh"/"Settling"/"Settled"), DEBUG-log de-dupe only
 
+    -- AI squad spacing / formation (2026-09-11)
+    formationSlotIndex: number,    -- 1 = leader/anchor; 2+ cycle through Constants.AI_SQUAD_SPACING.SLOT_OFFSETS
+    currentMoveGoal   : Vector3?,  -- last goal actually issued to Humanoid:MoveTo by the throttled travel path (nil = none issued yet)
+    lastMoveGoalAt    : number,    -- os.clock() of that issuance
+    lastMoveAnchor    : Vector3?,  -- the RAW target (player pos / patrol point / etc, before spread+jitter+separation) that goal was computed from —
+                                    -- compared against on each think so the MOVE_GOAL_RECALCULATE_INTERVAL throttle isn't defeated by jitter re-rolling every time
+
     dead      : boolean,
 }
 
@@ -219,6 +227,12 @@ type SquadRecord = {
     alerted             : boolean,             -- sticky: true once any member has engaged a live target this squad's life
     attackerSlots       : { [Model]: boolean }, -- grunts currently allowed to fire (MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD)
     nextAttackSlotRecheck: number,              -- os.clock() of the next updateSquadAttackSlots() pass
+
+    -- AI squad spacing / formation (2026-09-11)
+    members                : { Model },             -- living members as of the last assignFormationSlots() pass
+    leader                 : Model?,                 -- the current leader/anchor (original spawn leader if alive, else the first survivor)
+    formationSlotAssignments: { [Model]: number },   -- model -> formation slot index, mirrored onto each NPCRecord.formationSlotIndex
+    lastFormationAssignAt  : number,                 -- os.clock() of the last (re)assignment
 }
 
 -- ============================================================
@@ -1236,16 +1250,189 @@ local function setState(record: NPCRecord, newState: AIState)
     end
 end
 
+-- Base Patrol/Idle anchor point (a patrol waypoint, or the squad spawn if there
+-- are none) — WITHOUT any per-grunt offset. Squad spacing applies the spread
+-- (IDLE_SPREAD_RADIUS) at the call site via issueSquadMoveGoal, replacing the
+-- old flat `+ record.slot` that used to live here.
 local function patrolDestination(record: NPCRecord): Vector3
     local squad = squads[record.squadId]
     if #patrolPoints > 0 and squad ~= nil then
         local pt = patrolPoints[((squad.patrolIndex - 1) % #patrolPoints) + 1]
-        return pt.Position + record.slot
+        return pt.Position
     end
     if squad ~= nil then
-        return squad.spawnCFrame.Position + record.slot
+        return squad.spawnCFrame.Position
     end
     return record.root.Position
+end
+
+-- ============================================================
+-- Squad spacing / anti-bunching
+-- ============================================================
+
+-- Direction (unit vector, or zero) a formation slot pulls a grunt away from the
+-- squad anchor. Slot 1 (leader) uses LEADER_SLOT_OFFSET (zero by default — the
+-- leader beelines for the anchor); slots 2+ cycle through SLOT_OFFSETS[2..],
+-- wrapping if the squad somehow has more members than table entries. Only the
+-- DIRECTION is used here — squadSpreadGoal scales it out to the context's own
+-- spread radius, so SLOT_OFFSETS defines the formation's shape, not its size.
+local function formationDirectionForSlot(slotIndex: number): Vector3
+    local offsets = SPACING.SLOT_OFFSETS :: { Vector3 }
+    local off: Vector3
+    if slotIndex <= 1 or #offsets <= 1 then
+        off = SPACING.LEADER_SLOT_OFFSET :: Vector3
+    else
+        local idx = ((slotIndex - 2) % (#offsets - 1)) + 2
+        off = offsets[idx]
+    end
+    if off.Magnitude > 0.01 then
+        return off.Unit
+    end
+    return Vector3.zero
+end
+
+-- Fans a grunt's goal out from a SHARED anchor (player position, last-known
+-- position, patrol point, squad spawn) by its formation slot direction scaled to
+-- `radius`, plus a small random MOVE_GOAL_JITTER so goals never perfectly
+-- overlap even within the same slot. Falls back to the grunt's static spawn-time
+-- ring offset (record.slot — Stage 1A) when squad spacing is disabled or its
+-- squad record can't be found, so disabling SPACING.ENABLED cleanly reverts to
+-- the original pre-this-change behavior.
+local function squadSpreadGoal(record: NPCRecord, anchor: Vector3, radius: number): Vector3
+    if SPACING.ENABLED ~= true or squads[record.squadId] == nil then
+        return anchor + record.slot
+    end
+    local dir = formationDirectionForSlot(record.formationSlotIndex)
+    local jitter = Vector3.new(
+        (math.random() * 2 - 1) * (SPACING.MOVE_GOAL_JITTER :: number),
+        0,
+        (math.random() * 2 - 1) * (SPACING.MOVE_GOAL_JITTER :: number)
+    )
+    return anchor + dir * radius + jitter
+end
+
+-- Required helper (exact signature from the squad-spacing task spec). Nudges
+-- `desiredGoal` away from any LIVING squadmate whose current position is closer
+-- than MIN_PERSONAL_SPACE to it, by SEPARATION_PUSH_DISTANCE per violator. Pure
+-- math — returns a new Vector3 only; never touches HumanoidRootPart, never
+-- applies a physics force. Squads are tiny (MAX_ACTIVE_NPCS = 12 total) so a
+-- full scan of `npcs` per call is cheap.
+local function getSeparationAdjustedGoal(npcRecord: NPCRecord, desiredGoal: Vector3): Vector3
+    assert(npcRecord ~= nil, "npcRecord is required")
+    assert(typeof(desiredGoal) == "Vector3", "desiredGoal must be a Vector3")
+    if SPACING.ENABLED ~= true then
+        return desiredGoal
+    end
+    local minSpace = SPACING.MIN_PERSONAL_SPACE :: number
+    local pushDist = SPACING.SEPARATION_PUSH_DISTANCE :: number
+    local adjusted = desiredGoal
+    for otherModel, other in pairs(npcs) do
+        if other ~= npcRecord and not other.dead and other.squadId == npcRecord.squadId then
+            local otherPos = other.root.Position
+            local delta = Vector3.new(adjusted.X - otherPos.X, 0, adjusted.Z - otherPos.Z)
+            local dist = delta.Magnitude
+            if dist < minSpace then
+                local pushDir = if dist > 0.01 then delta.Unit else Vector3.new(1, 0, 0)
+                adjusted = adjusted + pushDir * pushDist
+                if SPACING.DEBUG == true then
+                    Logger.debug("[AIService]", npcRecord.model.Name, "separation: pushed goal away from", otherModel.Name)
+                end
+            end
+        end
+    end
+    return adjusted
+end
+
+-- Shared throttled MoveTo issuance for every "travel toward a destination"
+-- branch (Patrol/Idle, Chase, Search, Attack/Cover transit) — never the
+-- stationary "hold position" MoveTo(root.Position) calls elsewhere in this file,
+-- which stay direct/unthrottled so a grunt that just planted actually stops
+-- moving on the same think rather than coasting further on a stale goal.
+--
+-- Only recomputes/reissues when MOVE_GOAL_RECALCULATE_INTERVAL has elapsed OR
+-- `anchor` (the RAW target — before spread/jitter/separation) has moved more
+-- than MOVE_GOAL_JITTER studs since the last issuance. Comparing the raw anchor
+-- rather than the final goal is what makes the throttle actually throttle:
+-- squadSpreadGoal re-rolls jitter on every call, so comparing final goals would
+-- see "changed" almost every think and never actually skip a reissue.
+--
+-- `radius` > 0 additionally fans the grunt out around `anchor` by formation slot
+-- (shared-target cases — pass CHASE_SPREAD_RADIUS / IDLE_SPREAD_RADIUS). Pass 0
+-- for a goal that is already an individually-computed final position (an Attack
+-- fighting spot, a Cover hide point, a flank point) — those only get separation,
+-- never spread/jitter, so they aren't pulled off a validated cover/LOS spot.
+local function issueSquadMoveGoal(record: NPCRecord, humanoid: Humanoid, anchor: Vector3, radius: number, now: number)
+    local lastAnchor = record.lastMoveAnchor
+    local intervalPassed = now - record.lastMoveGoalAt >= (SPACING.MOVE_GOAL_RECALCULATE_INTERVAL :: number)
+    local anchorMoved = lastAnchor == nil or (anchor - lastAnchor).Magnitude >= (SPACING.MOVE_GOAL_JITTER :: number)
+    if not intervalPassed and not anchorMoved then
+        return
+    end
+    local desired = if radius > 0 then squadSpreadGoal(record, anchor, radius) else anchor
+    local adjusted = getSeparationAdjustedGoal(record, desired)
+    record.lastMoveAnchor  = anchor
+    record.currentMoveGoal = adjusted
+    record.lastMoveGoalAt  = now
+    humanoid:MoveTo(adjusted)
+end
+
+-- (Re)assigns every living squad member a formation slot index: 1 = leader/anchor
+-- (the original spawn leader if still alive, else the first surviving member is
+-- promoted), 2+ cycle through SLOT_OFFSETS' flanking/rear directions. Called once
+-- at spawn, at most every FORMATION_SLOT_REASSIGN_INTERVAL thereafter (guarded
+-- below), and immediately whenever a member dies — never every think tick.
+local function assignFormationSlots(squad: SquadRecord, now: number)
+    local members: { Model } = {}
+    local leader: Model? = nil
+    for model, record in pairs(npcs) do
+        if record.squadId == squad.id and not record.dead then
+            table.insert(members, model)
+            if record.isLeader then
+                leader = model
+            end
+        end
+    end
+    if leader == nil and #members > 0 then
+        leader = members[1]  -- the original leader died; promote the first survivor
+    end
+
+    squad.members = members
+    squad.leader  = leader
+    table.clear(squad.formationSlotAssignments)
+
+    if leader ~= nil then
+        squad.formationSlotAssignments[leader] = 1
+        local leaderRecord = npcs[leader]
+        if leaderRecord ~= nil then
+            leaderRecord.formationSlotIndex = 1
+        end
+    end
+    local nextSlot = 2
+    for _, model in ipairs(members) do
+        if model ~= leader then
+            squad.formationSlotAssignments[model] = nextSlot
+            local memberRecord = npcs[model]
+            if memberRecord ~= nil then
+                memberRecord.formationSlotIndex = nextSlot
+            end
+            nextSlot += 1
+        end
+    end
+    squad.lastFormationAssignAt = now
+
+    if SPACING.DEBUG == true then
+        Logger.debug("[AIService] squad", squad.id, "formation reassigned —", #members,
+            "member(s), leader:", leader ~= nil and leader.Name or "none")
+    end
+end
+
+-- Reassigns squad `id`'s formation slots if FORMATION_SLOT_REASSIGN_INTERVAL has
+-- elapsed since the last pass. Cheap early-return; safe to call from every
+-- member's think (mirrors the existing updateSquadAttackSlots recheck pattern).
+local function ensureFormationAssigned(squad: SquadRecord, now: number)
+    if SPACING.ENABLED == true and now - squad.lastFormationAssignAt >= (SPACING.FORMATION_SLOT_REASSIGN_INTERVAL :: number) then
+        assignFormationSlots(squad, now)
+    end
 end
 
 -- Stage 1D: lerp the HumanoidRootPart to look at `worldPos` (flattened to the
@@ -1467,6 +1654,15 @@ local function thinkNPC(record: NPCRecord, now: number)
     -- Stage 1F: pull the gun/arm off any near wall every think, in every state.
     updateWeaponCollision(record)
 
+    -- Squad spacing: keep this grunt's formation slot fresh (cheap no-op unless
+    -- FORMATION_SLOT_REASSIGN_INTERVAL has actually elapsed).
+    do
+        local squad = squads[record.squadId]
+        if squad ~= nil then
+            ensureFormationAssigned(squad, now)
+        end
+    end
+
     -- ── Target acquisition / validation ──────────────────────────────────────
     if now >= record.nextTargetCheckClock then
         record.nextTargetCheckClock = now + AI.TARGET_RECHECK_INTERVAL
@@ -1605,9 +1801,11 @@ local function thinkNPC(record: NPCRecord, now: number)
                 startBurst(record)
             else
                 -- Between shots, no LOS, or the retreat-fire flag is off — just keep
-                -- retreating toward cover.
+                -- retreating toward cover. `cp` is already an individually-computed
+                -- LOS-breaking spot (Stage 1D findCoverPoint), so radius 0: separation
+                -- + throttling only, no additional squad spread/jitter.
                 humanoid.AutoRotate = true
-                humanoid:MoveTo(cp or root.Position)
+                issueSquadMoveGoal(record, humanoid, cp or root.Position, 0, now)
             end
         elseif dist <= AI.ATTACK_RANGE and inLos then
             setState(record, "Attack")
@@ -1615,20 +1813,31 @@ local function thinkNPC(record: NPCRecord, now: number)
             local spot = record.fightPoint
             if spot == nil and AI.FIGHT_FROM_COVER == true then
                 spot = findFightingPosition(record, troot.Position)
+                if spot == nil and SPACING.ENABLED == true then
+                    -- No literal cover nearby (findFightingPosition gave up). Rather
+                    -- than planting wherever ATTACK_RANGE happened to be reached —
+                    -- which is how a squad converging on the player ends up bunched
+                    -- in the open — fan out around the target using the formation
+                    -- slot at COMBAT_SPREAD_RADIUS.
+                    spot = squadSpreadGoal(record, troot.Position, SPACING.COMBAT_SPREAD_RADIUS :: number)
+                end
                 record.fightPoint = spot
             end
             if spot ~= nil and (root.Position - spot).Magnitude > AI.FIGHT_ARRIVE_DIST then
-                -- Still moving into a cover-adjacent firing spot — stand while moving.
+                -- Still moving into a firing spot — stand while moving. `spot` is
+                -- already a final, individually-computed position (real cover, or the
+                -- combat-spread fallback above), so radius 0 here.
                 setCrouched(record, false)
                 humanoid.AutoRotate = true
                 humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
-                humanoid:MoveTo(spot)
+                issueSquadMoveGoal(record, humanoid, spot, 0, now)
             else
                 -- Planted. Crouch — and fire from the crouch, nothing blocks that —
-                -- only when the plant spot is real cover (`spot ~= nil`, from
-                -- findFightingPosition); with no cover nearby there's nothing to crouch
-                -- behind, so stand in the open instead.
-                setCrouched(record, spot ~= nil)
+                -- only when the plant spot is actually beside cover (re-checked live
+                -- with hasNearbyCover rather than just "spot ~= nil", since `spot` can
+                -- now also be the squad-spacing COMBAT_SPREAD_RADIUS fallback above,
+                -- which has no cover guarantee); otherwise stand in the open.
+                setCrouched(record, spot ~= nil and hasNearbyCover(spot, troot.Position))
                 humanoid.AutoRotate = false
                 humanoid.WalkSpeed = AI.ATTACK_MOVE_SPEED
                 humanoid:MoveTo(root.Position)
@@ -1670,7 +1879,7 @@ local function thinkNPC(record: NPCRecord, now: number)
             record.fightPoint = nil
             humanoid.AutoRotate = true
             humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
-            humanoid:MoveTo(troot.Position + record.slot)
+            issueSquadMoveGoal(record, humanoid, troot.Position, SPACING.CHASE_SPREAD_RADIUS :: number, now)
         end
         return
     end
@@ -1687,12 +1896,14 @@ local function thinkNPC(record: NPCRecord, now: number)
             -- Fresh: run straight at where they were last seen.
             setState(record, "Chase")
             humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
-            humanoid:MoveTo(lastSeen + record.slot)
+            issueSquadMoveGoal(record, humanoid, lastSeen, SPACING.CHASE_SPREAD_RADIUS :: number, now)
         else
-            -- Stale: move in and flank the last-known position on an arc.
+            -- Stale: move in and flank the last-known position on an arc. flankPointFor
+            -- already spreads squadmates via flankSide (Stage 1E) — that logic is
+            -- untouched here; radius 0 layers on separation + throttling only.
             setState(record, "Search")
             humanoid.WalkSpeed = AI.NPC_WALK_SPEED
-            humanoid:MoveTo(flankPointFor(record, lastSeen))
+            issueSquadMoveGoal(record, humanoid, flankPointFor(record, lastSeen), 0, now)
         end
         return
     end
@@ -1705,7 +1916,7 @@ local function thinkNPC(record: NPCRecord, now: number)
     setState(record, (#patrolPoints > 0) and "Patrol" or "Idle")
     humanoid.AutoRotate = true
     humanoid.WalkSpeed = AI.NPC_WALK_SPEED
-    humanoid:MoveTo(patrolDestination(record))
+    issueSquadMoveGoal(record, humanoid, patrolDestination(record), SPACING.IDLE_SPREAD_RADIUS :: number, now)
 
     if record.isLeader and #patrolPoints > 0 then
         local squad = squads[record.squadId]
@@ -1810,6 +2021,21 @@ local function onNPCDied(record: NPCRecord)
     npcs[record.model] = nil
     table.insert(pendingCleanup, record)
 
+    -- Squad spacing: reassign formation slots immediately on a death (per spec —
+    -- not waiting for the next FORMATION_SLOT_REASSIGN_INTERVAL) so the rest of the
+    -- squad doesn't keep orbiting a now-vacant slot. If that leaves nobody alive,
+    -- drop the squad record entirely rather than leaving a zero-member husk around.
+    local squad = squads[record.squadId]
+    if squad ~= nil then
+        assignFormationSlots(squad, os.clock())
+        if #squad.members == 0 then
+            squads[record.squadId] = nil
+            if SPACING.DEBUG == true then
+                Logger.debug("[AIService] squad", record.squadId, "cleared — no members remain")
+            end
+        end
+    end
+
     ragdollDeadNPC(record)
 
     if AI.DEBUG then
@@ -1911,6 +2137,11 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
         lastDamageCallAt        = -math.huge,
         aimBand                 = nil,
 
+        formationSlotIndex = 1,   -- corrected by assignFormationSlots() right after this record is registered
+        currentMoveGoal    = nil,
+        lastMoveGoalAt     = 0,
+        lastMoveAnchor     = nil,
+
         dead      = false,
     }
 
@@ -1988,6 +2219,11 @@ local function spawnSquad(spawnCFrame: CFrame?, squadSize: number?): { Model }
         alerted               = false,
         attackerSlots         = {},
         nextAttackSlotRecheck = 0,
+
+        members                 = {},
+        leader                  = nil,
+        formationSlotAssignments = {},
+        lastFormationAssignAt   = 0,
     }
 
     local models: { Model } = {}
@@ -2000,6 +2236,13 @@ local function spawnSquad(spawnCFrame: CFrame?, squadSize: number?): { Model }
         if i < size then
             task.wait(AI.SPAWN_DELAY_BETWEEN_NPCS)
         end
+    end
+
+    -- Squad spacing: assign formation slots immediately (leader = slot 1) rather
+    -- than waiting for the first think's lazy FORMATION_SLOT_REASSIGN_INTERVAL check.
+    local newSquad = squads[squadId]
+    if newSquad ~= nil then
+        assignFormationSlots(newSquad, os.clock())
     end
 
     if AI.DEBUG then

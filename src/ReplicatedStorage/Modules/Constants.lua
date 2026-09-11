@@ -2373,6 +2373,47 @@ Constants.AI_COMBAT_TUNING = {
     MIN_TIME_BETWEEN_DAMAGE_CALLS = 0.05,
 }
 
+-- ── AI squad spacing / anti-bunching (AIService.server) ─────────────────────
+-- Loose formation slots around a squad anchor (leader if alive, else the average
+-- of living members) so squadmates fan out instead of stacking on the exact same
+-- point while patrolling, chasing, or taking cover. Simple offset-based formation,
+-- not real tactical movement — no obstacle awareness, no pathfinding. Layers on
+-- top of the per-grunt cover/fighting-position picking from earlier stages (which
+-- already naturally spreads Attack/Cover goals per grunt); this targets the
+-- "everyone runs to the identical point" cases: Chase, Search, Patrol/Idle.
+Constants.AI_SQUAD_SPACING = {
+    ENABLED = true,
+    DEBUG = true,
+
+    MIN_PERSONAL_SPACE      = 7,   -- studs; a squadmate's goal closer than this to another gets pushed away
+    PREFERRED_PERSONAL_SPACE = 11, -- studs; not directly enforced, documents the target resting spacing MIN_PERSONAL_SPACE + SEPARATION_PUSH_DISTANCE approximates
+    SEPARATION_PUSH_DISTANCE = 5,  -- studs; how far getSeparationAdjustedGoal nudges a goal away from a too-close squadmate
+
+    FORMATION_SLOT_REASSIGN_INTERVAL = 3.0, -- seconds between periodic slot reassignment passes (also reassigned immediately on a member's death)
+    FORMATION_SLOT_REACHED_DISTANCE  = 5,   -- studs; not a hard gate anywhere yet — reserved for a future "has this grunt reached its slot" check
+
+    -- Slot 1 is the leader/anchor; it goes (almost) straight for the anchor point.
+    -- Slots 2+ cycle through SLOT_OFFSETS[2..], each one's DIRECTION (not raw
+    -- magnitude) scaled out to the context's spread radius below — SLOT_OFFSETS
+    -- defines the formation's shape (who's left/right/rear), the radius constants
+    -- define its scale per behavior.
+    LEADER_SLOT_OFFSET = Vector3.new(0, 0, 0),
+    SLOT_OFFSETS = {
+        Vector3.new(0, 0, 0),
+        Vector3.new(-10, 0, 5),
+        Vector3.new(10, 0, 5),
+        Vector3.new(-7, 0, 13),
+        Vector3.new(7, 0, 13),
+    },
+
+    CHASE_SPREAD_RADIUS  = 14, -- studs; Chase and a fresh (non-stale) Search both fan out around the target at this radius
+    COMBAT_SPREAD_RADIUS = 18, -- studs; Attack fallback when findFightingPosition finds no literal cover — fan out around the target instead of planting wherever combat range was reached
+    IDLE_SPREAD_RADIUS   = 10, -- studs; Patrol/Idle fan out around the patrol point / squad spawn at this radius
+
+    MOVE_GOAL_JITTER = 3,   -- studs; random +/- per axis added so goals don't perfectly overlap; also the "meaningfully changed" distance threshold for the MoveTo throttle below
+    MOVE_GOAL_RECALCULATE_INTERVAL = 1.0, -- seconds; a travel MoveTo goal is only recomputed/reissued this often, or sooner if the underlying anchor moved past MOVE_GOAL_JITTER studs
+}
+
 -- ── Developer test area (TestAreaBuilder.server) ────────────────────────────
 -- Layout knobs for the generated developer sandbox under Workspace/<FOLDER_NAME>.
 -- All positions are world-space offsets from ORIGIN.

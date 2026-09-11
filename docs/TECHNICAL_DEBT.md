@@ -367,6 +367,81 @@ flanks around and regains LOS. Risks:
 - **Wall-clip risks from the base 1F block still apply** (side walls, un-eyeballed
   C0/C1 signs, no pathfinding on the pulled-back spot).
 
+## AI squad spacing / anti-bunching (Studio verification: REQUIRED, not done)
+
+New `Constants.AI_SQUAD_SPACING` + `AIService` helpers `assignFormationSlots` /
+`ensureFormationAssigned` / `formationDirectionForSlot` / `squadSpreadGoal` /
+`getSeparationAdjustedGoal` / `issueSquadMoveGoal`, wired into Patrol/Idle,
+Chase, fresh Search, Attack-transit, and Cover-retreat. `AIService` +
+`Constants.AI_SQUAD_SPACING` only — no new remotes, no client files,
+`GunService`/`DamageService` untouched; spawning, chase/attack, combat FX,
+damage integration, and death cleanup all preserved (only the `MoveTo`
+destinations themselves changed). MCP-checked formation-slot assignment
+(leader promotion on death, slot numbering, empty-squad clearing), the
+separation-push math, and the recalculate-throttle's anchor-vs-jitter
+distinction, all in isolation with throwaway logic (not a live `AIService`
+require — that pattern has previously timed out in this environment).
+Residual risks:
+
+- **Not runtime-verified in Play.** None of "does it actually look like a loose
+  squad" has been observed — only the underlying math was checked.
+- **Formation is simple offset-based, not real tactical movement.** Slots are
+  fixed compass-ish directions off an anchor point scaled by a spread radius —
+  no facing/heading rotation of the formation shape, no "flank left because
+  there's a wall on the right," no coordination between squads.
+- **No true obstacle-aware formation.** `squadSpreadGoal` and
+  `getSeparationAdjustedGoal` are pure vector math against other squadmates'
+  positions — a formation slot or a separation push can land a grunt inside a
+  wall, off a ledge, or somewhere `Humanoid:MoveTo` simply can't path to. No
+  raycast/walkability check on the adjusted goal (unlike `findCoverPoint`
+  /`findFightingPosition`, which do raycast). `issueSquadMoveGoal`'s
+  radius-0 call sites (Attack/Cover/Search-flank) are lower risk since the
+  underlying goal there already came from a raycast-validated helper and
+  separation only nudges it a few studs.
+- **No pathfinding rewrite** (still plain `Humanoid:MoveTo`) — explicitly out
+  of scope for this task, so a spread-out squadmate can still get stuck on
+  geometry exactly like before.
+- **Squad "anchor" isn't a single materialized value.** The task asked for
+  "leader position if alive, else average of living members" — this
+  implementation only ever uses the LEADER's live position (via slot 1's own
+  goal, which is `anchor + 0` since `LEADER_SLOT_OFFSET` is zero) as the
+  effective anchor for the *leader itself*, and each OTHER member's goal is
+  `troot.Position` (the actual player, not a "squad anchor") + formation
+  offset — so in the Chase/Search/Patrol cases the "anchor" is always the
+  live target or patrol point, not the squad's own center of mass. The
+  "average of living members" fallback (for a dead/missing leader) is not
+  implemented as a distinct code path — dead leaders are handled by
+  *promoting* a new leader (`assignFormationSlots`) rather than computing a
+  centroid, which achieves the same practical goal (a stable slot-1 anchor
+  member) more simply, but is a deliberate deviation from the literal spec
+  wording. Documented here rather than silently diverging.
+- **Spacing values are first guesses**, unplaytested — `MIN_PERSONAL_SPACE`,
+  `SEPARATION_PUSH_DISTANCE`, the three spread radii, and `MOVE_GOAL_JITTER`
+  all as specified verbatim.
+- **`PREFERRED_PERSONAL_SPACE` and `FORMATION_SLOT_REACHED_DISTANCE` are
+  unused.** Both are required Constants per the task spec but nothing in this
+  pass reads them — `PREFERRED_PERSONAL_SPACE` documents an intended resting
+  distance that `getSeparationAdjustedGoal`'s single push-on-violation model
+  doesn't need a separate constant for, and `FORMATION_SLOT_REACHED_DISTANCE`
+  is reserved for a future "has this grunt actually reached its formation
+  slot" check that nothing currently asks. Left in `Constants.lua` (not
+  removed) since the constant block was requested verbatim.
+- **Replaces, rather than layers onto, the Stage 1A static per-grunt ring
+  offset** (`record.slot`) for Chase/Search-fresh/Patrol/Idle — running both a
+  fixed spawn-time offset and a dynamic reassigned one for the same "spread
+  squadmates around a shared goal" purpose would be redundant, so
+  `record.slot` is now only read as the disabled/no-squad fallback inside
+  `squadSpreadGoal`. Same consolidation pattern as the Stage 1C-vs-1H
+  reaction-delay merge earlier this session.
+- **`COMBAT_SPREAD_RADIUS` fallback changes `Attack` behavior when no cover is
+  found**: previously a grunt with no cover nearby just held wherever
+  `ATTACK_RANGE` was reached; now (when `SPACING.ENABLED`) it walks to a
+  formation-spread point around the target instead. The crouch decision at the
+  plant point was updated to re-check `hasNearbyCover` live (rather than just
+  "a fight point exists") specifically because this fallback point has no
+  cover guarantee — worth confirming in Play that this doesn't make grunts
+  wander more than intended when genuinely no cover exists nearby.
+
 ## Player first-person weapon retraction — Tarkov close-quarters (Studio verification: REQUIRED, not done)
 
 `ViewModelController.computeWallCollisionCF` + `Constants.VIEWMODEL_WALL_*`. One

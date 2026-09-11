@@ -1,5 +1,44 @@
 # Changelog
 
+## AI squad spacing and anti-bunching
+
+- **Formation slots.** Each squad now assigns a formation slot to every living
+  member — 1 for the leader/anchor (original spawn leader, or the first
+  survivor if it dies), 2+ cycling through flanking/rear directions
+  (`Constants.AI_SQUAD_SPACING.SLOT_OFFSETS`). Reassigned at most every
+  `FORMATION_SLOT_REASSIGN_INTERVAL`, and immediately on a member's death —
+  never every think.
+- **Squadmates no longer all run to the identical point.** Patrol/Idle, Chase,
+  and a fresh Search now fan squadmates out from the shared target (patrol
+  point, player position, last-known position) by formation-slot direction ×
+  a context spread radius (`CHASE_SPREAD_RADIUS` / `IDLE_SPREAD_RADIUS`) plus
+  a little jitter so goals never perfectly overlap.
+- **Separation avoidance.** New `getSeparationAdjustedGoal` nudges any goal
+  away from a squadmate closer than `MIN_PERSONAL_SPACE` — pure vector math,
+  no physics forces, never touches `HumanoidRootPart` directly. Applied on
+  top of every travel goal, including the ones that are already individually
+  computed (Attack fighting spots, Cover hide points, flank points), so those
+  only get a small safety-net push, not the full spread treatment (keeps them
+  from being pulled off a validated cover/LOS spot).
+- **Combat fallback.** When `Attack` finds no literal cover
+  (`findFightingPosition` returns nil), grunts now fan out around the target
+  at `COMBAT_SPREAD_RADIUS` instead of planting wherever attack range was
+  reached — a common cause of squads bunching in the open.
+- **MoveTo throttling.** A new shared `issueSquadMoveGoal` only recomputes and
+  reissues a travel goal when `MOVE_GOAL_RECALCULATE_INTERVAL` has passed or
+  the underlying raw target has moved past `MOVE_GOAL_JITTER` studs — not
+  every think. Stationary "hold position" `MoveTo(root.Position)` calls
+  (planted/firing, mid-burst) are untouched and stay direct, so a grunt still
+  stops moving the instant it plants.
+- Falls back to the pre-existing static per-grunt ring offset when
+  `Constants.AI_SQUAD_SPACING.ENABLED` is false or a squad record can't be
+  found, cleanly reverting to prior behavior.
+- `AIService` + `Constants.AI_SQUAD_SPACING` only — no new remotes, no client
+  files, `GunService`/`DamageService` untouched. Spawning, chase/attack,
+  combat FX, damage integration, and death cleanup all preserved. MCP-checked
+  the formation math in isolation; not runtime-verified in Play (see
+  docs/TECHNICAL_DEBT.md "AI squad spacing / anti-bunching").
+
 ## Fix: stuck cursor + instant mid-round weapon switch from the loadout menu
 
 - **Cursor stuck visible after spawning in.** `LoadoutMenu`'s cursor-restore
