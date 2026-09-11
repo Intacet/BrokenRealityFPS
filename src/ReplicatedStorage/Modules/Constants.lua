@@ -2116,6 +2116,15 @@ Constants.AI = {
     -- (not per-player) so it can't be spammed to grief other players' fights.
     RESPAWN_COOLDOWN_SECONDS = 8,
 
+    -- ── Kill all (KillAllBots remote, fired from the LoadoutMenu button) ────────
+    -- Unlike Respawn, this routes every live grunt through the REAL death path
+    -- (Humanoid.Health = 0 → the existing Died handler → ragdoll + blood + the
+    -- normal DEATH_CLEANUP_DELAY corpse timer) instead of an instant destroy, and
+    -- does not spawn replacements — the AI zone just goes quiet until the next
+    -- Respawn Bots press or server restart. Same shared, not-per-player, cooldown
+    -- pattern as RESPAWN_COOLDOWN_SECONDS.
+    KILL_ALL_COOLDOWN_SECONDS = 5,
+
     SPAWN_ON_SERVER_START_IN_STUDIO    = true,
     -- Published servers previously never spawned any AI at all (this flag did not
     -- exist, so the Studio-only gate below silently skipped every live server).

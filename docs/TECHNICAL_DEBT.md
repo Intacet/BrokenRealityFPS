@@ -784,6 +784,22 @@ each player server-owned pre-round state in two Player attributes:
   back to `Constants.LOADOUT.AUTO_OPEN_PHASES`.
 - **Not runtime-verified.** MCP can't drive input or equip a weapon; needs an in-game
   Play test — menu open/close, team pick moving the spawn, AKS-74 equipping, ammo label.
+- **KILL ALL BOTS button (2026-09-11).** `AIService.KillAllBots()` sets every live
+  grunt's `Humanoid.Health = 0` directly and lets the existing per-NPC `Died`
+  connection do the rest (`onNPCDied`: ragdoll, blood, corpse timer, attack-slot
+  release, formation reassignment) — the same mechanism every AI death in this
+  game already goes through (a player's bullet, `KillAllBots`'s remote
+  ancestor being no different structurally). Gated by a new
+  `Constants.AI.KILL_ALL_COOLDOWN_SECONDS` shared cooldown, same pattern as
+  Respawn Bots. No new record fields, no new state machine — `AIService`'s
+  own `onNPCDied` already handles every cleanup path this button needs. Not
+  independently runtime-verified (relies on the already-proven Health=0→Died
+  pipeline, not a new one); confirm in Play that a full squad wipe via the
+  button looks/sounds right (ragdolls drop with no impulse direction, since
+  there's no `DamageInfo` behind this kill — `record.lastHit` is whatever it
+  last was, which `ragdollDeadNPC` already handles as an optional field, so
+  the body should just crumple rather than fly, which is the intended feel
+  for an admin/dev-style kill switch, not a shot).
 
 ## Aiming / free-aim / cursor — Tarkov-style hipfire (Studio verification: YES, required)
 

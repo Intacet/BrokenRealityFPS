@@ -1,5 +1,23 @@
 # Changelog
 
+## Kill All Bots button
+
+- New **KILL ALL BOTS** button in the loadout (`M`) menu, next to Respawn Bots.
+  Fires a new `KillAllBots` RemoteEvent; `AIService.KillAllBots()` sets every
+  live grunt's `Humanoid.Health = 0`, routing it through the exact same death
+  path a player's bullet would (ragdoll, blood, the normal corpse-cleanup
+  timer, attack-slot release, squad formation reassignment) — unlike Respawn
+  Bots, it does not spawn replacements; the AI zone stays empty until the next
+  Respawn Bots press. Available to every player, Studio and published alike,
+  gated by its own shared server-wide cooldown
+  (`Constants.AI.KILL_ALL_COOLDOWN_SECONDS`), same not-per-player pattern as
+  Respawn Bots.
+- `AIService.server.lua` + `RemoteSetup.server.lua` + `LoadoutMenu.lua` +
+  `Constants.lua` only. No other file touched. `rojo build` clean; the
+  underlying kill mechanism (`Humanoid.Health = 0` → `Died` → `onNPCDied`) is
+  the same one every AI death this session already goes through, not a new
+  code path — not independently re-verified in Play.
+
 ## AI squad fire discipline
 
 - **Only 1-2 bots fire at once per squad** (`MAX_ACTIVE_SHOOTERS_PER_SQUAD`) —

@@ -79,8 +79,9 @@ makeEvent("BloodEffect")        -- server → all clients | reproduce a blood bu
 makeEvent("DummyDevCommand")    -- client → server | dev command: subscribe / reset / heal / infinite / blood / hitbox
 makeEvent("DummyDevState")      -- server → subscribed dev client | test-dummy state snapshot for the debug HUD
 
--- AI grunts (available to every player, dev and published — LoadoutMenu button)
+-- AI grunts (available to every player, dev and published — LoadoutMenu buttons)
 makeEvent("RespawnBots")        -- client → server | request AIService.RespawnAllSquads(); server-side cooldown
+makeEvent("KillAllBots")        -- client → server | request AIService.KillAllBots(); server-side cooldown
 
 -- World weapon model (third-person attachment)
 makeEvent("WeaponEquipState")   -- client → server | request equip/holster of world weapon model

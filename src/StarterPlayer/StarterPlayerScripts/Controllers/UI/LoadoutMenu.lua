@@ -23,6 +23,11 @@
 -- holds one shared cooldown (Constants.AI.RESPAWN_COOLDOWN_SECONDS) so it can't be
 -- spammed — this button's countdown is a cosmetic mirror of that, not the real gate.
 --
+-- KILL ALL BOTS fires the KillAllBots RemoteEvent — AIService.KillAllBots() routes
+-- every live grunt through the real death path (ragdoll, blood, the normal corpse
+-- timer) instead of an instant destroy, and does not spawn replacements. Same
+-- shared-cooldown pattern (Constants.AI.KILL_ALL_COOLDOWN_SECONDS).
+--
 -- Initialized by ClientInit via loadInitAndStart():
 --   1. init(playerGui) — builds every GUI instance
 --   2. Start()         — connects input + RoundStateChanged, seeds selection
@@ -48,6 +53,7 @@ local Remotes           = ReplicatedStorage:WaitForChild("Remotes")
 local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEvent
 local SelectLoadout     = Remotes:WaitForChild("SelectLoadout")     :: RemoteEvent
 local RespawnBots       = Remotes:WaitForChild("RespawnBots")       :: RemoteEvent
+local KillAllBots       = Remotes:WaitForChild("KillAllBots")       :: RemoteEvent
 
 local LocalPlayer = Players.LocalPlayer
 local LOADOUT     = Constants.LOADOUT :: any
@@ -83,6 +89,8 @@ local crosshairBtn : TextButton
 local crosshairLbl : TextLabel
 local respawnBtn   : TextButton
 local respawnLbl   : TextLabel
+local killAllBtn   : TextButton
+local killAllLbl   : TextLabel
 
 -- weapon key → { button: TextButton, stroke: UIStroke, selectable: boolean }
 local weaponRows : { [string]: { button: TextButton, stroke: UIStroke, selectable: boolean } } = {}
@@ -103,6 +111,8 @@ local crosshairEnabled = true
 -- cosmetic (disables the button + shows a countdown); the server is the real gate
 -- and simply ignores a request that arrives too soon.
 local respawnCooldownUntil = 0
+-- Same pattern, mirroring Constants.AI.KILL_ALL_COOLDOWN_SECONDS.
+local killAllCooldownUntil = 0
 
 -- ============================================================
 -- Build helpers
@@ -187,6 +197,32 @@ local function runRespawnCooldown(seconds: number)
         if respawnLbl ~= nil then
             respawnLbl.Text = "RESPAWN BOTS"
             respawnLbl.TextColor3 = WHITE
+        end
+    end)
+end
+
+-- Same as runRespawnCooldown, for the KILL ALL BOTS button.
+local function runKillAllCooldown(seconds: number)
+    killAllCooldownUntil = os.clock() + seconds
+    task.spawn(function()
+        while os.clock() < killAllCooldownUntil do
+            if killAllBtn ~= nil then
+                killAllBtn.Active = false
+                killAllBtn.AutoButtonColor = false
+            end
+            if killAllLbl ~= nil then
+                killAllLbl.Text = string.format("KILL ALL BOTS (%ds)", math.max(0, math.ceil(killAllCooldownUntil - os.clock())))
+                killAllLbl.TextColor3 = DIM_GREY
+            end
+            task.wait(0.2)
+        end
+        if killAllBtn ~= nil then
+            killAllBtn.Active = true
+            killAllBtn.AutoButtonColor = true
+        end
+        if killAllLbl ~= nil then
+            killAllLbl.Text = "KILL ALL BOTS"
+            killAllLbl.TextColor3 = WHITE
         end
     end)
 end
@@ -322,10 +358,10 @@ function LoadoutMenu:init(playerGui: PlayerGui)
     backdrop.Parent              = screenGui
 
     -- Panel
-    local TOGGLE_H = 30  -- crosshair toggle / respawn-bots button row height
+    local TOGGLE_H = 30  -- crosshair toggle / respawn-bots / kill-all-bots button row height
     local weaponBlockH = #LOADOUT.WEAPONS * CARD_H + (#LOADOUT.WEAPONS - 1) * CARD_GAP
     local panelH = PAD + 28 + 22 + weaponBlockH + 24 + 20 + ROW_H + 20 + ROW_H + 8
-        + TOGGLE_H + 8 + TOGGLE_H + 8 + 16 + PAD
+        + TOGGLE_H + 8 + TOGGLE_H + 8 + TOGGLE_H + 8 + 16 + PAD
 
     panel                    = Instance.new("Frame")
     panel.Name               = "Panel"
@@ -438,6 +474,20 @@ function LoadoutMenu:init(playerGui: PlayerGui)
         12, true, WHITE, Enum.TextXAlignment.Center)
     y += TOGGLE_H + 8
 
+    -- Kill all bots — same availability as Respawn Bots, but routes every grunt
+    -- through the real death path instead of an instant reset. Server owns the
+    -- real cooldown (Constants.AI.KILL_ALL_COOLDOWN_SECONDS).
+    local killAllButton = makeButton(panel,
+        UDim2.fromOffset(innerW, TOGGLE_H),
+        UDim2.fromOffset(PAD, y),
+        CARD_COLOR)
+    killAllBtn = killAllButton
+    killAllBtn.Name = "KillAllBots"
+    killAllLbl = makeLabel(killAllBtn, "KILL ALL BOTS",
+        UDim2.fromScale(1, 1), UDim2.fromScale(0, 0),
+        12, true, WHITE, Enum.TextXAlignment.Center)
+    y += TOGGLE_H + 8
+
     makeLabel(panel,
         string.format("[%s] close", LOADOUT.TOGGLE_KEY.Name),
         UDim2.fromOffset(innerW, 16), UDim2.fromOffset(PAD, y),
@@ -490,6 +540,17 @@ function LoadoutMenu:Start()
         Logger.debug("[LoadoutMenu] Respawn Bots requested")
         local cooldown = (Constants.AI :: any).RESPAWN_COOLDOWN_SECONDS
         runRespawnCooldown(typeof(cooldown) == "number" and cooldown or 8)
+    end)
+
+    -- Kill all bots — same immediate-fire / server-is-the-real-gate pattern.
+    killAllBtn.Activated:Connect(function()
+        if os.clock() < killAllCooldownUntil then
+            return
+        end
+        KillAllBots:FireServer()
+        Logger.debug("[LoadoutMenu] Kill All Bots requested")
+        local cooldown = (Constants.AI :: any).KILL_ALL_COOLDOWN_SECONDS
+        runKillAllCooldown(typeof(cooldown) == "number" and cooldown or 5)
     end)
 
     -- Toggle key.

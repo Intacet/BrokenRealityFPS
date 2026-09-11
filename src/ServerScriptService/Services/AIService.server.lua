@@ -110,9 +110,10 @@ local CombatEvents = require(script.Parent:WaitForChild("CombatEvents"))
 -- dead grunt flops with the shot's knockback instead of freezing then vanishing.
 local RagdollService = require(script.Parent:WaitForChild("RagdollService"))
 
--- Stage 1H: RespawnBots — created by RemoteSetup before any Service needs it.
+-- Stage 1H: RespawnBots / KillAllBots — created by RemoteSetup before any Service needs them.
 local Remotes      = ReplicatedStorage:WaitForChild("Remotes")
 local RespawnBots  = Remotes:WaitForChild("RespawnBots") :: RemoteEvent
+local KillAllBots  = Remotes:WaitForChild("KillAllBots") :: RemoteEvent
 
 -- Untyped views of the tuning tables (heterogeneous fields; matches the pattern
 -- used by TestAreaBuilder's `local CFG = Constants.DEV_TEST_AREA :: any`).
@@ -258,6 +259,8 @@ local serviceConns: { RBXScriptConnection } = {}
 local didAutoSpawn = false
 -- Stage 1H: shared server-wide cooldown gate for the RespawnBots remote.
 local lastManualRespawnClock = -math.huge
+-- Shared server-wide cooldown gate for the KillAllBots remote.
+local lastManualKillAllClock = -math.huge
 
 local aiFolder : Folder? = nil
 local losParams: RaycastParams = RaycastParams.new()
@@ -2592,6 +2595,22 @@ function AIService.Start(): ()
     end)
     table.insert(serviceConns, respawnConn)
 
+    -- Any player can request a full AI kill from the LoadoutMenu button, dev and
+    -- published alike. Server-authoritative and cooldown-gated (shared, not
+    -- per-player). Unlike RespawnBots this routes every grunt through the REAL
+    -- death path (ragdoll, blood, cleanup timer) and does not spawn replacements.
+    local killAllConn = KillAllBots.OnServerEvent:Connect(function(player: Player)
+        local now = os.clock()
+        local cooldown = AI.KILL_ALL_COOLDOWN_SECONDS :: number
+        if now - lastManualKillAllClock < cooldown then
+            return
+        end
+        lastManualKillAllClock = now
+        Logger.debug("[AIService] KillAllBots requested by", player.Name)
+        AIService.KillAllBots()
+    end)
+    table.insert(serviceConns, killAllConn)
+
     if autoSpawnEnabled() and #spawnParts == 0 then
         local flagName = if RunService:IsStudio()
             then "SPAWN_ON_SERVER_START_IN_STUDIO"
@@ -2652,6 +2671,34 @@ function AIService.RespawnAllSquads(): number
     end
     Logger.debug("[AIService] RespawnAllSquads: spawned", spawned, "squad(s) — active", activeCount())
     return spawned
+end
+
+-- Instantly routes every LIVE grunt through the real death path: sets
+-- Humanoid.Health = 0, which fires the same Humanoid.Died connection every grunt
+-- already has, running the normal onNPCDied flow (ragdoll, the DEATH_CLEANUP_DELAY
+-- corpse timer, attack-slot release, formation reassignment) — the same as if a
+-- player had shot them. Unlike RespawnAllSquads this does NOT spawn replacements;
+-- the AI zone just goes quiet until the next Respawn Bots press or server restart.
+-- Grunts already dying (pendingCleanup) are left alone. Non-yielding (no
+-- task.wait anywhere in this function), so — unlike RespawnAllSquads — the
+-- KillAllBots remote handler calls this directly, no task.spawn needed. Returns
+-- the number of grunts killed.
+function AIService.KillAllBots(): number
+    if not started or not running then
+        Logger.warn("[AIService] KillAllBots called before Start() / after Destroy() — ignored")
+        return 0
+    end
+    local killed = 0
+    for _, record in pairs(npcs) do
+        if not record.dead and record.humanoid.Parent ~= nil then
+            record.humanoid.Health = 0
+            killed += 1
+        end
+    end
+    if AI.DEBUG then
+        Logger.debug("[AIService] KillAllBots: killed", killed, "grunt(s)")
+    end
+    return killed
 end
 
 -- Number of NPCs that are alive and thinking.
