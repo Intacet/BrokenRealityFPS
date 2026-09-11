@@ -2105,6 +2105,13 @@ Constants.AI = {
     SPAWN_FOLDER_NAME  = "AISpawns",       -- Workspace folder of BasePart squad origins
     PATROL_FOLDER_NAME = "AIPatrolPoints", -- Workspace folder of BasePart patrol destinations
 
+    -- AI arena / factions (2026-09-11): the Constants.AI_FACTIONS key every
+    -- spawn resolves to when SpawnSquad's factionKey argument is omitted — every
+    -- pre-existing spawn path (auto-spawn, RespawnBots, KillAllBots) stays on
+    -- this one faction, so same-faction grunts never target each other and
+    -- today's behavior is unchanged. See Constants.AI_FACTIONS below.
+    DEFAULT_FACTION = "DEFAULT",
+
     MAX_ACTIVE_NPCS    = 12,
     DEFAULT_SQUAD_SIZE = 3,
     MAX_SQUADS         = 2,
@@ -2575,6 +2582,83 @@ Constants.AI_NAVIGATION = {
 
     FALLBACK_TO_MOVE_TO_ON_PATH_FAIL = true, -- if pathfinding fails/returns no waypoints, fall back to a direct Humanoid:MoveTo(goal) rather than the grunt freezing in place
     AIPATROLPOINTS_OPTIONAL          = true, -- documents the behavior collectParts()/thinkNPC already implement — Workspace/AIPatrolPoints missing or empty no longer warns as a misconfiguration and dynamic roaming takes over
+}
+
+-- ── AI factions (AIService.server) ────────────────────────────────────────────
+-- A grunt only ever targets / is targeted by another grunt when their factions
+-- differ — see findVisibleTarget/fireOneShot in AIService.server.lua. DEFAULT
+-- is what every existing spawn path (auto-spawn, RespawnBots, KillAllBots)
+-- resolves to when Constants.AI.DEFAULT_FACTION / SpawnSquad's factionKey is
+-- omitted, so same-faction grunts never fight each other — this table adding
+-- ARENA_RED/ARENA_BLUE does not change any of today's single-faction behavior.
+-- BODY_COLOR/LIMB_COLOR also give each faction's rig a distinct look (the
+-- "designation" requested for the AI arena) — DEFAULT's colors are the
+-- pre-existing grey grunt, unchanged.
+Constants.AI_FACTIONS = {
+    DEFAULT = {
+        NAME       = "Grunt",
+        BODY_COLOR = Color3.fromRGB(120, 122, 128),
+        LIMB_COLOR = Color3.fromRGB( 96,  98, 104),
+    },
+    ARENA_RED = {
+        NAME       = "Red Squad",
+        BODY_COLOR = Color3.fromRGB(150,  45,  45),
+        LIMB_COLOR = Color3.fromRGB(110,  32,  32),
+    },
+    ARENA_BLUE = {
+        NAME       = "Blue Squad",
+        BODY_COLOR = Color3.fromRGB( 45,  80, 150),
+        LIMB_COLOR = Color3.fromRGB( 32,  58, 110),
+    },
+}
+
+-- ── AI arena (AIArenaBuilder.server) ──────────────────────────────────────────
+-- A separate generated test map — walls, scattered cover, one ramp structure —
+-- so ARENA_RED vs ARENA_BLUE squads can be watched fighting each other,
+-- exercising spacing/fire-discipline/awareness/bounding/dynamic-navigation
+-- against a real opponent instead of just the player. Own sky-island ORIGIN,
+-- clear of DEV_TEST_AREA's (Y 300) and the live map's (~Y 10-95). Entirely
+-- separate from Workspace/AISpawns + AIPatrolPoints — those stay the main
+-- game's, untouched; this arena computes its own spawn CFrames and calls
+-- AIService.SpawnSquad directly. Foundation-only: not a designer AI-zone
+-- editor, no scoring/UI — see docs/TECHNICAL_DEBT.md "AI arena / factions".
+Constants.AI_ARENA = {
+    ENABLED = true,
+    DEBUG   = true,
+    -- false = Studio only (safe default). true = also build it on a published
+    -- server, same split as DEV_TEST_AREA.RUN_IN_PUBLISHED.
+    RUN_IN_PUBLISHED = false,
+
+    FOLDER_NAME = "BrokenReality_AIArena",
+    ORIGIN      = Vector3.new(0, 600, 0),
+
+    BASEPLATE_SIZE     = Vector3.new(170, 1, 170),
+    BASEPLATE_POSITION = Vector3.new(0, -0.5, 0),
+
+    WALL_HEIGHT    = 14,
+    WALL_THICKNESS = 2,
+
+    -- Opposite ends of the arena, ~130 studs apart with the scattered cover
+    -- layout between them, so squads must advance to find each other instead
+    -- of seeing each other the instant they spawn.
+    RED_SPAWN_POSITION  = Vector3.new(0, 3, -65),
+    BLUE_SPAWN_POSITION = Vector3.new(0, 3,  65),
+    SPAWN_SPREAD        = 10, -- studs between individual squad-member spawn points along X
+
+    SQUAD_SIZE = 4,
+
+    -- Auto-spawns both squads on server start (Studio-gated like every other
+    -- dev system) and, once either side's living count hits 0 (a battle
+    -- conclusion, or an unrelated RespawnBots/KillAllBots wipe — this doesn't
+    -- distinguish why), waits this long then respawns BOTH sides fresh — a
+    -- hands-off, continuously-repeating AI-vs-AI test.
+    AUTO_SPAWN_BATTLE     = true,
+    BATTLE_CHECK_INTERVAL = 4,
+    BATTLE_RESPAWN_DELAY  = 6,
+    -- How long SpawnSquad is retried (AIService.Start() may not have run yet)
+    -- before giving up with a Logger.warn.
+    SPAWN_RETRY_INTERVAL = 0.5,
+    SPAWN_RETRY_ATTEMPTS = 20,
 }
 
 -- ── Developer test area (TestAreaBuilder.server) ────────────────────────────

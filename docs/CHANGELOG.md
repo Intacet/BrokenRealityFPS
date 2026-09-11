@@ -1,5 +1,42 @@
 # Changelog
 
+## AI arena — separate AI-vs-AI test map with two colored factions
+
+- **New self-contained arena** for watching AI squads fight each other, not
+  just the player: perimeter walls, a scattered layout of cover blocks, and a
+  small stepped structure, built at `Workspace/BrokenReality_AIArena` (its own
+  sky-island location, well clear of the main game map and the existing dev
+  test area). Auto-spawns a **Red Squad** and a **Blue Squad** on server start
+  in Studio, and automatically restarts the battle a few seconds after either
+  side is wiped — a hands-off, continuously-repeating test.
+- **AI can now fight AI.** Squads only ever target/damage each other when they
+  belong to different factions — every existing single-squad spawn (the main
+  game's AI zone, Respawn Bots, Kill All Bots) stays on one shared default
+  faction and is completely unaffected; grunts of the same faction still never
+  target each other, exactly like today.
+- **Each faction has its own color** as a visual designation — Red Squad and
+  Blue Squad grunts are recolored at spawn; a player who walks into the arena
+  is treated as hostile by both sides too (AI already targets players
+  unconditionally, unchanged).
+- No DamageService changes were needed — an AI grunt shooting another AI grunt
+  routes through the exact same damage path a player's bullet already uses to
+  hurt a tagged grunt.
+- New `Constants.AI_FACTIONS` + `Constants.AI_ARENA` tables, new
+  `AIArenaBuilder.server.lua` (geometry only — no AI spawning, no combat logic
+  of its own), and `AIService.server.lua` additions: a widened target type so
+  a grunt can target either a Player or an enemy-faction grunt, per-faction
+  rig colors, and the arena's own auto-spawn/self-healing battle loop (fully
+  inside AIService — the two new/changed files never call into each other
+  directly, they just share the same `Constants.AI_ARENA` layout).
+- No new remotes, no client files, `GunService`/`DamageService`/`TeamService`
+  untouched. One new `default.project.json` entry for `AIArenaBuilder`. `rojo
+  build` clean; MCP-checked the faction no-op guarantee, target-type
+  branching, arena geometry (walls fully enclose the spawn points and cover
+  scatter), and the wipe-detection/retry logic in isolation; not yet
+  runtime-verified in Play — see docs/TECHNICAL_DEBT.md "AI arena / factions"
+  for every scoping note and known limitation (this is the largest AI
+  targeting-core change this session).
+
 ## AI dynamic big-map navigation (AIPatrolPoints now optional)
 
 - **AI no longer needs hand-placed patrol points.** Workspace/AIPatrolPoints is

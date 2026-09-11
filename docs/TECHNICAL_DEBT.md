@@ -840,6 +840,98 @@ for the Studio test steps below. Residual risks:
   version would. Nothing to disconnect currently exists because nothing
   subscribes; flagged here since the task's cleanup section anticipated one.
 
+## AI arena / factions (Studio verification: REQUIRED, not done)
+
+**Scope note up front:** this is the largest AI-targeting-core change this
+session — it widens `NPCRecord.target`'s type (`Player?` → `Player | Model`)
+and touches `findVisibleTarget`/`targetRootOf`/`fireOneShot`, the functions
+every combat decision in `thinkNPC` ultimately depends on. It was deliberately
+designed so every existing single-faction spawn path is a **structural
+no-op** — same-faction grunts never select each other in `findVisibleTarget`,
+so nothing about today's Player-vs-AI behavior should have changed — but
+this is real surface area on the most safety-critical file in the project,
+flagged honestly as higher-risk than the last several AI passes rather than
+downplayed.
+
+New `Constants.AI_FACTIONS` + `Constants.AI_ARENA` tables, new
+`AIArenaBuilder.server.lua` (geometry only), and in `AIService.server.lua`: a
+new `AITarget` type, `NPCRecord.faction`, `targetCharacterOf`, the widened
+`targetRootOf`/`findVisibleTarget`/`fireOneShot`, per-faction `buildRig`
+colors, the `factionKey` parameter threaded through `spawnOne`/`spawnSquad`/
+`AIService.SpawnSquad`, and the self-contained `runArenaBattle` auto-spawn/
+watch loop. `AIService.server.lua` + `Constants.lua` + one new file + one new
+`default.project.json` entry only — no new remotes, no client files,
+`GunService`/`DamageService`/`TeamService` untouched. MCP-checked (throwaway
+logic, not a live `AIService` require, against a live Edit datamodel) the
+same-faction no-op guarantee, different-faction targeting, dead-target
+exclusion, the Player-vs-Model target-kind branch, the arena's wall/cover/
+spawn-position geometry (spawn points and every cover block, including its
+rotated half-diagonal, land inside the perimeter walls; the two spawn points
+are ~130 studs apart), the wipe-detection condition, and the spawn-retry
+loop's termination behavior. Residual risks:
+
+- **Not runtime-verified in Play.** Whether AI-vs-AI combat actually looks
+  and feels right — squads advancing, using cover, fire discipline holding,
+  bound-and-cover leapfrogging, dynamic navigation routing around the
+  arena's walls — has not been observed. This is also, by construction, the
+  first time `findVisibleTarget`'s enemy-grunt loop and `fireOneShot`'s
+  enemy-grunt damage branch have ever actually executed (no faction has ever
+  differed before this pass), so it is the least-exercised new code path in
+  the whole session.
+- **No attacker attribution for AI-vs-AI damage.** `DamageService`'s
+  `attacker` field is `Player?` — deliberately not touched, so `ApplyDamage`
+  is called with `targetModel` only when the source is an enemy grunt. This
+  means the `CombatEvents.DamageDealt` hit-reaction listener (which sets
+  `record.target = info.attacker` to instantly retarget onto whoever just
+  shot you) never fires for AI-inflicted hits, exactly as it already didn't
+  for AI→player hits — a grunt shot by an enemy squad only reacquires that
+  enemy via `findVisibleTarget`'s next LOS scan (`AI.TARGET_RECHECK_INTERVAL`),
+  not instantly. It does still enter `Cover` on the hit (`record.coverUntil`
+  is armed regardless of attacker identity) and does still get suppressed/
+  recently-damaged tiering, since those don't need to know *who* shot it.
+- **Arena squads share the global `MAX_ACTIVE_NPCS` (12) budget with every
+  other AI spawn in the game.** With the main game's own AI zone active
+  (`DEV_TEST_AREA.SPAWN_AI_ZONE`, up to `MAX_SQUADS` × `DEFAULT_SQUAD_SIZE` =
+  6) plus the arena's two `SQUAD_SIZE` = 4 squads (8), total demand (14) can
+  exceed the cap — squads may spawn smaller than requested, or `spawnSquad`
+  can return empty and `runArenaBattle`'s retry loop can exhaust all
+  `SPAWN_RETRY_ATTEMPTS` and give up (logged via `Logger.warn`) if the game's
+  other AI never frees up room. Not fixed automatically — `MAX_ACTIVE_NPCS`
+  is a gameplay-balance constant, out of scope to silently raise here.
+- **A wandering DEFAULT-faction grunt (or a player) near the arena's
+  sky-island footprint would also register as hostile to both arena
+  factions** — correct "different faction = enemy" semantics by design, not
+  a bug, but this specific interaction (a third faction wandering into an
+  active two-faction fight) is untested. In practice the arena's `Y=600`
+  sky-island origin makes this unlikely to ever happen by accident.
+- **No designer control over the arena's cover placement.** The ten cover
+  blocks and the one stepped structure in `AIArenaBuilder.buildCoverScatter`/
+  `buildStructure` are a single hand-authored layout, hardcoded in the
+  builder script (same convention `TestAreaBuilder` already uses for its own
+  Stairs/DropTest shapes) — not data-driven, not randomized, no in-Studio
+  editor. Changing the layout means editing the script.
+- **`AIArenaBuilder` duplicates `TestAreaBuilder`'s `makeBlock` helper**
+  rather than sharing a module — deliberate isolation (this file is meant to
+  be fully independent of `TestAreaBuilder`), same precedent as Stage 1C's
+  AI weapon-attach code duplicating `WorldWeaponService`'s ~30 lines,
+  already noted elsewhere in this file.
+- **The stepped structure's risers are a first guess (2 studs each), not
+  Studio-verified against the default `Humanoid` step height** — if a grunt
+  can't auto-step them, it will just walk into the first riser and stop
+  (`AGENT_CAN_JUMP = true` in `Constants.AI_NAVIGATION` gives dynamic-nav
+  waypoints a jump fallback, but the structure isn't guaranteed to be reached
+  via a nav-mode goal — it is purely decorative/optional, not a required
+  combat position).
+- **`runArenaBattle`'s wipe-detection polls on a fixed `BATTLE_CHECK_INTERVAL`
+  (4s)**, so there's up to a 4s delay between a side's last grunt dying and
+  the respawn timer even starting, on top of the `BATTLE_RESPAWN_DELAY`
+  itself — not instant, deliberately (matches every other polling loop in
+  this file rather than adding an event-driven death hook).
+- **No scoring, no round counter, no UI.** Per the task's own narrowed scope
+  ("just two teams... their own color") — nothing here tracks win/loss
+  history or displays faction identity to a player beyond the rig colors
+  themselves and the `BR_AIFaction` attribute (Studio-inspectable only).
+
 ## Player first-person weapon retraction — Tarkov close-quarters (Studio verification: REQUIRED, not done)
 
 `ViewModelController.computeWallCollisionCF` + `Constants.VIEWMODEL_WALL_*`. One

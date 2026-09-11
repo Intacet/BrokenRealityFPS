@@ -143,12 +143,21 @@ local DISCIPLINE = Constants.AI_FIRE_DISCIPLINE :: any  -- squad fire discipline
 local AWARENESS  = Constants.AI_SQUAD_AWARENESS :: any  -- squad awareness sharing + last-known-position memory
 local BOUNDING   = Constants.AI_BOUNDING :: any  -- squad bound-and-cover movement (Mover/Cover roles)
 local NAV        = Constants.AI_NAVIGATION :: any  -- dynamic big-map navigation (ground sampling + PathfindingService)
+local ARENA      = Constants.AI_ARENA :: any  -- AI arena: auto-spawns + watches an ARENA_RED vs ARENA_BLUE battle (geometry itself is AIArenaBuilder.server.lua)
 
 -- ============================================================
 -- Types
 -- ============================================================
 
 type AIState = "Idle" | "Patrol" | "Chase" | "Attack" | "Cover" | "Search" | "Dead"
+
+-- AI arena / factions (2026-09-11): anything a grunt can target/engage — a
+-- live Player (the only case that existed before this pass) or another AI
+-- grunt's own Model (opposing faction — see Constants.AI_FACTIONS). Every
+-- field/function that used to be typed Player-only for "the current target"
+-- widens to this; targetRootOf/targetCharacterOf are the only two places that
+-- actually branch on which kind it is — everything else just passes it through.
+type AITarget = Player | Model
 
 -- Stage 1B combat FX instances, built once per NPC and reused every shot.
 -- All children of `attachment`, so they are destroyed with the NPC model.
@@ -179,8 +188,16 @@ type NPCRecord = {
     isLeader : boolean,
     slot     : Vector3,          -- formation offset around the squad reference point
 
+    -- AI arena / factions (2026-09-11): a key into Constants.AI_FACTIONS,
+    -- resolved once at spawn (also sets the rig's colors — see buildRig) and
+    -- never changed after. Two grunts only ever consider each other hostile
+    -- when their factions differ — see findVisibleTarget/fireOneShot. Every
+    -- existing spawn path resolves this to Constants.AI.DEFAULT_FACTION, so
+    -- same-faction grunts never target each other (today's behavior, unchanged).
+    faction  : string,
+
     state        : AIState,
-    target       : Player?,
+    target       : AITarget?,
     lastSeenPos  : Vector3?,
     lastSeenClock: number,
 
@@ -310,7 +327,7 @@ type SquadRecord = {
     -- overlap this consolidates rather than duplicates.
     alertUntil            : number,    -- os.clock() deadline; > now → squad reacts on the fast "Alert" reaction tier
     lastKnownTargetPosition: Vector3?, -- shared sighting/hit position, nil once CLEAR_ALERT_AFTER_NO_CONTACT elapses
-    lastKnownTargetPlayer  : Player?,  -- who that position belongs to
+    lastKnownTargetPlayer  : AITarget?,  -- who that position belongs to (Player, or an enemy-faction grunt's Model — AI arena, 2026-09-11); field name unchanged, only the type widened
     lastKnownUpdateAt      : number,   -- os.clock() of the last share (also the LAST_KNOWN_POSITION_SHARE_INTERVAL throttle gate)
     lastContactAt          : number,   -- os.clock() of the most recent sighting or hit, from ANY member — drives CLEAR_ALERT_AFTER_NO_CONTACT
 
@@ -328,6 +345,10 @@ type SquadRecord = {
 local started   = false
 local running   = false
 local mainThread: thread? = nil
+-- AI arena / factions (2026-09-11): the auto-spawn + self-healing battle watch
+-- loop (runArenaBattle) — a second, independent task.spawn loop alongside
+-- mainThread, cancelled the same way in Destroy().
+local arenaThread: thread? = nil
 local serviceConns: { RBXScriptConnection } = {}
 local didAutoSpawn = false
 -- Stage 1H: shared server-wide cooldown gate for the RespawnBots remote.
@@ -358,6 +379,7 @@ local warnedPlaceholderFx  = false  -- one-time: AI_COMBAT_FX still on rbxasseti
 local warnedNoMuzzleParent = false  -- one-time: an NPC rig had no Right Arm / HRP
 local warnedNoWorldModel    = false  -- one-time: WorldModels/<weapon> asset missing (Stage 1C)
 local warnedAnimLoadFailed  = false  -- one-time: LoadAnimation threw for an AI anim (Stage 1C)
+local warnedBadFaction      = false  -- one-time: spawnOne got an unrecognized Constants.AI_FACTIONS key (AI arena, 2026-09-11)
 
 -- ============================================================
 -- Workspace folder discovery
@@ -445,21 +467,25 @@ local function makeMotor(name: string, part0: BasePart, part1: BasePart, c0: CFr
     return motor
 end
 
--- Builds a standard R6 rig at the given world CFrame.
+-- Builds a standard R6 rig at the given world CFrame. `bodyColor`/`limbColor`
+-- (AI arena / factions, 2026-09-11) let a squad's faction give its grunts a
+-- distinct look — see Constants.AI_FACTIONS; every existing call site passes
+-- the same BODY_COLOR/LIMB_COLOR constants below, so the default grey rig is
+-- unchanged.
 -- Returns (model, humanoid, root, rightShoulderMotor).
-local function buildRig(worldCFrame: CFrame): (Model, Humanoid, BasePart, Motor6D)
+local function buildRig(worldCFrame: CFrame, bodyColor: Color3, limbColor: Color3): (Model, Humanoid, BasePart, Motor6D)
     local model = Instance.new("Model")
 
-    local root  = makePart("HumanoidRootPart", Vector3.new(2, 2, 1), BODY_COLOR)
+    local root  = makePart("HumanoidRootPart", Vector3.new(2, 2, 1), bodyColor)
     root.Transparency = 1
     root.CanCollide   = false
 
-    local torso = makePart("Torso",     Vector3.new(2, 2, 1), BODY_COLOR)
-    local head  = makePart("Head",      Vector3.new(2, 1, 1), BODY_COLOR)
-    local lArm  = makePart("Left Arm",  Vector3.new(1, 2, 1), LIMB_COLOR)
-    local rArm  = makePart("Right Arm", Vector3.new(1, 2, 1), LIMB_COLOR)
-    local lLeg  = makePart("Left Leg",  Vector3.new(1, 2, 1), LIMB_COLOR)
-    local rLeg  = makePart("Right Leg", Vector3.new(1, 2, 1), LIMB_COLOR)
+    local torso = makePart("Torso",     Vector3.new(2, 2, 1), bodyColor)
+    local head  = makePart("Head",      Vector3.new(2, 1, 1), bodyColor)
+    local lArm  = makePart("Left Arm",  Vector3.new(1, 2, 1), limbColor)
+    local rArm  = makePart("Right Arm", Vector3.new(1, 2, 1), limbColor)
+    local lLeg  = makePart("Left Leg",  Vector3.new(1, 2, 1), limbColor)
+    local rLeg  = makePart("Right Leg", Vector3.new(1, 2, 1), limbColor)
 
     local headMesh = Instance.new("SpecialMesh")
     headMesh.MeshType = Enum.MeshType.Head
@@ -553,9 +579,14 @@ local function canSee(record: NPCRecord, targetChar: Model, targetRoot: BasePart
     return result.Instance:IsDescendantOf(targetChar)
 end
 
--- Nearest player that is alive, in DETECTION_RANGE, and visible. nil if none.
-local function findVisibleTarget(record: NPCRecord): Player?
-    local best: Player? = nil
+-- Nearest target that is alive, in DETECTION_RANGE, and visible — a Player
+-- (unconditionally hostile, as it always has been) or an enemy-faction AI
+-- grunt (AI arena, 2026-09-11). nil if none. Two grunts of the SAME faction
+-- never match each other here — every existing single-faction spawn path
+-- resolves to the same Constants.AI.DEFAULT_FACTION, so this loop's second
+-- half is a no-op for all of today's behavior.
+local function findVisibleTarget(record: NPCRecord): AITarget?
+    local best: AITarget? = nil
     local bestDist = math.huge
     for _, player in ipairs(Players:GetPlayers()) do
         local char = player.Character
@@ -572,27 +603,60 @@ local function findVisibleTarget(record: NPCRecord): Player?
             end
         end
     end
+    for otherModel, other in pairs(npcs) do
+        if other ~= record and not other.dead and other.faction ~= record.faction then
+            local dist = (other.root.Position - record.root.Position).Magnitude
+            if dist <= AI.DETECTION_RANGE and dist < bestDist and canSee(record, otherModel, other.root) then
+                best = otherModel
+                bestDist = dist
+            end
+        end
+    end
     return best
 end
 
--- Returns the target's root BasePart if the target is still a live, rooted character.
-local function targetRootOf(player: Player?): BasePart?
-    if player == nil then
+-- Returns the target's root BasePart if the target is still live — a Player's
+-- Character HumanoidRootPart (unchanged logic), or (AI arena, 2026-09-11) an
+-- enemy grunt's own root, resolved via the live npcs table (cheaper and more
+-- authoritative than re-deriving state from the Model).
+local function targetRootOf(target: AITarget?): BasePart?
+    if target == nil then
         return nil
     end
-    local char = player.Character
-    if char == nil then
+    if target:IsA("Player") then
+        local player = target :: Player
+        local char = player.Character
+        if char == nil then
+            return nil
+        end
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if humanoid == nil or humanoid.Health <= 0 then
+            return nil
+        end
+        local rootInst = char:FindFirstChild("HumanoidRootPart")
+        if rootInst == nil or not rootInst:IsA("BasePart") then
+            return nil
+        end
+        return rootInst :: BasePart
+    end
+    local enemyRecord = npcs[target :: Model]
+    if enemyRecord == nil or enemyRecord.dead then
         return nil
     end
-    local humanoid = char:FindFirstChildOfClass("Humanoid")
-    if humanoid == nil or humanoid.Health <= 0 then
+    return enemyRecord.root
+end
+
+-- Returns the "character" Model to feed canSee()/attack-slot LOS checks — a
+-- Player's Character (unchanged), or (AI arena) the enemy grunt's own Model,
+-- which already IS its character equivalent (no further indirection needed).
+local function targetCharacterOf(target: AITarget?): Model?
+    if target == nil then
         return nil
     end
-    local rootInst = char:FindFirstChild("HumanoidRootPart")
-    if rootInst == nil or not rootInst:IsA("BasePart") then
-        return nil
+    if target:IsA("Player") then
+        return (target :: Player).Character
     end
-    return rootInst :: BasePart
+    return target :: Model
 end
 
 -- ============================================================
@@ -648,7 +712,7 @@ end
 -- (attacker unknown, or no position available) still puts the squad "on edge"
 -- (alertUntil/lastContactAt, faster reaction tier) without sharing anywhere to
 -- investigate toward, per spec point 3.
-local function shareSquadAlert(record: NPCRecord, targetPlayer: Player?, targetPos: Vector3?, now: number)
+local function shareSquadAlert(record: NPCRecord, targetPlayer: AITarget?, targetPos: Vector3?, now: number)
     if AWARENESS.ENABLED ~= true then
         return
     end
@@ -752,7 +816,7 @@ local function attackSlotEligible(record: NPCRecord): boolean
     -- hard restriction on this task, not a tunable. The flag exists so future code
     -- reading Constants.AI_SQUAD_AWARENESS can assert/document the invariant
     -- without re-deriving it. See docs/TECHNICAL_DEBT.md "AI squad awareness".
-    local tchar: Model? = if record.target ~= nil then record.target.Character else nil
+    local tchar: Model? = targetCharacterOf(record.target)
     if tchar == nil or not canSee(record, tchar, troot) then
         return false
     end
@@ -1423,7 +1487,20 @@ local function fireOneShot(record: NPCRecord)
         return
     end
     local victim = Players:GetPlayerFromCharacter(hitModel :: Model)
+
+    -- AI arena / factions (2026-09-11): the ray can also hit another AI grunt.
+    -- Only counts as a valid enemy hit if that grunt is alive AND its faction
+    -- differs from the shooter's — two same-faction grunts (every existing
+    -- single-faction spawn) can physically hit each other's hitboxes but this
+    -- stays nil for them, so nothing here changes today's behavior.
+    local enemyRecord: NPCRecord? = nil
     if victim == nil then
+        local candidate = npcs[hitModel :: Model]
+        if candidate ~= nil and not candidate.dead and candidate.faction ~= record.faction then
+            enemyRecord = candidate
+        end
+    end
+    if victim == nil and enemyRecord == nil then
         return
     end
 
@@ -1436,22 +1513,44 @@ local function fireOneShot(record: NPCRecord)
     end
     record.lastDamageCallAt = now
 
-    -- `attacker` is intentionally omitted: AI is not a Player, so DamageService
-    -- treats it as an environment kill (no friendly-fire guard, "environment" feed).
-    DamageService:ApplyDamage({
-        targetPlayer = victim,
-        targetModel  = victim.Character,
-        sourceName   = AI.NPC_NAME_PREFIX,
-        damageType   = Constants.DamageType.Bullet,
-        region       = Constants.HitRegion.Unknown,  -- flat SHOT_DAMAGE, no headshot multiplier
-        hitPart      = result.Instance :: BasePart,
-        hitPosition  = result.Position,
-        hitDirection = dir,
-        baseAmount   = AI.SHOT_DAMAGE,
-    })
-
-    if AI.DEBUG then
-        Logger.debug("[AIService]", record.model.Name, "hit", victim.Name, "for", AI.SHOT_DAMAGE)
+    if victim ~= nil then
+        -- `attacker` is intentionally omitted: AI is not a Player, so DamageService
+        -- treats it as an environment kill (no friendly-fire guard, "environment" feed).
+        DamageService:ApplyDamage({
+            targetPlayer = victim,
+            targetModel  = victim.Character,
+            sourceName   = AI.NPC_NAME_PREFIX,
+            damageType   = Constants.DamageType.Bullet,
+            region       = Constants.HitRegion.Unknown,  -- flat SHOT_DAMAGE, no headshot multiplier
+            hitPart      = result.Instance :: BasePart,
+            hitPosition  = result.Position,
+            hitDirection = dir,
+            baseAmount   = AI.SHOT_DAMAGE,
+        })
+        if AI.DEBUG then
+            Logger.debug("[AIService]", record.model.Name, "hit", victim.Name, "for", AI.SHOT_DAMAGE)
+        end
+    else
+        local enemy = enemyRecord :: NPCRecord
+        -- Same ApplyDamage shape as above, minus targetPlayer — the exact
+        -- applyToNonPlayer path a player's bullet already uses to damage a
+        -- TAG_DAMAGE_ENTITY-tagged grunt (see getDamageableEntity in
+        -- GunService); DamageService needed no changes for AI-vs-AI. No
+        -- attacker attribution here either (DamageInfo.attacker is Player-only)
+        -- — see docs/TECHNICAL_DEBT.md "AI arena / factions" for that limit.
+        DamageService:ApplyDamage({
+            targetModel  = enemy.model,
+            sourceName   = AI.NPC_NAME_PREFIX,
+            damageType   = Constants.DamageType.Bullet,
+            region       = Constants.HitRegion.Unknown,
+            hitPart      = result.Instance :: BasePart,
+            hitPosition  = result.Position,
+            hitDirection = dir,
+            baseAmount   = AI.SHOT_DAMAGE,
+        })
+        if AI.DEBUG then
+            Logger.debug("[AIService]", record.model.Name, "hit enemy-faction", enemy.model.Name, "for", AI.SHOT_DAMAGE)
+        end
     end
 end
 
@@ -2195,7 +2294,7 @@ local function findCoverPoint(record: NPCRecord, targetPos: Vector3): Vector3
     local distance = AI.COVER_SEEK_DISTANCE
     local hug      = AI.COVER_HUG_DISTANCE :: number
 
-    local tchar: Model? = if record.target ~= nil then record.target.Character else nil
+    local tchar: Model? = targetCharacterOf(record.target)
     local bestPos: Vector3? = nil
     local bestObstacleDist = math.huge
     local fallbackPos: Vector3? = nil
@@ -2252,7 +2351,7 @@ local function findFightingPosition(record: NPCRecord, targetPos: Vector3): Vect
         return nil
     end
     local awayDir = flatAway.Unit
-    local tchar: Model? = if record.target ~= nil then record.target.Character else nil
+    local tchar: Model? = targetCharacterOf(record.target)
 
     for _, radius in ipairs({ AI.FIGHT_SEEK_DISTANCE * 0.5, AI.FIGHT_SEEK_DISTANCE }) do
         for _, deg in ipairs(AI.FIGHT_SAMPLE_ANGLES) do
@@ -2427,7 +2526,7 @@ local function thinkNPC(record: NPCRecord, now: number)
 
     -- ── Decide + act ────────────────────────────────────────────────────────
     local troot = targetRootOf(record.target)
-    local tchar: Model? = if record.target ~= nil then record.target.Character else nil
+    local tchar: Model? = targetCharacterOf(record.target)
     if troot ~= nil then
         record.lastSeenPos = troot.Position
         record.lastSeenClock = now
@@ -3017,11 +3116,37 @@ local function activeCount(): number
     return n
 end
 
-local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean, index: number, size: number): Model
+-- AI arena / factions (2026-09-11): how many LIVING grunts currently belong to
+-- `faction`. Shared by the public AIService.CountLivingByFaction wrapper and
+-- runArenaBattle's own wipe check below, so there's one counting rule, not two.
+local function countLivingByFaction(faction: string): number
+    local n = 0
+    for _, record in pairs(npcs) do
+        if not record.dead and record.faction == faction then
+            n += 1
+        end
+    end
+    return n
+end
+
+-- `faction` (AI arena, 2026-09-11) is a key into Constants.AI_FACTIONS; an
+-- unknown key falls back to the DEFAULT entry (logged once via warnedBadFaction
+-- below) rather than erroring a whole squad's spawn.
+local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean, index: number, size: number, faction: string): Model
     npcCounter += 1
-    local model, humanoid, root, rightShoulder = buildRig(worldCFrame)
+    local factions = Constants.AI_FACTIONS :: any
+    local factionCfg = factions[faction]
+    if factionCfg == nil then
+        factionCfg = factions.DEFAULT
+        if not warnedBadFaction then
+            warnedBadFaction = true
+            Logger.warn("[AIService] unknown AI faction \"" .. tostring(faction) .. "\" — falling back to DEFAULT")
+        end
+    end
+    local model, humanoid, root, rightShoulder = buildRig(worldCFrame, factionCfg.BODY_COLOR, factionCfg.LIMB_COLOR)
     model.Name = AI.NPC_NAME_PREFIX .. "_" .. tostring(squadId) .. "_" .. tostring(npcCounter)
     model:SetAttribute("BR_AINpc", true)
+    model:SetAttribute("BR_AIFaction", faction)
     CollectionService:AddTag(model, Constants.TAG_DAMAGE_ENTITY)
 
     model.Parent = aiFolder or workspace
@@ -3037,6 +3162,7 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
         squadId  = squadId,
         isLeader = isLeader,
         slot     = slotOffset(index, size),
+        faction  = faction,
 
         state        = "Idle",
         target       = nil,
@@ -3153,11 +3279,17 @@ end
 
 -- Public: create up to `squadSize` NPCs near `spawnCFrame`. Clamped so the total
 -- never exceeds Constants.AI.MAX_ACTIVE_NPCS. Returns the spawned models.
-local function spawnSquad(spawnCFrame: CFrame?, squadSize: number?): { Model }
+-- `factionKey` (AI arena, 2026-09-11): nil/omitted resolves to
+-- Constants.AI.DEFAULT_FACTION — every pre-existing call site (auto-spawn,
+-- RespawnAllSquads) omits it, so this is a no-op for all of today's behavior.
+local function spawnSquad(spawnCFrame: CFrame?, squadSize: number?, factionKey: string?): { Model }
     assert(spawnCFrame == nil or typeof(spawnCFrame) == "CFrame",
         "[AIService] SpawnSquad: spawnCFrame must be a CFrame or nil")
     assert(squadSize == nil or (type(squadSize) == "number" and squadSize >= 1),
         "[AIService] SpawnSquad: squadSize must be a number >= 1 or nil")
+    assert(factionKey == nil or type(factionKey) == "string",
+        "[AIService] SpawnSquad: factionKey must be a string or nil")
+    local faction: string = factionKey or (AI.DEFAULT_FACTION :: string)
 
     if not started or not running then
         Logger.warn("[AIService] SpawnSquad called before Start() / after Destroy() — ignored")
@@ -3226,7 +3358,7 @@ local function spawnSquad(spawnCFrame: CFrame?, squadSize: number?): { Model }
             break
         end
         local memberCFrame = origin * CFrame.new(slotOffset(i, size))
-        table.insert(models, spawnOne(memberCFrame, squadId, i == 1, i, size))
+        table.insert(models, spawnOne(memberCFrame, squadId, i == 1, i, size, faction))
         if i < size then
             task.wait(AI.SPAWN_DELAY_BETWEEN_NPCS)
         end
@@ -3300,6 +3432,86 @@ local function autoSpawnSquads()
             spawnSquad(part.CFrame, AI.DEFAULT_SQUAD_SIZE)
         end
     end)
+end
+
+-- ============================================================
+-- AI arena / factions — auto-spawn + self-healing ARENA_RED vs ARENA_BLUE battle
+-- ============================================================
+
+-- Whether the auto-spawn-battle system is allowed to run here — same
+-- Studio/RUN_IN_PUBLISHED split every other dev-only system in this file uses.
+local function arenaEnabled(): boolean
+    if ARENA == nil or ARENA.ENABLED ~= true or ARENA.AUTO_SPAWN_BATTLE ~= true then
+        return false
+    end
+    if RunService:IsStudio() then
+        return true
+    end
+    return ARENA.RUN_IN_PUBLISHED == true
+end
+
+-- Spawns one faction's squad at its arena position, retrying briefly if it
+-- comes back empty (e.g. MAX_ACTIVE_NPCS is momentarily full while the game's
+-- own single-faction auto-spawn is still in progress) rather than giving up
+-- after a single attempt.
+local function spawnArenaSquad(cframe: CFrame, factionKey: string): { Model }
+    for _ = 1, (ARENA.SPAWN_RETRY_ATTEMPTS :: number) do
+        if not running then
+            return {}
+        end
+        local models = spawnSquad(cframe, ARENA.SQUAD_SIZE, factionKey)
+        if #models > 0 then
+            return models
+        end
+        task.wait(ARENA.SPAWN_RETRY_INTERVAL :: number)
+    end
+    Logger.warn("[AIService] AI arena: gave up spawning faction", factionKey,
+        "after", ARENA.SPAWN_RETRY_ATTEMPTS, "attempt(s)")
+    return {}
+end
+
+-- Auto-spawns ARENA_RED vs ARENA_BLUE at Constants.AI_ARENA's two spawn
+-- positions, then watches (every BATTLE_CHECK_INTERVAL) until either side's
+-- living count hits 0 — a battle conclusion, or an unrelated
+-- RespawnBots/KillAllBots wipe; this doesn't distinguish why — and after
+-- BATTLE_RESPAWN_DELAY respawns BOTH sides fresh. Runs entirely inside
+-- AIService (never a cross-script call — AIService.server.lua is a Script, not
+-- a requirable ModuleScript; AIArenaBuilder only builds the arena's geometry,
+-- independently, off the same Constants.AI_ARENA positions — see
+-- docs/TECHNICAL_DEBT.md "AI arena / factions").
+local function runArenaBattle()
+    local origin     = ARENA.ORIGIN :: Vector3
+    local redCFrame  = CFrame.new(origin + (ARENA.RED_SPAWN_POSITION :: Vector3))
+    local blueCFrame = CFrame.new(origin + (ARENA.BLUE_SPAWN_POSITION :: Vector3))
+
+    local function spawnBothFresh()
+        spawnArenaSquad(redCFrame, "ARENA_RED")
+        spawnArenaSquad(blueCFrame, "ARENA_BLUE")
+        if ARENA.DEBUG == true then
+            Logger.debug("[AIService] AI arena: battle (re)started")
+        end
+    end
+
+    spawnBothFresh()
+
+    while running do
+        task.wait(ARENA.BATTLE_CHECK_INTERVAL :: number)
+        if not running then
+            break
+        end
+        local redAlive  = countLivingByFaction("ARENA_RED")
+        local blueAlive = countLivingByFaction("ARENA_BLUE")
+        if redAlive <= 0 or blueAlive <= 0 then
+            if ARENA.DEBUG == true then
+                Logger.debug("[AIService] AI arena: one side wiped (red", redAlive, "/ blue", blueAlive,
+                    ") — respawning in", ARENA.BATTLE_RESPAWN_DELAY, "s")
+            end
+            task.wait(ARENA.BATTLE_RESPAWN_DELAY :: number)
+            if running then
+                spawnBothFresh()
+            end
+        end
+    end
 end
 
 -- ============================================================
@@ -3456,12 +3668,21 @@ function AIService.Start(): ()
     end
     autoSpawnSquads()
 
+    -- AI arena / factions: independent of the game's own single-faction
+    -- auto-spawn above — its own Studio/RUN_IN_PUBLISHED gate, its own thread.
+    if arenaEnabled() then
+        arenaThread = task.spawn(runArenaBattle)
+    end
+
     Logger.debug("[AIService] started — spawns:", #spawnParts, "patrol points:", #patrolPoints)
 end
 
--- Public wrapper (asserts live in spawnSquad).
-function AIService.SpawnSquad(spawnCFrame: CFrame?, squadSize: number?): { Model }
-    return spawnSquad(spawnCFrame, squadSize)
+-- Public wrapper (asserts live in spawnSquad). `factionKey` (AI arena,
+-- 2026-09-11) is optional — omit it for the normal single-faction grunts every
+-- existing caller spawns; pass a Constants.AI_FACTIONS key (e.g. "ARENA_RED")
+-- to spawn a squad that only targets/is targeted by a DIFFERENT faction.
+function AIService.SpawnSquad(spawnCFrame: CFrame?, squadSize: number?, factionKey: string?): { Model }
+    return spawnSquad(spawnCFrame, squadSize, factionKey)
 end
 
 -- Stage 1H: full manual reset — instantly destroys every live/pending-cleanup grunt
@@ -3543,6 +3764,13 @@ function AIService.GetActiveNPCCount(): number
     return activeCount()
 end
 
+-- AI arena / factions (2026-09-11): how many LIVING grunts currently belong to
+-- `faction` — public read-only convenience (e.g. for Studio/MCP inspection);
+-- runArenaBattle uses the same underlying countLivingByFaction directly.
+function AIService.CountLivingByFaction(faction: string): number
+    return countLivingByFaction(faction)
+end
+
 -- Stops the loop and every burst, disconnects all connections, destroys all NPC
 -- models (live and pending), and clears state. Safe to call repeatedly.
 function AIService.Destroy(): ()
@@ -3558,6 +3786,10 @@ function AIService.Destroy(): ()
     if mainThread ~= nil then
         pcall(task.cancel, mainThread)
         mainThread = nil
+    end
+    if arenaThread ~= nil then
+        pcall(task.cancel, arenaThread)
+        arenaThread = nil
     end
 
     for _, record in pairs(npcs) do
