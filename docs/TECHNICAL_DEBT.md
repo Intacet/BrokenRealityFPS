@@ -452,6 +452,84 @@ pattern already verified in Stage 1G). Residual risks:
   realistic as possible" was interpreted as bounded human-like imperfection +
   wound response, not a tactics/AI-navigation overhaul.
 
+## AI Stage 1C — fair combat tuning (Studio verification: REQUIRED, not done)
+
+**Naming note:** this is the **second** feature to use the "AI Stage 1C" label —
+the earlier one (still above, "grunt weapon model + third-person animation") is
+unrelated and unaffected. The task that produced this entry explicitly named
+itself "AI Stage 1C fair combat tuning" without apparent awareness that a Stage
+1C already existed in this codebase (Stages 1A–1H were already complete). Both
+are kept, distinguished by date/content in `docs/CHANGELOG.md` and
+`docs/PROJECT_MAP.md`; nothing was renumbered.
+
+New `Constants.AI_COMBAT_TUNING` + `AIService` helpers `armReaction` /
+`aimBandFor` / `updateSquadAttackSlots`, new `NPCRecord` fields
+(`firstSawTargetAt`, `lastSawTargetAt`, `lastKnownTargetPosition`,
+`reactionReadyAt`, `reactionAnnouncedAt`, `lastTargetSwitchAt`,
+`suppressedUntil`, `recentlyDamagedUntil`, `visibleTargetTime`,
+`lastDamageCallAt`, `aimBand`) and new `SquadRecord` fields (`alerted`,
+`attackerSlots`, `nextAttackSlotRecheck`). `AIService` + `Constants.AI_COMBAT_TUNING`
+only — no new remotes, no client files, `GunService` / `DamageService` /
+`RemoteSetup` / `default.project.json` untouched. MCP-checked the tier
+selection, aim-ramp formula, sticky attack-slot allocation, target-switch
+cooldown, and visible-time freeze/reset math with throwaway logic (not a live
+`AIService` require — that pattern timed out in this environment in an earlier
+session; see the Stage 1G entry above). Residual risks:
+
+- **Not runtime-verified in Play.** None of reaction feel, aim-ramp danger
+  curve, suppression's effect on incoming fire, or squad-slot fairness has been
+  observed in a real fight — only the underlying math was checked in isolation.
+- **Tuning values are first guesses.** `REACTION_TIME_*`, `AIM_SETTLE_TIME`,
+  the two spread multipliers, `SUPPRESSED_*`, `MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD`
+  — all as specified verbatim, none tuned against actual play. Expect to need
+  a pass after the Studio test steps below.
+- **Near-miss suppression was deferred**, per the task's own "Optional only if
+  easy" — there is no existing signal for "a shot passed close to this NPC
+  without hitting it" (raycasts resolve to a single hit or nothing; there's no
+  broad-phase near-miss event). Only actual accepted hits (`CombatEvents.DamageDealt`)
+  arm suppression. Adding true near-miss detection would need a new geometric
+  check (e.g. closest-approach-to-ray) — a separate, larger task.
+- **Consolidated with, rather than layered onto, Stage 1H's reaction-delay
+  mechanism.** The old flat `Constants.AI.REACTION_TIME_MIN/MAX` fire-gate
+  (`record.engageAtClock`, the `reactionDelay()` helper) was **removed** and
+  replaced by the new tiered system — running both would have gated the same
+  "when does this grunt first shoot" decision twice for no benefit and no
+  unaware/alert distinction. The two `Constants.AI` fields are left in place,
+  now unread, because the task said not to remove existing `Constants.AI`
+  values; a future cleanup could delete them. Stage 1H's *other* two knobs
+  (`aimSkill` per-grunt variance, the moving-target spread bonus) were kept and
+  now multiply together with the new aim-ramp/suppression factors on the same
+  cone — not redundant (different concepts: personality vs. target behavior vs.
+  engagement freshness vs. being shot at) but four multiplicative factors
+  stacked on one `SHOT_SPREAD_DEGREES` is more surface area to over/under-tune
+  than the spec alone describes; watch for it compounding into either
+  laser-accurate or comically wide shots in edge cases (e.g. a low-`aimSkill`
+  grunt that is also suppressed and tracking a sprinting target).
+- **`record.target` was kept**, not renamed to the spec's `currentTarget` — same
+  role, used at ~15 existing call sites; renaming was judged out of scope for a
+  tuning-only pass ("do not rewrite AIService from scratch"). Anyone matching
+  this file against the original task text should expect that name difference.
+- **`LAST_KNOWN_POSITION_MEMORY` drives the NEW aim-ramp decay, not a second
+  chase/investigate timer.** The pre-existing `LAST_SEEN_CHASE_SECONDS` /
+  `SEARCH_DURATION` / `flankPointFor` Chase→Search pipeline (Stage 1D/1E) is
+  completely unchanged — deliberately, since cover/flanking rewrites were
+  explicitly out of scope for this task. "AI can chase/investigate last known
+  position for LAST_KNOWN_POSITION_MEMORY seconds" is satisfied by that
+  pre-existing pipeline, not a new one.
+- **Squad attack slots are a simple recheck-and-fill, no roles.** Sticky (an
+  existing holder keeps its slot while eligible) to avoid flicker, but has no
+  concept of "best positioned" or "closest" grunt — whichever eligible member
+  `pairs(npcs)` happens to iterate to first fills a vacancy. A benched grunt
+  only "holds fire"; it does not reposition or fall back to reload/support,
+  per the task's own scope (no advanced roles yet).
+- **`squad.alerted` never resets.** Once any member of a squad has engaged a
+  live target, that squad's reaction tier is `Alert` forever (until the squad
+  is destroyed/respawned) — matches "alert bots react faster" but means a squad
+  that loses the player for a long time and returns to patrolling still reacts
+  at Alert speed on next contact, never fully de-escalating to Unaware. No
+  decay timer exists for this; could be added later if it feels wrong.
+- **No rewards/killstreaks, no difficulty presets** — not part of this task.
+
 ## Pre-round loadout menu — partial DEBT-013 (Studio verification: YES, required)
 
 `LoadoutMenu` (client UI) + `LoadoutService` (server) + the `SelectLoadout` remote give

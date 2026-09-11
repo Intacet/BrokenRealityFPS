@@ -2322,6 +2322,44 @@ Constants.AI_COMBAT_FX = {
     CLEANUP_LIFETIME = 1.0,
 }
 
+-- ── AI Stage 1C — fair combat tuning (AIService.server) ─────────────────────
+-- Reaction delay, aim ramp-up, suppression, target memory and per-squad attack
+-- slots — makes one grunt beatable and a squad dangerous if ignored, without
+-- aimbot accuracy. Layers on top of (does not replace) the earlier per-grunt
+-- Constants.AI.AIM_SKILL_* / AIM_MOVING_TARGET_* spread factors — those are
+-- unchanged, this is an additional multiplier for engagement freshness +
+-- suppression. Supersedes Constants.AI.REACTION_TIME_MIN/MAX for the actual
+-- fire-gate (see docs/TECHNICAL_DEBT.md "AI Stage 1C" — those two fields are
+-- left in place, unread, rather than deleted).
+Constants.AI_COMBAT_TUNING = {
+    ENABLED = true,
+    DEBUG = true,
+
+    REACTION_TIME_UNAWARE_MIN = 0.55,
+    REACTION_TIME_UNAWARE_MAX = 0.95,
+    REACTION_TIME_ALERT_MIN = 0.25,
+    REACTION_TIME_ALERT_MAX = 0.5,
+    REACTION_TIME_RECENTLY_DAMAGED_MIN = 0.12,
+    REACTION_TIME_RECENTLY_DAMAGED_MAX = 0.28,
+
+    AIM_SETTLE_TIME = 1.6,
+    INITIAL_SPREAD_MULTIPLIER = 2.25,
+    FINAL_SPREAD_MULTIPLIER = 0.85,
+    MAX_TRACKED_VISIBLE_TIME = 3.0,
+
+    SUPPRESSED_SPREAD_MULTIPLIER = 1.8,
+    SUPPRESSED_DURATION = 1.4,
+    RECENT_DAMAGE_SUPPRESSION_DURATION = 2.0,
+
+    LAST_KNOWN_POSITION_MEMORY = 4.0,
+    TARGET_SWITCH_COOLDOWN = 1.25,
+
+    MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD = 2,
+    ATTACK_SLOT_RECHECK_INTERVAL = 0.5,
+
+    MIN_TIME_BETWEEN_DAMAGE_CALLS = 0.05,
+}
+
 -- ── Developer test area (TestAreaBuilder.server) ────────────────────────────
 -- Layout knobs for the generated developer sandbox under Workspace/<FOLDER_NAME>.
 -- All positions are world-space offsets from ORIGIN.

@@ -116,8 +116,9 @@ local RespawnBots  = Remotes:WaitForChild("RespawnBots") :: RemoteEvent
 
 -- Untyped views of the tuning tables (heterogeneous fields; matches the pattern
 -- used by TestAreaBuilder's `local CFG = Constants.DEV_TEST_AREA :: any`).
-local AI = Constants.AI :: any
-local FX = Constants.AI_COMBAT_FX :: any
+local AI   = Constants.AI :: any
+local FX   = Constants.AI_COMBAT_FX :: any
+local TUNE = Constants.AI_COMBAT_TUNING :: any  -- AI Stage 1C: reaction/aim-ramp/suppression tuning
 
 -- ============================================================
 -- Types
@@ -185,9 +186,25 @@ type NPCRecord = {
     -- Stage 1G — death ragdoll
     lastHit   : Types.DamageInfo?,         -- most recent accepted hit on this grunt (for the death impulse)
 
-    -- Stage 1H — combat realism
-    engageAtClock: number,  -- os.clock() before which this grunt will not fire at its current target (reaction time)
+    -- Stage 1H — combat realism (per-grunt flavor; unrelated to the Stage 1C
+    -- engagement-freshness ramp below — the two multiply together in fireOneShot).
     aimSkill     : number,  -- per-grunt spread multiplier, rolled once at spawn
+
+    -- AI Stage 1C — fair combat tuning. NOTE: this file keeps the existing `target`
+    -- field name above rather than the spec's `currentTarget` — same role, renaming
+    -- ~15 existing call sites for a cosmetic difference was out of scope for a
+    -- tuning-only pass (see docs/TECHNICAL_DEBT.md "AI Stage 1C").
+    firstSawTargetAt    : number,    -- os.clock() the CURRENT target was first acquired (0 = no target seen yet)
+    lastSawTargetAt     : number,    -- os.clock() of the most recent think the target was actually in LOS
+    lastKnownTargetPosition: Vector3?, -- mirrors lastSeenPos; kept under the spec's field name too
+    reactionReadyAt     : number,    -- os.clock() before which this grunt will not fire at its current target
+    reactionAnnouncedAt : number,    -- de-dupe: the reactionReadyAt value the "reaction-ready" log already fired for
+    lastTargetSwitchAt  : number,    -- os.clock() of the last time `target` changed to a DIFFERENT player
+    suppressedUntil     : number,    -- os.clock() deadline; > now → SUPPRESSED_SPREAD_MULTIPLIER applies
+    recentlyDamagedUntil: number,    -- os.clock() deadline; > now → next reaction uses the fast "recently damaged" tier
+    visibleTargetTime   : number,    -- seconds the current target has been continuously visible, clamped to MAX_TRACKED_VISIBLE_TIME
+    lastDamageCallAt    : number,    -- os.clock() of the last accepted DamageService call (MIN_TIME_BETWEEN_DAMAGE_CALLS guard)
+    aimBand             : string?,   -- last logged ramp band ("Fresh"/"Settling"/"Settled"), DEBUG-log de-dupe only
 
     dead      : boolean,
 }
@@ -196,6 +213,11 @@ type SquadRecord = {
     id          : number,
     spawnCFrame : CFrame,
     patrolIndex : number,
+
+    -- AI Stage 1C — fair combat tuning
+    alerted             : boolean,             -- sticky: true once any member has engaged a live target this squad's life
+    attackerSlots       : { [Model]: boolean }, -- grunts currently allowed to fire (MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD)
+    nextAttackSlotRecheck: number,              -- os.clock() of the next updateSquadAttackSlots() pass
 }
 
 -- ============================================================
@@ -458,12 +480,95 @@ end
 -- Shooting (server raycast, no remotes)
 -- ============================================================
 
--- Stage 1H: a random beat before a grunt opens fire on a freshly-acquired target —
--- called only when the target actually changes (see the two call sites), not on
--- every think, so an ongoing firefight never re-hesitates mid-engagement.
-local function reactionDelay(): number
-    local lo, hi = AI.REACTION_TIME_MIN :: number, AI.REACTION_TIME_MAX :: number
-    return lo + math.random() * (hi - lo)
+-- AI Stage 1C: three-tier reaction delay. Called only when a grunt's live target
+-- actually changes (fresh acquisition, or a different attacker via the hit-reaction
+-- listener) — not on every think — so an ongoing firefight never re-hesitates
+-- mid-engagement. Tier priority: recently damaged (already under fire — react fast)
+-- > alert (this squad has made contact before) > unaware (first contact). Squad-,
+-- not grunt-, level alertness per the spec's "squad/AI is unaware/alert" wording:
+-- one grunt spotting a threat puts the whole squad on alert, even before its own
+-- delay elapses — realistic (yelling/pointing), and simple (sticky, never resets).
+local function armReaction(record: NPCRecord, now: number)
+    if TUNE.ENABLED ~= true then
+        -- Master switch off: revert to "fires the instant it can" (pre-Stage-1C).
+        record.reactionReadyAt = now
+        record.reactionAnnouncedAt = now
+        return
+    end
+    local squad = squads[record.squadId]
+    local lo: number, hi: number, tier: string
+    if now < record.recentlyDamagedUntil then
+        lo, hi, tier = TUNE.REACTION_TIME_RECENTLY_DAMAGED_MIN :: number, TUNE.REACTION_TIME_RECENTLY_DAMAGED_MAX :: number, "RecentlyDamaged"
+    elseif squad ~= nil and squad.alerted then
+        lo, hi, tier = TUNE.REACTION_TIME_ALERT_MIN :: number, TUNE.REACTION_TIME_ALERT_MAX :: number, "Alert"
+    else
+        lo, hi, tier = TUNE.REACTION_TIME_UNAWARE_MIN :: number, TUNE.REACTION_TIME_UNAWARE_MAX :: number, "Unaware"
+    end
+    local delay = lo + math.random() * (hi - lo)
+    record.reactionReadyAt = now + delay
+    record.reactionAnnouncedAt = -1  -- allow the "reaction-ready" log to fire again for this engagement
+    if TUNE.DEBUG == true then
+        Logger.debug("[AIService]", record.model.Name, "reaction delay:", tier, string.format("%.2fs", delay))
+    end
+    if squad ~= nil then
+        squad.alerted = true
+    end
+end
+
+-- AI Stage 1C: "Fresh" / "Settling" / "Settled" aim-ramp band for DEBUG logging
+-- only (fireOneShot computes the actual continuous multiplier) — keeps the log to
+-- one line per band crossing instead of every think.
+local function aimBandFor(t: number): string
+    if t >= 0.9 then
+        return "Settled"
+    elseif t >= 0.15 then
+        return "Settling"
+    end
+    return "Fresh"
+end
+
+-- AI Stage 1C: caps how many grunts in one squad actively fire at once
+-- (MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD) so a 3-grunt squad doesn't all laser the
+-- player simultaneously — the extras hold their planted Attack position (still
+-- tracking/facing the player) without pulling the trigger until a slot opens.
+-- Sticky: an existing holder keeps its slot as long as it stays eligible, so slots
+-- don't flicker between squadmates every recheck; only vacated slots are refilled.
+-- Cheap: re-evaluated at most once per ATTACK_SLOT_RECHECK_INTERVAL per squad,
+-- guarded below, and squads are small (MAX_ACTIVE_NPCS = 12 total).
+local function updateSquadAttackSlots(squad: SquadRecord, now: number)
+    if now < squad.nextAttackSlotRecheck then
+        return
+    end
+    squad.nextAttackSlotRecheck = now + (TUNE.ATTACK_SLOT_RECHECK_INTERVAL :: number)
+    local maxSlots = TUNE.MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD :: number
+
+    local function eligible(record: NPCRecord?): boolean
+        return record ~= nil and not record.dead and record.state == "Attack" and record.target ~= nil
+    end
+
+    -- Drop holders that are no longer eligible (dead, lost target, left Attack).
+    for model in pairs(squad.attackerSlots) do
+        if not eligible(npcs[model]) then
+            squad.attackerSlots[model] = nil
+        end
+    end
+
+    -- Fill any remaining slots from eligible squad members that don't hold one yet.
+    local held = 0
+    for _ in pairs(squad.attackerSlots) do
+        held += 1
+    end
+    if held < maxSlots then
+        for model, record in pairs(npcs) do
+            if held >= maxSlots then
+                break
+            end
+            if record.squadId == squad.id and squad.attackerSlots[model] == nil and eligible(record) then
+                squad.attackerSlots[model] = true
+                held += 1
+            end
+        end
+    end
 end
 
 -- Random direction inside a cone of half-angle `maxAngleRad` about `dir`.
@@ -978,6 +1083,8 @@ local function fireOneShot(record: NPCRecord)
         return
     end
 
+    local now = os.clock()
+
     -- Stage 1H: per-grunt aim skill (rolled at spawn) plus extra spread against a
     -- target that is actually moving — real aim tracks a sprinting/strafing target
     -- worse than a stationary one. AssemblyLinearVelocity reads the live HRP.
@@ -987,6 +1094,24 @@ local function fireOneShot(record: NPCRecord)
         local ref   = AI.AIM_MOVING_TARGET_SPEED_REF :: number
         spreadDeg  += math.clamp(speed / ref, 0, 1) * (AI.AIM_MOVING_TARGET_SPREAD_BONUS_DEG :: number)
     end
+
+    -- AI Stage 1C: aim ramp — a freshly-acquired target gets INITIAL_SPREAD_MULTIPLIER
+    -- (wide, "miss shots at first"), easing toward FINAL_SPREAD_MULTIPLIER as
+    -- record.visibleTargetTime (continuous LOS on the CURRENT target) approaches
+    -- AIM_SETTLE_TIME ("become dangerous if the player stays exposed"). Multiplies
+    -- with aimSkill/moving-target above — three independent factors, not a
+    -- replacement for either. Then a temporary SUPPRESSED_SPREAD_MULTIPLIER while
+    -- record.suppressedUntil is in the future (a recent hit rattled this grunt).
+    if TUNE.ENABLED == true then
+        local settle = (TUNE.AIM_SETTLE_TIME :: number)
+        local rampT  = if settle > 0 then math.clamp(record.visibleTargetTime / settle, 0, 1) else 1
+        local initM, finalM = (TUNE.INITIAL_SPREAD_MULTIPLIER :: number), (TUNE.FINAL_SPREAD_MULTIPLIER :: number)
+        spreadDeg *= initM + (finalM - initM) * rampT
+        if now < record.suppressedUntil then
+            spreadDeg *= (TUNE.SUPPRESSED_SPREAD_MULTIPLIER :: number)
+        end
+    end
+
     local dir = coneSpread(baseDir.Unit, math.rad(spreadDeg))
 
     local rayVec = dir * AI.SHOT_RANGE
@@ -1015,6 +1140,15 @@ local function fireOneShot(record: NPCRecord)
     if victim == nil then
         return
     end
+
+    -- AI Stage 1C: safety net, independent of burst timing — never call DamageService
+    -- for this grunt more often than MIN_TIME_BETWEEN_DAMAGE_CALLS, even if a future
+    -- tuning change ever drops SECONDS_BETWEEN_SHOTS below it. DamageService itself
+    -- is unchanged; this only decides whether AIService calls it.
+    if now - record.lastDamageCallAt < (TUNE.MIN_TIME_BETWEEN_DAMAGE_CALLS :: number) then
+        return
+    end
+    record.lastDamageCallAt = now
 
     -- `attacker` is intentionally omitted: AI is not a Player, so DamageService
     -- treats it as an environment kill (no friendly-fire guard, "environment" feed).
@@ -1332,17 +1466,32 @@ local function thinkNPC(record: NPCRecord, now: number)
         record.nextTargetCheckClock = now + AI.TARGET_RECHECK_INTERVAL
         local seen = findVisibleTarget(record)
         if seen ~= nil then
-            -- Stage 1H: only a NEW target gets a reaction-time beat before the first
-            -- shot; re-confirming the same one every recheck must not re-hesitate.
-            if record.target ~= seen then
-                record.engageAtClock = now + reactionDelay()
+            local isSwitch = record.target ~= nil and record.target ~= seen
+            -- AI Stage 1C: switching AWAY from an already-valid target is rate-limited
+            -- (TARGET_SWITCH_COOLDOWN) so two nearby players don't make a grunt flicker
+            -- between them. A target-less grunt can always acquire immediately.
+            local canSwitch = not isSwitch or (now - record.lastTargetSwitchAt) >= (TUNE.TARGET_SWITCH_COOLDOWN :: number)
+            if canSwitch then
+                if record.target ~= seen then
+                    -- Stage 1H/1C: a genuinely NEW target gets a tiered reaction-time
+                    -- beat before the first shot; re-confirming the same one every
+                    -- recheck must not re-hesitate. Also resets the aim ramp — you
+                    -- don't inherit "settled" aim against a different player.
+                    record.lastTargetSwitchAt = now
+                    record.firstSawTargetAt = now
+                    record.lastSawTargetAt = now
+                    record.visibleTargetTime = 0
+                    record.aimBand = nil
+                    armReaction(record, now)
+                end
+                record.target = seen
+                local sroot = targetRootOf(seen)
+                if sroot ~= nil then
+                    record.lastSeenPos = sroot.Position
+                    record.lastKnownTargetPosition = sroot.Position
+                end
+                record.lastSeenClock = now
             end
-            record.target = seen
-            local sroot = targetRootOf(seen)
-            if sroot ~= nil then
-                record.lastSeenPos = sroot.Position
-            end
-            record.lastSeenClock = now
         elseif record.target ~= nil then
             local tr   = targetRootOf(record.target)
             local lost = tr == nil
@@ -1374,6 +1523,32 @@ local function thinkNPC(record: NPCRecord, now: number)
     if troot ~= nil then
         local dist  = (troot.Position - root.Position).Magnitude
         local inLos = tchar ~= nil and canSee(record, tchar, troot)
+
+        -- AI Stage 1C: track continuous-visibility time for the aim ramp + refresh
+        -- lastKnownTargetPosition. Freezes (does not increase) the instant LOS breaks;
+        -- resets only once the break outlasts LAST_KNOWN_POSITION_MEMORY, so a
+        -- one-think LOS flicker doesn't cost the ramp, but genuinely losing the
+        -- player for a few seconds does. Bookkeeping only — never fires through this.
+        if inLos then
+            local dt = now - record.lastSawTargetAt
+            if dt < 0 or dt > 1.0 then
+                dt = AI.THINK_INTERVAL :: number
+            end
+            record.visibleTargetTime = math.min(record.visibleTargetTime + dt, TUNE.MAX_TRACKED_VISIBLE_TIME :: number)
+            record.lastSawTargetAt = now
+            record.lastKnownTargetPosition = troot.Position
+            if TUNE.DEBUG == true then
+                local settle = math.max(TUNE.AIM_SETTLE_TIME :: number, 1e-3)
+                local band = aimBandFor(record.visibleTargetTime / settle)
+                if band ~= record.aimBand then
+                    record.aimBand = band
+                    Logger.debug("[AIService]", record.model.Name, "aim ramp ->", band)
+                end
+            end
+        elseif (now - record.lastSawTargetAt) > (TUNE.LAST_KNOWN_POSITION_MEMORY :: number) then
+            record.visibleTargetTime = 0
+            record.aimBand = nil
+        end
 
         if AI.TAKE_COVER == true and record.coverUntil > now then
             -- Burst just finished OR just got shot — hold at / move to a spot that
@@ -1415,9 +1590,32 @@ local function thinkNPC(record: NPCRecord, now: number)
                 humanoid.WalkSpeed = AI.ATTACK_MOVE_SPEED
                 humanoid:MoveTo(root.Position)
                 faceToward(record, troot.Position)
-                -- Stage 1H: raise/track the target during the reaction-time window but
-                -- hold fire until it elapses — a beat before shooting, not an instant flick.
-                if not record.firing and now >= record.engageAtClock then
+
+                -- AI Stage 1C: raise/track the target during the reaction-time window
+                -- but hold fire until reactionReadyAt — a beat before shooting, not an
+                -- instant flick. "If target is lost before reactionReadyAt, do not
+                -- shoot magically" is automatic: this branch only runs while troot is
+                -- non-nil (a live, in-range target), so losing the target routes to
+                -- Chase/Search instead and startBurst is simply never reached.
+                local reactionReady = now >= record.reactionReadyAt
+                if reactionReady and record.reactionAnnouncedAt ~= record.reactionReadyAt then
+                    record.reactionAnnouncedAt = record.reactionReadyAt
+                    if TUNE.DEBUG == true then
+                        Logger.debug("[AIService]", record.model.Name, "reaction-ready, engaging")
+                    end
+                end
+
+                -- Per-squad attack slot: at most MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD
+                -- grunts in this squad fire at once. Extras stay planted and aimed
+                -- (everything above still runs) but hold fire until a slot frees up.
+                local squad = squads[record.squadId]
+                local hasAttackSlot = true
+                if TUNE.ENABLED == true and squad ~= nil then
+                    updateSquadAttackSlots(squad, now)
+                    hasAttackSlot = squad.attackerSlots[record.model] == true
+                end
+
+                if not record.firing and reactionReady and hasAttackSlot then
                     startBurst(record)
                 end
             end
@@ -1652,11 +1850,22 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
 
         lastHit   = nil,
 
-        engageAtClock = 0,
         aimSkill = math.clamp(
             1 + (math.random() * 2 - 1) * (AI.AIM_SKILL_VARIANCE :: number),
             AI.AIM_SKILL_MIN :: number, AI.AIM_SKILL_MAX :: number
         ),
+
+        firstSawTargetAt        = 0,
+        lastSawTargetAt         = 0,
+        lastKnownTargetPosition = nil,
+        reactionReadyAt         = 0,
+        reactionAnnouncedAt     = -1,
+        lastTargetSwitchAt      = -math.huge,
+        suppressedUntil         = 0,
+        recentlyDamagedUntil    = 0,
+        visibleTargetTime       = 0,
+        lastDamageCallAt        = -math.huge,
+        aimBand                 = nil,
 
         dead      = false,
     }
@@ -1731,6 +1940,10 @@ local function spawnSquad(spawnCFrame: CFrame?, squadSize: number?): { Model }
         id          = squadId,
         spawnCFrame = origin,
         patrolIndex = 1,
+
+        alerted               = false,
+        attackerSlots         = {},
+        nextAttackSlotRecheck = 0,
     }
 
     local models: { Model } = {}
@@ -1852,25 +2065,47 @@ function AIService.Start(): ()
         if record == nil or record.dead then
             return
         end
+        local now = os.clock()
+
         -- Stage 1G: remember the latest hit so onNPCDied can shove the ragdoll with
         -- the killing shot's direction / weapon (mirrors DummyService.record.lastHit).
         record.lastHit = info
         if AI.HURT_COVER == true then
-            record.coverUntil = os.clock() + coverDurationFor(record)
+            record.coverUntil = now + coverDurationFor(record)
             record.coverPoint = nil  -- force a fresh hide spot away from the new threat
         end
+
+        -- AI Stage 1C: any accepted hit marks this grunt suppressed (worse aim for
+        -- SUPPRESSED_DURATION) and "recently damaged" (fast reaction tier for
+        -- RECENT_DAMAGE_SUPPRESSION_DURATION) — required per spec regardless of
+        -- whether the attacker is known.
+        if TUNE.ENABLED == true then
+            local wasSuppressed = now < record.suppressedUntil
+            record.suppressedUntil = now + (TUNE.SUPPRESSED_DURATION :: number)
+            record.recentlyDamagedUntil = now + (TUNE.RECENT_DAMAGE_SUPPRESSION_DURATION :: number)
+            if not wasSuppressed and TUNE.DEBUG == true then
+                Logger.debug("[AIService]", record.model.Name, "suppressed")
+            end
+        end
+
         local attacker = info.attacker
         if attacker ~= nil then
-            -- Stage 1H: shot from an unseen angle — still take a beat to identify the
-            -- threat before returning fire, same reaction-time rule as a fresh sighting.
+            -- Shot from an unseen angle — still take a beat to identify the threat
+            -- before returning fire; recentlyDamagedUntil (just armed above) makes
+            -- armReaction pick the fast tier, so that beat is short, not zero.
             if record.target ~= attacker then
-                record.engageAtClock = os.clock() + reactionDelay()
+                record.firstSawTargetAt = now
+                record.lastSawTargetAt = now
+                record.visibleTargetTime = 0
+                record.aimBand = nil
+                armReaction(record, now)
             end
             record.target = attacker
             local aroot = targetRootOf(attacker)
             if aroot ~= nil then
                 record.lastSeenPos = aroot.Position
-                record.lastSeenClock = os.clock()
+                record.lastKnownTargetPosition = aroot.Position
+                record.lastSeenClock = now
             end
         end
     end)

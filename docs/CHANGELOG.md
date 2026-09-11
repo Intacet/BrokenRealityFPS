@@ -1,5 +1,38 @@
 # Changelog
 
+## AI Stage 1C — fair combat tuning (reaction tiers, aim ramp, suppression, target memory, squad attack slots)
+
+- **Tiered reaction delay.** Replaces the flat Stage 1H reaction beat with three
+  tiers keyed off squad/NPC state: `RecentlyDamaged` (fastest — already under
+  fire) > `Alert` (this squad has made contact before — sticky, squad-wide) >
+  `Unaware` (first contact, slowest). Armed only when a grunt's live target
+  actually changes; movement/facing continue during the delay, only the first
+  shot is held back.
+- **Aim ramp.** A freshly-acquired target gets a wide `INITIAL_SPREAD_MULTIPLIER`
+  cone; it eases toward a tighter `FINAL_SPREAD_MULTIPLIER` as the target stays
+  continuously visible, up to `AIM_SETTLE_TIME` — miss shots at first, dangerous
+  if you stay exposed. Frozen (not reset) on a brief LOS break; resets only past
+  `LAST_KNOWN_POSITION_MEMORY`. Multiplies with, doesn't replace, the existing
+  per-grunt aim-skill and moving-target spread factors.
+- **Suppression.** Any accepted hit on a grunt now also arms a temporary
+  `SUPPRESSED_SPREAD_MULTIPLIER` penalty and marks it "recently damaged" (feeds
+  the fast reaction tier above) — damaged bots shoot back worse, not not at all.
+- **Target switch cooldown** stops a grunt from flickering between two nearby
+  players; **per-squad attacker limit** caps how many squadmates fire at once
+  (`MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD`, sticky slot allocation, rechecked on
+  `ATTACK_SLOT_RECHECK_INTERVAL`) — the rest stay planted and aimed but hold
+  fire, so a 3-grunt squad doesn't all laser the player simultaneously.
+- **Damage-call-rate safety net** (`MIN_TIME_BETWEEN_DAMAGE_CALLS`), independent
+  of burst timing; `DamageService` itself is untouched.
+- New `Constants.AI_COMBAT_TUNING` table. Consolidates with (removes) the
+  overlapping Stage 1H flat reaction-delay mechanism rather than running two
+  competing gates for the same decision — see docs/TECHNICAL_DEBT.md "AI Stage
+  1C" for that call and every other judgment call made interpreting this task.
+  `AIService` + `Constants.AI_COMBAT_TUNING` only — no new remotes, no client
+  files, `GunService` / `DamageService` untouched. MCP-checked the tier logic,
+  ramp formula, sticky slot allocation, and target-memory math; not
+  runtime-verified in Play.
+
 ## AI Stage 1H — combat realism pass + a Respawn Bots button
 
 - **Reaction time.** A grunt no longer fires the instant it spots you: acquiring
