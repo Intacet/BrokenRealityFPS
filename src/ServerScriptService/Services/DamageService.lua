@@ -139,6 +139,19 @@ local function applyToPlayer(info: Types.DamageInfo)
         end
     end
 
+    -- Tooling-helper support (SetInvincible, 2026-09-11 — AI-arena-spectating
+    -- addition): mirrors applyToNonPlayer's ATTR_INFINITE_HEALTH behavior below
+    -- for a Player victim too — still emits DamageDealt (blood/reactions/limb
+    -- tracking keep working) but takes no health and can never die. Keyed off
+    -- the Character Model, since that is what SetInvincible actually receives
+    -- (the attribute lives on the Model, not the Player) — a fresh respawn is a
+    -- new Model, so this never carries over past a death/round-start reset.
+    local victimChar = victim.Character
+    if victimChar ~= nil and victimChar:GetAttribute(Constants.ATTR_INFINITE_HEALTH) == true then
+        CombatEvents.DamageDealt:Fire(info.targetModel, info)
+        return
+    end
+
     local current = playerHealth[victim]
     if current == nil then
         -- Player joined between phases; initialise to full health before applying damage.
@@ -288,8 +301,12 @@ function DamageService:Heal(target: Instance, amount: number)
     end
 end
 
--- Tooling helper. Toggles Constants.ATTR_INFINITE_HEALTH on a non-player model. While set,
--- ApplyDamage still emits DamageDealt but removes no health and never kills it.
+-- Tooling helper. Toggles Constants.ATTR_INFINITE_HEALTH on `model`. While set,
+-- ApplyDamage still emits DamageDealt but removes no health and never kills it —
+-- works for a non-player model (applyToNonPlayer, the original use) AND (added
+-- 2026-09-11 for AI-arena spectating) a player's Character (applyToPlayer now
+-- checks this attribute too, keyed off the Character since that is what this
+-- function receives, not the Player).
 function DamageService:SetInvincible(model: Model, enabled: boolean)
     model:SetAttribute(Constants.ATTR_INFINITE_HEALTH, enabled == true)
 end

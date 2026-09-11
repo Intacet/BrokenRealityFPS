@@ -1,5 +1,32 @@
 # Changelog
 
+## Watch AI Arena button + free-fly spectating
+
+- **New "WATCH AI ARENA" button** in the loadout (`M`) menu, next to Respawn
+  Bots / Kill All Bots. Teleports you directly above the AI arena (the
+  separate `Workspace/BrokenReality_AIArena` map added previously, well away
+  from the main game map and the dev test area) so you can watch the Red
+  Squad vs Blue Squad fight.
+- **Free-fly spectating.** Once teleported, you can fly freely — WASD to
+  move, Space/Left Ctrl to go up/down, hold Left Shift to move faster, and
+  `F` to toggle flying on/off at any time afterward. Flying passes straight
+  through walls and cover so you can get any angle on the fight.
+- **You can't be shot while spectating.** Grunts already detect/attack out to
+  90-120 studs, farther than the teleport height, so this needed a small,
+  explicit invincibility grant tied to your current body — it clears itself
+  automatically the next time you actually respawn.
+- New `TeleportToArena` RemoteEvent, a new `Constants.SPECTATOR_FLY` table,
+  and a new `SpectatorFlyController.lua` client controller. Touches
+  `LoadoutMenu.lua`, `RemoteSetup.server.lua`, `ClientInit.client.lua`, and
+  (for the invincibility grant) `DamageService.lua` — the first time this
+  session touches that file; see docs/TECHNICAL_DEBT.md "AI arena
+  spectating" for exactly what changed there and why.
+- `rojo build` clean; MCP-checked the camera-relative movement math, speed
+  selection, the safe-landing snap-back distance check, the toggle no-op
+  guard, the per-player teleport debounce, and a live round-trip of the
+  invincibility attribute against the real `Constants` module in Studio; not
+  yet runtime-verified in Play.
+
 ## AI arena — separate AI-vs-AI test map with two colored factions
 
 - **New self-contained arena** for watching AI squads fight each other, not

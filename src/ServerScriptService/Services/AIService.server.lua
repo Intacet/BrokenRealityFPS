@@ -129,9 +129,13 @@ local CombatEvents = require(script.Parent:WaitForChild("CombatEvents"))
 local RagdollService = require(script.Parent:WaitForChild("RagdollService"))
 
 -- Stage 1H: RespawnBots / KillAllBots — created by RemoteSetup before any Service needs them.
-local Remotes      = ReplicatedStorage:WaitForChild("Remotes")
-local RespawnBots  = Remotes:WaitForChild("RespawnBots") :: RemoteEvent
-local KillAllBots  = Remotes:WaitForChild("KillAllBots") :: RemoteEvent
+local Remotes         = ReplicatedStorage:WaitForChild("Remotes")
+local RespawnBots     = Remotes:WaitForChild("RespawnBots") :: RemoteEvent
+local KillAllBots     = Remotes:WaitForChild("KillAllBots") :: RemoteEvent
+-- AI arena spectating (2026-09-11): client → server request, then server → same
+-- client confirmation once the teleport lands (SpectatorFlyController grants fly
+-- only after seeing that confirmation, never on the raw request).
+local TeleportToArena = Remotes:WaitForChild("TeleportToArena") :: RemoteEvent
 
 -- Untyped views of the tuning tables (heterogeneous fields; matches the pattern
 -- used by TestAreaBuilder's `local CFG = Constants.DEV_TEST_AREA :: any`).
@@ -355,6 +359,10 @@ local didAutoSpawn = false
 local lastManualRespawnClock = -math.huge
 -- Shared server-wide cooldown gate for the KillAllBots remote.
 local lastManualKillAllClock = -math.huge
+-- AI arena spectating: PER-PLAYER debounce for TeleportToArena (unlike the two
+-- above, this only ever affects the requester, so it is not a shared gate) —
+-- cleared on PlayerRemoving so this table never grows across a long server life.
+local lastTeleportToArenaClock: { [Player]: number } = {}
 
 local aiFolder : Folder? = nil
 local losParams: RaycastParams = RaycastParams.new()
@@ -3659,6 +3667,60 @@ function AIService.Start(): ()
         AIService.KillAllBots()
     end)
     table.insert(serviceConns, killAllConn)
+
+    -- AI arena spectating (2026-09-11): teleport the requesting player's own
+    -- character above Workspace/BrokenReality_AIArena so they can watch the
+    -- ARENA_RED vs ARENA_BLUE battle. Only ever moves the requester — no shared
+    -- cooldown needed (unlike RespawnBots/KillAllBots, which affect every
+    -- player's AI) — a small per-player debounce just guards against an
+    -- accidental double-fire, not a real gameplay gate. Sets HumanoidRootPart.CFrame
+    -- directly, same convention TeamService.teleportToSpawn already uses for
+    -- round-start spawning. Fires TeleportToArena back to the SAME client once the
+    -- teleport lands — that confirmation, not the raw button press, is what
+    -- SpectatorFlyController treats as permission to grant fly.
+    local teleportConn = TeleportToArena.OnServerEvent:Connect(function(player: Player)
+        local now = os.clock()
+        local last = lastTeleportToArenaClock[player]
+        if last ~= nil and now - last < 1 then
+            return
+        end
+        lastTeleportToArenaClock[player] = now
+
+        local character = player.Character
+        if character == nil then
+            return
+        end
+        local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+        if root == nil then
+            return
+        end
+
+        local origin = ARENA.ORIGIN :: Vector3
+        local height = ARENA.SPECTATE_HEIGHT :: number
+        root.CFrame = CFrame.new(origin + Vector3.new(0, height, 0))
+        root.AssemblyLinearVelocity = Vector3.zero
+
+        -- Grunts detect/attack unconditionally out to DETECTION_RANGE (120) /
+        -- ATTACK_RANGE (90) studs — both farther than SPECTATE_HEIGHT, so a
+        -- spectator flying near the arena is a fair target without this.
+        -- SetInvincible (DamageService) is keyed off the Character Model, so a
+        -- future normal respawn (a fresh Model from TeamService) is never
+        -- invincible by default.
+        pcall(function()
+            DamageService:SetInvincible(character :: Model, true)
+        end)
+
+        if ARENA.DEBUG == true then
+            Logger.debug("[AIService] teleported", player.Name, "above the AI arena")
+        end
+        TeleportToArena:FireClient(player)
+    end)
+    table.insert(serviceConns, teleportConn)
+
+    local teleportCleanupConn = Players.PlayerRemoving:Connect(function(player: Player)
+        lastTeleportToArenaClock[player] = nil
+    end)
+    table.insert(serviceConns, teleportCleanupConn)
 
     if autoSpawnEnabled() and #spawnParts == 0 then
         local flagName = if RunService:IsStudio()

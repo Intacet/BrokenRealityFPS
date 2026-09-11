@@ -82,6 +82,7 @@ makeEvent("DummyDevState")      -- server → subscribed dev client | test-dummy
 -- AI grunts (available to every player, dev and published — LoadoutMenu buttons)
 makeEvent("RespawnBots")        -- client → server | request AIService.RespawnAllSquads(); server-side cooldown
 makeEvent("KillAllBots")        -- client → server | request AIService.KillAllBots(); server-side cooldown
+makeEvent("TeleportToArena")    -- client → server | request teleport above Workspace/BrokenReality_AIArena; server → same client | confirms the teleport landed so SpectatorFlyController can grant fly
 
 -- World weapon model (third-person attachment)
 makeEvent("WeaponEquipState")   -- client → server | request equip/holster of world weapon model

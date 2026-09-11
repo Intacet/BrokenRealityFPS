@@ -2659,6 +2659,34 @@ Constants.AI_ARENA = {
     -- before giving up with a Logger.warn.
     SPAWN_RETRY_INTERVAL = 0.5,
     SPAWN_RETRY_ATTEMPTS = 20,
+
+    -- Spectating (TeleportToArena remote, AIService.server / LoadoutMenu "WATCH
+    -- AI ARENA" button, 2026-09-11): how high above ORIGIN a requesting player is
+    -- placed — comfortably above WALL_HEIGHT and the stepped structure for a full
+    -- view. Client-side fly behavior itself is Constants.SPECTATOR_FLY, below.
+    SPECTATE_HEIGHT = 60,
+}
+
+-- ── Spectator fly (SpectatorFlyController, client) ────────────────────────────
+-- Free-fly / noclip movement so a player teleported above the AI arena (see
+-- Constants.AI_ARENA.SPECTATE_HEIGHT) can move around and watch. Entirely
+-- client-side (Humanoid.PlatformStand freezes normal locomotion; the
+-- controller drives HumanoidRootPart.CFrame directly from camera-relative
+-- input) — no server authority over spectator movement, same trust level as
+-- every other purely-cosmetic camera/movement system in this game. Toggled by
+-- TOGGLE_KEY at any time once granted (granted automatically on the
+-- TeleportToArena confirmation; see docs/TECHNICAL_DEBT.md "AI arena
+-- spectating" for why this isn't gated further).
+Constants.SPECTATOR_FLY = {
+    ENABLED = true,
+
+    TOGGLE_KEY  = Enum.KeyCode.F,
+    ASCEND_KEY  = Enum.KeyCode.Space,
+    DESCEND_KEY = Enum.KeyCode.LeftControl,
+    BOOST_KEY   = Enum.KeyCode.LeftShift, -- held for BOOST_SPEED instead of SPEED
+
+    SPEED       = 60,  -- studs/second, camera-relative WASD + ascend/descend
+    BOOST_SPEED = 150,
 }
 
 -- ── Developer test area (TestAreaBuilder.server) ────────────────────────────

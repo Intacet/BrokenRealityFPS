@@ -34,6 +34,10 @@
 -- and FreeAimController at module level, so all five must be initialized before GunController:Start().
 -- DeathScreen and KillFeedUI have no deps on other controllers and none depend on them.
 --
+--   16. SpectatorFlyController — free-fly spectating (AI arena), granted only on
+--       the server's TeleportToArena confirmation; no dependency on other
+--       controllers; needs PlayerGui for its hint label.
+--
 -- To add a new controller: require it here and call its Start() (or init()+Start())
 -- inside the appropriate helper. Keep the order intentional and document any dependency.
 
@@ -238,6 +242,13 @@ end)
 --     dependency on other controllers. Fires SelectLoadout on Deploy.
 loadInitAndStart("LoadoutMenu", function()
     return require(script.Parent:WaitForChild("UI"):WaitForChild("LoadoutMenu"))
+end)
+
+-- 16. SpectatorFlyController — free-fly spectating, granted only on the server's
+--     TeleportToArena confirmation (requested by LoadoutMenu's "WATCH AI ARENA"
+--     button). No dependency on other controllers; needs PlayerGui for its hint label.
+loadInitAndStart("SpectatorFlyController", function()
+    return require(script.Parent:WaitForChild("UI"):WaitForChild("SpectatorFlyController"))
 end)
 
 Logger.debug("[ClientInit] Startup complete")

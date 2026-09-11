@@ -28,6 +28,12 @@
 -- timer) instead of an instant destroy, and does not spawn replacements. Same
 -- shared-cooldown pattern (Constants.AI.KILL_ALL_COOLDOWN_SECONDS).
 --
+-- WATCH AI ARENA fires TeleportToArena — the server moves the player's own
+-- character above Workspace/BrokenReality_AIArena (Constants.AI_ARENA.SPECTATE_HEIGHT)
+-- and fires the same remote back once it lands; SpectatorFlyController (a separate
+-- client controller) listens for that confirmation and grants free-fly spectating.
+-- Only ever affects the requesting player, so no shared cooldown.
+--
 -- Initialized by ClientInit via loadInitAndStart():
 --   1. init(playerGui) — builds every GUI instance
 --   2. Start()         — connects input + RoundStateChanged, seeds selection
@@ -54,6 +60,7 @@ local RoundStateChanged = Remotes:WaitForChild("RoundStateChanged") :: RemoteEve
 local SelectLoadout     = Remotes:WaitForChild("SelectLoadout")     :: RemoteEvent
 local RespawnBots       = Remotes:WaitForChild("RespawnBots")       :: RemoteEvent
 local KillAllBots       = Remotes:WaitForChild("KillAllBots")       :: RemoteEvent
+local TeleportToArena   = Remotes:WaitForChild("TeleportToArena")   :: RemoteEvent
 
 local LocalPlayer = Players.LocalPlayer
 local LOADOUT     = Constants.LOADOUT :: any
@@ -91,6 +98,7 @@ local respawnBtn   : TextButton
 local respawnLbl   : TextLabel
 local killAllBtn   : TextButton
 local killAllLbl   : TextLabel
+local watchArenaBtn: TextButton
 
 -- weapon key → { button: TextButton, stroke: UIStroke, selectable: boolean }
 local weaponRows : { [string]: { button: TextButton, stroke: UIStroke, selectable: boolean } } = {}
@@ -358,10 +366,10 @@ function LoadoutMenu:init(playerGui: PlayerGui)
     backdrop.Parent              = screenGui
 
     -- Panel
-    local TOGGLE_H = 30  -- crosshair toggle / respawn-bots / kill-all-bots button row height
+    local TOGGLE_H = 30  -- crosshair toggle / respawn-bots / kill-all-bots / watch-arena button row height
     local weaponBlockH = #LOADOUT.WEAPONS * CARD_H + (#LOADOUT.WEAPONS - 1) * CARD_GAP
     local panelH = PAD + 28 + 22 + weaponBlockH + 24 + 20 + ROW_H + 20 + ROW_H + 8
-        + TOGGLE_H + 8 + TOGGLE_H + 8 + TOGGLE_H + 8 + 16 + PAD
+        + TOGGLE_H + 8 + TOGGLE_H + 8 + TOGGLE_H + 8 + TOGGLE_H + 8 + 16 + PAD
 
     panel                    = Instance.new("Frame")
     panel.Name               = "Panel"
@@ -488,6 +496,20 @@ function LoadoutMenu:init(playerGui: PlayerGui)
         12, true, WHITE, Enum.TextXAlignment.Center)
     y += TOGGLE_H + 8
 
+    -- Watch AI arena — teleports the player above Workspace/BrokenReality_AIArena
+    -- and grants free-fly spectating (SpectatorFlyController) once the server
+    -- confirms the teleport landed. No cooldown UI: only moves the requester.
+    local watchArenaButton = makeButton(panel,
+        UDim2.fromOffset(innerW, TOGGLE_H),
+        UDim2.fromOffset(PAD, y),
+        CARD_COLOR)
+    watchArenaBtn = watchArenaButton
+    watchArenaBtn.Name = "WatchAIArena"
+    makeLabel(watchArenaBtn, "WATCH AI ARENA",
+        UDim2.fromScale(1, 1), UDim2.fromScale(0, 0),
+        12, true, WHITE, Enum.TextXAlignment.Center)
+    y += TOGGLE_H + 8
+
     makeLabel(panel,
         string.format("[%s] close", LOADOUT.TOGGLE_KEY.Name),
         UDim2.fromOffset(innerW, 16), UDim2.fromOffset(PAD, y),
@@ -551,6 +573,15 @@ function LoadoutMenu:Start()
         Logger.debug("[LoadoutMenu] Kill All Bots requested")
         local cooldown = (Constants.AI :: any).KILL_ALL_COOLDOWN_SECONDS
         runKillAllCooldown(typeof(cooldown) == "number" and cooldown or 5)
+    end)
+
+    -- Watch AI arena — closes the menu immediately so the player can see
+    -- themselves teleport; SpectatorFlyController grants fly on the server's
+    -- TeleportToArena confirmation, not on this click.
+    watchArenaBtn.Activated:Connect(function()
+        TeleportToArena:FireServer()
+        Logger.debug("[LoadoutMenu] Watch AI Arena requested")
+        setOpen(false)
     end)
 
     -- Toggle key.

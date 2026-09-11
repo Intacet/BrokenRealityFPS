@@ -932,6 +932,86 @@ loop's termination behavior. Residual risks:
   history or displays faction identity to a player beyond the rig colors
   themselves and the `BR_AIFaction` attribute (Studio-inspectable only).
 
+## AI arena spectating (Studio verification: REQUIRED, not done)
+
+**Scope note up front:** this task requires client UI (a new menu button) and
+a way to keep a spectating player from being shot — genuinely can't be done
+without touching client controllers and, for the invincibility,
+`DamageService.lua`. This is the **first time this session touches
+`DamageService.lua`**, a file every prior AI task in this session explicitly
+listed as off-limits; flagged prominently rather than done quietly. The
+change itself is small and additive (see below), not a rewrite.
+
+New `TeleportToArena` RemoteEvent (`RemoteSetup.server.lua`), a new
+"WATCH AI ARENA" button (`LoadoutMenu.lua`), a new `SpectatorFlyController.lua`
+client controller (registered in `ClientInit.client.lua`, one new
+`default.project.json` entry), a new `Constants.SPECTATOR_FLY` table +
+`Constants.AI_ARENA.SPECTATE_HEIGHT`, a new `TeleportToArena.OnServerEvent`
+handler in `AIService.server.lua`, and a small addition to
+`DamageService.lua`'s `applyToPlayer` (extends the existing `SetInvincible`
+tooling helper — previously non-player-only — to also work for a Player's
+Character, mirroring `applyToNonPlayer`'s exact `ATTR_INFINITE_HEALTH`
+behavior). `GunService.server.lua`/`TeamService.server.lua` untouched. MCP-
+checked (throwaway logic against a live Edit datamodel) the camera-relative
+movement composition, speed selection, position integration, the
+safe-landing distance check, the toggle no-op guard, the per-player
+debounce, and a live round-trip of the invincibility attribute against the
+real `Constants` module — a live `require(DamageService)` check timed out
+(the same "live file require can hang" limitation noted earlier this
+session, not a new one; the edit was instead verified by careful manual
+review plus the successful live `Constants` require, which exercises the
+same Luau parser). Residual risks:
+
+- **Not runtime-verified in Play.** Whether the fly controls feel good,
+  whether the invincibility grant actually prevents damage end-to-end, and
+  whether the button/teleport/fly sequence works smoothly together have not
+  been observed.
+- **The `DamageService.lua` change is real, if small.** `applyToPlayer` now
+  reads `victim.Character:GetAttribute(Constants.ATTR_INFINITE_HEALTH)` before
+  computing health — a new branch in the single most safety-critical function
+  in the combat pipeline (every player death/damage event in the whole game
+  goes through it). It is a straight mirror of `applyToNonPlayer`'s existing,
+  already-shipped behavior for the identical attribute, not new logic, but it
+  is still a change to a file this session has treated as sacrosanct until
+  now — worth a deliberate look in review, not just a rubber stamp because
+  the diff is short.
+- **Invincibility has no explicit "turn it back off" path.** It's keyed to
+  the Character Model and only ever cleared by that Model going away (death →
+  a fresh Model from the next `TeamService` respawn is never invincible by
+  default). A player who flies back down and keeps playing on the SAME body
+  without ever dying stays invincible until the next round's forced
+  respawn (`TeamService` calls `LoadCharacter()` + teleports every player at
+  every PREP) — bounded by the match loop, but not instant.
+- **Fly movement is entirely client-authoritative**, same trust level as
+  every other cosmetic client movement/camera system in this game (no
+  anti-cheat boundary, nothing server-side validates or bounds where a
+  spectating player's HumanoidRootPart actually goes). Acceptable for a
+  dev/spectator convenience feature; would need real server reconciliation
+  before this pattern could be reused for anything competitive.
+- **`Space`/`Left Ctrl` (ascend/descend) overlap with existing bound keys** in
+  `MovementController.lua` (`Space` = vault trigger, `Left Ctrl` = custom
+  mouse-lock toggle). Deliberately not touched — `MovementController.lua` is
+  at Luau's 200-local-register limit (see its own entry above) and this
+  controller was built as a fully separate module specifically to avoid it.
+  Holding these keys while flying may harmlessly also fire those other
+  systems' input handlers (e.g. toggling mouse lock) since `Humanoid.
+  PlatformStand` freezes the Humanoid's own state machine but not other
+  scripts' raw input listeners — cosmetic overlap only, not a functional
+  conflict, but untested together.
+- **No server-side bound on how far a player can fly from the arena** —
+  `setFlying`'s off-branch only snaps back to the arena center once, on
+  toggle-off, past a 120-stud/below-ground threshold; nothing stops a player
+  from flying arbitrarily far away first (e.g. back over the live map, 500+
+  studs below). Acceptable for a dev feature; not something a player could
+  do accidentally.
+- **No "return to the game" affordance.** Landing, walking back into the
+  normal game area, or dying are the only ways out of spectator mode short
+  of the next round's forced respawn — there's no button that immediately
+  ends spectating and teleports the player back to a normal spawn.
+- **The hint label's wording is fixed English text**, not localized, and only
+  ever shows/hides with the flying state — no separate "press the arena
+  button to get started" prompt before the first grant.
+
 ## Player first-person weapon retraction — Tarkov close-quarters (Studio verification: REQUIRED, not done)
 
 `ViewModelController.computeWallCollisionCF` + `Constants.VIEWMODEL_WALL_*`. One

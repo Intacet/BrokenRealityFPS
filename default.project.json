@@ -284,6 +284,10 @@
               "$ignoreUnknownInstances": true,
               "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/LoadoutMenu.lua"
             },
+            "SpectatorFlyController": {
+              "$ignoreUnknownInstances": true,
+              "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/SpectatorFlyController.lua"
+            },
             "HUD": {
               "$ignoreUnknownInstances": true,
               "$path": "src/StarterPlayer/StarterPlayerScripts/Controllers/UI/HUD.lua"
