@@ -2486,6 +2486,40 @@ Constants.AI_SQUAD_AWARENESS = {
     REQUIRE_OWN_LOS_TO_SHOOT = true, -- documents (does not toggle — see attackSlotEligible) that shared awareness never lets a blind grunt shoot; "no wallhack shooting" is a hard invariant here, not tunable
 }
 
+-- ── AI squad bound-and-cover movement (AIService.server) ─────────────────────
+-- A simplified, game-friendly "one bot advances while others hold" pass layered
+-- on top of the existing Chase state: while a squad is alert with a shared
+-- last-known target position (Constants.AI_SQUAD_AWARENESS) and not already
+-- close enough to fight, one living member is picked as Mover and advances a
+-- bound closer to the target; the rest hold in place instead of also rushing
+-- forward. Once the squad is close enough (DO_NOT_BOUND_WITHIN_ATTACK_RANGE) or
+-- not alert, bounding clears and Chase/Attack behave exactly as before this
+-- pass. Not a cover-node system, not real fire-and-maneuver doctrine — see
+-- docs/TECHNICAL_DEBT.md "AI squad bound-and-cover".
+Constants.AI_BOUNDING = {
+    ENABLED = true,
+    DEBUG = true,
+
+    BOUND_REEVALUATE_INTERVAL  = 1.25, -- seconds between updateSquadBounding() passes per squad — role assignment, not movement itself, is throttled to this
+    MAX_MOVERS_PER_SQUAD       = 1,    -- hard cap on simultaneous movers; this pass only ever assigns one regardless
+    MIN_COVERING_BOTS_REQUIRED = 1,    -- desired floor for a debug warning only — bounding still proceeds with fewer if the squad is small
+
+    MOVE_BOUND_DISTANCE_MIN = 10, -- studs; the mover's bound destination advances this far toward the target, at most
+    MOVE_BOUND_DISTANCE_MAX = 26,
+    BOUND_ARRIVE_DISTANCE   = 6,  -- studs; within this of its bound destination, the mover is considered arrived
+
+    COVER_HOLD_TIME_MIN = 1.0, -- seconds; reserved for a future randomized cover-hold duration (see docs/TECHNICAL_DEBT.md "AI squad bound-and-cover") — not yet read
+    COVER_HOLD_TIME_MAX = 2.25,
+
+    MOVER_SHOULD_NOT_SHOOT = true, -- the mover never starts a burst while it holds the Mover role, even if it briefly gains an attack slot + LOS mid-advance
+    COVER_BOT_CAN_SHOOT    = true, -- false forces every non-mover bounding member to hold fire even with an attack slot + LOS (pure "watch and don't engage" cover) — true (default) leaves the existing fire-discipline gate as the only requirement
+
+    SWAP_AFTER_MOVER_ARRIVES = true, -- once the mover reaches BOUND_ARRIVE_DISTANCE, the next reevaluation picks a new mover
+    SWAP_AFTER_MAX_TIME      = 4.5,  -- seconds; a mover that hasn't arrived by this long is swapped out anyway (stuck-on-geometry safety net)
+
+    DO_NOT_BOUND_WITHIN_ATTACK_RANGE = 18, -- studs; once the closest living squad member is this near the shared target position, stop bounding and let Chase/Attack/fire-discipline take over directly
+}
+
 -- ── Developer test area (TestAreaBuilder.server) ────────────────────────────
 -- Layout knobs for the generated developer sandbox under Workspace/<FOLDER_NAME>.
 -- All positions are world-space offsets from ORIGIN.

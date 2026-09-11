@@ -123,6 +123,7 @@ local TUNE    = Constants.AI_COMBAT_TUNING :: any  -- AI Stage 1C: reaction/aim-
 local SPACING    = Constants.AI_SQUAD_SPACING :: any    -- squad formation / anti-bunching tuning
 local DISCIPLINE = Constants.AI_FIRE_DISCIPLINE :: any  -- squad fire discipline (active shooter slots + non-shooter support)
 local AWARENESS  = Constants.AI_SQUAD_AWARENESS :: any  -- squad awareness sharing + last-known-position memory
+local BOUNDING   = Constants.AI_BOUNDING :: any  -- squad bound-and-cover movement (Mover/Cover roles)
 
 -- ============================================================
 -- Types
@@ -229,6 +230,13 @@ type NPCRecord = {
     isAlertedBySquad: boolean,  -- a squadmate within ALERT_SHARE_RADIUS saw/was hit recently; may investigate without own LOS
     investigateGoal : Vector3?, -- a small random offset near the squad's shared lastKnownTargetPosition, picked once and reused until stale (not the exact point — "don't send every NPC to the same spot")
 
+    -- AI squad bound-and-cover (2026-09-11). "Shooter"/"Support" are refined live,
+    -- each think, from the base "Cover" assignment (see updateSquadBounding) —
+    -- Shooter = currently holds an attack slot; Support = holding in Chase with no
+    -- LOS at all yet. nil = this grunt isn't part of an active bound right now.
+    tacticalRole    : ("Mover" | "Cover" | "Shooter" | "Support")?,
+    boundDestination: Vector3?, -- the Mover's current bound point (nil for every other role); computed once per assignment, held until arrival/timeout
+
     dead      : boolean,
 }
 
@@ -267,6 +275,12 @@ type SquadRecord = {
     lastKnownTargetPlayer  : Player?,  -- who that position belongs to
     lastKnownUpdateAt      : number,   -- os.clock() of the last share (also the LAST_KNOWN_POSITION_SHARE_INTERVAL throttle gate)
     lastContactAt          : number,   -- os.clock() of the most recent sighting or hit, from ANY member — drives CLEAR_ALERT_AFTER_NO_CONTACT
+
+    -- AI squad bound-and-cover (2026-09-11)
+    currentMoverNpcId   : Model?,   -- the grunt currently assigned "Mover", or nil while not bounding
+    coveringNpcIds      : { Model }, -- every other living member currently assigned "Cover" (further refined to "Shooter"/"Support" live)
+    currentBoundStartedAt: number,  -- os.clock() the current mover was assigned — feeds SWAP_AFTER_MAX_TIME
+    lastBoundEvaluateAt  : number,  -- os.clock() of the last updateSquadBounding() pass
 }
 
 -- ============================================================
@@ -1585,6 +1599,190 @@ local function issueSquadMoveGoal(record: NPCRecord, humanoid: Humanoid, anchor:
     humanoid:MoveTo(adjusted)
 end
 
+-- ============================================================
+-- Squad bound-and-cover movement (Mover/Cover roles)
+-- ============================================================
+-- A simplified, game-friendly "one bot advances while others hold" pass layered
+-- on top of Chase/Attack — NOT a real fire-and-maneuver/cover-node system. See
+-- docs/TECHNICAL_DEBT.md "AI squad bound-and-cover" for every simplification.
+
+-- Clears `record`'s own tacticalRole/boundDestination, and — if it was the
+-- squad's current Mover or a listed Cover member — clears that squad-level
+-- bookkeeping too, so a dead/invalid bot never leaves a stuck role behind.
+-- Called from onNPCDied / disconnectRecord (one grunt) as well as from
+-- updateSquadBounding itself (mover arrived / timed out / went invalid).
+local function releaseBoundRole(record: NPCRecord)
+    if record.tacticalRole == nil and record.boundDestination == nil then
+        return
+    end
+    record.tacticalRole = nil
+    record.boundDestination = nil
+    local squad = squads[record.squadId]
+    if squad == nil then
+        return
+    end
+    if squad.currentMoverNpcId == record.model then
+        squad.currentMoverNpcId = nil
+        squad.currentBoundStartedAt = 0
+    end
+    local idx = table.find(squad.coveringNpcIds, record.model)
+    if idx ~= nil then
+        table.remove(squad.coveringNpcIds, idx)
+    end
+end
+
+-- Drops an entire squad's bounding state (no active Mover, nobody labeled Cover/
+-- Shooter/Support) — used when the squad isn't alert, has no shared target
+-- position, is already close enough (DO_NOT_BOUND_WITHIN_ATTACK_RANGE), or has
+-- fewer than 2 living members to bound with. Cheap no-op once already clear.
+local function clearSquadBounding(squad: SquadRecord)
+    if squad.currentMoverNpcId == nil and #squad.coveringNpcIds == 0 then
+        return
+    end
+    for _, record in pairs(npcs) do
+        if record.squadId == squad.id then
+            record.tacticalRole = nil
+            record.boundDestination = nil
+        end
+    end
+    squad.currentMoverNpcId = nil
+    table.clear(squad.coveringNpcIds)
+    squad.currentBoundStartedAt = 0
+end
+
+-- Picks the Mover's next bound point: `MOVE_BOUND_DISTANCE_MIN..MAX` studs toward
+-- the shared target, offset sideways by this grunt's existing squad-spacing
+-- formation direction (same shape every other squad goal in this file uses) so
+-- movers from different slots don't all converge on one line. Never plans past
+-- DO_NOT_BOUND_WITHIN_ATTACK_RANGE of the target — the final close is left to the
+-- normal Attack approach instead of the bound overshooting into melee range.
+local function boundDestinationFor(record: NPCRecord, targetPos: Vector3): Vector3
+    local root = record.root
+    local toTarget = targetPos - root.Position
+    local flat = Vector3.new(toTarget.X, 0, toTarget.Z)
+    local forward = if flat.Magnitude > 0.1 then flat.Unit else Vector3.new(0, 0, -1)
+    local lo, hi = BOUNDING.MOVE_BOUND_DISTANCE_MIN :: number, BOUNDING.MOVE_BOUND_DISTANCE_MAX :: number
+    local advance = lo + math.random() * (hi - lo)
+    local maxAdvance = math.max(flat.Magnitude - (BOUNDING.DO_NOT_BOUND_WITHIN_ATTACK_RANGE :: number), 1)
+    advance = math.min(advance, maxAdvance)
+    local lateral = formationDirectionForSlot(record.formationSlotIndex)
+    -- 0.35 is a fixed formation-shape ratio (how wide the lateral fan is relative
+    -- to how far the bound advances), not an independent gameplay tunable — kept
+    -- inline rather than adding a single-use Constants field for it.
+    return root.Position + forward * advance + lateral * (advance * 0.35)
+end
+
+-- Re-evaluates squad `squad`'s bound-and-cover roles, at most once every
+-- BOUND_REEVALUATE_INTERVAL (cheap early-return otherwise — safe to call from
+-- every member's think, mirrors ensureFormationAssigned / clearStaleSquadAlert).
+-- Only ever maintains MAX_ACTIVE_NPCS-scale squads, so a full `npcs` scan per
+-- pass is cheap (same justification as getSeparationAdjustedGoal).
+local function updateSquadBounding(squad: SquadRecord, now: number)
+    if BOUNDING.ENABLED ~= true then
+        return
+    end
+    if now - squad.lastBoundEvaluateAt < (BOUNDING.BOUND_REEVALUATE_INTERVAL :: number) then
+        return
+    end
+    squad.lastBoundEvaluateAt = now
+
+    local targetPos = squad.lastKnownTargetPosition
+    local alert = now < squad.alertUntil
+    if not alert or targetPos == nil then
+        clearSquadBounding(squad)
+        return
+    end
+
+    local living: { Model } = {}
+    local nearest = math.huge
+    for model, record in pairs(npcs) do
+        if record.squadId == squad.id and not record.dead then
+            table.insert(living, model)
+            local d = (record.root.Position - targetPos).Magnitude
+            if d < nearest then
+                nearest = d
+            end
+        end
+    end
+
+    -- Need a Mover plus at least MIN_COVERING_BOTS_REQUIRED to bound at all, and
+    -- no point bounding once the squad is already this close to the target.
+    if #living < 1 + (BOUNDING.MIN_COVERING_BOTS_REQUIRED :: number)
+        or nearest <= (BOUNDING.DO_NOT_BOUND_WITHIN_ATTACK_RANGE :: number) then
+        clearSquadBounding(squad)
+        return
+    end
+
+    -- Validate / retire the current Mover (dead, arrived, or timed out).
+    local moverModel = squad.currentMoverNpcId
+    local moverRecord: NPCRecord? = if moverModel ~= nil then npcs[moverModel] else nil
+    if moverRecord ~= nil and moverRecord.dead then
+        releaseBoundRole(moverRecord)
+        moverModel, moverRecord = nil, nil
+    end
+    if moverRecord ~= nil then
+        local dest = moverRecord.boundDestination
+        local arrived = dest ~= nil and (moverRecord.root.Position - (dest :: Vector3)).Magnitude <= (BOUNDING.BOUND_ARRIVE_DISTANCE :: number)
+        local timedOut = (now - squad.currentBoundStartedAt) >= (BOUNDING.SWAP_AFTER_MAX_TIME :: number)
+        if (arrived and BOUNDING.SWAP_AFTER_MOVER_ARRIVES == true) or timedOut then
+            if BOUNDING.DEBUG == true then
+                Logger.debug("[AIService] squad", squad.id, "bound complete —", moverRecord.model.Name,
+                    arrived and "(arrived)" or "(timed out)")
+            end
+            releaseBoundRole(moverRecord)
+            moverModel, moverRecord = nil, nil
+        end
+    end
+
+    -- MAX_MOVERS_PER_SQUAD is 1 by design in this pass (see
+    -- docs/TECHNICAL_DEBT.md) — a single squad.currentMoverNpcId field, not a
+    -- list. Pick the living member farthest from the target (closes the biggest
+    -- gap; naturally excludes whoever just finished a bound since it's now nearer
+    -- than everyone it left behind), so the squad actually alternates instead of
+    -- re-picking the same mover every time.
+    if moverRecord == nil then
+        local best: Model? = nil
+        local bestDist = -1
+        for _, model in ipairs(living) do
+            local candidate = npcs[model]
+            if candidate ~= nil then
+                local d = (candidate.root.Position - targetPos).Magnitude
+                if d > bestDist then
+                    bestDist = d
+                    best = model
+                end
+            end
+        end
+        if best ~= nil then
+            moverModel = best
+            moverRecord = npcs[best]
+            squad.currentMoverNpcId = best
+            squad.currentBoundStartedAt = now
+            if moverRecord ~= nil then
+                moverRecord.tacticalRole = "Mover"
+                moverRecord.boundDestination = boundDestinationFor(moverRecord, targetPos)
+            end
+            if BOUNDING.DEBUG == true then
+                Logger.debug("[AIService] squad", squad.id, "mover assigned —", best.Name)
+            end
+        end
+    end
+
+    -- Everyone else living holds as Cover (thinkNPC's Attack-planted branch
+    -- further refines this live to "Shooter"/keeps "Support" — see there).
+    table.clear(squad.coveringNpcIds)
+    for _, model in ipairs(living) do
+        if model ~= moverModel then
+            local record = npcs[model]
+            if record ~= nil then
+                record.tacticalRole = "Cover"
+                record.boundDestination = nil
+                table.insert(squad.coveringNpcIds, model)
+            end
+        end
+    end
+end
+
 -- (Re)assigns every living squad member a formation slot index: 1 = leader/anchor
 -- (the original spawn leader if still alive, else the first surviving member is
 -- promoted), 2+ cycle through SLOT_OFFSETS' flanking/rear directions. Called once
@@ -1872,6 +2070,9 @@ local function thinkNPC(record: NPCRecord, now: number)
         if squad ~= nil then
             ensureFormationAssigned(squad, now)
             clearStaleSquadAlert(squad, now)
+            -- AI squad bound-and-cover: cheap no-op unless BOUND_REEVALUATE_INTERVAL
+            -- has actually elapsed (mirrors the two calls above).
+            updateSquadBounding(squad, now)
         end
     end
 
@@ -2022,6 +2223,25 @@ local function thinkNPC(record: NPCRecord, now: number)
                 humanoid.AutoRotate = true
                 issueSquadMoveGoal(record, humanoid, cp or root.Position, 0, now)
             end
+        elseif BOUNDING.ENABLED == true and record.tacticalRole == "Mover" and record.boundDestination ~= nil
+            and dist > (BOUNDING.DO_NOT_BOUND_WITHIN_ATTACK_RANGE :: number) then
+            -- AI squad bound-and-cover: this grunt is the squad's currently-advancing
+            -- Mover — keep closing on its bound destination instead of planting/
+            -- fighting from here, even though ATTACK_RANGE/LOS may already allow it.
+            -- Falls through to the normal Attack/Chase branches below on its own once
+            -- it's close enough that bounding no longer applies (updateSquadBounding
+            -- also clears the role on arrival/timeout/target loss).
+            setState(record, "Chase")
+            record.coverUntil = 0
+            record.coverPoint = nil
+            record.fightPoint = nil
+            setCrouched(record, false)
+            humanoid.AutoRotate = true
+            humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
+            issueSquadMoveGoal(record, humanoid, record.boundDestination :: Vector3, 0, now)
+            if BOUNDING.MOVER_SHOULD_NOT_SHOOT ~= true and inLos and not record.firing and now >= record.reactionReadyAt then
+                startBurst(record)
+            end
         elseif dist <= AI.ATTACK_RANGE and inLos then
             setState(record, "Attack")
             record.coverPoint = nil
@@ -2068,7 +2288,30 @@ local function thinkNPC(record: NPCRecord, now: number)
                     hasAttackSlot = record.hasAttackSlot
                 end
 
-                if hasAttackSlot then
+                -- AI squad bound-and-cover: a Mover caught here (already within
+                -- ATTACK_RANGE/LOS but not yet past DO_NOT_BOUND_WITHIN_ATTACK_RANGE —
+                -- see the bound-override branch above) still must not shoot while
+                -- MOVER_SHOULD_NOT_SHOOT is true; a bounding Cover/Shooter/Support bot
+                -- must not shoot at all when COVER_BOT_CAN_SHOOT is false, even if it
+                -- holds a fire-discipline slot. Purely a further restriction on top of
+                -- hasAttackSlot — never grants a slot fire discipline didn't already.
+                local effectiveHasSlot = hasAttackSlot
+                if hasAttackSlot and BOUNDING.ENABLED == true then
+                    if record.tacticalRole == "Mover" and BOUNDING.MOVER_SHOULD_NOT_SHOOT == true then
+                        effectiveHasSlot = false
+                    elseif (record.tacticalRole == "Cover" or record.tacticalRole == "Shooter" or record.tacticalRole == "Support")
+                        and BOUNDING.COVER_BOT_CAN_SHOOT ~= true then
+                        effectiveHasSlot = false
+                    end
+                end
+
+                if effectiveHasSlot then
+                    if BOUNDING.ENABLED == true and record.tacticalRole ~= nil and record.tacticalRole ~= "Mover" then
+                        if record.tacticalRole ~= "Shooter" and BOUNDING.DEBUG == true then
+                            Logger.debug("[AIService]", record.model.Name, "bound role -> Shooter")
+                        end
+                        record.tacticalRole = "Shooter"
+                    end
                     -- Active shooter: face the player and fire once reaction-time
                     -- elapses. "If target is lost before reactionReadyAt, do not shoot
                     -- magically" is automatic: this branch only runs while troot is
@@ -2089,6 +2332,13 @@ local function thinkNPC(record: NPCRecord, now: number)
                         startBurst(record)
                     end
                 else
+                    -- AI squad bound-and-cover: relabel a bounding bot that's holding
+                    -- fire here (no slot, or COVER_BOT_CAN_SHOOT suppressed it) — "Cover"
+                    -- if it still has its own LOS, "Support" if it doesn't (matches the
+                    -- NPCRecord field doc: Support = no LOS at all yet).
+                    if BOUNDING.ENABLED == true and record.tacticalRole ~= nil and record.tacticalRole ~= "Mover" then
+                        record.tacticalRole = if inLos then "Cover" else "Support"
+                    end
                     -- No attack slot: never startBurst here (WAITING_BOT_CAN_SHOOT is
                     -- false by default — see below for the explicit opt-in escape
                     -- hatch). Track the target and/or reposition to a support/hold
@@ -2136,7 +2386,13 @@ local function thinkNPC(record: NPCRecord, now: number)
                     -- Escape hatch (off by default): explicitly let waiting bots fire
                     -- anyway, bypassing the slot limit. Reads Constants.AI.SHOT_* via
                     -- the normal startBurst/fireOneShot path, no separate damage logic.
-                    if DISCIPLINE.WAITING_BOT_CAN_SHOOT == true and not record.firing and now >= record.reactionReadyAt then
+                    -- Bound-and-cover's own restrictions still apply on top of it.
+                    local escapeHatchBlocked = BOUNDING.ENABLED == true
+                        and ((record.tacticalRole == "Mover" and BOUNDING.MOVER_SHOULD_NOT_SHOOT == true)
+                            or ((record.tacticalRole == "Cover" or record.tacticalRole == "Support")
+                                and BOUNDING.COVER_BOT_CAN_SHOOT ~= true))
+                    if DISCIPLINE.WAITING_BOT_CAN_SHOOT == true and not escapeHatchBlocked
+                        and not record.firing and now >= record.reactionReadyAt then
                         startBurst(record)
                     end
                 end
@@ -2148,8 +2404,25 @@ local function thinkNPC(record: NPCRecord, now: number)
             record.coverPoint = nil
             record.fightPoint = nil
             humanoid.AutoRotate = true
-            humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
-            issueSquadMoveGoal(record, humanoid, troot.Position, SPACING.CHASE_SPREAD_RADIUS :: number, now)
+
+            if BOUNDING.ENABLED == true and record.tacticalRole == "Mover" and record.boundDestination ~= nil then
+                humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
+                issueSquadMoveGoal(record, humanoid, record.boundDestination :: Vector3, 0, now)
+            elseif BOUNDING.ENABLED == true and record.tacticalRole ~= nil then
+                -- Covering (Cover/Shooter/Support): hold this ground instead of also
+                -- rushing forward while the squad's Mover advances — the core "some
+                -- bots hold while another moves" ask. Still turns to track the target
+                -- if it can see it. Does not route through findCoverPoint/
+                -- findFightingPosition here — see docs/TECHNICAL_DEBT.md "AI squad
+                -- bound-and-cover" for that deliberate simplification.
+                humanoid:MoveTo(root.Position)
+                if inLos then
+                    faceToward(record, troot.Position)
+                end
+            else
+                humanoid.WalkSpeed = AI.NPC_CHASE_SPEED
+                issueSquadMoveGoal(record, humanoid, troot.Position, SPACING.CHASE_SPREAD_RADIUS :: number, now)
+            end
         end
         return
     end
@@ -2278,6 +2551,10 @@ local function disconnectRecord(record: NPCRecord)
     -- anyway for hygiene, matching every other per-death field above.
     record.isAlertedBySquad = false
     record.investigateGoal = nil
+    -- AI squad bound-and-cover: release this grunt's Mover/Cover role (and the
+    -- squad's currentMoverNpcId/coveringNpcIds bookkeeping if it held one) so a
+    -- dead or destroyed grunt never leaves a stuck role behind.
+    releaseBoundRole(record)
     for _, conn in ipairs(record.conns) do
         conn:Disconnect()
     end
@@ -2479,6 +2756,9 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
         isAlertedBySquad = false,
         investigateGoal  = nil,
 
+        tacticalRole     = nil,
+        boundDestination = nil,
+
         dead      = false,
     }
 
@@ -2572,6 +2852,15 @@ local function spawnSquad(spawnCFrame: CFrame?, squadSize: number?): { Model }
         -- the first 0.75s of server life.
         lastKnownUpdateAt      = -math.huge,
         lastContactAt          = 0,  -- safe at 0: clearStaleSquadAlert's own pre-filter (lastKnownTargetPosition == nil) shields this before it's ever checked
+
+        currentMoverNpcId    = nil,
+        coveringNpcIds       = {},
+        currentBoundStartedAt = 0,
+        -- -math.huge, same reasoning/bug class as lastAttackSlotUpdateAt /
+        -- lastKnownUpdateAt above: a 0-init would let the BOUND_REEVALUATE_INTERVAL
+        -- throttle in updateSquadBounding skip this squad's very first evaluation if
+        -- it happens within the first 1.25s of server life.
+        lastBoundEvaluateAt   = -math.huge,
     }
 
     local models: { Model } = {}

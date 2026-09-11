@@ -1,5 +1,37 @@
 # Changelog
 
+## AI squad bound-and-cover movement
+
+- **Squads advance more naturally.** When a squad is alert with a known
+  player position but still far away, one living member is picked as the
+  **Mover** and advances toward the player while everyone else holds as
+  **Cover** — instead of the whole squad sprinting straight at the player
+  together. Once the Mover arrives (or a timeout passes), a different member
+  becomes the next Mover, so squads leapfrog forward rather than bunching.
+- **Fire discipline still applies, plus new restrictions.** A Mover does not
+  shoot while advancing (`MOVER_SHOULD_NOT_SHOOT`); Cover bots only fire with
+  their own line of sight and only if a fire-discipline attack slot is free
+  (`COVER_BOT_CAN_SHOOT` can force them to hold fire entirely). Never a
+  wallhack — bounding only ever changes movement/shoot-suppression, the
+  existing "must have own LOS to shoot" rule is untouched.
+- **Fair, not unbeatable.** Only a limited number of bots shoot at once
+  (existing fire discipline), the advancing Mover is exposed while moving,
+  and roles clear immediately on death/target loss/squad wipe — no stuck
+  mover, no permanent advantage.
+- New `Constants.AI_BOUNDING` table + `AIService` helpers `releaseBoundRole` /
+  `clearSquadBounding` / `boundDestinationFor` / `updateSquadBounding`. A
+  simplified, game-friendly pass — not a real cover-node/fire-and-maneuver
+  system — layered on top of the existing squad spacing, fire discipline, and
+  awareness systems rather than duplicating any of them; see
+  docs/TECHNICAL_DEBT.md "AI squad bound-and-cover movement" for every
+  scoping note and known limitation.
+- `AIService.server.lua` + `Constants.lua` only — no new remotes, no client
+  files, `GunService`/`DamageService` untouched, existing spawning / patrol /
+  chase / attack / cover / awareness / combat FX / damage / death cleanup all
+  preserved. `rojo build` clean; MCP-checked the bound-destination math,
+  mover selection, and arrival/timeout swap logic in isolation; not
+  runtime-verified in Play.
+
 ## AI squad awareness and last-known-position memory
 
 - **Squads react together.** When one grunt spots (or is hit by) the player,
@@ -1141,3 +1173,64 @@ Client-only, no server / remote / ammo / damage / hit-validation change.
 - Native Studio control became available. Observed the migration test window and existing Rojo 7.6.1 plugin.
 - Matched the local CLI to official Rojo 7.6.1 and rebuilt both configurations successfully.
 - Saved the test copy and revalidated all mapped scripts against it before attempting the pilot connection.
+
+
+## RPG-7 gameplay prototype — 2026-09-11
+
+Owner requested continuation after RPG import. Added RPG7 loadout (one loaded/four reserve), semi fire, 4.8-second server-validated reload, server ray-swept rocket flight (140 studs/s, 600-stud limit), impact blast (14-stud radius, distance falloff, occlusion checks), and procedural presentation using the existing shared arms module. No new remotes. RocketService uses the existing DamageService with Explosion/Unknown-region damage and a visual-only zero-pressure Explosion. WorldWeaponService now accepts registered worldModelName entries instead of an AKS74-only guard.
+
+Assistant MCP checks: equipped RPG7 visible with arms; fire consumed 1/4 to 0/4; reload restored 1/3; controlled blast target health 56.56 exposed, 100 behind cover, 100 outside radius. Seven changed scripts compiled before the world-model guard refinement. Source pack clips remain archived, not published/retargeted animation tracks. Generic rocket visual/audio and procedural reload remain polish work; no prop demolition is wired. No user-confirmed playtest or publishing claimed. Test sessions stopped and temporary QA instances discarded.
+
+
+## Material destruction — 2026-09-11
+
+Implemented server-owned Wood, Glass, Plaster, Brick, Concrete, and Metal profiles, with bullet/blast multipliers. Existing anchored-part opt-in remains: BR_BreakableProfile is a profile name or Auto (Material lookup). Untagged geometry is preserved. Runtime additions register automatically; call DestructionService:Register after assigning an attribute to an already-parented part. Bullet hits also attempt lazy registration.
+
+RPG impacts now call ApplyBlast after character damage. Blast range/falloff uses nearest oriented-box point; cover visibility is snapshotted before applying changes, preventing a single blast from destroying successive layers through cover. Existing fragment budget and PREP reset are retained. This is whole-part destruction; authored segmented panels give partial breaches. No arbitrary mesh cutting or structural collapse.
+
+Assistant MCP tests: a 30-damage bullet left Glass 0, Wood 50, Plaster 31, Brick 145.5, Concrete 240, Metal 198.5 health. Untagged parts rejected damage; invalid blast radius rejected; broken parts rejected repeat hits; reset restored health, transparency, and collision. A glass front panel blocked damage to another glass panel behind it within the same blast. Runtime Auto-material registration and RPG-impact glass destruction passed. These are assistant tests, not owner-reported verification. Studio RocketService required a targeted manual hook update because the active Rojo process had not loaded its new mapping. Sessions stopped and temporary test objects cleared.
+
+Workspace.MaterialDestructionRange contains six labeled opt-in sample panels at the elevated test range (y=303, z=-48). No other map geometry was newly tagged. Generic material-matched fragments are used; unique shatter sounds/dust/chipping remain future polish. Not published.
+
+
+## Irregular fracture prototype — 2026-09-11
+
+Owner rejected the untested cell-grid direction and requested Battlefield-style irregular breaches. Removed the grid implementation and its configuration. DestructionService now supports authored irregular section Models, shared section health, precise planar polygon blast distance, steep local blast falloff, rigid cosmetic slab detachment, foundation/neighbor-graph support checks, and full PREP reset. Ordinary tagged material parts retain their previous behavior. No new remotes.
+
+Workspace.FractureWallDemo is a 14x8x0.65 concrete wall, centered (-28,304,-30), with 18 irregular sections made from 118 wedge primitives (no voxel cells). The wedges inside each section share health and detach together. Foundations and shared-edge neighbor lists were generated from clipped Voronoi polygons. Labeled RPG test wall added. Rotated brick surface textures exposed each triangle, so this demo deliberately uses concrete; authored UV meshes are still preferable for brick courses and detailed finishes.
+
+Assistant MCP tests: actual RocketService projectile opened four of 18 sections, leaving an irregular central breach. Shared health, concrete bullet resistance, collapse after removal of all foundations (18 sections), debris cap/noncollision, and complete health/collision/visibility reset passed. Changed scripts compiled; whitespace check passed with Windows line endings recognized. Test objects discarded by stopping Play. No user-reported verification or publishing claimed.
+
+Authoring: parent BaseParts under section Models marked BR_FractureRegion=true. Give each piece BR_BreakableProfile. Put sections under a wall Model; mark base sections BR_Foundation=true, list adjacent section names in comma-separated BR_Neighbors, and enable BR_SupportCollapse on the wall. Generated planar sections also store BR_FracturePolygon; wall pivot and BR_FractureFrame/BR_FractureThickness define the face for precise blast distance. A section must fit wholly inside the global registration budget. Model movement during active simulation is not supported; walls are anchored static structures.
+
+Scope: this is a working pre-fractured-wall prototype, not automatic arbitrary-map fracture, mesh carving, full building load simulation, layered plaster/rebar, or persistent rubble. Debris is cosmetic, noncolliding, globally capped at 64 primitives and expires. Materials still use the established damage profiles. Only the demonstration wall has been authored with the new irregular geometry; the six earlier sample panels remain whole-part tests.
+
+
+## Wood splinters and metal snap fragments — 2026-09-11
+
+Added material-specific break presentation to existing tagged objects and fracture sections. Wood emits long tapered WedgePart splinters; metal emits thin angular shards with greater velocity and spin. Authored fracture slabs also use material-specific launch motion. Shared debris budget/noncollision/lifetime and existing damage/reset rules remain. No new remotes or sound assets.
+
+Added WoodFractureDemo (14 elongated irregular regions, 80 primitives, x=-46) and MetalFractureDemo (10 angular regions, 58 primitives, x=-10), both y=304,z=-30. Wood geometry was refined from overly straight full-height strips to staggered long fractures. Wood material avoids rotating plank-course patterns. These are authored demo patterns; existing ordinary props receive debris styles but do not automatically acquire irregular geometry.
+
+Assistant MCP tests confirmed WoodSplinter and MetalShard output, tapered/thin dimensions, noncolliding/nonqueryable debris, and reset restoring both models and clearing debris. Visually reviewed wood splinters and metal sharp breach edges in play. Source compile passed. Sessions stopped; no publishing or user-reported verification claimed. Rebuild scripts saved in outputs/MaterialFractures in the active task workspace.
+
+
+## Fine wood and concrete fractures — 2026-09-11
+
+Owner requested smaller wood/concrete pieces, with very small gunfire wood splinters and larger explosive debris. Damage kind now reaches the break presentation: wood bullet breaks emit 0.154–0.275-stud tapered splinters and suppress the large detached slab; explosive/collapse breaks retain 1.26–2.25-stud splinters plus slab detachment. Existing metal behavior remains. No new remotes.
+
+WoodFractureDemo now has 140 irregular regions (1021 wedge primitives after degenerate wedges are skipped); FractureWallDemo now has 48 regions (333 primitives). Global registration ceiling increased from 800 to 1800 for the denser test assets; cosmetic debris ceiling remains 64. This is a bounded demonstration density, not a recommendation to prefracture an entire map at this resolution. Only authored fracture walls get the smaller openings; ordinary tagged props still break as a whole part with the updated debris style. Wood procedural texture orientation varies across wedge geometry; unified authored UVs remain visual polish.
+
+Assistant MCP tests: all wood/concrete pieces registered; one bullet destroyed exactly one small wood region, emitting only tiny splinters (observed max 0.251 studs). An explosive hit emitted larger splinters (observed max 2.243 studs) and slabs. Visual checks confirmed the small gunfire hole and finer concrete breach. Reset restored collision, visibility, and intact flags for both denser walls. Script compiled. Test session stopped and temporary checks removed; not published and no user-reported verification claimed.
+
+
+## Concrete RPG breach tuning — 2026-09-11
+
+Added a concrete-only fracture blast falloff exponent of 4 (other fracture materials retain 5). Assistant MCP comparison at the same RPG impact broke 10 concrete sections versus 8 previously. Character blast damage/range and wood/metal rules unchanged. Playtest stopped; not published.
+
+
+## Visible support collapse — 2026-09-11
+
+Fixed unsupported sections disappearing when cosmetic clone debris hit its 64-primitive budget. Support collapse now animates the existing unsupported geometry as a falling group; it does not allocate debris clones. Gravity-driven visual descent is capped by a downward ground ray, with a slight tip. Sections remain for six seconds and fade over 1.2 seconds. Collision/query are disabled during collapse; this is cosmetic server-controlled motion, not a dynamic rigid-body simulation. Bullet/explosion chips retain their separate limits. Original transforms are recorded and restored on Reset; shutdown/removal clears tracking.
+
+Assistant MCP test severed wood along an exact horizontal polygon cut: 447 unsupported primitives remained visible and moved downward (>0.1 studs), exceeding the old clone budget without disappearance. Timed fade cleanup and reset restoring original positions/visibility/collision passed. Source compiled and whitespace check passed. Playtest stopped; not published.

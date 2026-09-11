@@ -592,6 +592,110 @@ Residual risks:
   a squadmate still shown as "alert" for reaction purposes 2 extra seconds
   after it's stopped actually investigating anywhere).
 
+## AI squad bound-and-cover movement (Studio verification: REQUIRED, not done)
+
+**Scope note up front:** this is a deliberately **simplified, game-friendly**
+pass — "one bot advances while others hold, then they swap" — not a real
+fire-and-maneuver doctrine simulation, not a cover-node system, no flanking
+routes, no breaching, no grenades, no voice callouts. That's an explicit
+design goal from the task, not a shortcut taken against it.
+
+New `Constants.AI_BOUNDING` table + `AIService` helpers `releaseBoundRole` /
+`clearSquadBounding` / `boundDestinationFor` / `updateSquadBounding`, new
+`NPCRecord` fields `tacticalRole` (`"Mover" | "Cover" | "Shooter" | "Support" |
+nil`) / `boundDestination`, new `SquadRecord` fields `currentMoverNpcId` /
+`coveringNpcIds` / `currentBoundStartedAt` / `lastBoundEvaluateAt`. Layers on
+top of, and reads from, three earlier systems this same session built:
+squad-spacing's `formationDirectionForSlot` (lateral offset for the bound
+destination), fire discipline's slot/LOS gate (bounding only ever
+*restricts* who's allowed to fire further, never grants a shot fire
+discipline wouldn't already), and squad awareness's shared `alertUntil` /
+`lastKnownTargetPosition` (the "is the squad alert with a known target"
+precondition for bounding at all). `AIService` + `Constants.AI_BOUNDING`
+only — no new remotes, no client files, `GunService`/`DamageService`
+untouched, spawning / spacing / fire discipline / awareness / cover /
+combat FX / damage / death cleanup all preserved. MCP-checked (throwaway
+logic, not a live `AIService` require) the bound-destination math
+(advance/clamp toward target, never landing inside
+`DO_NOT_BOUND_WITHIN_ATTACK_RANGE`), farthest-from-target mover selection,
+the arrival/timeout swap conditions, the `MIN_COVERING_BOTS_REQUIRED` /
+`DO_NOT_BOUND_WITHIN_ATTACK_RANGE` bounding-eligibility gate, and the
+`-math.huge` reevaluation-throttle init (same bug class caught twice already
+this session in `lastAttackSlotUpdateAt` / `lastKnownUpdateAt`). Residual
+risks:
+
+- **Not runtime-verified in Play.** Whether a squad advancing this way
+  actually reads as "one bot moves while others cover, then they swap" — the
+  core design goal — has not been observed. The distance/timing constants
+  (`MOVE_BOUND_DISTANCE_MIN/MAX`, `BOUND_ARRIVE_DISTANCE`,
+  `SWAP_AFTER_MAX_TIME`, `BOUND_REEVALUATE_INTERVAL`) are first guesses and
+  will likely need tuning after an actual playtest.
+- **No real cover-node system.** The Mover's `boundDestination` is a raw
+  point offset toward the target plus a formation-slot lateral nudge — it is
+  not validated against actual geometry, does not check walkability, and
+  does not prefer an actual wall/obstacle the way `findCoverPoint` /
+  `findFightingPosition` do for the Cover/Attack states. A bound can plan a
+  destination in the open, against a wall, or somewhere the grunt can't
+  path to (`Humanoid:MoveTo` then just quietly fails, same caveat as every
+  other computed-goal system this session).
+- **Cover role doesn't call `findCoverPoint`/`findFightingPosition` while
+  holding in `Chase`.** Per the task's own "keep it simple" instruction, a
+  covering bot in the `Chase` state just holds its current ground
+  (`MoveTo(root.Position)`) rather than actively repositioning to nearby
+  literal cover — it only gets real cover-seeking once it's close enough to
+  transition into the existing `Attack` state (`findFightingPosition`) or
+  gets shot at (`Cover` state, `findCoverPoint`). A covering bot caught in
+  the open while holding is therefore still exposed, same as it always was
+  outside of Attack/Cover — bounding does not make it safer, only stops it
+  from *also* running forward.
+- **`MAX_MOVERS_PER_SQUAD` only supports the literal value `1` from this
+  task's spec.** `SquadRecord.currentMoverNpcId` is a single field, not a
+  list — setting the constant higher than `1` would have no effect (the code
+  never reads it as a count). Documented here rather than silently ignored;
+  generalizing to N movers would need `currentMoverNpcId` turned into a set
+  and touches `updateSquadBounding`'s mover-picking loop, `releaseBoundRole`,
+  and every branch that checks `record.tacticalRole == "Mover"`.
+- **`COVER_HOLD_TIME_MIN`/`MAX` are declared but not read anywhere.** The
+  task's Constants block includes them (reserved for a future randomized
+  "how long does a covering bot hold before also considering advancing"
+  timer); this pass never needed that decision — a covering bot's role only
+  changes when `updateSquadBounding` reassigns Mover/Cover on its own
+  `BOUND_REEVALUATE_INTERVAL` cadence, or when fire-discipline/LOS
+  reassigns `tacticalRole` between `Cover`/`Shooter`/`Support`. Left as
+  literal dead config rather than wiring speculative behavior for it.
+- **Mover-selection is "farthest from target," not doctrine-aware.** It does
+  not consider ammo, health, formation slot role (e.g. the leader could get
+  picked as Mover), or whether the farthest bot has a remotely safe path —
+  purely a distance heuristic chosen to keep the pass simple and to
+  naturally alternate who advances (the previous mover, now nearer, is
+  unlikely to be picked again immediately).
+- **Bound-and-cover only integrates with `Chase` and the `Attack`-planted
+  branch — not `Cover`, `Search`, or the squad-shared-investigate path.** A
+  bot retreating to cover after taking fire, searching a stale last-known
+  position, or investigating a squadmate's shared sighting ignores its
+  `tacticalRole` entirely for movement purposes (though the shoot-gates
+  still apply anywhere `startBurst` is reachable). This was a deliberate
+  scope decision — the task asked for "basic bound-and-cover movement," and
+  Chase (the "several squad members are running straight at the player"
+  case the task specifically called out) plus Attack (where the shoot-gates
+  matter) cover the actual complaint; extending role-awareness into every
+  other state risked a much larger, riskier change for a "keep it simple"
+  task.
+- **`ATTACK_RANGE` (90 studs) is far larger than
+  `DO_NOT_BOUND_WITHIN_ATTACK_RANGE` (18 studs)**, so a squad is very
+  commonly already in the `Attack`-planted branch (in range + LOS) while
+  still bounding. Handled via a dedicated bound-override branch checked
+  *before* the normal Attack-range decision (a Mover keeps closing on its
+  `boundDestination` even though it technically qualifies for `Attack`) plus
+  shoot-suppression inside the Attack-planted branch itself as a safety net
+  for the brief window before a role updates — but this means "Attack" state
+  and "currently bounding" now overlap for a meaningful chunk of typical
+  engagement range, which adds a small amount of branch complexity future
+  readers should be aware of.
+- **No animation/callout polish.** A Mover advancing and a Cover bot holding
+  look identical to their existing Chase/Attack poses — no distinct "moving
+  up" or "covering" animation, stance, or barked line.
+
 ## Player first-person weapon retraction — Tarkov close-quarters (Studio verification: REQUIRED, not done)
 
 `ViewModelController.computeWallCollisionCF` + `Constants.VIEWMODEL_WALL_*`. One
@@ -1258,3 +1362,59 @@ Do not create replacement systems to resolve speculative debt. Preserve baseline
 - Existing AR15 server weapon and AKS74 viewmodel naming/configuration differ; keep this separate from city integration.
 - Generated test-copy GunService integration is not represented in src or Rojo mappings. Connecting baseline default.project.json to the city copy would revert that integration.
 - New map artifacts are stored separately from Git. The generator is backed up in Git, but rebuilding the complete test requires the separately preserved original place file.
+
+
+## RPG-7 gameplay prototype — 2026-09-11
+
+Owner requested continuation after RPG import. Added RPG7 loadout (one loaded/four reserve), semi fire, 4.8-second server-validated reload, server ray-swept rocket flight (140 studs/s, 600-stud limit), impact blast (14-stud radius, distance falloff, occlusion checks), and procedural presentation using the existing shared arms module. No new remotes. RocketService uses the existing DamageService with Explosion/Unknown-region damage and a visual-only zero-pressure Explosion. WorldWeaponService now accepts registered worldModelName entries instead of an AKS74-only guard.
+
+Assistant MCP checks: equipped RPG7 visible with arms; fire consumed 1/4 to 0/4; reload restored 1/3; controlled blast target health 56.56 exposed, 100 behind cover, 100 outside radius. Seven changed scripts compiled before the world-model guard refinement. Source pack clips remain archived, not published/retargeted animation tracks. Generic rocket visual/audio and procedural reload remain polish work; no prop demolition is wired. No user-confirmed playtest or publishing claimed. Test sessions stopped and temporary QA instances discarded.
+
+
+## Material destruction — 2026-09-11
+
+Implemented server-owned Wood, Glass, Plaster, Brick, Concrete, and Metal profiles, with bullet/blast multipliers. Existing anchored-part opt-in remains: BR_BreakableProfile is a profile name or Auto (Material lookup). Untagged geometry is preserved. Runtime additions register automatically; call DestructionService:Register after assigning an attribute to an already-parented part. Bullet hits also attempt lazy registration.
+
+RPG impacts now call ApplyBlast after character damage. Blast range/falloff uses nearest oriented-box point; cover visibility is snapshotted before applying changes, preventing a single blast from destroying successive layers through cover. Existing fragment budget and PREP reset are retained. This is whole-part destruction; authored segmented panels give partial breaches. No arbitrary mesh cutting or structural collapse.
+
+Assistant MCP tests: a 30-damage bullet left Glass 0, Wood 50, Plaster 31, Brick 145.5, Concrete 240, Metal 198.5 health. Untagged parts rejected damage; invalid blast radius rejected; broken parts rejected repeat hits; reset restored health, transparency, and collision. A glass front panel blocked damage to another glass panel behind it within the same blast. Runtime Auto-material registration and RPG-impact glass destruction passed. These are assistant tests, not owner-reported verification. Studio RocketService required a targeted manual hook update because the active Rojo process had not loaded its new mapping. Sessions stopped and temporary test objects cleared.
+
+Workspace.MaterialDestructionRange contains six labeled opt-in sample panels at the elevated test range (y=303, z=-48). No other map geometry was newly tagged. Generic material-matched fragments are used; unique shatter sounds/dust/chipping remain future polish. Not published.
+
+
+## Irregular fracture prototype — 2026-09-11
+
+Owner rejected the untested cell-grid direction and requested Battlefield-style irregular breaches. Removed the grid implementation and its configuration. DestructionService now supports authored irregular section Models, shared section health, precise planar polygon blast distance, steep local blast falloff, rigid cosmetic slab detachment, foundation/neighbor-graph support checks, and full PREP reset. Ordinary tagged material parts retain their previous behavior. No new remotes.
+
+Workspace.FractureWallDemo is a 14x8x0.65 concrete wall, centered (-28,304,-30), with 18 irregular sections made from 118 wedge primitives (no voxel cells). The wedges inside each section share health and detach together. Foundations and shared-edge neighbor lists were generated from clipped Voronoi polygons. Labeled RPG test wall added. Rotated brick surface textures exposed each triangle, so this demo deliberately uses concrete; authored UV meshes are still preferable for brick courses and detailed finishes.
+
+Assistant MCP tests: actual RocketService projectile opened four of 18 sections, leaving an irregular central breach. Shared health, concrete bullet resistance, collapse after removal of all foundations (18 sections), debris cap/noncollision, and complete health/collision/visibility reset passed. Changed scripts compiled; whitespace check passed with Windows line endings recognized. Test objects discarded by stopping Play. No user-reported verification or publishing claimed.
+
+Authoring: parent BaseParts under section Models marked BR_FractureRegion=true. Give each piece BR_BreakableProfile. Put sections under a wall Model; mark base sections BR_Foundation=true, list adjacent section names in comma-separated BR_Neighbors, and enable BR_SupportCollapse on the wall. Generated planar sections also store BR_FracturePolygon; wall pivot and BR_FractureFrame/BR_FractureThickness define the face for precise blast distance. A section must fit wholly inside the global registration budget. Model movement during active simulation is not supported; walls are anchored static structures.
+
+Scope: this is a working pre-fractured-wall prototype, not automatic arbitrary-map fracture, mesh carving, full building load simulation, layered plaster/rebar, or persistent rubble. Debris is cosmetic, noncolliding, globally capped at 64 primitives and expires. Materials still use the established damage profiles. Only the demonstration wall has been authored with the new irregular geometry; the six earlier sample panels remain whole-part tests.
+
+
+## Wood splinters and metal snap fragments — 2026-09-11
+
+Added material-specific break presentation to existing tagged objects and fracture sections. Wood emits long tapered WedgePart splinters; metal emits thin angular shards with greater velocity and spin. Authored fracture slabs also use material-specific launch motion. Shared debris budget/noncollision/lifetime and existing damage/reset rules remain. No new remotes or sound assets.
+
+Added WoodFractureDemo (14 elongated irregular regions, 80 primitives, x=-46) and MetalFractureDemo (10 angular regions, 58 primitives, x=-10), both y=304,z=-30. Wood geometry was refined from overly straight full-height strips to staggered long fractures. Wood material avoids rotating plank-course patterns. These are authored demo patterns; existing ordinary props receive debris styles but do not automatically acquire irregular geometry.
+
+Assistant MCP tests confirmed WoodSplinter and MetalShard output, tapered/thin dimensions, noncolliding/nonqueryable debris, and reset restoring both models and clearing debris. Visually reviewed wood splinters and metal sharp breach edges in play. Source compile passed. Sessions stopped; no publishing or user-reported verification claimed. Rebuild scripts saved in outputs/MaterialFractures in the active task workspace.
+
+
+## Fine wood and concrete fractures — 2026-09-11
+
+Owner requested smaller wood/concrete pieces, with very small gunfire wood splinters and larger explosive debris. Damage kind now reaches the break presentation: wood bullet breaks emit 0.154–0.275-stud tapered splinters and suppress the large detached slab; explosive/collapse breaks retain 1.26–2.25-stud splinters plus slab detachment. Existing metal behavior remains. No new remotes.
+
+WoodFractureDemo now has 140 irregular regions (1021 wedge primitives after degenerate wedges are skipped); FractureWallDemo now has 48 regions (333 primitives). Global registration ceiling increased from 800 to 1800 for the denser test assets; cosmetic debris ceiling remains 64. This is a bounded demonstration density, not a recommendation to prefracture an entire map at this resolution. Only authored fracture walls get the smaller openings; ordinary tagged props still break as a whole part with the updated debris style. Wood procedural texture orientation varies across wedge geometry; unified authored UVs remain visual polish.
+
+Assistant MCP tests: all wood/concrete pieces registered; one bullet destroyed exactly one small wood region, emitting only tiny splinters (observed max 0.251 studs). An explosive hit emitted larger splinters (observed max 2.243 studs) and slabs. Visual checks confirmed the small gunfire hole and finer concrete breach. Reset restored collision, visibility, and intact flags for both denser walls. Script compiled. Test session stopped and temporary checks removed; not published and no user-reported verification claimed.
+
+
+## Visible support collapse — 2026-09-11
+
+Fixed unsupported sections disappearing when cosmetic clone debris hit its 64-primitive budget. Support collapse now animates the existing unsupported geometry as a falling group; it does not allocate debris clones. Gravity-driven visual descent is capped by a downward ground ray, with a slight tip. Sections remain for six seconds and fade over 1.2 seconds. Collision/query are disabled during collapse; this is cosmetic server-controlled motion, not a dynamic rigid-body simulation. Bullet/explosion chips retain their separate limits. Original transforms are recorded and restored on Reset; shutdown/removal clears tracking.
+
+Assistant MCP test severed wood along an exact horizontal polygon cut: 447 unsupported primitives remained visible and moved downward (>0.1 studs), exceeding the old clone budget without disappearance. Timed fade cleanup and reset restoring original positions/visibility/collision passed. Source compiled and whitespace check passed. Playtest stopped; not published.
