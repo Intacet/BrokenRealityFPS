@@ -2082,6 +2082,12 @@ Constants.TAG_DAMAGE_DUMMY       = "BR_DamageDummy"      -- developer test dummy
 Constants.ATTR_INFINITE_HEALTH   = "BR_InfiniteHealth"   -- model attribute: DamageService still fires damage events but does not reduce Humanoid.Health
 Constants.ATTR_REACTIONS_ENABLED = "BR_ReactionsEnabled" -- reserved for HitReactionService (Stage 5, not yet built)
 Constants.ATTR_BLOOD_ENABLED     = "BR_BloodEnabled"     -- reserved for BloodService (Stage 4, not yet built)
+-- Player attribute (2026-09-11): AIService's own targeting (findVisibleTarget /
+-- targetRootOf / the DamageDealt hit-reaction listener) skips a player entirely
+-- while this is true — set server-side by AIService's SetAIInvisible remote
+-- handler, requested by LoadoutMenu's "AI INVISIBILITY" toggle button. Persists
+-- across respawns (a session toggle, like the crosshair toggle) until turned off.
+Constants.ATTR_AI_INVISIBLE      = "BR_AIInvisible"
 
 -- Developer gating. Dev-only tooling (dummy control UI, Stage 6) is accepted from a
 -- player whose UserId is listed here, or from any client when RunService:IsStudio().

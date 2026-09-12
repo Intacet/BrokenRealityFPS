@@ -34,6 +34,12 @@
 -- client controller) listens for that confirmation and grants free-fly spectating.
 -- Only ever affects the requesting player, so no shared cooldown.
 --
+-- AI INVISIBILITY toggles Constants.ATTR_AI_INVISIBLE on this player via the
+-- SetAIInvisible remote — AIService's own targeting (findVisibleTarget,
+-- targetRootOf, the hit-reaction listener) skips this player entirely while
+-- it's set, so grunts never acquire, track, or return fire on them. A session
+-- toggle like Crosshair — persists across respawns until turned back off.
+--
 -- Initialized by ClientInit via loadInitAndStart():
 --   1. init(playerGui) — builds every GUI instance
 --   2. Start()         — connects input + RoundStateChanged, seeds selection
@@ -61,6 +67,7 @@ local SelectLoadout     = Remotes:WaitForChild("SelectLoadout")     :: RemoteEve
 local RespawnBots       = Remotes:WaitForChild("RespawnBots")       :: RemoteEvent
 local KillAllBots       = Remotes:WaitForChild("KillAllBots")       :: RemoteEvent
 local TeleportToArena   = Remotes:WaitForChild("TeleportToArena")   :: RemoteEvent
+local SetAIInvisible    = Remotes:WaitForChild("SetAIInvisible")    :: RemoteEvent
 
 local LocalPlayer = Players.LocalPlayer
 local LOADOUT     = Constants.LOADOUT :: any
@@ -99,6 +106,8 @@ local respawnLbl   : TextLabel
 local killAllBtn   : TextButton
 local killAllLbl   : TextLabel
 local watchArenaBtn: TextButton
+local aiInvisibleBtn: TextButton
+local aiInvisibleLbl: TextLabel
 
 -- weapon key → { button: TextButton, stroke: UIStroke, selectable: boolean }
 local weaponRows : { [string]: { button: TextButton, stroke: UIStroke, selectable: boolean } } = {}
@@ -121,6 +130,10 @@ local crosshairEnabled = true
 local respawnCooldownUntil = 0
 -- Same pattern, mirroring Constants.AI.KILL_ALL_COOLDOWN_SECONDS.
 local killAllCooldownUntil = 0
+-- Client-side mirror of Constants.ATTR_AI_INVISIBLE — same "purely a UI mirror"
+-- pattern as crosshairEnabled; the server attribute (set via SetAIInvisible) is
+-- the real state AIService reads, this var only drives the button label.
+local aiInvisibleEnabled = false
 
 -- ============================================================
 -- Build helpers
@@ -249,6 +262,18 @@ local function refreshCrosshairButton()
     end
 end
 
+-- Syncs the AI invisibility toggle label from the local mirror. Unlike
+-- crosshair there's no client-readable authority to re-sync FROM (the real
+-- state lives server-side as Constants.ATTR_AI_INVISIBLE on this player) —
+-- aiInvisibleEnabled is the only place this button's state lives client-side,
+-- exactly like the server-authoritative respawn/kill-all cooldowns above.
+local function refreshAIInvisibleButton()
+    if aiInvisibleLbl ~= nil then
+        aiInvisibleLbl.Text = "AI INVISIBILITY: " .. (aiInvisibleEnabled and "ON" or "OFF")
+        aiInvisibleLbl.TextColor3 = aiInvisibleEnabled and WHITE or DIM_GREY
+    end
+end
+
 -- ============================================================
 -- Open / close
 -- ============================================================
@@ -366,10 +391,10 @@ function LoadoutMenu:init(playerGui: PlayerGui)
     backdrop.Parent              = screenGui
 
     -- Panel
-    local TOGGLE_H = 30  -- crosshair toggle / respawn-bots / kill-all-bots / watch-arena button row height
+    local TOGGLE_H = 30  -- crosshair / respawn-bots / kill-all-bots / watch-arena / ai-invisibility button row height
     local weaponBlockH = #LOADOUT.WEAPONS * CARD_H + (#LOADOUT.WEAPONS - 1) * CARD_GAP
     local panelH = PAD + 28 + 22 + weaponBlockH + 24 + 20 + ROW_H + 20 + ROW_H + 8
-        + TOGGLE_H + 8 + TOGGLE_H + 8 + TOGGLE_H + 8 + TOGGLE_H + 8 + 16 + PAD
+        + TOGGLE_H + 8 + TOGGLE_H + 8 + TOGGLE_H + 8 + TOGGLE_H + 8 + TOGGLE_H + 8 + 16 + PAD
 
     panel                    = Instance.new("Frame")
     panel.Name               = "Panel"
@@ -510,6 +535,21 @@ function LoadoutMenu:init(playerGui: PlayerGui)
         12, true, WHITE, Enum.TextXAlignment.Center)
     y += TOGGLE_H + 8
 
+    -- AI invisibility — sets Constants.ATTR_AI_INVISIBLE on this player via
+    -- SetAIInvisible; AIService's own targeting (findVisibleTarget/
+    -- targetRootOf/hit-reaction) skips this player entirely while it's set.
+    -- Session toggle, like Crosshair — persists across respawns until turned off.
+    local aiInvisibleButton = makeButton(panel,
+        UDim2.fromOffset(innerW, TOGGLE_H),
+        UDim2.fromOffset(PAD, y),
+        CARD_COLOR)
+    aiInvisibleBtn = aiInvisibleButton
+    aiInvisibleBtn.Name = "AIInvisibility"
+    aiInvisibleLbl = makeLabel(aiInvisibleBtn, "AI INVISIBILITY: OFF",
+        UDim2.fromScale(1, 1), UDim2.fromScale(0, 0),
+        12, true, WHITE, Enum.TextXAlignment.Center)
+    y += TOGGLE_H + 8
+
     makeLabel(panel,
         string.format("[%s] close", LOADOUT.TOGGLE_KEY.Name),
         UDim2.fromOffset(innerW, 16), UDim2.fromOffset(PAD, y),
@@ -582,6 +622,16 @@ function LoadoutMenu:Start()
         TeleportToArena:FireServer()
         Logger.debug("[LoadoutMenu] Watch AI Arena requested")
         setOpen(false)
+    end)
+
+    -- AI invisibility on/off — fires immediately; the server just sets the
+    -- attribute, no validation/cooldown needed since it only affects the
+    -- requester's own player.
+    aiInvisibleBtn.Activated:Connect(function()
+        aiInvisibleEnabled = not aiInvisibleEnabled
+        SetAIInvisible:FireServer(aiInvisibleEnabled)
+        Logger.debug("[LoadoutMenu] AI Invisibility ->", aiInvisibleEnabled)
+        refreshAIInvisibleButton()
     end)
 
     -- Toggle key.

@@ -83,6 +83,7 @@ makeEvent("DummyDevState")      -- server → subscribed dev client | test-dummy
 makeEvent("RespawnBots")        -- client → server | request AIService.RespawnAllSquads(); server-side cooldown
 makeEvent("KillAllBots")        -- client → server | request AIService.KillAllBots(); server-side cooldown
 makeEvent("TeleportToArena")    -- client → server | request teleport above Workspace/BrokenReality_AIArena; server → same client | confirms the teleport landed so SpectatorFlyController can grant fly
+makeEvent("SetAIInvisible")     -- client → server | (boolean) sets/clears Constants.ATTR_AI_INVISIBLE on the requesting player; AIService's own targeting skips them while set
 
 -- World weapon model (third-person attachment)
 makeEvent("WeaponEquipState")   -- client → server | request equip/holster of world weapon model

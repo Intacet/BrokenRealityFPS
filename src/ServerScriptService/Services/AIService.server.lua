@@ -136,6 +136,9 @@ local KillAllBots     = Remotes:WaitForChild("KillAllBots") :: RemoteEvent
 -- client confirmation once the teleport lands (SpectatorFlyController grants fly
 -- only after seeing that confirmation, never on the raw request).
 local TeleportToArena = Remotes:WaitForChild("TeleportToArena") :: RemoteEvent
+-- AI invisibility toggle (2026-09-11): client → server (boolean) | sets/clears
+-- Constants.ATTR_AI_INVISIBLE on the requesting player.
+local SetAIInvisible  = Remotes:WaitForChild("SetAIInvisible")  :: RemoteEvent
 
 -- Untyped views of the tuning tables (heterogeneous fields; matches the pattern
 -- used by TestAreaBuilder's `local CFG = Constants.DEV_TEST_AREA :: any`).
@@ -587,18 +590,29 @@ local function canSee(record: NPCRecord, targetChar: Model, targetRoot: BasePart
     return result.Instance:IsDescendantOf(targetChar)
 end
 
+-- AI invisibility toggle (2026-09-11): true while Constants.ATTR_AI_INVISIBLE
+-- is set on `player` (LoadoutMenu's "AI INVISIBILITY" button, via the
+-- SetAIInvisible remote below). Consulted by findVisibleTarget (never
+-- acquired as a fresh target) and targetRootOf (drops an already-engaged
+-- grunt's target instantly, the same as if the player had disconnected) — the
+-- combination is what makes this a real "AI can't see me" toggle rather than
+-- only blocking new acquisitions.
+local function isAIInvisible(player: Player): boolean
+    return player:GetAttribute(Constants.ATTR_AI_INVISIBLE) == true
+end
+
 -- Nearest target that is alive, in DETECTION_RANGE, and visible — a Player
--- (unconditionally hostile, as it always has been) or an enemy-faction AI
--- grunt (AI arena, 2026-09-11). nil if none. Two grunts of the SAME faction
--- never match each other here — every existing single-faction spawn path
--- resolves to the same Constants.AI.DEFAULT_FACTION, so this loop's second
--- half is a no-op for all of today's behavior.
+-- (unconditionally hostile, as it always has been, unless isAIInvisible) or
+-- an enemy-faction AI grunt (AI arena, 2026-09-11). nil if none. Two grunts of
+-- the SAME faction never match each other here — every existing
+-- single-faction spawn path resolves to the same Constants.AI.DEFAULT_FACTION,
+-- so this loop's second half is a no-op for all of today's behavior.
 local function findVisibleTarget(record: NPCRecord): AITarget?
     local best: AITarget? = nil
     local bestDist = math.huge
     for _, player in ipairs(Players:GetPlayers()) do
         local char = player.Character
-        if char ~= nil then
+        if char ~= nil and not isAIInvisible(player) then
             local humanoid = char:FindFirstChildOfClass("Humanoid")
             local rootInst = char:FindFirstChild("HumanoidRootPart")
             if humanoid ~= nil and humanoid.Health > 0 and rootInst ~= nil and rootInst:IsA("BasePart") then
@@ -633,6 +647,13 @@ local function targetRootOf(target: AITarget?): BasePart?
     end
     if target:IsA("Player") then
         local player = target :: Player
+        if isAIInvisible(player) then
+            -- Drops an already-engaged grunt's target the instant invisibility
+            -- is turned on — exactly as if the player had disconnected. thinkNPC
+            -- falls back to lastSeenPos/Chase/Search from here, same as any
+            -- other lost-target case.
+            return nil
+        end
         local char = player.Character
         if char == nil then
             return nil
@@ -3590,6 +3611,14 @@ function AIService.Start(): ()
         end
 
         local attacker = info.attacker
+        -- AI invisibility toggle: a hit from an invisible player is treated
+        -- exactly like an unidentified attacker below — no target acquisition,
+        -- no position shared with the squad. Without this, shooting a grunt
+        -- while "invisible" would instantly reveal you anyway, defeating the
+        -- whole point of the toggle.
+        if attacker ~= nil and isAIInvisible(attacker) then
+            attacker = nil
+        end
         if attacker ~= nil then
             -- Shot from an unseen angle — still take a beat to identify the threat
             -- before returning fire; recentlyDamagedUntil (just armed above) makes
@@ -3612,8 +3641,9 @@ function AIService.Start(): ()
             -- the squad, per spec point 3.
             shareSquadAlert(record, attacker, aroot ~= nil and aroot.Position or nil, now)
         else
-            -- Attacker unknown (e.g. environment damage) — still puts the squad on
-            -- edge without a location to share or investigate toward.
+            -- Attacker unknown (e.g. environment damage, or an invisible player's
+            -- hit, per above) — still puts the squad on edge without a location to
+            -- share or investigate toward.
             shareSquadAlert(record, nil, nil, now)
         end
     end)
@@ -3721,6 +3751,19 @@ function AIService.Start(): ()
         lastTeleportToArenaClock[player] = nil
     end)
     table.insert(serviceConns, teleportCleanupConn)
+
+    -- AI invisibility toggle (2026-09-11): sets/clears Constants.ATTR_AI_INVISIBLE
+    -- on the requesting player. No cooldown — only ever affects the requester,
+    -- and findVisibleTarget/targetRootOf/the DamageDealt listener above are the
+    -- real gate (this just flips the attribute they all read).
+    local setInvisibleConn = SetAIInvisible.OnServerEvent:Connect(function(player: Player, enabled: any)
+        local on = enabled == true
+        player:SetAttribute(Constants.ATTR_AI_INVISIBLE, on)
+        if AI.DEBUG then
+            Logger.debug("[AIService]", player.Name, "AI invisibility:", on and "ON" or "OFF")
+        end
+    end)
+    table.insert(serviceConns, setInvisibleConn)
 
     if autoSpawnEnabled() and #spawnParts == 0 then
         local flagName = if RunService:IsStudio()

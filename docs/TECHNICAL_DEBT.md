@@ -1012,6 +1012,57 @@ same Luau parser). Residual risks:
   ever shows/hides with the flying state — no separate "press the arena
   button to get started" prompt before the first grant.
 
+## AI Invisibility button (Studio verification: REQUIRED, not done)
+
+New `SetAIInvisible` RemoteEvent, `Constants.ATTR_AI_INVISIBLE` player
+attribute, a `LoadoutMenu.lua` toggle button, and `isAIInvisible(player)`
+checks inside `AIService.server.lua`'s `findVisibleTarget`, `targetRootOf`,
+and the `CombatEvents.DamageDealt` hit-reaction listener. No `GunService`/
+`DamageService`/`TeamService` changes. MCP-checked (throwaway logic) the
+attribute round-trip, the "skip invisible even if closer" selection rule, the
+instant-drop-on-toggle behavior, and the attacker-nulling logic in isolation;
+this check deliberately avoided the live `Constants` module in this Studio
+session, which was stale for these newest additions (Rojo sync had not
+picked them up yet at check time — confirmed by re-checking `Constants.
+AI_ARENA.SPECTATE_HEIGHT`, added the previous task and correctly resolving
+live, versus `Constants.ATTR_AI_INVISIBLE`, added this task and resolving
+`nil` live) — noted honestly rather than silently skipped or reported as a
+false pass. Residual risks:
+
+- **Not runtime-verified in Play.** Whether the toggle actually prevents
+  detection/damage/awareness end-to-end in a live fight, and whether the
+  button's label stays accurate across menu opens/closes, has not been
+  observed.
+- **Invisibility is a targeting-selection rule only, not a rendering/
+  collision change.** An "invisible" player is still fully visible and solid
+  to every other *player* (this never touches `LocalTransparencyModifier`,
+  `CanCollide`, or any client rendering) — the name describes how AI treats
+  them, not a literal visual effect. Worth a clearer button label
+  ("AI CAN'T SEE ME" or similar) if this reads as confusing in practice.
+- **No server-side validation of the boolean payload beyond a `== true`
+  coercion.** `SetAIInvisible.OnServerEvent`'s handler accepts whatever a
+  client sends and coerces it — harmless here (the attribute only ever
+  affects that same player's own treatment by AI, there is no way to abuse
+  it against anyone else), but worth knowing this remote trusts its caller
+  completely, same trust level as the crosshair toggle.
+- **No cooldown/rate limit on toggling.** Spamming the button just spams
+  attribute writes and debug logs — cheap, but unbounded; not expected to
+  matter for a single-player-affecting dev toggle.
+- **Does not suppress an already-armed `record.coverUntil`/suppression state**
+  on the grunt that gets shot by an invisible attacker — the grunt still
+  ducks into cover and gets suppressed (matches `applyToNonPlayer`'s general
+  "still reacts physically, just can't identify/track the shooter" design
+  used elsewhere for unknown attackers) — it just can't identify or chase the
+  source. This is almost certainly the right call (a suppressed/hiding grunt
+  reads as more "alive" than one that visibly ignores incoming fire), but
+  it's a design choice worth flagging, not an oversight.
+- **Does not affect `RocketService`'s splash-damage iteration** (it walks
+  every `TAG_DAMAGE_ENTITY`-tagged entity directly, independent of
+  `AIService`'s targeting) — an invisible player standing near a rocket
+  impact would still take splash damage exactly as before. Out of scope
+  here (that file is the parallel session's), but worth knowing "AI
+  Invisibility" is specifically about AI *targeting*, not blast AoE.
+
 ## Player first-person weapon retraction — Tarkov close-quarters (Studio verification: REQUIRED, not done)
 
 `ViewModelController.computeWallCollisionCF` + `Constants.VIEWMODEL_WALL_*`. One

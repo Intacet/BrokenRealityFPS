@@ -1,5 +1,27 @@
 # Changelog
 
+## AI Invisibility button
+
+- **New "AI INVISIBILITY" toggle button** in the loadout (`M`) menu, next to
+  Watch AI Arena. While on, every AI grunt's targeting ignores you completely
+  — they can't acquire you as a fresh target, an already-engaged grunt drops
+  you instantly (as if you'd disconnected), and shooting a grunt while
+  invisible doesn't reveal your position to its squad either. A session
+  toggle, like Crosshair — stays on until you turn it off, persists across
+  respawns.
+- New `SetAIInvisible` RemoteEvent and `Constants.ATTR_AI_INVISIBLE` player
+  attribute. `AIService.server.lua`'s `findVisibleTarget`, `targetRootOf`, and
+  the `DamageDealt` hit-reaction listener all check it — no new remotes beyond
+  the one, no client movement/camera changes, `GunService`/`DamageService`/
+  `TeamService` untouched.
+- `rojo build` clean; MCP-checked the attribute round-trip, the "closer
+  invisible loses to farther visible" target-selection rule, the instant-drop
+  behavior for an already-engaged target, and the attacker-nulling logic for
+  the hit-reaction listener, all in isolation (this Studio session's Rojo sync
+  was stale for the newest `Constants` additions at check time, so the check
+  deliberately didn't touch the live module — noted honestly rather than
+  reporting a false pass); not yet runtime-verified in Play.
+
 ## Watch AI Arena button + free-fly spectating
 
 - **New "WATCH AI ARENA" button** in the loadout (`M`) menu, next to Respawn
