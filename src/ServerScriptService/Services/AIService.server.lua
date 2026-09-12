@@ -152,6 +152,7 @@ local BOUNDING   = Constants.AI_BOUNDING :: any  -- squad bound-and-cover moveme
 local NAV        = Constants.AI_NAVIGATION :: any  -- dynamic big-map navigation (ground sampling + PathfindingService)
 local ARENA      = Constants.AI_ARENA :: any  -- AI arena: auto-spawns + watches an ARENA_RED vs ARENA_BLUE battle (geometry itself is AIArenaBuilder.server.lua)
 local ARENA2     = Constants.AI_ARENA_2 :: any  -- second, separate AI arena (2026-09-11) — ARENA2_RED vs ARENA2_BLUE (geometry is AIArenaCorridorBuilder.server.lua)
+local SHOTGUN    = Constants.AI_SHOTGUN :: any  -- some grunts (random roll at spawn) carry a shotgun instead of the default rifle
 
 -- ============================================================
 -- Types
@@ -203,6 +204,14 @@ type NPCRecord = {
     -- existing spawn path resolves this to Constants.AI.DEFAULT_FACTION, so
     -- same-faction grunts never target each other (today's behavior, unchanged).
     faction  : string,
+
+    -- AI shotgun (2026-09-11): a WeaponData key, resolved once at spawn via an
+    -- independent random roll (Constants.AI_SHOTGUN.CHANCE) — unrelated to
+    -- faction/squad. Read by attachAIWorldWeapon (world model + grip),
+    -- setupAIAnimation (thirdPerson clips, with a rifle-anim fallback for
+    -- weapons with no thirdPerson set of their own), and fireOneShot/
+    -- startBurst (per-weapon damage/range/spread/burst pacing).
+    weaponKey: string,
 
     state        : AIState,
     target       : AITarget?,
@@ -1290,7 +1299,9 @@ local function attachAIWorldWeapon(record: NPCRecord): ()
         return
     end
 
-    local rawData = WeaponData[AI.WEAPON_NAME]
+    -- AI shotgun (2026-09-11): uses this grunt's OWN assigned weapon, not
+    -- always the rifle default.
+    local rawData = WeaponData[record.weaponKey]
     if rawData == nil then
         return
     end
@@ -1343,12 +1354,26 @@ local function attachAIWorldWeapon(record: NPCRecord): ()
 
     clone.Parent = record.model
 
+    -- AI shotgun (2026-09-11): Constants.WORLD_AKS74_GRIP_C0/C1 are the
+    -- rifle's own grip offsets specifically; a weapon that instead defines
+    -- worldGripC0/C1 directly in its own WeaponData entry (PumpShotgun, RPG7
+    -- — the same fields WorldWeaponService already reads for players) uses
+    -- those instead, so the grip isn't hardcoded to one weapon's shape.
+    local gripC0 = (rawData :: any).worldGripC0
+    local gripC1 = (rawData :: any).worldGripC1
+    if typeof(gripC0) ~= "CFrame" then
+        gripC0 = Constants.WORLD_AKS74_GRIP_C0
+    end
+    if typeof(gripC1) ~= "CFrame" then
+        gripC1 = Constants.WORLD_AKS74_GRIP_C1
+    end
+
     local motor  = Instance.new("Motor6D")
     motor.Name   = Constants.WORLD_WEAPON_GRIP_MOTOR_NAME
     motor.Part0  = rightArmInst
     motor.Part1  = handleInst
-    motor.C0     = Constants.WORLD_AKS74_GRIP_C0
-    motor.C1     = Constants.WORLD_AKS74_GRIP_C1
+    motor.C0     = gripC0 :: CFrame
+    motor.C1     = gripC1 :: CFrame
     motor.Parent = rightArmInst
 
     -- Stage 1F: remember the grip joint + its rest C1 so updateWeaponCollision can
@@ -1391,8 +1416,22 @@ local function setupAIAnimation(record: NPCRecord): ()
     end
 
     if AI.USE_THIRD_PERSON_ANIMS == true then
-        local data = WeaponData[AI.WEAPON_NAME] :: any
+        local data = WeaponData[record.weaponKey] :: any
         local tp = if data ~= nil and data.animations ~= nil then data.animations.thirdPerson else nil
+        -- AI shotgun (2026-09-11): WeaponData.PumpShotgun.animations.thirdPerson
+        -- is intentionally empty (its presentation is procedural, client-only,
+        -- which AI does not run) — fall back to the rifle's own thirdPerson
+        -- clips so a shotgun-grunt still looks like it's holding/firing
+        -- something, rather than standing in a raw, unanimated pose. Only
+        -- triggers for a weapon whose OWN thirdPerson set is genuinely empty,
+        -- so the rifle's own animations (and any future weapon that defines
+        -- its own) are never overridden.
+        if (tp == nil or (typeof(tp.idle) ~= "string" and typeof(tp.fire) ~= "string" and typeof(tp.equip) ~= "string"))
+            and SHOTGUN.USE_RIFLE_THIRDPERSON_ANIM_FALLBACK == true
+            and record.weaponKey ~= (AI.WEAPON_NAME :: string) then
+            local fallbackData = WeaponData[AI.WEAPON_NAME] :: any
+            tp = if fallbackData ~= nil and fallbackData.animations ~= nil then fallbackData.animations.thirdPerson else nil
+        end
         if tp ~= nil then
             if typeof(tp.idle) == "string" then
                 anim.weaponIdle = loadTrack(animator, tp.idle, true, Enum.AnimationPriority.Action)
@@ -1467,6 +1506,81 @@ local function playAIFireAnim(record: NPCRecord): ()
     end
 end
 
+-- Resolves one raycast result into a valid damageable target (a live Player,
+-- or a living enemy-faction grunt — same rule as elsewhere: same-faction
+-- grunts are never a valid hit) and, if found, applies `damage`. Returns true
+-- if a target was actually found (regardless of whether it was hit before —
+-- used by fireOneShot to know whether ANY pellet connected). Shared by the
+-- single rifle round and every shotgun pellet so there is exactly one place
+-- that resolves "what did this raycast actually hit."
+local function resolveAndDamageHit(record: NPCRecord, result: RaycastResult?, dir: Vector3, damage: number): boolean
+    if result == nil then
+        return false
+    end
+    local hitModel = result.Instance:FindFirstAncestorWhichIsA("Model")
+    if hitModel == nil then
+        return false
+    end
+    local victim = Players:GetPlayerFromCharacter(hitModel :: Model)
+
+    -- AI arena / factions (2026-09-11): the ray can also hit another AI grunt.
+    -- Only counts as a valid enemy hit if that grunt is alive AND its faction
+    -- differs from the shooter's — two same-faction grunts (every existing
+    -- single-faction spawn) can physically hit each other's hitboxes but this
+    -- stays nil for them, so nothing here changes today's behavior.
+    local enemyRecord: NPCRecord? = nil
+    if victim == nil then
+        local candidate = npcs[hitModel :: Model]
+        if candidate ~= nil and not candidate.dead and candidate.faction ~= record.faction then
+            enemyRecord = candidate
+        end
+    end
+    if victim == nil and enemyRecord == nil then
+        return false
+    end
+
+    if victim ~= nil then
+        -- `attacker` is intentionally omitted: AI is not a Player, so DamageService
+        -- treats it as an environment kill (no friendly-fire guard, "environment" feed).
+        DamageService:ApplyDamage({
+            targetPlayer = victim,
+            targetModel  = victim.Character,
+            sourceName   = AI.NPC_NAME_PREFIX,
+            damageType   = Constants.DamageType.Bullet,
+            region       = Constants.HitRegion.Unknown,  -- flat per-shot/per-pellet damage, no headshot multiplier
+            hitPart      = result.Instance :: BasePart,
+            hitPosition  = result.Position,
+            hitDirection = dir,
+            baseAmount   = damage,
+        })
+        if AI.DEBUG then
+            Logger.debug("[AIService]", record.model.Name, "hit", victim.Name, "for", damage)
+        end
+    else
+        local enemy = enemyRecord :: NPCRecord
+        -- Same ApplyDamage shape as above, minus targetPlayer — the exact
+        -- applyToNonPlayer path a player's bullet already uses to damage a
+        -- TAG_DAMAGE_ENTITY-tagged grunt (see getDamageableEntity in
+        -- GunService); DamageService needed no changes for AI-vs-AI. No
+        -- attacker attribution here either (DamageInfo.attacker is Player-only)
+        -- — see docs/TECHNICAL_DEBT.md "AI arena / factions" for that limit.
+        DamageService:ApplyDamage({
+            targetModel  = enemy.model,
+            sourceName   = AI.NPC_NAME_PREFIX,
+            damageType   = Constants.DamageType.Bullet,
+            region       = Constants.HitRegion.Unknown,
+            hitPart      = result.Instance :: BasePart,
+            hitPosition  = result.Position,
+            hitDirection = dir,
+            baseAmount   = damage,
+        })
+        if AI.DEBUG then
+            Logger.debug("[AIService]", record.model.Name, "hit enemy-faction", enemy.model.Name, "for", damage)
+        end
+    end
+    return true
+end
+
 local function fireOneShot(record: NPCRecord)
     local target = record.target
     local troot  = targetRootOf(target)
@@ -1483,6 +1597,17 @@ local function fireOneShot(record: NPCRecord)
     end
 
     local now = os.clock()
+
+    -- AI shotgun (2026-09-11): this grunt's own weapon decides pellet count/
+    -- damage/range/extra spread. pelletCount is 1 and pelletSpreadDeg is 0 for
+    -- every non-shotgun weapon, so the loop below fires exactly once with
+    -- exactly the same numbers as before this change — a pure extension, not
+    -- a behavior change, for the rifle.
+    local isShotgun = SHOTGUN.ENABLED == true and record.weaponKey == SHOTGUN.WEAPON_KEY
+    local shotRange       = if isShotgun then (SHOTGUN.SHOT_RANGE :: number) else (AI.SHOT_RANGE :: number)
+    local shotDamage      = if isShotgun then (SHOTGUN.SHOT_DAMAGE_PER_PELLET :: number) else (AI.SHOT_DAMAGE :: number)
+    local pelletCount     = if isShotgun then math.max(1, SHOTGUN.PELLET_COUNT :: number) else 1
+    local pelletSpreadDeg = if isShotgun then (SHOTGUN.PELLET_SPREAD_DEGREES :: number) else 0
 
     -- Stage 1H: per-grunt aim skill (rolled at spawn) plus extra spread against a
     -- target that is actually moving — real aim tracks a sprinting/strafing target
@@ -1510,17 +1635,19 @@ local function fireOneShot(record: NPCRecord)
             spreadDeg *= (TUNE.SUPPRESSED_SPREAD_MULTIPLIER :: number)
         end
     end
+    spreadDeg += pelletSpreadDeg -- 0 for every non-shotgun weapon
 
+    -- Fire the first (or only) pellet now — also what the visible tracer/FX use.
     local dir = coneSpread(baseDir.Unit, math.rad(spreadDeg))
-
-    local rayVec = dir * AI.SHOT_RANGE
+    local rayVec = dir * shotRange
     -- shotParams (not losParams — see its declaration) excludes only this
     -- grunt's own Model, so the shot can actually hit another grunt.
     shotParams.FilterDescendantsInstances = { record.model }
     local result = workspace:Raycast(origin, rayVec, shotParams)
 
     -- Stage 1B/1C: play the visible + audible shot FX and the fire kick for every
-    -- shot, hit or miss. Reads only the muzzle / end position — hit calc unchanged.
+    -- shot, hit or miss, once per trigger pull (not once per pellet). Reads only
+    -- the muzzle / end position — hit calc unchanged.
     local muzzlePos: Vector3 = origin
     local fx = record.fx
     if fx ~= nil and fx.attachment.Parent ~= nil then
@@ -1530,79 +1657,40 @@ local function fireOneShot(record: NPCRecord)
     playAIShotFx(record, muzzlePos, endPos)
     playAIFireAnim(record)
 
-    if result == nil then
-        return
+    -- Collect every pellet that actually resolved to a valid, damageable
+    -- target before touching the damage-rate gate or calling DamageService —
+    -- for the rifle (pelletCount == 1) this is exactly the original
+    -- single-raycast control flow, just routed through the shared helper.
+    local hits: { { result: RaycastResult, dir: Vector3 } } = {}
+    if result ~= nil then
+        table.insert(hits, { result = result :: RaycastResult, dir = dir })
     end
-
-    local hitModel = result.Instance:FindFirstAncestorWhichIsA("Model")
-    if hitModel == nil then
-        return
-    end
-    local victim = Players:GetPlayerFromCharacter(hitModel :: Model)
-
-    -- AI arena / factions (2026-09-11): the ray can also hit another AI grunt.
-    -- Only counts as a valid enemy hit if that grunt is alive AND its faction
-    -- differs from the shooter's — two same-faction grunts (every existing
-    -- single-faction spawn) can physically hit each other's hitboxes but this
-    -- stays nil for them, so nothing here changes today's behavior.
-    local enemyRecord: NPCRecord? = nil
-    if victim == nil then
-        local candidate = npcs[hitModel :: Model]
-        if candidate ~= nil and not candidate.dead and candidate.faction ~= record.faction then
-            enemyRecord = candidate
+    for _ = 2, pelletCount do
+        local pelletDir = coneSpread(baseDir.Unit, math.rad(spreadDeg))
+        local pelletRayVec = pelletDir * shotRange
+        shotParams.FilterDescendantsInstances = { record.model }
+        local pelletResult = workspace:Raycast(origin, pelletRayVec, shotParams)
+        if pelletResult ~= nil then
+            table.insert(hits, { result = pelletResult :: RaycastResult, dir = pelletDir })
         end
     end
-    if victim == nil and enemyRecord == nil then
+
+    if #hits == 0 then
         return
     end
 
     -- AI Stage 1C: safety net, independent of burst timing — never call DamageService
     -- for this grunt more often than MIN_TIME_BETWEEN_DAMAGE_CALLS, even if a future
-    -- tuning change ever drops SECONDS_BETWEEN_SHOTS below it. DamageService itself
-    -- is unchanged; this only decides whether AIService calls it.
+    -- tuning change ever drops SECONDS_BETWEEN_SHOTS below it. Gates the WHOLE
+    -- trigger pull once, not per pellet. DamageService itself is unchanged;
+    -- this only decides whether AIService calls it.
     if now - record.lastDamageCallAt < (TUNE.MIN_TIME_BETWEEN_DAMAGE_CALLS :: number) then
         return
     end
     record.lastDamageCallAt = now
 
-    if victim ~= nil then
-        -- `attacker` is intentionally omitted: AI is not a Player, so DamageService
-        -- treats it as an environment kill (no friendly-fire guard, "environment" feed).
-        DamageService:ApplyDamage({
-            targetPlayer = victim,
-            targetModel  = victim.Character,
-            sourceName   = AI.NPC_NAME_PREFIX,
-            damageType   = Constants.DamageType.Bullet,
-            region       = Constants.HitRegion.Unknown,  -- flat SHOT_DAMAGE, no headshot multiplier
-            hitPart      = result.Instance :: BasePart,
-            hitPosition  = result.Position,
-            hitDirection = dir,
-            baseAmount   = AI.SHOT_DAMAGE,
-        })
-        if AI.DEBUG then
-            Logger.debug("[AIService]", record.model.Name, "hit", victim.Name, "for", AI.SHOT_DAMAGE)
-        end
-    else
-        local enemy = enemyRecord :: NPCRecord
-        -- Same ApplyDamage shape as above, minus targetPlayer — the exact
-        -- applyToNonPlayer path a player's bullet already uses to damage a
-        -- TAG_DAMAGE_ENTITY-tagged grunt (see getDamageableEntity in
-        -- GunService); DamageService needed no changes for AI-vs-AI. No
-        -- attacker attribution here either (DamageInfo.attacker is Player-only)
-        -- — see docs/TECHNICAL_DEBT.md "AI arena / factions" for that limit.
-        DamageService:ApplyDamage({
-            targetModel  = enemy.model,
-            sourceName   = AI.NPC_NAME_PREFIX,
-            damageType   = Constants.DamageType.Bullet,
-            region       = Constants.HitRegion.Unknown,
-            hitPart      = result.Instance :: BasePart,
-            hitPosition  = result.Position,
-            hitDirection = dir,
-            baseAmount   = AI.SHOT_DAMAGE,
-        })
-        if AI.DEBUG then
-            Logger.debug("[AIService]", record.model.Name, "hit enemy-faction", enemy.model.Name, "for", AI.SHOT_DAMAGE)
-        end
+    for _, hit in ipairs(hits) do
+        resolveAndDamageHit(record, hit.result, hit.dir, shotDamage)
     end
 end
 
@@ -1627,8 +1715,16 @@ local function startBurst(record: NPCRecord)
         return
     end
     record.firing = true
+    -- AI shotgun (2026-09-11): a shotgun-armed grunt bursts on its own
+    -- (fewer, further-spaced pulls) pacing instead of the rifle's — read
+    -- once per burst, same as the rifle's AI.* fields always have been.
+    local isShotgun = SHOTGUN.ENABLED == true and record.weaponKey == SHOTGUN.WEAPON_KEY
+    local minShots      = if isShotgun then (SHOTGUN.BURST_SHOTS_MIN :: number) else (AI.BURST_SHOTS_MIN :: number)
+    local maxShots       = if isShotgun then (SHOTGUN.BURST_SHOTS_MAX :: number) else (AI.BURST_SHOTS_MAX :: number)
+    local betweenShots  = if isShotgun then (SHOTGUN.SECONDS_BETWEEN_SHOTS :: number) else (AI.SECONDS_BETWEEN_SHOTS :: number)
+    local betweenBursts = if isShotgun then (SHOTGUN.SECONDS_BETWEEN_BURSTS :: number) else (AI.SECONDS_BETWEEN_BURSTS :: number)
     record.fireThread = task.spawn(function()
-        local shots = math.random(AI.BURST_SHOTS_MIN, AI.BURST_SHOTS_MAX)
+        local shots = math.random(minShots, maxShots)
         if AI.DEBUG then
             local tname = record.target ~= nil and record.target.Name or "?"
             Logger.debug("[AIService]", record.model.Name, "burst x" .. tostring(shots), "at", tname)
@@ -1643,7 +1739,7 @@ local function startBurst(record: NPCRecord)
                 break
             end
             fireOneShot(record)
-            task.wait(AI.SECONDS_BETWEEN_SHOTS)
+            task.wait(betweenShots)
         end
         -- Stage 1D: arm the cover window so thinkNPC ducks this grunt away before
         -- the next burst. The burst loop already bailed on an invalid state above.
@@ -1651,7 +1747,7 @@ local function startBurst(record: NPCRecord)
             record.coverUntil = os.clock() + coverDurationFor(record)
         end
         if not record.dead and running then
-            task.wait(AI.SECONDS_BETWEEN_BURSTS)
+            task.wait(betweenBursts)
         end
         record.firing = false
         record.fireThread = nil
@@ -3195,10 +3291,19 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
             Logger.warn("[AIService] unknown AI faction \"" .. tostring(faction) .. "\" — falling back to DEFAULT")
         end
     end
+    -- AI shotgun (2026-09-11): a per-grunt roll, independent of faction/squad
+    -- — CHANCE below decides "some of the AI" (any squad, either arena, or the
+    -- main game's AI zone, can end up with a mix of rifle and shotgun grunts).
+    local weaponKey: string = AI.WEAPON_NAME :: string
+    if SHOTGUN.ENABLED == true and math.random() < (SHOTGUN.CHANCE :: number) then
+        weaponKey = SHOTGUN.WEAPON_KEY :: string
+    end
+
     local model, humanoid, root, rightShoulder = buildRig(worldCFrame, factionCfg.BODY_COLOR, factionCfg.LIMB_COLOR)
     model.Name = AI.NPC_NAME_PREFIX .. "_" .. tostring(squadId) .. "_" .. tostring(npcCounter)
     model:SetAttribute("BR_AINpc", true)
     model:SetAttribute("BR_AIFaction", faction)
+    model:SetAttribute("BR_AIWeapon", weaponKey)
     CollectionService:AddTag(model, Constants.TAG_DAMAGE_ENTITY)
 
     model.Parent = aiFolder or workspace
@@ -3215,6 +3320,7 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
         isLeader = isLeader,
         slot     = slotOffset(index, size),
         faction  = faction,
+        weaponKey= weaponKey,
 
         state        = "Idle",
         target       = nil,

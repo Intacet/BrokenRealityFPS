@@ -2598,6 +2598,45 @@ Constants.AI_NAVIGATION = {
     AIPATROLPOINTS_OPTIONAL          = true, -- documents the behavior collectParts()/thinkNPC already implement — Workspace/AIPatrolPoints missing or empty no longer warns as a misconfiguration and dynamic roaming takes over
 }
 
+-- ── AI shotgun (AIService.server) ─────────────────────────────────────────────
+-- Gives "some of the AI" (a per-grunt random roll at spawn, CHANCE below —
+-- independent of faction/squad/arena, so any squad can end up with a mix of
+-- rifle and shotgun grunts) a WeaponData.PumpShotgun instead of the default
+-- rifle (Constants.AI.WEAPON_NAME). Combat numbers here are AI's OWN
+-- simplified tuning (PELLET_COUNT/SHOT_DAMAGE_PER_PELLET/etc.), independent
+-- of WeaponData.PumpShotgun's own player-facing stats — same relationship
+-- Constants.AI.SHOT_DAMAGE already has to WeaponData.AKS74.damage (never
+-- read from there either). WeaponData.PumpShotgun.animations.thirdPerson is
+-- intentionally empty (its presentation is procedural, client-only —
+-- ShotgunPresentation.lua — which AI does not run), so a shotgun-grunt falls
+-- back to the rifle's own thirdPerson idle/fire/equip clips (see
+-- USE_RIFLE_THIRDPERSON_ANIM_FALLBACK) rather than standing in a raw,
+-- unanimated pose; only the welded world-model mesh actually changes.
+-- WeaponData.PumpShotgun.worldGripC0/C1 (the same fields WorldWeaponService
+-- already reads for players) are reused as-is for the AI grip weld — no
+-- separate copy kept here. See docs/TECHNICAL_DEBT.md "AI shotgun".
+Constants.AI_SHOTGUN = {
+    ENABLED = true,
+    DEBUG   = true,
+
+    WEAPON_KEY = "PumpShotgun", -- WeaponData key; also stored as NPCRecord.weaponKey / the BR_AIWeapon attribute
+    CHANCE     = 0.3,           -- 0..1 probability a newly-spawned grunt carries a shotgun instead of the rifle
+
+    USE_RIFLE_THIRDPERSON_ANIM_FALLBACK = true,
+
+    PELLET_COUNT           = 6,
+    SHOT_DAMAGE_PER_PELLET = 5,   -- 6 pellets landing all at once tops out around one solid rifle hit's worth of damage
+    PELLET_SPREAD_DEGREES  = 6.0, -- extra spread cone on top of the usual aim-skill/aim-ramp/suppression spread — pellets scatter, a single rifle round doesn't
+    SHOT_RANGE             = 90,  -- short — shotguns are a close-quarters weapon, unlike the rifle's longer SHOT_RANGE
+
+    -- Shotguns don't "burst" like a rifle — one or two shells, then a slower
+    -- pump-action recovery beat, not the rifle's rapid multi-shot burst.
+    BURST_SHOTS_MIN = 1,
+    BURST_SHOTS_MAX = 2,
+    SECONDS_BETWEEN_SHOTS  = 0.9,
+    SECONDS_BETWEEN_BURSTS = 2.2,
+}
+
 -- ── AI factions (AIService.server) ────────────────────────────────────────────
 -- A grunt only ever targets / is targeted by another grunt when their factions
 -- differ — see findVisibleTarget/fireOneShot in AIService.server.lua. DEFAULT

@@ -1,5 +1,51 @@
 # Technical debt and unresolved migration questions
 
+## AI shotgun (Studio verification: REQUIRED, not done)
+
+`Constants.AI_SHOTGUN` + `AIService.server.lua` give a random 30% of newly-spawned
+grunts `WeaponData.PumpShotgun`'s world model and a pellet-based firing pattern
+instead of the default rifle. See `docs/PROJECT_MAP.md`'s "AI shotguns" entry for
+the full mechanism.
+
+- **Third-person animation is a simplification, not the real presentation.**
+  `WeaponData.PumpShotgun.animations.thirdPerson` is intentionally empty — its
+  actual presentation (`ShotgunPresentation.lua` + `Constants.SHOTGUN_PRESENTATION`,
+  the parallel session's procedural pump/bolt/equip/reload choreography) is
+  client-only and AI does not run client scripts. A shotgun-grunt falls back to
+  the **rifle's** thirdPerson idle/fire/equip clips, so it plays a rifle-shaped
+  animation while visibly holding a shotgun model — a mismatch, deliberately
+  accepted over an unanimated pose. If a real thirdPerson shotgun animation set
+  is ever authored, point `WeaponData.PumpShotgun.animations.thirdPerson` at it
+  directly and this fallback becomes a no-op automatically (the empty-table
+  check in `setupAIAnimation` stops matching).
+- **Combat numbers are a first guess, not balanced.** `PELLET_COUNT` (6),
+  `SHOT_DAMAGE_PER_PELLET` (5), `PELLET_SPREAD_DEGREES` (6.0), `SHOT_RANGE` (90),
+  and the burst-pacing fields are AI's own hand-picked tuning, independent of
+  `WeaponData.PumpShotgun`'s player-facing stats (same relationship
+  `Constants.AI.SHOT_DAMAGE` already has to `WeaponData.AKS74.damage`) — none of
+  this has been playtested. `CHANCE = 0.3` is likewise an arbitrary first guess
+  for "some of the AI."
+- **Depends on `ReplicatedStorage/WorldModels/PumpShotgun` actually existing as
+  an asset** (parallel to the AKS-74 world model Stage 1C already depends on) —
+  not independently verified this task. `attachAIWorldWeapon`'s existing
+  graceful-degradation (pcall'd, warns once) already handles a missing asset
+  without erroring, so a shotgun-grunt would just fire without a visible gun if
+  it's absent, not crash.
+- **Interacts with every existing AI-spawn path** — the roll in `spawnOne` is
+  independent of faction/squad/arena, so shotgun grunts can appear in the main
+  game's AI zone, arena 1, or arena 2 (see the arena entries below) in any mix.
+  No per-arena or per-faction override exists to force/forbid shotgun grunts in
+  a specific place.
+- **Not runtime-verified.** MCP throwaway-logic checks confirmed the
+  pellet-collection ordering (no early-return on an early pellet miss), the
+  grip-C0/C1 fallback (rifle falls back to `WORLD_AKS74_GRIP_C0/C1`, shotgun uses
+  its own `worldGripC0`/`worldGripC1`), and the thirdPerson-animation fallback
+  branch selection — all against throwaway stand-ins, not the live modules (the
+  connected Studio session's `Constants`/`WeaponData` were stale at check time).
+  `rojo build` is clean. Needs a real Play pass: confirm a shotgun-grunt's world
+  model actually renders, its pellets visibly spread and connect, and rifle-only
+  grunts are completely unaffected.
+
 ## AI Stage 1A — server-owned squad NPC foundation (Studio verification: REQUIRED, not done)
 
 `AIService.server.lua` + `Constants.AI` add basic R6 rifleman "grunt" squads:

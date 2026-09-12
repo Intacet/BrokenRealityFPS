@@ -1,5 +1,49 @@
 # Changelog
 
+## Give some of the AI shotguns
+
+- Every newly-spawned grunt (any squad, either AI arena, or the main game's
+  AI zone — the roll is independent of faction/squad) now has a 30% chance
+  (`Constants.AI_SHOTGUN.CHANCE`) to carry `WeaponData.PumpShotgun`'s world
+  model instead of the default rifle, tracked as `NPCRecord.weaponKey` and a
+  new `BR_AIWeapon` Studio-inspectable attribute (mirrors the existing
+  `BR_AIFaction` attribute).
+- A shotgun-armed grunt fires a genuinely different pattern: each trigger
+  pull sends `Constants.AI_SHOTGUN.PELLET_COUNT` (6) independent raycasts in
+  a wider cone, each pellet dealing `SHOT_DAMAGE_PER_PELLET` (5) at a shorter
+  `SHOT_RANGE` (90 vs. the rifle's longer range), in 1–2 shot bursts spaced
+  further apart than the rifle's burst — a slower, close-range, high-alpha
+  weapon rather than a sustained-fire one. These are AI's OWN simplified
+  combat numbers, independent of `WeaponData.PumpShotgun`'s player-facing
+  stats — the same relationship `Constants.AI.SHOT_DAMAGE` already has to
+  `WeaponData.AKS74.damage` (AI never reads a player weapon's damage/pellet
+  stats directly).
+- The world-model attach (grip weld) now reads `WeaponData[record.weaponKey]`
+  generally, using that weapon's own `worldGripC0`/`worldGripC1` when present
+  (PumpShotgun has its own) and falling back to the existing AKS74 grip
+  constants only when a weapon has none of its own (every other weapon
+  today) — so this generalizes cleanly for future weapons too, not just the
+  shotgun.
+- `WeaponData.PumpShotgun.animations.thirdPerson` is intentionally empty
+  (its real presentation is procedural and client-only —
+  `ShotgunPresentation.lua` — which AI does not run), so a shotgun-grunt
+  falls back to the rifle's own thirdPerson idle/fire/equip clips
+  (`Constants.AI_SHOTGUN.USE_RIFLE_THIRDPERSON_ANIM_FALLBACK`) rather than
+  standing in a raw, unanimated pose. Only the welded world-model mesh
+  actually changes; see `docs/TECHNICAL_DEBT.md` "AI shotgun" for the
+  simplification this implies.
+- No new remotes, no client files touched, `DamageService`/`GunService`/
+  `TeamService` untouched. Verified via `rojo build` (clean) and MCP
+  throwaway-logic checks of the pellet-collection ordering (a miss on an
+  early pellet never skips later pellets, damage-rate-limit gates the whole
+  trigger pull once — not once per pellet) and the grip/animation fallback
+  branches. The connected Studio session's live `Constants`/`WeaponData`
+  modules were stale at verification time (a known Rojo-sync gap, not a code
+  issue — see recent "reset rojo" note), so this could not also be checked
+  via a live `require()`; Studio Play testing is still needed to confirm a
+  shotgun-grunt's world model actually renders and its pellets visibly
+  connect.
+
 ## Bugfix: only the red squad was spawning (AI headcount cap too low)
 
 - **Confirmed in testing:** with both AI arenas' battles running alongside
