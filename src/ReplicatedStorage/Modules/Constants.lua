@@ -2616,6 +2616,20 @@ Constants.AI_FACTIONS = {
         BODY_COLOR = Color3.fromRGB( 45,  80, 150),
         LIMB_COLOR = Color3.fromRGB( 32,  58, 110),
     },
+    -- Second, separate AI arena (2026-09-11) — same red/blue team colors as
+    -- above (still just "red squad" / "blue squad" thematically), but a
+    -- DIFFERENT faction key so this arena's battle and the first arena's
+    -- battle never mix into one combined countLivingByFaction headcount.
+    ARENA2_RED = {
+        NAME       = "Red Squad",
+        BODY_COLOR = Color3.fromRGB(150,  45,  45),
+        LIMB_COLOR = Color3.fromRGB(110,  32,  32),
+    },
+    ARENA2_BLUE = {
+        NAME       = "Blue Squad",
+        BODY_COLOR = Color3.fromRGB( 45,  80, 150),
+        LIMB_COLOR = Color3.fromRGB( 32,  58, 110),
+    },
 }
 
 -- ── AI arena (AIArenaBuilder.server) ──────────────────────────────────────────
@@ -2671,6 +2685,79 @@ Constants.AI_ARENA = {
     -- placed — comfortably above WALL_HEIGHT and the stepped structure for a full
     -- view. Client-side fly behavior itself is Constants.SPECTATOR_FLY, below.
     SPECTATE_HEIGHT = 60,
+}
+
+-- ── Second AI arena — corridor map (AIArenaCorridorBuilder.server) ───────────
+-- A second, separate arena (2026-09-11, user-sketched layout) alongside the
+-- first (Constants.AI_ARENA): an elongated room, solid north/south walls, open
+-- east/west ends as the two team entrances, two tall "high wall" segments
+-- blocking the centerline (with a gap between them as a crossing lane),
+-- shorter "low cover" segments flanking them on both sides, and one L-shaped
+-- elevated platform + staircase near each entrance — positioned so it's on
+-- the RIGHT as that team walks in (south side near the west/red entrance,
+-- north side near the east/blue entrance — a 180°-rotationally-symmetric,
+-- fair layout). Own sky-island ORIGIN, clear of DEV_TEST_AREA (Y 300) and the
+-- first AI arena (Y 600). Runs its own independent auto-spawn/self-healing
+-- battle in AIService.server.lua under ARENA2_RED/ARENA2_BLUE — see
+-- docs/TECHNICAL_DEBT.md "Second AI arena — corridor map" for the geometry's
+-- first-guess numbers and every other scoping note.
+Constants.AI_ARENA_2 = {
+    ENABLED = true,
+    DEBUG   = true,
+    RUN_IN_PUBLISHED = false,
+
+    FOLDER_NAME = "BrokenReality_AIArenaCorridor",
+    ORIGIN      = Vector3.new(0, 900, 0),
+
+    -- Room interior: X (east/west, the long axis) in [-100,100], Z (north/
+    -- south) in [-55,55]. Baseplate is sized a bit larger so the spawn points
+    -- (X = ±110) still sit on solid ground just outside the room proper.
+    BASEPLATE_SIZE     = Vector3.new(260, 1, 130),
+    BASEPLATE_POSITION = Vector3.new(0, -0.5, 0),
+
+    -- North/south perimeter walls: stop short of the very ends (leaving the
+    -- east/west entrances open) rather than fully enclosing the room.
+    WALL_HEIGHT     = 16,
+    WALL_THICKNESS  = 3,
+    WALL_X_MIN      = -80,
+    WALL_X_MAX      = 80,
+    WALL_Z          = 55, -- north wall at -WALL_Z, south wall at +WALL_Z
+
+    -- The two "high walls" down the centerline (X = 0), split in two along Z
+    -- with a gap in the middle so squads can cross through the center lane
+    -- instead of only flanking left/right.
+    CENTER_WALL_HEIGHT    = 16,
+    CENTER_WALL_THICKNESS = 3,
+    CENTER_WALL_Z_INNER   = 15, -- gap spans [-CENTER_WALL_Z_INNER, +CENTER_WALL_Z_INNER]
+    CENTER_WALL_Z_OUTER   = 55, -- each segment runs from Z_INNER out to Z_OUTER
+
+    -- The shorter "low cover" segments flanking the center walls on both
+    -- sides (X = ±COVER_X), same inner/outer gap shape, shorter and thinner.
+    COVER_HEIGHT    = 5,
+    COVER_THICKNESS = 2,
+    COVER_X         = 35,
+    COVER_Z_INNER   = 25,
+    COVER_Z_OUTER   = 50,
+
+    -- Team spawns at the open east/west ends.
+    RED_SPAWN_POSITION  = Vector3.new(-110, 3, 0),
+    BLUE_SPAWN_POSITION = Vector3.new(110, 3, 0),
+
+    -- L-shaped platform + 3-step staircase near each entrance (south-west for
+    -- red, north-east for blue — 180° rotations of each other). Height 6,
+    -- matching the first arena's stepped structure; each step riser is 2 studs.
+    PLATFORM_HEIGHT = 6,
+    STEP_RISE       = 2,
+    STEP_COUNT      = 3,
+
+    SQUAD_SIZE = 3, -- smaller than the first arena's (4) — two arenas plus the
+                     -- main game's own AI zone now share one MAX_ACTIVE_NPCS budget
+
+    AUTO_SPAWN_BATTLE     = true,
+    BATTLE_CHECK_INTERVAL = 4,
+    BATTLE_RESPAWN_DELAY  = 6,
+    SPAWN_RETRY_INTERVAL  = 0.5,
+    SPAWN_RETRY_ATTEMPTS  = 20,
 }
 
 -- ── Spectator fly (SpectatorFlyController, client) ────────────────────────────

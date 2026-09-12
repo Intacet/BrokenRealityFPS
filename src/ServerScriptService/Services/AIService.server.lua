@@ -151,6 +151,7 @@ local AWARENESS  = Constants.AI_SQUAD_AWARENESS :: any  -- squad awareness shari
 local BOUNDING   = Constants.AI_BOUNDING :: any  -- squad bound-and-cover movement (Mover/Cover roles)
 local NAV        = Constants.AI_NAVIGATION :: any  -- dynamic big-map navigation (ground sampling + PathfindingService)
 local ARENA      = Constants.AI_ARENA :: any  -- AI arena: auto-spawns + watches an ARENA_RED vs ARENA_BLUE battle (geometry itself is AIArenaBuilder.server.lua)
+local ARENA2     = Constants.AI_ARENA_2 :: any  -- second, separate AI arena (2026-09-11) — ARENA2_RED vs ARENA2_BLUE (geometry is AIArenaCorridorBuilder.server.lua)
 
 -- ============================================================
 -- Types
@@ -356,6 +357,9 @@ local mainThread: thread? = nil
 -- loop (runArenaBattle) — a second, independent task.spawn loop alongside
 -- mainThread, cancelled the same way in Destroy().
 local arenaThread: thread? = nil
+-- Second, separate AI arena (2026-09-11) — its own independent battle-watch
+-- thread, same cancellation pattern.
+local arena2Thread: thread? = nil
 local serviceConns: { RBXScriptConnection } = {}
 local didAutoSpawn = false
 -- Stage 1H: shared server-wide cooldown gate for the RespawnBots remote.
@@ -3464,78 +3468,86 @@ local function autoSpawnSquads()
 end
 
 -- ============================================================
--- AI arena / factions — auto-spawn + self-healing ARENA_RED vs ARENA_BLUE battle
+-- AI arena / factions — auto-spawn + self-healing RED vs BLUE battle
 -- ============================================================
+-- Generalized (2026-09-11, second arena) to take the arena's Constants table
+-- and faction key pair as parameters, rather than closing over the single
+-- Constants.AI_ARENA global — so the exact same battle logic runs both the
+-- original arena (ARENA_RED/ARENA_BLUE) and the new second arena
+-- (ARENA2_RED/ARENA2_BLUE) as two independent threads. Behavior for the first
+-- arena is unchanged; this is a pure parameterization.
 
--- Whether the auto-spawn-battle system is allowed to run here — same
+-- Whether the auto-spawn-battle system is allowed to run for `cfg` — same
 -- Studio/RUN_IN_PUBLISHED split every other dev-only system in this file uses.
-local function arenaEnabled(): boolean
-    if ARENA == nil or ARENA.ENABLED ~= true or ARENA.AUTO_SPAWN_BATTLE ~= true then
+local function arenaEnabled(cfg: any): boolean
+    if cfg == nil or cfg.ENABLED ~= true or cfg.AUTO_SPAWN_BATTLE ~= true then
         return false
     end
     if RunService:IsStudio() then
         return true
     end
-    return ARENA.RUN_IN_PUBLISHED == true
+    return cfg.RUN_IN_PUBLISHED == true
 end
 
 -- Spawns one faction's squad at its arena position, retrying briefly if it
 -- comes back empty (e.g. MAX_ACTIVE_NPCS is momentarily full while the game's
--- own single-faction auto-spawn is still in progress) rather than giving up
--- after a single attempt.
-local function spawnArenaSquad(cframe: CFrame, factionKey: string): { Model }
-    for _ = 1, (ARENA.SPAWN_RETRY_ATTEMPTS :: number) do
+-- own single-faction auto-spawn — or the OTHER arena's — is still in
+-- progress) rather than giving up after a single attempt.
+local function spawnArenaSquad(cfg: any, cframe: CFrame, factionKey: string): { Model }
+    for _ = 1, (cfg.SPAWN_RETRY_ATTEMPTS :: number) do
         if not running then
             return {}
         end
-        local models = spawnSquad(cframe, ARENA.SQUAD_SIZE, factionKey)
+        local models = spawnSquad(cframe, cfg.SQUAD_SIZE, factionKey)
         if #models > 0 then
             return models
         end
-        task.wait(ARENA.SPAWN_RETRY_INTERVAL :: number)
+        task.wait(cfg.SPAWN_RETRY_INTERVAL :: number)
     end
     Logger.warn("[AIService] AI arena: gave up spawning faction", factionKey,
-        "after", ARENA.SPAWN_RETRY_ATTEMPTS, "attempt(s)")
+        "after", cfg.SPAWN_RETRY_ATTEMPTS, "attempt(s)")
     return {}
 end
 
--- Auto-spawns ARENA_RED vs ARENA_BLUE at Constants.AI_ARENA's two spawn
--- positions, then watches (every BATTLE_CHECK_INTERVAL) until either side's
--- living count hits 0 — a battle conclusion, or an unrelated
--- RespawnBots/KillAllBots wipe; this doesn't distinguish why — and after
--- BATTLE_RESPAWN_DELAY respawns BOTH sides fresh. Runs entirely inside
--- AIService (never a cross-script call — AIService.server.lua is a Script, not
--- a requirable ModuleScript; AIArenaBuilder only builds the arena's geometry,
--- independently, off the same Constants.AI_ARENA positions — see
--- docs/TECHNICAL_DEBT.md "AI arena / factions").
-local function runArenaBattle()
-    local origin     = ARENA.ORIGIN :: Vector3
-    local redCFrame  = CFrame.new(origin + (ARENA.RED_SPAWN_POSITION :: Vector3))
-    local blueCFrame = CFrame.new(origin + (ARENA.BLUE_SPAWN_POSITION :: Vector3))
+-- Auto-spawns `redFaction` vs `blueFaction` at `cfg`'s two spawn positions,
+-- then watches (every cfg.BATTLE_CHECK_INTERVAL) until either side's living
+-- count hits 0 — a battle conclusion, or an unrelated RespawnBots/KillAllBots
+-- wipe; this doesn't distinguish why — and after cfg.BATTLE_RESPAWN_DELAY
+-- respawns BOTH sides fresh. Runs entirely inside AIService (never a
+-- cross-script call — AIService.server.lua is a Script, not a requirable
+-- ModuleScript; the AIArenaBuilder scripts only build each arena's geometry,
+-- independently, off the same Constants tables — see docs/TECHNICAL_DEBT.md
+-- "AI arena / factions"). Each arena gets its OWN faction key pair (not
+-- shared) specifically so countLivingByFaction scopes to that arena's own
+-- battle, not a combined count across every arena using "red"/"blue".
+local function runArenaBattle(cfg: any, redFaction: string, blueFaction: string)
+    local origin     = cfg.ORIGIN :: Vector3
+    local redCFrame  = CFrame.new(origin + (cfg.RED_SPAWN_POSITION :: Vector3))
+    local blueCFrame = CFrame.new(origin + (cfg.BLUE_SPAWN_POSITION :: Vector3))
 
     local function spawnBothFresh()
-        spawnArenaSquad(redCFrame, "ARENA_RED")
-        spawnArenaSquad(blueCFrame, "ARENA_BLUE")
-        if ARENA.DEBUG == true then
-            Logger.debug("[AIService] AI arena: battle (re)started")
+        spawnArenaSquad(cfg, redCFrame, redFaction)
+        spawnArenaSquad(cfg, blueCFrame, blueFaction)
+        if cfg.DEBUG == true then
+            Logger.debug("[AIService] AI arena: battle (re)started —", redFaction, "vs", blueFaction)
         end
     end
 
     spawnBothFresh()
 
     while running do
-        task.wait(ARENA.BATTLE_CHECK_INTERVAL :: number)
+        task.wait(cfg.BATTLE_CHECK_INTERVAL :: number)
         if not running then
             break
         end
-        local redAlive  = countLivingByFaction("ARENA_RED")
-        local blueAlive = countLivingByFaction("ARENA_BLUE")
+        local redAlive  = countLivingByFaction(redFaction)
+        local blueAlive = countLivingByFaction(blueFaction)
         if redAlive <= 0 or blueAlive <= 0 then
-            if ARENA.DEBUG == true then
-                Logger.debug("[AIService] AI arena: one side wiped (red", redAlive, "/ blue", blueAlive,
-                    ") — respawning in", ARENA.BATTLE_RESPAWN_DELAY, "s")
+            if cfg.DEBUG == true then
+                Logger.debug("[AIService] AI arena: one side wiped (", redFaction, redAlive, "/", blueFaction, blueAlive,
+                    ") — respawning in", cfg.BATTLE_RESPAWN_DELAY, "s")
             end
-            task.wait(ARENA.BATTLE_RESPAWN_DELAY :: number)
+            task.wait(cfg.BATTLE_RESPAWN_DELAY :: number)
             if running then
                 spawnBothFresh()
             end
@@ -3775,8 +3787,18 @@ function AIService.Start(): ()
 
     -- AI arena / factions: independent of the game's own single-faction
     -- auto-spawn above — its own Studio/RUN_IN_PUBLISHED gate, its own thread.
-    if arenaEnabled() then
-        arenaThread = task.spawn(runArenaBattle)
+    if arenaEnabled(ARENA) then
+        arenaThread = task.spawn(function()
+            runArenaBattle(ARENA, "ARENA_RED", "ARENA_BLUE")
+        end)
+    end
+    -- Second, separate AI arena (2026-09-11) — its own config, its own faction
+    -- keys (so countLivingByFaction never mixes the two arenas' headcounts),
+    -- its own thread.
+    if arenaEnabled(ARENA2) then
+        arena2Thread = task.spawn(function()
+            runArenaBattle(ARENA2, "ARENA2_RED", "ARENA2_BLUE")
+        end)
     end
 
     Logger.debug("[AIService] started — spawns:", #spawnParts, "patrol points:", #patrolPoints)
@@ -3895,6 +3917,10 @@ function AIService.Destroy(): ()
     if arenaThread ~= nil then
         pcall(task.cancel, arenaThread)
         arenaThread = nil
+    end
+    if arena2Thread ~= nil then
+        pcall(task.cancel, arena2Thread)
+        arena2Thread = nil
     end
 
     for _, record in pairs(npcs) do

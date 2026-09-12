@@ -1,5 +1,36 @@
 # Changelog
 
+## Second AI arena — corridor map with L-shaped platforms
+
+- **A second, separate AI arena** (user-sketched layout), running alongside
+  the first one at its own sky-island location: an elongated room with solid
+  north/south walls, open east/west ends where the two teams spawn, two tall
+  walls blocking the centerline (with a gap in the middle so squads can cross
+  through instead of only flanking), shorter cover pieces flanking those
+  walls on both sides, and an elevated L-shaped platform + staircase near
+  each entrance — positioned on the side that's on that team's right as they
+  walk in, so both sides get an identical, fair setup. AI can climb the
+  stairs and shoot down from the platform.
+- Runs its own independent Red Squad vs Blue Squad battle, auto-spawning and
+  automatically restarting after a wipe, exactly like the first arena — the
+  two battles never interfere with each other.
+- New `Constants.AI_ARENA_2` table, two new `Constants.AI_FACTIONS` entries
+  (`ARENA2_RED`/`ARENA2_BLUE` — same team colors as the first arena, distinct
+  faction keys so the two arenas' win/loss tracking never mixes), and a new
+  `AIArenaCorridorBuilder.server.lua` (geometry only, mirrors the first
+  arena's builder). `AIService.server.lua`'s existing arena battle logic was
+  generalized to take an arena's config + faction keys as parameters instead
+  of only ever reading the first arena's — same behavior for arena 1,
+  extended for free to arena 2.
+- No new remotes, no client files, `GunService`/`DamageService`/`TeamService`
+  untouched. One new `default.project.json` entry. `rojo build` clean;
+  MCP-checked the platform/staircase mirror-symmetry between the two sides,
+  the step-riser walkability math, the spawn-distance/geometry bounds, and
+  that the two arenas' living-squad counts never mix, all in isolation; not
+  yet runtime-verified in Play — see docs/TECHNICAL_DEBT.md "Second AI arena
+  — corridor map" (both arenas now share one `MAX_ACTIVE_NPCS` budget with
+  the main game's own AI zone).
+
 ## AI Invisibility button
 
 - **New "AI INVISIBILITY" toggle button** in the loadout (`M`) menu, next to

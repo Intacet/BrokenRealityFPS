@@ -182,6 +182,14 @@
             "RunContext": "Legacy"
           }
         },
+        "AIArenaCorridorBuilder": {
+          "$ignoreUnknownInstances": true,
+          "$path": "src/ServerScriptService/Services/AIArenaCorridorBuilder.server.lua",
+          "$properties": {
+            "Disabled": false,
+            "RunContext": "Legacy"
+          }
+        },
         "LoadoutService": {
           "$ignoreUnknownInstances": true,
           "$path": "src/ServerScriptService/Services/LoadoutService.server.lua",

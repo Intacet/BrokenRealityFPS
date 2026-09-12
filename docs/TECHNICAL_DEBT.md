@@ -1063,6 +1063,71 @@ false pass. Residual risks:
   here (that file is the parallel session's), but worth knowing "AI
   Invisibility" is specifically about AI *targeting*, not blast AoE.
 
+## Second AI arena — corridor map (Studio verification: REQUIRED, not done)
+
+**Scope note up front:** this is a second, independent instance of the exact
+same "AI arena" pattern as the first (`docs/TECHNICAL_DEBT.md` "AI arena /
+factions" above) — same design goal, same known limitations by inheritance
+(foundation-only, no designer AI-zone tooling, no doors/ladders/vaulting/
+climbing beyond the walkable stairs built here, no strategic planner). This
+entry only covers what's genuinely NEW: the second arena's own geometry and
+the generalization that let `AIService.server.lua` run two battles at once.
+
+New `Constants.AI_ARENA_2` table, two new `Constants.AI_FACTIONS` entries
+(`ARENA2_RED`/`ARENA2_BLUE`), a new `AIArenaCorridorBuilder.server.lua`
+(geometry only, one new `default.project.json` entry), and a generalization
+of `AIService.server.lua`'s `arenaEnabled`/`spawnArenaSquad`/`runArenaBattle`
+to take an arena's config + faction-key pair as parameters instead of only
+ever reading `Constants.AI_ARENA` — a pure parameterization, verified to
+produce byte-for-byte the same call shape for the first arena
+(`runArenaBattle(ARENA, "ARENA_RED", "ARENA_BLUE")` from the exact same
+`Start()` call site as before). `GunService`/`DamageService`/`TeamService`
+untouched. MCP-checked (throwaway logic against a live Edit datamodel) the
+180°-mirror relationship between the red and blue stair/platform structures,
+the step-riser math (each riser exactly `STEP_RISE`, the final step's top
+exactly matching `PLATFORM_HEIGHT`), every structure's containment within the
+baseplate, the spawn-point separation distance, and — the one genuinely new
+piece of *logic*, not just geometry — that `countLivingByFaction` correctly
+scopes to one arena's battle and never mixes in the other arena's headcount,
+since the two arenas use entirely distinct faction keys. Residual risks:
+
+- **Not runtime-verified in Play.** Whether the layout reads as intended
+  (three lanes — west cover, center high-wall crossing, east cover — plus two
+  fair, symmetric elevated firing positions), whether AI actually climbs the
+  stairs and uses the platform to shoot down, and whether running TWO
+  concurrent arena battles alongside the main game's own AI zone causes any
+  server hitching, have not been observed.
+- **Both arenas now compete for the same global `MAX_ACTIVE_NPCS` (12)
+  budget, on top of the main game's own AI zone.** Total demand if everything
+  is active at once: main zone (up to 6) + arena 1 (2×4=8) + arena 2 (2×3=6)
+  = 20, well over the cap. Arena 2's `SQUAD_SIZE` was set to 3 (smaller than
+  arena 1's 4) specifically to ease this, and both arenas' own
+  `spawnArenaSquad` retry loops already handle a temporarily-full roster
+  gracefully (retry, then log and give up) — but with all three systems
+  enabled, it is likely that not every squad reaches its configured size, or
+  a squad fails to spawn at all until something else frees up room. Not
+  fixed automatically — `MAX_ACTIVE_NPCS` is a gameplay-balance constant, out
+  of scope to silently raise here; the user may want to raise it if they
+  intend to run everything simultaneously.
+- **The L-shaped platform and staircase geometry is a first guess, not
+  Studio-verified.** The two overlapping-rectangle "arms" forming the L, the
+  3-step staircase's alignment with the platform's edge, and whether AI's
+  existing pathfinding (`Constants.AI_NAVIGATION`, `AGENT_CAN_JUMP = true`,
+  `AGENT_CAN_CLIMB = false`) actually routes a grunt up the stairs onto the
+  platform (rather than just walking around it and ignoring it) are all
+  unverified assumptions carried over from the same caveat already logged for
+  the first arena's stepped structure.
+- **No "Watch This Arena" button for the second arena.** The existing "WATCH
+  AI ARENA" button + `TeleportToArena` remote + `SpectatorFlyController` only
+  ever teleport above the FIRST arena (`Constants.AI_ARENA`) — a player
+  cannot currently fly-spectate the second arena's battle without manually
+  flying there (via the first arena's spectate mode) or using Studio's own
+  move-to tooling. Not asked for in this task; a natural follow-up if wanted.
+- **Both arenas' battles are otherwise fully independent** — no
+  shared/aggregate win-loss tracking, no way to see both battles' state at
+  once beyond watching (or flying to) each in turn, and no scoring/UI for
+  either, consistent with every AI-arena task so far in this session.
+
 ## Player first-person weapon retraction — Tarkov close-quarters (Studio verification: REQUIRED, not done)
 
 `ViewModelController.computeWallCollisionCF` + `Constants.VIEWMODEL_WALL_*`. One
