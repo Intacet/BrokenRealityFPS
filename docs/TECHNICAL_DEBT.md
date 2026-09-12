@@ -928,6 +928,15 @@ for the Studio test steps below. Residual risks:
 
 ## AI arena / factions (Studio verification: REQUIRED, not done)
 
+**Now live on published servers (2026-09-12).** `Constants.AI_ARENA.RUN_IN_PUBLISHED`
+was flipped from its "safe by default" `false` to `true` at the owner's
+explicit request, after publishing and finding the arena missing (it had
+only ever run in Studio until now). Every "Not runtime-verified in Play"
+caveat throughout this entry now applies to real players on the live
+server, not just a Studio playtester — this arena has NOT been observed in
+an actual published build yet, only Studio's Edit datamodel via MCP. Worth
+an actual published-server pass soon given that gap widened.
+
 **Scope note up front:** this is the largest AI-targeting-core change this
 session — it widens `NPCRecord.target`'s type (`Player?` → `Player | Model`)
 and touches `findVisibleTarget`/`targetRootOf`/`fireOneShot`, the functions
@@ -1217,6 +1226,11 @@ false pass. Residual risks:
   Invisibility" is specifically about AI *targeting*, not blast AoE.
 
 ## Second AI arena — corridor map (Studio verification: REQUIRED, not done)
+
+**Now live on published servers (2026-09-12).** Same change and same caveat
+as "AI arena / factions" above: `Constants.AI_ARENA_2.RUN_IN_PUBLISHED`
+flipped `false` → `true` at the owner's explicit request. Not yet observed
+on an actual published build.
 
 **Scope note up front:** this is a second, independent instance of the exact
 same "AI arena" pattern as the first (`docs/TECHNICAL_DEBT.md` "AI arena /

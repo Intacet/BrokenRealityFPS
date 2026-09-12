@@ -2692,9 +2692,12 @@ Constants.AI_FACTIONS = {
 Constants.AI_ARENA = {
     ENABLED = true,
     DEBUG   = true,
-    -- false = Studio only (safe default). true = also build it on a published
-    -- server, same split as DEV_TEST_AREA.RUN_IN_PUBLISHED.
-    RUN_IN_PUBLISHED = false,
+    -- false = Studio only. true = also build it on a published server, same
+    -- split as DEV_TEST_AREA.RUN_IN_PUBLISHED. Was the safe default (false);
+    -- flipped true 2026-09-12 at the owner's explicit request after publishing
+    -- and finding the arena missing — this ships the sky-island arena + its
+    -- red-vs-blue battle to every player on the live server.
+    RUN_IN_PUBLISHED = true,
 
     FOLDER_NAME = "BrokenReality_AIArena",
     ORIGIN      = Vector3.new(0, 600, 0),
@@ -2751,7 +2754,10 @@ Constants.AI_ARENA = {
 Constants.AI_ARENA_2 = {
     ENABLED = true,
     DEBUG   = true,
-    RUN_IN_PUBLISHED = false,
+    -- Was the safe Studio-only default (false); flipped true 2026-09-12 at the
+    -- owner's explicit request, same as AI_ARENA above — see that field's
+    -- comment for the full reasoning.
+    RUN_IN_PUBLISHED = true,
 
     FOLDER_NAME = "BrokenReality_AIArenaCorridor",
     ORIGIN      = Vector3.new(0, 900, 0),

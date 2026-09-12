@@ -1,5 +1,23 @@
 # Changelog
 
+## Both AI arenas now build on a published server, not just Studio
+
+- **User-reported:** after publishing the build, the AI arena wasn't there.
+  Root cause: `Constants.AI_ARENA.RUN_IN_PUBLISHED` and
+  `Constants.AI_ARENA_2.RUN_IN_PUBLISHED` both defaulted to `false` — a
+  deliberate "safe by default" switch (same pattern as
+  `DEV_TEST_AREA.RUN_IN_PUBLISHED`, which defaults `true`) that gated all
+  three published-server behaviors: `AIArenaBuilder.server.lua` /
+  `AIArenaCorridorBuilder.server.lua` building the arena geometry, and
+  `AIService.server.lua`'s `arenaEnabled()` running either red-vs-blue
+  battle loop. Not a Rojo/sync/publish bug — everything else published
+  correctly, these two flags were just off.
+- Flipped both to `true` at the owner's explicit request — both arenas and
+  their battles now build and run on the live published server, same as in
+  Studio.
+- One two-line `Constants.lua` change (the two `RUN_IN_PUBLISHED` booleans);
+  no other files touched. `rojo build` clean.
+
 ## Debt cleanup: AI-vs-AI hits now attribute the shooter, so grunts instantly retarget
 
 - A grunt shot by an enemy-faction grunt (either AI arena) previously had no
