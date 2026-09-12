@@ -376,6 +376,22 @@ local losParams: RaycastParams = RaycastParams.new()
 losParams.FilterType = Enum.RaycastFilterType.Exclude
 losParams.IgnoreWater = true
 
+-- AI arena / factions bugfix (2026-09-11): losParams.FilterDescendantsInstances
+-- is set to { aiFolder } below — the ENTIRE folder every grunt (and its welded
+-- gun) lives in — so any raycast using losParams passes straight through every
+-- grunt, friend or enemy. That's correct for canSee()'s LOS check (a squadmate
+-- standing in the way shouldn't block detection) but was silently breaking
+-- fireOneShot's actual damage raycast: it could never hit another grunt at all,
+-- so AI-vs-AI shots always missed regardless of faction/range/aim. shotParams
+-- excludes only the FIRING grunt's own Model each shot (mutated right before
+-- each raycast, no per-shot allocation) — its welded gun is a descendant of
+-- that Model, so it's excluded too — letting a bullet hit players, terrain,
+-- AND any other grunt (enemy or friendly; fireOneShot's own faction check is
+-- what decides whether a hit on a grunt actually deals damage).
+local shotParams: RaycastParams = RaycastParams.new()
+shotParams.FilterType = Enum.RaycastFilterType.Exclude
+shotParams.IgnoreWater = true
+
 local npcs   : { [Model]: NPCRecord } = {}
 local squads : { [number]: SquadRecord } = {}
 
@@ -1498,7 +1514,10 @@ local function fireOneShot(record: NPCRecord)
     local dir = coneSpread(baseDir.Unit, math.rad(spreadDeg))
 
     local rayVec = dir * AI.SHOT_RANGE
-    local result = workspace:Raycast(origin, rayVec, losParams)
+    -- shotParams (not losParams — see its declaration) excludes only this
+    -- grunt's own Model, so the shot can actually hit another grunt.
+    shotParams.FilterDescendantsInstances = { record.model }
+    local result = workspace:Raycast(origin, rayVec, shotParams)
 
     -- Stage 1B/1C: play the visible + audible shot FX and the fire kick for every
     -- shot, hit or miss. Reads only the muzzle / end position — hit calc unchanged.

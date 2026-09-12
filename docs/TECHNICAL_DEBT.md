@@ -877,7 +877,18 @@ loop's termination behavior. Residual risks:
   first time `findVisibleTarget`'s enemy-grunt loop and `fireOneShot`'s
   enemy-grunt damage branch have ever actually executed (no faction has ever
   differed before this pass), so it is the least-exercised new code path in
-  the whole session.
+  the whole session. **Update (2026-09-11):** it exercised a real bug —
+  reported after actual Play testing as "the bots can't damage each other."
+  `fireOneShot`'s shot raycast was reusing `losParams`, which excludes the
+  entire `Workspace/AI` folder (built for `canSee()`'s LOS check, where a
+  squadmate blocking detection would be wrong) — so a grunt's bullet could
+  never physically hit *any* other grunt, AI-vs-AI or otherwise. Fixed with a
+  separate `shotParams` excluding only the firing grunt's own Model; proven
+  against real Instances in a live Studio raycast (not simulated) — the old
+  params hit nothing, the new ones hit the target. This was a pre-existing
+  gap in the original single-faction design (AI could never hit AI at all,
+  by construction, until this task's faction work made it possible to even
+  try), not something this task's faction logic itself got wrong.
 - **No attacker attribution for AI-vs-AI damage.** `DamageService`'s
   `attacker` field is `Player?` — deliberately not touched, so `ApplyDamage`
   is called with `targetModel` only when the source is an enemy grunt. This
@@ -965,7 +976,27 @@ same Luau parser). Residual risks:
 - **Not runtime-verified in Play.** Whether the fly controls feel good,
   whether the invincibility grant actually prevents damage end-to-end, and
   whether the button/teleport/fly sequence works smoothly together have not
-  been observed.
+  been observed. **Update (2026-09-11):** it exercised a real bug — reported
+  after actual Play testing as "I'm not able to fly." The movement loop only
+  wrote a new `HumanoidRootPart.CFrame` while a key was actually held, and
+  never touched the part's velocity; gravity keeps accelerating an unanchored
+  part's `AssemblyLinearVelocity` every physics step regardless of
+  `Humanoid.PlatformStand`, so that velocity built up between frames and
+  fought the flight (worse while standing still, since no CFrame write
+  happened at all to counter it). Fixed: the loop now runs — and re-pins
+  position — every frame while flying, moved or not, and zeroes both linear
+  and angular velocity every frame; toggling fly on/off now also explicitly
+  calls `Humanoid:ChangeState(Physics)`/`ChangeState(GettingUp)`, the
+  standard way to make sure the Humanoid's own Running/Freefall/Landed state
+  machine isn't still fighting a custom controller for control alongside
+  `PlatformStand`. Not yet re-verified in an actual Play session (the same
+  limitation as every other fix in this file) — MCP could only check the
+  underlying math/raycast behavior, not the in-game feel. **Also surfaced
+  while investigating:** the Studio session used for MCP checks has a stale
+  Rojo sync (`Constants.SPECTATOR_FLY` present, but `Constants.AI_ARENA_2`/
+  `ATTR_AI_INVISIBLE`, added in the two commits since, are not) — if these
+  fixes don't resolve what's being seen, reconnecting Rojo before retesting
+  is worth ruling out first.
 - **The `DamageService.lua` change is real, if small.** `applyToPlayer` now
   reads `victim.Character:GetAttribute(Constants.ATTR_INFINITE_HEALTH)` before
   computing health — a new branch in the single most safety-critical function

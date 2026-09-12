@@ -56,6 +56,16 @@ local currentRoot: BasePart? = nil
 -- Movement
 -- ============================================================
 
+-- Bugfix (2026-09-11): the original version only wrote root.CFrame when
+-- moveDir was non-zero, and never touched the part's velocity. Gravity keeps
+-- accelerating an unanchored BasePart's AssemblyLinearVelocity every physics
+-- step regardless of PlatformStand or how often a script repositions it — so
+-- standing still (or even moving) let that velocity build up between frames,
+-- making "flying" feel like a losing fight against constantly falling/
+-- sinking, up to and including feeling like flight "doesn't work" at all.
+-- Now: runs — and re-pins position — every frame while flying, moved or not,
+-- and explicitly zeroes both linear and angular velocity every frame so
+-- gravity/physics never gets a chance to accumulate between writes.
 local function onRenderStepped(dt: number)
     if not flying or currentRoot == nil then
         return
@@ -87,15 +97,14 @@ local function onRenderStepped(dt: number)
         moveDir -= Vector3.yAxis
     end
 
-    if moveDir.Magnitude < 1e-4 then
-        return
-    end
-
     local speed = if UserInputService:IsKeyDown(FLY.BOOST_KEY)
         then FLY.BOOST_SPEED :: number
         else FLY.SPEED :: number
-    local newPos = root.Position + moveDir.Unit * speed * dt
+    local delta = if moveDir.Magnitude > 1e-4 then moveDir.Unit * speed * dt else Vector3.zero
+    local newPos = root.Position + delta
     root.CFrame = CFrame.new(newPos, newPos + camCF.LookVector)
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
 end
 
 -- ============================================================
@@ -159,6 +168,15 @@ local function setFlying(on: boolean): ()
 
     if on then
         humanoid.PlatformStand = true
+        -- Bugfix (2026-09-11): PlatformStand alone stops WASD-driven walking,
+        -- but the Humanoid's own state machine (Running/Freefall/Landed, each
+        -- with its own physics/animation behavior) can still be active and
+        -- fighting for control. Forcing the Physics state hands the rig fully
+        -- over to direct script control — the standard technique for a custom
+        -- fly/noclip controller like this one.
+        pcall(function()
+            humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+        end)
         table.clear(originalCanCollide)
         for _, inst in ipairs(character:GetDescendants()) do
             if inst:IsA("BasePart") then
@@ -182,6 +200,11 @@ local function setFlying(on: boolean): ()
             root.CFrame = CFrame.new(origin + Vector3.new(0, 10, 0))
         end
         humanoid.PlatformStand = false
+        -- Hands control back to the normal Humanoid state machine (matches
+        -- the ChangeState(Physics) call above) rather than leaving it stuck.
+        pcall(function()
+            humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+        end)
         for part, canCollide in pairs(originalCanCollide) do
             if part.Parent ~= nil then
                 part.CanCollide = canCollide

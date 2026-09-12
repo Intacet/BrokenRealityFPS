@@ -1,5 +1,43 @@
 # Changelog
 
+## Bugfix: AI-vs-AI shots never hit, spectator fly fought gravity
+
+Two bugs reported after real Play testing:
+
+- **Bots couldn't damage each other.** The shot raycast in `fireOneShot`
+  reused `losParams`, which excludes the *entire* `Workspace/AI` folder (every
+  grunt, both arenas' squads) to keep line-of-sight checks from being blocked
+  by a squadmate. That's correct for detection, but it meant a grunt's actual
+  bullet could never physically hit any other grunt at all — shots always
+  passed straight through, regardless of faction, range, or aim. Fixed with a
+  separate `shotParams` that excludes only the firing grunt's own model (its
+  welded gun goes with it, being a child of that model) — proven with a real
+  raycast against real Instances in a live Studio session: the old params hit
+  nothing, the new ones hit the target square on. A shot can now also be
+  blocked by a *friendly* grunt standing in the way (its own faction check
+  still stops damage from landing), which is more realistic, not a
+  regression.
+- **Spectator fly wasn't working.** `SpectatorFlyController`'s movement loop
+  only wrote a new position when a key was actually held, and never touched
+  the part's velocity — gravity keeps accelerating an unanchored part every
+  physics step regardless of `Humanoid.PlatformStand`, so that velocity built
+  up between frames and fought the flight, especially when not actively
+  moving. Now the position is re-pinned and both linear and angular velocity
+  are zeroed every single frame while flying, moved or not, and toggling fly
+  on now also forces the Humanoid into the `Physics` state (the standard way
+  to make sure nothing in its own Running/Freefall/Landed state machine is
+  still fighting for control), restored to `GettingUp` on toggle-off.
+- Both fixes are narrowly scoped to the exact broken logic — no behavior
+  changes to targeting, faction rules, teleporting, or anything else in
+  either system. `rojo build` clean; MCP-verified the raycast fix against
+  real Instances (not simulated) in a live Studio session, and the
+  gravity-cancellation math in isolation.
+- **Also confirmed while investigating:** the Studio session used for MCP
+  checks has a stale Rojo sync — `Constants.SPECTATOR_FLY`/`AI_ARENA` are
+  present but `AI_ARENA_2`/`ATTR_AI_INVISIBLE` (added in the two commits
+  since) are not. If these fixes don't resolve what you're seeing, reconnect
+  Rojo and resync before retesting — noted honestly rather than assumed.
+
 ## Second AI arena — corridor map with L-shaped platforms
 
 - **A second, separate AI arena** (user-sketched layout), running alongside
