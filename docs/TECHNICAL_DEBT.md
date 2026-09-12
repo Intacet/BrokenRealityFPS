@@ -360,14 +360,28 @@ additive `Motor6D` C0/C1 offsets apply and restore. Residual risks:
   is unchanged (goes fully quiet for the rest of the window). Not runtime-verified
   — the state-machine logic was checked in isolation, not the in-game feel or
   timing. Residual risks:
-  - **Not squad-attacker-slot-limited.** `updateSquadAttackSlots`
-    (`Constants.AI_COMBAT_TUNING.MAX_SIMULTANEOUS_ATTACKERS_PER_SQUAD`) only
-    counts grunts in `Attack`; a retreating grunt's covering-fire burst doesn't
-    consume/respect a slot, so it's possible for more grunts to be shooting at
-    once than the squad cap intends if some are retreating while others are
-    fighting. Judged acceptable for a first pass — squads are small (≤4) and
-    retreat bursts are short and infrequent — but worth revisiting if it feels
-    like too much simultaneous fire.
+  - **Not squad-attacker-slot-limited — fixed (2026-09-12).** A retreating
+    grunt's covering-fire burst previously didn't consume/respect a slot, so
+    it was possible for more grunts to be shooting at once than
+    `AI_FIRE_DISCIPLINE.MAX_ACTIVE_SHOOTERS_PER_SQUAD` intends if some were
+    retreating while others were planted in Attack. New
+    `coverRetreatFireSlotAvailable` helper gates the Cover branch's
+    bounding-overwatch fire trigger on the exact same `updateSquadAttackSlots`
+    /`canNpcUseAttackSlot` mechanism the Attack-planted branch already uses —
+    `attackSlotEligible` was already deliberately state-agnostic (documented
+    at its own declaration as "independently testable and reusable"), so this
+    is that reuse, not a new mechanism. When the squad's slots are all held
+    by Attack-planted shooters, a retreating grunt now falls through to the
+    plain retreat-walk branch instead of firing anyway, and retries every
+    think until a slot frees up or its own cooldown re-rolls. Fails open
+    (fires, as before this fix) when `AI_FIRE_DISCIPLINE.ENABLED` is false or
+    the grunt's squad record can't be found, matching the Attack branch's own
+    fallback shape. `rojo build` clean; MCP-checked the four-case decision
+    table (discipline off, no squad, has slot, no slot) in isolation. Not
+    runtime-verified in Play — whether this reads as noticeably calmer
+    (fewer simultaneous muzzle flashes when a squad is bounding) has not been
+    observed; squads are still small (≤4) so the practical difference from
+    the old unlimited behavior may be subtle.
   - **No reaction-time gate on the retreat burst** (`record.reactionReadyAt` is
     only checked in `Attack`) — intentional, since retreat-fire is always against
     an already-engaged target (reaction time modeled the beat before the FIRST

@@ -1,5 +1,29 @@
 # Changelog
 
+## Debt cleanup: covering fire while retreating now respects the squad fire-discipline cap
+
+- A retreating grunt's covering-fire burst (`AI.COVER_RETREAT_FIRE`) previously
+  fired regardless of the squad's `AI_FIRE_DISCIPLINE.MAX_ACTIVE_SHOOTERS_PER_SQUAD`
+  cap — it never consumed or competed for an attack slot, so more grunts
+  could end up shooting at once than the cap intends whenever some
+  squadmates are retreating to cover while others are planted in Attack.
+  Flagged in `docs/TECHNICAL_DEBT.md` since the original "AI Stage 1F"
+  covering-fire task as "judged acceptable for a first pass... worth
+  revisiting."
+- New `coverRetreatFireSlotAvailable` helper reuses the exact same
+  `updateSquadAttackSlots`/`canNpcUseAttackSlot` mechanism the Attack-planted
+  branch already gates on — `attackSlotEligible` was already deliberately
+  written to not check `record.state`, specifically so it could be reused
+  like this. When the squad's shooter slots are all held elsewhere, a
+  retreating grunt now just keeps retreating instead of also firing; it
+  retries every think until a slot frees up. Fails open (unchanged behavior)
+  if fire discipline is disabled or the grunt's squad record is missing.
+- `AIService.server.lua` only — no new remotes, no client files,
+  `GunService`/`DamageService` untouched. `rojo build` clean; MCP-checked the
+  four-case decision table (discipline off / no squad / has slot / no slot)
+  in isolation. Not runtime-verified in Play — whether it's noticeably
+  calmer with a squad bounding is unconfirmed.
+
 ## Debt cleanup: fix a latent AI reposition-timer bug
 
 - `NPCRecord.lastSupportRepositionAt` was initialized to `0` and gated by a

@@ -979,6 +979,32 @@ local function updateSquadAttackSlots(squad: SquadRecord, now: number)
     end
 end
 
+-- Covering fire while retreating (AI Stage 1F) previously ignored the squad's
+-- fire-discipline attack-slot cap entirely -- a retreating grunt's covering
+-- burst never consumed or competed for a slot, so it was possible for more
+-- grunts to be shooting at once than MAX_ACTIVE_SHOOTERS_PER_SQUAD intends
+-- whenever some squadmates are retreating to cover while others are planted
+-- in Attack (see docs/TECHNICAL_DEBT.md "AI Stage 1F" -> "Not
+-- squad-attacker-slot-limited"). Fixes that by reusing the exact same
+-- updateSquadAttackSlots gate the Attack-planted branch already applies --
+-- attackSlotEligible is deliberately state-agnostic (see its own comment
+-- above), so calling it from Cover is exactly the "independently testable
+-- and reusable" use it was designed for, not a special case. Mirrors the
+-- Attack branch's own "DISCIPLINE.ENABLED / squad found" fallback-open
+-- shape so a disabled or squad-less grunt still fires exactly as it did
+-- before this fix.
+local function coverRetreatFireSlotAvailable(record: NPCRecord, now: number): boolean
+    if DISCIPLINE.ENABLED ~= true then
+        return true
+    end
+    local squad = squads[record.squadId]
+    if squad == nil then
+        return true
+    end
+    updateSquadAttackSlots(squad, now)
+    return record.hasAttackSlot
+end
+
 -- Random direction inside a cone of half-angle `maxAngleRad` about `dir`.
 local function coneSpread(dir: Vector3, maxAngleRad: number): Vector3
     if maxAngleRad <= 0 then
@@ -2749,9 +2775,16 @@ local function thinkNPC(record: NPCRecord, now: number)
                 humanoid.AutoRotate = false
                 humanoid:MoveTo(root.Position)
                 faceToward(record, troot.Position)
-            elseif AI.COVER_RETREAT_FIRE == true and inLos and now >= record.nextCoverShotClock then
+            elseif AI.COVER_RETREAT_FIRE == true and inLos and now >= record.nextCoverShotClock
+                and coverRetreatFireSlotAvailable(record, now) then
                 -- Bounding-overwatch pulse: stop, face the player, fire a burst back,
                 -- then resume walking to cover once it (and its cooldown) finishes.
+                -- Gated on the squad's shared fire-discipline attack-slot cap (see
+                -- coverRetreatFireSlotAvailable above) -- if the squad's shooter slots
+                -- are all held by grunts already planted in Attack, this pulse is
+                -- skipped and the grunt falls through to the retreat-walk branch below
+                -- instead, retrying every think until a slot frees up or the interval
+                -- naturally re-rolls.
                 local lo, hi = AI.COVER_RETREAT_SHOT_MIN :: number, AI.COVER_RETREAT_SHOT_MAX :: number
                 record.nextCoverShotClock = now + lo + math.random() * (hi - lo)
                 humanoid.AutoRotate = false
@@ -2759,10 +2792,11 @@ local function thinkNPC(record: NPCRecord, now: number)
                 faceToward(record, troot.Position)
                 startBurst(record)
             else
-                -- Between shots, no LOS, or the retreat-fire flag is off — just keep
-                -- retreating toward cover. `cp` is already an individually-computed
-                -- LOS-breaking spot (Stage 1D findCoverPoint), so radius 0: separation
-                -- + throttling only, no additional squad spread/jitter.
+                -- Between shots, no LOS, no free squad attack slot right now, or the
+                -- retreat-fire flag is off — just keep retreating toward cover. `cp` is
+                -- already an individually-computed LOS-breaking spot (Stage 1D
+                -- findCoverPoint), so radius 0: separation + throttling only, no
+                -- additional squad spread/jitter.
                 humanoid.AutoRotate = true
                 issueSquadMoveGoal(record, humanoid, cp or root.Position, 0, now)
             end
