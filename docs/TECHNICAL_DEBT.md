@@ -539,6 +539,32 @@ live `AIService` require). Residual risks:
   than 0.5s), but it was a real latent bug, not just theoretical — worth
   double-checking similar `= 0`-initialized throttle fields elsewhere if any
   more get added.
+- **That double-check turned up one more instance, now fixed (2026-09-12):**
+  `NPCRecord.lastSupportRepositionAt` had the identical `= 0` init against the
+  identical `now - last >= randomInterval` gate (the non-shooter reposition
+  timer just below this bullet). Fixed the same way, to `-math.huge`. Every
+  other `= 0`-initialized field in this file was re-checked against this bug
+  class during the same pass (`lastMoveGoalAt`, `lastFormationAssignAt`,
+  `attackSlotAssignedAt`, `currentBoundStartedAt`, `lastSawTargetAt`,
+  `firstSawTargetAt`) and confirmed safe — each is either an "armed-until"
+  sentinel where `now < 0` is harmlessly always false (`coverUntil`,
+  `alertUntil`, `roamCooldownUntil`, ...), a ">= a due-at clock" sentinel
+  where `now >= 0` is harmlessly always true on the first check
+  (`nextThinkClock`, `nextTargetCheckClock`, `nextCoverShotClock`), or
+  provably never read before being set with a real timestamp first
+  (`attackSlotAssignedAt`/`currentBoundStartedAt` are only ever consulted for
+  a record already present in `activeShooterIds`/already the current Mover,
+  and both of those are only ever entered by the same call that also stamps
+  the real `now`; `lastFormationAssignAt` is stamped by an explicit
+  immediate-assignment call right after spawn, before the throttled recheck
+  ever runs; `lastMoveGoalAt`'s throttle is OR'd with `lastMoveAnchor == nil`,
+  true on a fresh record regardless of the clock field). MCP-checked
+  (throwaway logic, not a live `AIService` require) the specific before/after
+  gate outcome for the fixed field; `rojo build` clean. Not runtime-verified
+  in Play — the effect (a non-shooter's very first support-position pick
+  landing immediately instead of after one `NON_SHOOTER_REPOSITION_INTERVAL`)
+  is only observable in the first couple of seconds of a squad's very first
+  engagement, same negligible-in-practice caveat as the three bugs before it.
 - **Active shooter selection is simple: eligibility + squad member iteration
   order, no ranking.** "Prefer bots with clear LOS and good position" is
   satisfied only in the sense that LOS is a hard eligibility requirement —

@@ -1,5 +1,26 @@
 # Changelog
 
+## Debt cleanup: fix a latent AI reposition-timer bug
+
+- `NPCRecord.lastSupportRepositionAt` was initialized to `0` and gated by a
+  `now - last >= randomInterval` check (a non-shooter grunt's "pick a new
+  support/hold-back position" timer). Since a fresh server's `os.clock()`
+  also starts near 0, this could in principle skip a squad's very first
+  non-shooter reposition pick if it happened within the first
+  `NON_SHOOTER_REPOSITION_INTERVAL` of server life — the exact same bug class
+  already found and fixed three times this session (`lastAttackSlotUpdateAt`
+  / `lastKnownUpdateAt` / `lastBoundEvaluateAt`). Fixed the same way: `-math.huge`.
+- Went back and re-checked every other `= 0`-initialized throttle-style field
+  in `AIService.server.lua` for the same class of bug — all others confirmed
+  safe (either an "armed-until" sentinel where 0 is harmlessly always in the
+  past, a "due-at" sentinel where 0 is harmlessly always already due, or
+  provably never read before being stamped with a real timestamp first).
+  Documented in `docs/TECHNICAL_DEBT.md`'s "AI squad fire discipline" entry.
+- One-line fix + a doc update; `rojo build` clean; MCP-checked the before/
+  after gate outcome. No Studio Play verification needed or possible for
+  this one (the observable effect is a sub-2-second timing difference at the
+  very start of a squad's first engagement).
+
 ## Give some of the AI shotguns
 
 - Every newly-spawned grunt (any squad, either AI arena, or the main game's

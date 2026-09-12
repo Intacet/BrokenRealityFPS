@@ -3376,7 +3376,15 @@ local function spawnOne(worldCFrame: CFrame, squadId: number, isLeader: boolean,
 
         hasAttackSlot           = false,
         attackSlotAssignedAt    = 0,
-        lastSupportRepositionAt = 0,
+        -- -math.huge, same reasoning/bug class as lastAttackSlotUpdateAt /
+        -- lastKnownUpdateAt / lastBoundEvaluateAt elsewhere in this file: the
+        -- non-shooter reposition gate below is `now - last >= randomInterval`,
+        -- and a fresh server's os.clock() starts near 0 too, so `= 0` could in
+        -- principle make a non-shooter's very first support/hold-position pick
+        -- wait out the interval instead of picking one immediately. Found
+        -- during a debt-cleanup pass checking every other `= 0`-initialized
+        -- throttle field in this file for the same class of bug.
+        lastSupportRepositionAt = -math.huge,
 
         isAlertedBySquad = false,
         investigateGoal  = nil,
