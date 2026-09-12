@@ -900,15 +900,26 @@ loop's termination behavior. Residual risks:
   not instantly. It does still enter `Cover` on the hit (`record.coverUntil`
   is armed regardless of attacker identity) and does still get suppressed/
   recently-damaged tiering, since those don't need to know *who* shot it.
-- **Arena squads share the global `MAX_ACTIVE_NPCS` (12) budget with every
-  other AI spawn in the game.** With the main game's own AI zone active
-  (`DEV_TEST_AREA.SPAWN_AI_ZONE`, up to `MAX_SQUADS` × `DEFAULT_SQUAD_SIZE` =
-  6) plus the arena's two `SQUAD_SIZE` = 4 squads (8), total demand (14) can
-  exceed the cap — squads may spawn smaller than requested, or `spawnSquad`
-  can return empty and `runArenaBattle`'s retry loop can exhaust all
-  `SPAWN_RETRY_ATTEMPTS` and give up (logged via `Logger.warn`) if the game's
-  other AI never frees up room. Not fixed automatically — `MAX_ACTIVE_NPCS`
-  is a gameplay-balance constant, out of scope to silently raise here.
+- **Arena squads share the global `MAX_ACTIVE_NPCS` budget with every other
+  AI spawn in the game.** **Fixed (2026-09-11), confirmed as a real bug in
+  testing:** with both AI arenas running (this one plus the second, corridor
+  arena) alongside the main game's own AI zone, reported as "only the red
+  squad spawns, blue never does" — steady-state demand is
+  `MAX_SQUADS`×`DEFAULT_SQUAD_SIZE` (6, main zone) + `AI_ARENA.SQUAD_SIZE`×2
+  (8) + `AI_ARENA_2.SQUAD_SIZE`×2 (6) = 20 living grunts at once, which
+  exceeded the original cap of 12 — red consistently won the race for the
+  shared budget because it's spawned first in each arena's `spawnBothFresh`,
+  leaving blue's `spawnArenaSquad` retry loop to exhaust all
+  `SPAWN_RETRY_ATTEMPTS` and give up. `Constants.AI.MAX_ACTIVE_NPCS` raised
+  to 30 (comfortable headroom over the 20 steady-state total) — this IS a
+  gameplay-balance constant, raised deliberately and visibly here rather than
+  left broken, since three concurrent AI-vs-AI/watch systems genuinely need
+  more room than the original single-squad-era cap ever anticipated. Not yet
+  stress-tested at the new cap for server performance with everything active
+  simultaneously, though the per-grunt work every relevant loop in this file
+  does (`getSeparationAdjustedGoal`, `shareSquadAlert`,
+  `findVisibleTarget`'s enemy scan, `countLivingByFaction`) is a cheap O(n)
+  scan over `npcs`, and n=30 is still small.
 - **A wandering DEFAULT-faction grunt (or a player) near the arena's
   sky-island footprint would also register as hostile to both arena
   factions** — correct "different faction = enemy" semantics by design, not
@@ -1128,18 +1139,15 @@ since the two arenas use entirely distinct faction keys. Residual risks:
   stairs and uses the platform to shoot down, and whether running TWO
   concurrent arena battles alongside the main game's own AI zone causes any
   server hitching, have not been observed.
-- **Both arenas now compete for the same global `MAX_ACTIVE_NPCS` (12)
-  budget, on top of the main game's own AI zone.** Total demand if everything
-  is active at once: main zone (up to 6) + arena 1 (2×4=8) + arena 2 (2×3=6)
-  = 20, well over the cap. Arena 2's `SQUAD_SIZE` was set to 3 (smaller than
-  arena 1's 4) specifically to ease this, and both arenas' own
-  `spawnArenaSquad` retry loops already handle a temporarily-full roster
-  gracefully (retry, then log and give up) — but with all three systems
-  enabled, it is likely that not every squad reaches its configured size, or
-  a squad fails to spawn at all until something else frees up room. Not
-  fixed automatically — `MAX_ACTIVE_NPCS` is a gameplay-balance constant, out
-  of scope to silently raise here; the user may want to raise it if they
-  intend to run everything simultaneously.
+- **Both arenas now compete for the same global `MAX_ACTIVE_NPCS` budget, on
+  top of the main game's own AI zone.** **Fixed (2026-09-11)** — see the
+  matching bullet in "AI arena / factions" above: this exact contention was
+  confirmed in real testing ("only the red squad spawns, blue never does")
+  and `Constants.AI.MAX_ACTIVE_NPCS` was raised from 12 to 30, comfortably
+  covering the ~20-grunt steady-state total across all three systems (main
+  zone 6, arena 1 8, arena 2 6). Arena 2's `SQUAD_SIZE` staying smaller than
+  arena 1's (3 vs. 4) is left as-is — a minor, intentional asymmetry, not
+  something the cap raise needed to undo.
 - **The L-shaped platform and staircase geometry is a first guess, not
   Studio-verified.** The two overlapping-rectangle "arms" forming the L, the
   3-step staircase's alignment with the platform's edge, and whether AI's

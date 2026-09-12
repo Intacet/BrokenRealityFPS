@@ -2118,7 +2118,15 @@ Constants.AI = {
     -- today's behavior is unchanged. See Constants.AI_FACTIONS below.
     DEFAULT_FACTION = "DEFAULT",
 
-    MAX_ACTIVE_NPCS    = 12,
+    -- Bugfix (2026-09-11): raised from 12 — with both AI arenas' auto-battles
+    -- running alongside the main game's own AI zone, steady-state demand is
+    -- up to MAX_SQUADS*DEFAULT_SQUAD_SIZE (6) + AI_ARENA.SQUAD_SIZE*2 (8) +
+    -- AI_ARENA_2.SQUAD_SIZE*2 (6) = 20 living grunts at once. At 12 the two
+    -- arenas' own spawnArenaSquad retry loops were starving each other for
+    -- the shared budget — confirmed in testing as "only the red squad spawns,
+    -- blue never does" (red spawns first in each arena's battle loop and used
+    -- up what little room existed). 30 covers that 20 with real headroom.
+    MAX_ACTIVE_NPCS    = 30,
     DEFAULT_SQUAD_SIZE = 3,
     MAX_SQUADS         = 2,
 

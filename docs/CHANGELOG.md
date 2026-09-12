@@ -1,5 +1,23 @@
 # Changelog
 
+## Bugfix: only the red squad was spawning (AI headcount cap too low)
+
+- **Confirmed in testing:** with both AI arenas' battles running alongside
+  the main game's own AI zone, only red squads were spawning — blue never
+  did. Steady-state demand across all three systems (main zone up to 6,
+  arena 1 up to 8, arena 2 up to 6) is up to 20 living grunts at once, but
+  `Constants.AI.MAX_ACTIVE_NPCS` was still 12 — red consistently won the race
+  for that shared budget because it's always spawned first in each arena's
+  battle loop, leaving blue's own retry loop to exhaust its attempts and give
+  up.
+- Raised `MAX_ACTIVE_NPCS` from 12 to 30 — comfortable headroom over the
+  20-grunt steady-state total. This is a gameplay-balance constant, raised
+  deliberately here (not silently) since running two AI-vs-AI arenas plus the
+  main AI zone at once genuinely needs more room than the original
+  single-squad-era cap was ever sized for.
+- One-line `Constants.lua` change; no other files touched. `rojo build`
+  clean.
+
 ## Bugfix: AI-vs-AI shots never hit, spectator fly fought gravity
 
 Two bugs reported after real Play testing:
