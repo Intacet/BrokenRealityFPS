@@ -1,5 +1,31 @@
 # Changelog
 
+## Debt cleanup: AI-vs-AI hits now attribute the shooter, so grunts instantly retarget
+
+- A grunt shot by an enemy-faction grunt (either AI arena) previously had no
+  way to know *who* shot it — `DamageService`'s `attacker` field is
+  Player-only, so the hit-reaction listener's instant "retarget onto
+  whoever just shot you" never fired for AI-inflicted damage, only for a
+  player's. The victim grunt only ever reacquired the actual shooter via its
+  own next LOS scan, not instantly.
+- Fixed with one new, small, additive field rather than widening `attacker`
+  itself: `Types.DamageInfo`/`DamageRequest.attackerModel: Model?` carries
+  the shooting grunt's own Model, set only for AI-vs-AI hits (never
+  alongside `attacker`). `DamageService.applyToPlayer`/`killPlayer`/the
+  friendly-fire guard are completely untouched — the only two
+  `DamageService.lua` changes are threading the field through `ApplyDamage`
+  and one added fallback in the non-player killer-name log line.
+  `AIService`'s hit-reaction listener resolves a living `attackerModel` into
+  the same `Player | Model` target type the AI-arena/factions work already
+  taught the rest of the file to handle, and runs the exact same
+  instant-retarget path a Player attacker already gets. Does not grant
+  wallhack shooting — a grunt still needs its own line of sight before it
+  will actually fire back.
+- `Types.lua`/`DamageService.lua`/`AIService.server.lua` only — no new
+  remotes, no client files, `GunService`/`TeamService` untouched. `rojo
+  build` clean; MCP-checked the attacker-resolution decision table and the
+  killer-name priority chain in isolation. Not runtime-verified in Play.
+
 ## Debt cleanup: covering fire while retreating now respects the squad fire-discipline cap
 
 - A retreating grunt's covering-fire burst (`AI.COVER_RETREAT_FIRE`) previously

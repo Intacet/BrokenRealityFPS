@@ -1587,18 +1587,25 @@ local function resolveAndDamageHit(record: NPCRecord, result: RaycastResult?, di
         -- Same ApplyDamage shape as above, minus targetPlayer — the exact
         -- applyToNonPlayer path a player's bullet already uses to damage a
         -- TAG_DAMAGE_ENTITY-tagged grunt (see getDamageableEntity in
-        -- GunService); DamageService needed no changes for AI-vs-AI. No
-        -- attacker attribution here either (DamageInfo.attacker is Player-only)
-        -- — see docs/TECHNICAL_DEBT.md "AI arena / factions" for that limit.
+        -- GunService). attackerModel (2026-09-12) carries the shooter's own
+        -- Model — a separate, additive DamageInfo field from the Player-only
+        -- `attacker` (see its declaration in Types.lua), read back below by
+        -- this file's own DamageDealt listener to let the victim grunt
+        -- instantly retarget onto the shooter, the same way it already does
+        -- for a known Player attacker. This resolves the "No attacker
+        -- attribution for AI-vs-AI damage" gap in docs/TECHNICAL_DEBT.md
+        -- "AI arena / factions" — DamageService needed only the one small,
+        -- additive field, no change to its existing Player-only paths.
         DamageService:ApplyDamage({
-            targetModel  = enemy.model,
-            sourceName   = AI.NPC_NAME_PREFIX,
-            damageType   = Constants.DamageType.Bullet,
-            region       = Constants.HitRegion.Unknown,
-            hitPart      = result.Instance :: BasePart,
-            hitPosition  = result.Position,
-            hitDirection = dir,
-            baseAmount   = damage,
+            targetModel   = enemy.model,
+            attackerModel = record.model,
+            sourceName    = AI.NPC_NAME_PREFIX,
+            damageType    = Constants.DamageType.Bullet,
+            region        = Constants.HitRegion.Unknown,
+            hitPart       = result.Instance :: BasePart,
+            hitPosition   = result.Position,
+            hitDirection  = dir,
+            baseAmount    = damage,
         })
         if AI.DEBUG then
             Logger.debug("[AIService]", record.model.Name, "hit enemy-faction", enemy.model.Name, "for", damage)
@@ -3756,8 +3763,10 @@ function AIService.Start(): ()
 
     -- Stage 1E: react the instant a grunt is shot. DamageService fires DamageDealt
     -- for every accepted hit; targetModel is the grunt's Model, info.attacker is
-    -- the player who shot it (nil for AI-inflicted or environment damage). Non-grunt
-    -- events find no npcs[targetModel] and no-op.
+    -- the player who shot it (nil for environment damage), and (2026-09-12)
+    -- info.attackerModel is the enemy grunt's Model for an AI-vs-AI hit (nil
+    -- otherwise; never set alongside info.attacker) — resolved to an AITarget
+    -- just below. Non-grunt events find no npcs[targetModel] and no-op.
     local dmgConn = CombatEvents.DamageDealt.Event:Connect(function(targetModel: Model?, info: Types.DamageInfo)
         if targetModel == nil then
             return
@@ -3789,13 +3798,28 @@ function AIService.Start(): ()
             end
         end
 
-        local attacker = info.attacker
-        -- AI invisibility toggle: a hit from an invisible player is treated
-        -- exactly like an unidentified attacker below — no target acquisition,
-        -- no position shared with the squad. Without this, shooting a grunt
-        -- while "invisible" would instantly reveal you anyway, defeating the
-        -- whole point of the toggle.
-        if attacker ~= nil and isAIInvisible(attacker) then
+        local attacker: AITarget? = info.attacker
+        -- AI-vs-AI attacker attribution (2026-09-12): DamageInfo.attacker stays
+        -- Player-only (see its declaration in Types.lua) — a new, additive
+        -- attackerModel field carries the shooting grunt's Model instead, for
+        -- AI-vs-AI hits only (the two are never both set). Resolve it back to a
+        -- living record here so the exact same retarget/shareSquadAlert path
+        -- below already used for a known Player attacker also runs for a known
+        -- enemy-grunt attacker — record.target/shareSquadAlert already accept
+        -- AITarget (Player | Model) from the earlier AI-arena/factions work, so
+        -- no further widening was needed there, only this resolve step.
+        if attacker == nil and info.attackerModel ~= nil then
+            local attackerRecord = npcs[info.attackerModel]
+            if attackerRecord ~= nil and not attackerRecord.dead then
+                attacker = info.attackerModel
+            end
+        end
+        -- AI invisibility toggle: only meaningful for a Player attacker — a hit
+        -- from an invisible player is treated exactly like an unidentified
+        -- attacker below (no target acquisition, no position shared with the
+        -- squad); an enemy-grunt attacker is never "invisible" so this check is
+        -- skipped for one.
+        if attacker ~= nil and attacker:IsA("Player") and isAIInvisible(attacker :: Player) then
             attacker = nil
         end
         if attacker ~= nil then

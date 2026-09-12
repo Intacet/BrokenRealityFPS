@@ -947,8 +947,11 @@ colors, the `factionKey` parameter threaded through `spawnOne`/`spawnSquad`/
 `AIService.SpawnSquad`, and the self-contained `runArenaBattle` auto-spawn/
 watch loop. `AIService.server.lua` + `Constants.lua` + one new file + one new
 `default.project.json` entry only — no new remotes, no client files,
-`GunService`/`DamageService`/`TeamService` untouched. MCP-checked (throwaway
-logic, not a live `AIService` require, against a live Edit datamodel) the
+`GunService`/`DamageService`/`TeamService` untouched at the time this task
+landed (`DamageService.lua` was later given one small, additive field by the
+2026-09-12 attacker-attribution fix below — see that bullet; still no
+`GunService`/`TeamService` change). MCP-checked (throwaway logic, not a live
+`AIService` require, against a live Edit datamodel) the
 same-faction no-op guarantee, different-faction targeting, dead-target
 exclusion, the Player-vs-Model target-kind branch, the arena's wall/cover/
 spawn-position geometry (spawn points and every cover block, including its
@@ -975,17 +978,39 @@ loop's termination behavior. Residual risks:
   gap in the original single-faction design (AI could never hit AI at all,
   by construction, until this task's faction work made it possible to even
   try), not something this task's faction logic itself got wrong.
-- **No attacker attribution for AI-vs-AI damage.** `DamageService`'s
-  `attacker` field is `Player?` — deliberately not touched, so `ApplyDamage`
-  is called with `targetModel` only when the source is an enemy grunt. This
-  means the `CombatEvents.DamageDealt` hit-reaction listener (which sets
-  `record.target = info.attacker` to instantly retarget onto whoever just
-  shot you) never fires for AI-inflicted hits, exactly as it already didn't
-  for AI→player hits — a grunt shot by an enemy squad only reacquires that
-  enemy via `findVisibleTarget`'s next LOS scan (`AI.TARGET_RECHECK_INTERVAL`),
-  not instantly. It does still enter `Cover` on the hit (`record.coverUntil`
-  is armed regardless of attacker identity) and does still get suppressed/
-  recently-damaged tiering, since those don't need to know *who* shot it.
+- **No attacker attribution for AI-vs-AI damage — fixed (2026-09-12).**
+  `DamageService`'s `attacker` field stays `Player?`, untouched — instead a
+  new, additive `Types.DamageInfo`/`DamageRequest.attackerModel: Model?`
+  field carries the shooting grunt's own Model, set only for the AI-vs-AI
+  branch of `resolveAndDamageHit` (never alongside `attacker` — a hit has at
+  most one of the two). `DamageService.applyToPlayer`/`killPlayer`/the
+  friendly-fire guard/`RagdollService`'s kill-feed name are completely
+  unaffected (verified via `git diff` — the only two `DamageService.lua`
+  changes are threading the new field through `ApplyDamage` and one added
+  `or` clause in `applyToNonPlayer`'s killer-name resolution); this was
+  specifically designed to avoid widening `attacker`'s own type, which would
+  have forced changes to those Player-only call sites in "the single most
+  safety-critical function in the combat pipeline" for a gain this task
+  didn't need. `AIService`'s own `CombatEvents.DamageDealt` listener now
+  resolves a living `attackerModel` back into an `AITarget` (reusing the
+  `Player | Model` widening the AI-arena/factions work already did for
+  `record.target`/`shareSquadAlert` — no further widening needed there) and
+  runs the exact same instant-retarget path a known Player attacker already
+  gets. A hit from a since-dead or already-cleaned-up grunt correctly falls
+  back to "attacker unknown," same as before. This does **not** grant
+  wallhack shooting: `attackSlotEligible` still requires the grunt's own
+  `canSee(...)` before it will actually pull the trigger — the retarget only
+  changes who it turns to face/walk toward, the same pre-existing limitation
+  Player attackers already have ("a grunt shot from a direction it cannot
+  path to... will walk straight at the obstacle," still true, now symmetric
+  for AI attackers too rather than a Player-only asymmetry). `rojo build`
+  clean; MCP-checked the attacker-resolution decision table (Player
+  unaffected, living grunt resolves, dead/unknown grunt falls back to nil,
+  both-nil unchanged, a real Player attacker always takes priority over
+  `attackerModel`) and the killer-name priority chain, both in isolation.
+  Not runtime-verified in Play — whether instant retargeting during an
+  arena battle actually reads better than the old LOS-rescan delay has not
+  been observed.
 - **Arena squads share the global `MAX_ACTIVE_NPCS` budget with every other
   AI spawn in the game.** **Fixed (2026-09-11), confirmed as a real bug in
   testing:** with both AI arenas running (this one plus the second, corridor

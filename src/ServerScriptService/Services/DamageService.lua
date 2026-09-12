@@ -193,7 +193,11 @@ local function applyToNonPlayer(info: Types.DamageInfo)
     CombatEvents.DamageDealt:Fire(model, info)
 
     if not infinite and humanoid.Health <= 0 then
-        local killerName = info.attacker and info.attacker.DisplayName
+        -- attackerModel (2026-09-12, AI-vs-AI attribution): a non-player attacker's
+        -- Model name, used only when attacker (a Player) is nil — the two are never
+        -- both set. See Types.DamageInfo's own field comment.
+        local killerName = (info.attacker and info.attacker.DisplayName)
+            or (info.attackerModel and info.attackerModel.Name)
             or (info.sourceName ~= "" and info.sourceName)
             or "environment"
         Logger.debug("[DamageService]", model and model.Name or "entity", "killed by", killerName)
@@ -238,6 +242,7 @@ function DamageService:ApplyDamage(request: Types.DamageRequest)
         targetPlayer = request.targetPlayer,
         targetModel  = request.targetModel,
         attacker     = request.attacker,
+        attackerModel= request.attackerModel,
         sourceName   = request.sourceName or "",
         damageType   = request.damageType or Constants.DamageType.Unknown,
         region       = region,

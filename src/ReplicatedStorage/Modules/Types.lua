@@ -63,6 +63,19 @@ export type HitRegion = "Head" | "Torso" | "LeftArm" | "RightArm" | "LeftLeg" | 
 -- targetPlayer : set when the target is a player; nil for NPCs / test dummies.
 -- targetModel  : the character Model (may be nil for a player with no character).
 -- attacker     : the responsible player, or nil for environment / hazard damage.
+-- attackerModel: (2026-09-12, AI-vs-AI attribution) the responsible NON-PLAYER
+--                entity's Model (e.g. an enemy AI grunt), or nil. Deliberately a
+--                SEPARATE field rather than widening `attacker` itself — every
+--                existing player-facing consumer (DamageService.applyToPlayer's
+--                friendly-fire guard + killPlayer, RagdollService's kill-feed
+--                name, the client kill feed) reads only `attacker` and stays
+--                Player-only, untouched by this addition. Set instead of, never
+--                alongside, `attacker` — a hit has at most one of the two.
+--                Currently only AIService sets/reads this, for an enemy grunt's
+--                shot hitting another grunt (see AIService's DamageDealt
+--                listener) — AI-to-player damage still omits both fields
+--                (a separate, still-open debt item; see
+--                docs/TECHNICAL_DEBT.md "AI arena / factions").
 -- sourceName   : weapon or hazard identifier for logs / kill feed ("" if unknown).
 -- region       : resolved hit region; "Unknown" when hitPart is nil.
 -- hitPart      : the exact BasePart the server raycast returned, or nil.
@@ -74,6 +87,7 @@ export type DamageInfo = {
     targetPlayer : Player?,
     targetModel  : Model?,
     attacker     : Player?,
+    attackerModel: Model?,
     sourceName   : string,
     damageType   : DamageType,
     region       : HitRegion,
@@ -91,6 +105,7 @@ export type DamageRequest = {
     targetPlayer : Player?,
     targetModel  : Model?,
     attacker     : Player?,
+    attackerModel: Model?,
     sourceName   : string?,
     damageType   : DamageType?,
     region       : HitRegion?,
